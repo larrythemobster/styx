@@ -1,0 +1,58 @@
+{
+  "name": "acheron",
+  "license": "GPL-3.0",
+  "dependencies": [
+    {
+      "name": "openssl",
+      "version>=": "3.0.7"
+    },
+    "mlspp",
+    "libsodium",
+    "opus",
+    "nayuki-qr-code-generator",
+    {
+      "name": "zlib",
+      "platform": "windows"
+    }
+  ],
+  "features": {
+    "ffmpeg": {
+      "description": "Static ffmpeg built from source (FFMPEG_FROM_VCPKG), for targets the prebuilt ffmpeg DLLs do not run on",
+      "dependencies": [
+        {
+          "name": "ffmpeg",
+          "default-features": false,
+          "features": [
+            "avcodec",
+            "avformat",
+            "openssl",
+            "swresample",
+            "swscale",
+            "zlib"
+          ]
+        }
+      ]
+    },
+    "lottie": {
+      "description": "Lottie sticker playback (ENABLE_LOTTIE)",
+      "dependencies": [
+        "rlottie"
+      ]
+    }
+  },
+  "builtin-baseline": "16c71a39e5a0fc0bdb3fad03beef8f38ee00ee3b",
+  "vcpkg-configuration": {
+    "overlay-ports": [
+      "./vcpkg-overlay-ports"
+    ],
+    "overlay-triplets": [
+      "./vcpkg-triplets"
+    ]
+  },
+  "overrides": [
+    {
+      "name": "openssl",
+      "version": "3.0.7"
+    }
+  ]
+}

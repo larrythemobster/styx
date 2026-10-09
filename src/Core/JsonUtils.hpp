@@ -1,0 +1,340 @@
+#pragma once
+
+#include <QByteArray>
+#include <QDebug>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QString>
+
+#include <type_traits>
+
+#include "OrderedJson.hpp"
+#include "Snowflake.hpp"
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#include "qt_flags.hpp"
+#endif
+
+namespace Acheron {
+namespace Core {
+namespace JsonUtils {
+
+namespace detail {
+template <typename T>
+struct is_qflags : std::false_type
+{
+};
+template <typename T>
+struct is_qflags<QFlags<T>> : std::true_type
+{
+};
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+template <typename T>
+struct is_qflags<::Acheron::Compat::Flags<T>> : std::true_type
+{
+};
+#endif
+} // namespace detail
+
+template <typename T>
+concept Serializable = requires(const T &t) {
+    { t.toJson() } -> std::convertible_to<OrderedJson>;
+};
+
+template <typename T>
+concept Deserializable = requires(const QJsonObject &object) {
+    { T::fromJson(object) } -> std::convertible_to<T>;
+};
+
+template <typename T>
+concept ListLike = requires(T t) {
+    typename T::value_type;
+    t.append(std::declval<typename T::value_type>());
+    t.begin();
+    t.end();
+};
+
+template <typename T>
+concept MapLike = requires(T t) {
+    typename T::key_type;
+    typename T::mapped_type;
+    t.begin();
+    t.end();
+    // qt
+    t.begin().key();
+    t.begin().value();
+};
+
+template <typename T>
+concept QFlagType = detail::is_qflags<T>::value;
+
+class JsonObject
+{
+public:
+    // so entities can default themselves
+    template <typename T>
+        requires std::is_same_v<T, JsonObject>
+    bool operator==(const T &) const
+    {
+        return true;
+    }
+
+protected:
+    template <typename T, bool IsOptional = false, bool IsNullable = false>
+    class Field
+    {
+    public:
+        Field()
+        {
+            if constexpr (IsOptional) {
+                state = State::Undefined;
+            } else {
+                state = State::Value;
+                value = T();
+            }
+        }
+
+        Field(const Field<T, IsOptional, IsNullable> &other)
+            : state(other.state), value(other.value)
+        {
+        }
+
+        Field(const T &value) : state(State::Value), value(value) {}
+
+        Field(Field<T, IsOptional, IsNullable> &&other)
+            : state(other.state), value(std::move(other.value))
+        {
+        }
+
+        Field &operator=(const Field<T, IsOptional, IsNullable> &other)
+        {
+            state = other.state;
+            value = other.value;
+            return *this;
+        }
+
+        Field &operator=(Field<T, IsOptional, IsNullable> &&other)
+        {
+            state = other.state;
+            value = std::move(other.value);
+            return *this;
+        }
+
+        Field &operator=(const T &value)
+        {
+            this->value = value;
+            state = State::Value;
+            return *this;
+        }
+
+        Field &operator=(std::nullptr_t)
+        {
+            static_assert(IsNullable, "The field is not nullable");
+            state = State::Null;
+            return *this;
+        }
+
+        Field(std::nullptr_t)
+        {
+            static_assert(IsNullable, "The field is not nullable");
+            state = State::Null;
+        }
+
+        template <typename U>
+        bool operator==(const U &value) const
+        {
+            return this->value == value;
+        }
+
+        bool operator==(const Field &other) const
+        {
+            return state == other.state && (state != State::Value || value == other.value);
+        }
+
+        [[nodiscard]] bool isUndefined() const { return IsOptional && state == State::Undefined; }
+        [[nodiscard]] bool isNull() const { return IsNullable && state == State::Null; }
+        [[nodiscard]] bool hasValue() const { return state == State::Value; }
+
+        [[nodiscard]] T valueOr(const T &fallback = T()) const { return hasValue() ? value : fallback; }
+
+        T &get() { return value; }
+        const T &get() const { return value; }
+        T &operator*() { return value; }
+        const T &operator*() const { return value; }
+        T *operator->() { return &value; }
+        const T *operator->() const { return &value; }
+        operator T &() { return value; }
+        operator const T &() const { return value; }
+        operator QVariant() const
+        {
+            if constexpr (std::is_same_v<T, Snowflake>) {
+                return static_cast<quint64>(value);
+            } else {
+                return value;
+            }
+        }
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        friend QDebug operator<<(QDebug dbg, const Field &f) { return dbg << f.value; }
+#endif
+
+        void undefine()
+        {
+            static_assert(IsOptional, "The field is not optional");
+            state = State::Undefined;
+        }
+
+    private:
+        enum class State {
+            Undefined,
+            Null,
+            Value,
+        };
+        State state;
+        T value;
+    };
+
+    template <typename T>
+    static QJsonValue toJsonValue(const T &value)
+    {
+        if constexpr (std::is_same_v<T, bool>) {
+            return value;
+        } else if constexpr (std::is_same_v<T, Snowflake>) {
+            return QString::number(value);
+        } else if constexpr (std::unsigned_integral<T>) {
+            return static_cast<qint64>(value);
+        } else if constexpr (std::is_enum_v<T> || QFlagType<T>) {
+            return static_cast<qint64>(value);
+        } else {
+            return QJsonValue::fromVariant(QVariant::fromValue(value));
+        }
+    }
+
+    template <typename T>
+    static void insertValue(OrderedJson &object, const QString &key, const T &value)
+    {
+        if constexpr (Serializable<T>) {
+            object.insert(key, value.toJson());
+        } else if constexpr (MapLike<T>) {
+            OrderedJson mapObject;
+            for (auto it = value.begin(); it != value.end(); ++it) {
+                if constexpr (std::is_same_v<typename T::key_type, Snowflake>)
+                    insertValue(mapObject, QString::number(it.key()), it.value());
+                else
+                    insertValue(mapObject, it.key(), it.value());
+            }
+            object.insert(key, mapObject);
+        } else if constexpr (std::is_same_v<T, QByteArray>) {
+            OrderedJson::Array array;
+            for (unsigned char byte : value)
+                array.append(static_cast<int>(byte));
+            object.insert(key, array);
+        } else if constexpr (!std::is_same_v<T, QString> && ListLike<T>) {
+            OrderedJson::Array array;
+            for (const auto &element : value) {
+                if constexpr (Serializable<typename T::value_type>)
+                    array.append(element.toJson());
+                else
+                    array.append(toJsonValue(element));
+            }
+            object.insert(key, array);
+        } else {
+            object.insert(key, toJsonValue(value));
+        }
+    }
+
+    template <typename T, bool IsOptional, bool IsNullable>
+    static void insert(OrderedJson &object, const QString &key,
+                       const Field<T, IsOptional, IsNullable> &field)
+    {
+        if (field.isUndefined())
+            return;
+
+        if (field.isNull()) {
+            object.insert(key, QJsonValue::Null);
+            return;
+        }
+
+        insertValue(object, key, field.get());
+    }
+
+    template <typename T>
+    static T fromJsonValue(const QJsonValue &value)
+    {
+        if constexpr (Deserializable<T>) {
+            return T::fromJson(value.toObject());
+        } else if constexpr (std::is_same_v<T, Snowflake>) {
+            return value.toString().toULongLong();
+        } else if constexpr (std::is_same_v<T, bool>) {
+            return value.toBool();
+        } else if constexpr (std::is_same_v<T, QString>) {
+            return value.toString();
+        } else if constexpr (QFlagType<T>) {
+            return T::fromInt(value.toInt());
+        } else if constexpr (std::is_enum_v<T>) {
+            return static_cast<T>(value.toInt());
+        } else if constexpr (std::is_same_v<T, QByteArray>) {
+            QByteArray result;
+            const QJsonArray array = value.toArray();
+            result.reserve(array.size());
+            for (const QJsonValue &element : array)
+                result.append(static_cast<char>(element.toInt()));
+            return result;
+        } else if constexpr (MapLike<T>) {
+            using KeyType = typename T::key_type;
+            using MappedType = typename T::mapped_type;
+
+            T map;
+            const QJsonObject object = value.toObject();
+            for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+                KeyType key;
+                if constexpr (std::is_same_v<KeyType, Snowflake>) {
+                    key = Snowflake(it.key().toULongLong());
+                } else {
+                    key = it.key();
+                }
+                map.insert(key, fromJsonValue<MappedType>(it.value()));
+            }
+            return map;
+        } else if constexpr (ListLike<T>) {
+            using InnerType = typename T::value_type;
+
+            T list;
+            const QJsonArray array = value.toArray();
+            list.reserve(array.size());
+
+            for (const QJsonValue &element : array) {
+                list.append(fromJsonValue<InnerType>(element));
+            }
+            return list;
+        } else {
+            return value.toVariant().value<T>();
+        }
+    }
+
+    template <typename T, bool IsOptional, bool IsNullable>
+    static void get(const QJsonObject &object, const QString &key,
+                    Field<T, IsOptional, IsNullable> &field)
+    {
+        auto it = object.find(key);
+
+        if (it == object.end()) {
+            if constexpr (IsOptional) {
+                field.undefine();
+            }
+            return;
+        }
+
+        if (it.value().isNull()) {
+            if constexpr (IsNullable) {
+                field = nullptr;
+            }
+            return;
+        }
+
+        field = fromJsonValue<T>(it.value());
+    }
+};
+
+} // namespace JsonUtils
+} // namespace Core
+} // namespace Acheron

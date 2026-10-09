@@ -1,0 +1,171 @@
+#pragma once
+
+#include <QSize>
+#include <QString>
+#include <QUrl>
+
+#include "Core/Snowflake.hpp"
+#include "Discord/Enums.hpp"
+
+namespace Acheron {
+namespace Discord {
+namespace Cdn {
+
+inline QString assetExtension(const QString &hash)
+{
+    return hash.startsWith(QStringLiteral("a_")) ? QStringLiteral("gif") : QStringLiteral("png");
+}
+
+inline QUrl defaultUserAvatar(Core::Snowflake userId, int size = 128)
+{
+    if (!userId.isValid())
+        return {};
+    const quint64 index = (quint64(userId) >> 22) % 6;
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/embed/avatars/%1.png?size=%2")
+                        .arg(QString::number(index), QString::number(size)));
+}
+
+inline QUrl userAvatar(Core::Snowflake userId, const QString &hash, int size = 128)
+{
+    if (hash.isEmpty())
+        return defaultUserAvatar(userId, size);
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/avatars/%1/%2.%3?size=%4")
+                        .arg(QString::number(quint64(userId)), hash, assetExtension(hash),
+                             QString::number(size)));
+}
+
+inline QUrl guildMemberAvatar(Core::Snowflake guildId, Core::Snowflake userId,
+                              const QString &hash, int size = 128)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral(
+                        "https://cdn.discordapp.com/guilds/%1/users/%2/avatars/%3.%4?size=%5")
+                        .arg(QString::number(quint64(guildId)),
+                             QString::number(quint64(userId)), hash, assetExtension(hash),
+                             QString::number(size)));
+}
+
+inline QUrl effectiveAvatar(Core::Snowflake guildId, Core::Snowflake userId,
+                            const QString &memberHash, const QString &userHash, int size = 128)
+{
+    if (guildId.isValid() && !memberHash.isEmpty())
+        return guildMemberAvatar(guildId, userId, memberHash, size);
+    return userAvatar(userId, userHash, size);
+}
+
+inline QUrl userBanner(Core::Snowflake userId, const QString &hash, int size = 600)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/banners/%1/%2.%3?size=%4")
+                        .arg(QString::number(quint64(userId)), hash, assetExtension(hash),
+                             QString::number(size)));
+}
+
+inline QUrl guildIcon(Core::Snowflake guildId, const QString &hash, int size = 64)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/icons/%1/%2.%3?size=%4")
+                        .arg(QString::number(quint64(guildId)), hash, assetExtension(hash),
+                             QString::number(size)));
+}
+
+inline QUrl guildBanner(Core::Snowflake guildId, const QString &hash, int size = 480)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/banners/%1/%2.%3?size=%4")
+                        .arg(QString::number(quint64(guildId)), hash, assetExtension(hash),
+                             QString::number(size)));
+}
+
+inline QUrl guildSplash(Core::Snowflake guildId, const QString &hash, int size = 480)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/splashes/%1/%2.png?size=%3").arg(QString::number(quint64(guildId)), hash, QString::number(size)));
+}
+
+inline QUrl roleIcon(Core::Snowflake roleId, const QString &hash, int size = 64)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/role-icons/%1/%2.png?size=%3").arg(QString::number(quint64(roleId)), hash, QString::number(size)));
+}
+
+inline QUrl applicationIcon(Core::Snowflake applicationId, const QString &hash, int size = 128)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/app-icons/%1/%2.%3?size=%4")
+                        .arg(QString::number(quint64(applicationId)),
+                             hash,
+                             assetExtension(hash),
+                             QString::number(size)));
+}
+
+inline QUrl channelIcon(Core::Snowflake channelId, const QString &hash, int size = 64)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/channel-icons/%1/%2.png?size=%3")
+                        .arg(QString::number(quint64(channelId)), hash, QString::number(size)));
+}
+
+inline QUrl badgeIcon(const QString &hash, int size = 64)
+{
+    if (hash.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/badge-icons/%1.png?size=%2")
+                        .arg(hash, QString::number(size)));
+}
+
+inline QUrl emoji(Core::Snowflake emojiId, int size = 48, bool animated = false)
+{
+    if (!emojiId.isValid())
+        return {};
+    QString url = QStringLiteral("https://cdn.discordapp.com/emojis/%1.webp?size=%2")
+                          .arg(QString::number(quint64(emojiId)), QString::number(size));
+    if (animated)
+        url += QStringLiteral("&animated=true");
+    return QUrl(url);
+}
+
+inline bool isEmojiUrl(const QUrl &url)
+{
+    return url.host() == QLatin1String("cdn.discordapp.com") && url.path().startsWith(QLatin1String("/emojis/"));
+}
+
+bool isAnimatedEmojiUrl(const QUrl &url);
+QUrl stillEmojiUrl(const QUrl &animatedUrl);
+
+inline bool isStickerUrl(const QUrl &url)
+{
+    return url.path().startsWith(u"/stickers/") && (url.host() == u"media.discordapp.net" || url.host() == u"discord.com");
+}
+
+Core::Snowflake stickerIdFromUrl(const QUrl &url);
+[[nodiscard]] int stickerAssetPx(int logicalPx, qreal devicePixelRatio);
+// empty for lottie
+QUrl stickerStill(Core::Snowflake stickerId, StickerFormatType format, int assetPx);
+// empty for a plain png
+QUrl stickerAnimated(Core::Snowflake stickerId, StickerFormatType format, int assetPx);
+
+QUrl connectionIcon(const QString &type);
+
+QUrl activityAsset(Core::Snowflake applicationId, const QString &key, int size);
+
+bool isDiscordMediaUrl(const QUrl &url);
+bool isSigned(const QUrl &url);
+bool hasExpired(const QUrl &url);
+
+[[nodiscard]] bool isDiscordAssetUrl(const QUrl &url);
+[[nodiscard]] bool isAnimatedImage(const QUrl &originalUrl, bool flaggedAnimated);
+[[nodiscard]] QUrl animatedImageUrl(const QUrl &proxyUrl, bool flaggedAnimated, const QSize &sourceSize, const QSize &targetPixels);
+[[nodiscard]] bool fitsLoopingVideoLimit(const QSize &naturalSize);
+
+} // namespace Cdn
+} // namespace Discord
+} // namespace Acheron

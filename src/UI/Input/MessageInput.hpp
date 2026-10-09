@@ -1,0 +1,100 @@
+#pragma once
+
+#include <QWidget>
+#include <QTextEdit>
+#include <QLabel>
+
+#include "Core/PendingAttachment.hpp"
+#include "Core/Snowflake.hpp"
+#include "EmojiAutocompletePopup.hpp"
+
+class QToolButton;
+
+namespace Acheron {
+namespace UI {
+
+class AttachmentPreviewPanel;
+
+class ChatTextEdit : public QTextEdit
+{
+    Q_OBJECT
+public:
+    explicit ChatTextEdit(QWidget *parent = nullptr);
+
+    [[nodiscard]] QToolButton *emojiButton() const { return emojiPickerButton; }
+    [[nodiscard]] QToolButton *gifButton() const { return gifPickerButton; }
+
+protected:
+    void keyPressEvent(QKeyEvent *e) override;
+    void resizeEvent(QResizeEvent *e) override;
+    void changeEvent(QEvent *e) override;
+    bool canInsertFromMimeData(const QMimeData *source) const override;
+    void insertFromMimeData(const QMimeData *source) override;
+signals:
+    void returnPressed();
+    void escapePressed();
+    void editLastMessageRequested();
+    void filesPasted(const QList<QUrl> &urls);
+    void imagePasted(const QImage &image);
+
+private:
+    QToolButton *gifPickerButton;
+    QToolButton *emojiPickerButton;
+};
+
+class MessageInput : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit MessageInput(QWidget *parent = nullptr);
+    void clear();
+    void setPlaceholder(const QString &name);
+
+    void setReplyTarget(Core::Snowflake messageId, const QString &authorName,
+                        const QString &contentSnippet);
+    void clearReplyTarget();
+    [[nodiscard]] Core::Snowflake replyTargetMessageId() const { return replyMessageId; }
+
+    void setSendBlocked(bool blocked);
+    [[nodiscard]] bool isSendBlocked() const { return sendBlocked; }
+
+    void insertText(const QString &text);
+
+    void requestEmojiPicker();
+    void setEmojiPickerOpen(bool open);
+    void requestGifPicker();
+    void setGifPickerOpen(bool open);
+
+    void queueAttachments(const QList<QUrl> &urls);
+    void setMaxUploadSize(qint64 bytes);
+
+    [[nodiscard]] EmojiAutocomplete *emojiAutocomplete() const { return autocomplete; }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+
+signals:
+    void sendMessage(const QString &text, const QList<Core::PendingAttachment> &attachments);
+    void editLastMessageRequested();
+    void emojiPickerRequested(const QRect &globalAnchor);
+    void gifPickerRequested(const QRect &globalAnchor);
+
+private:
+    ChatTextEdit *textEdit;
+    QWidget *replyBar;
+    QLabel *replyLabel;
+    QToolButton *replyCancelButton;
+    AttachmentPreviewPanel *attachmentPanel;
+    EmojiAutocomplete *autocomplete;
+
+    Core::Snowflake replyMessageId;
+    bool sendBlocked = false;
+
+    void adjustHeight();
+    [[nodiscard]] QRect pickerAnchor() const;
+};
+
+} // namespace UI
+} // namespace Acheron

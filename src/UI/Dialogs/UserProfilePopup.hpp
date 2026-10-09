@@ -1,0 +1,143 @@
+#pragma once
+
+#include <optional>
+
+#include <QDialog>
+#include <QPointer>
+
+#include "Core/Snowflake.hpp"
+#include "Discord/Entities.hpp"
+#include "UI/Dialogs/ActivityCard.hpp"
+#include "UI/StatusIndicator.hpp"
+
+class QFrame;
+class QLabel;
+class QPushButton;
+class QTabWidget;
+class QTextEdit;
+class QTimer;
+class QVBoxLayout;
+class QWidget;
+
+namespace Acheron {
+namespace Core {
+class ClientInstance;
+class ImageManager;
+} // namespace Core
+namespace UI {
+
+class MessageTextBrowser;
+
+class UserProfilePopup : public QDialog
+{
+    Q_OBJECT
+public:
+    UserProfilePopup(Core::ImageManager *images, Core::ClientInstance *instance,
+                     Core::Snowflake userId, Core::Snowflake guildId,
+                     QWidget *parent = nullptr);
+    ~UserProfilePopup() override;
+
+signals:
+    void linkActivated(const QString &url);
+
+protected:
+    void showEvent(QShowEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
+    void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
+
+private:
+    void buildUi();
+    QWidget *buildHeader();
+    QWidget *buildBody();
+
+    void renderFromCachedData();
+    void renderFromProfile();
+    void renderBannerAndBio();
+    void renderPronouns();
+    void renderBadges();
+    void renderConnections();
+    void renderMutualServers();
+    void renderMutualFriends();
+    void renderFriendStatus();
+    void renderPresence();
+    QUrl activityFallbackImage(const Discord::Activity &activity);
+    void updateActivityTicker();
+    void applyView();
+
+    void loadCachedNote();
+    void saveNote();
+    void positionOverParent();
+    void requestProfile();
+
+    [[nodiscard]] std::optional<Discord::User> cachedUser() const;
+    [[nodiscard]] std::optional<Discord::Member> cachedMember() const;
+
+    QString tagHandle() const;
+    QString resolvedDisplayName() const;
+    QUrl resolvedAvatarUrl(int size) const;
+    int resolvedAccentColor() const;
+    bool isBot() const;
+
+private:
+    [[nodiscard]] Core::Snowflake accountId() const;
+
+    Core::ImageManager *images = nullptr;
+    QPointer<Core::ClientInstance> instance;
+    Core::Snowflake userId;
+    Core::Snowflake guildId;
+
+    bool guildView = true;
+    bool hasProfile = false;
+    bool noteLoaded = false;
+    bool noteDirty = false;
+    Discord::UserProfile profile;
+
+    QWidget *headerWidget = nullptr;
+    QLabel *bannerLabel = nullptr;
+    QLabel *avatarLabel = nullptr;
+
+    QLabel *displayNameLabel = nullptr;
+    QLabel *handleLabel = nullptr;
+    QLabel *pronounsLabel = nullptr;
+    QLabel *botBadgeLabel = nullptr;
+
+    QWidget *badgesRow = nullptr;
+
+    QWidget *bioSection = nullptr;
+    MessageTextBrowser *bioView = nullptr;
+
+    QWidget *customStatusRow = nullptr;
+    QLabel *customStatusEmoji = nullptr;
+    QLabel *customStatusLabel = nullptr;
+    StatusDot *avatarStatusDot = nullptr;
+    QWidget *activitySection = nullptr;
+    QVBoxLayout *activityLayout = nullptr;
+    QList<ActivityCard *> activityCards;
+    QTimer *activityTicker = nullptr;
+
+    QPushButton *viewToggle = nullptr;
+
+    QLabel *serverJoinLabel = nullptr;
+    QWidget *serverJoinRow = nullptr;
+    QLabel *discordJoinLabel = nullptr;
+    QLabel *friendsSinceLabel = nullptr;
+
+    QWidget *rolesSection = nullptr;
+    QLabel *rolesLabel = nullptr;
+
+    QTabWidget *rightTabs = nullptr;
+
+    QTextEdit *noteEdit = nullptr;
+    QVBoxLayout *connectionsLayout = nullptr;
+
+    QWidget *mutualServersTab = nullptr;
+    QVBoxLayout *mutualServersLayout = nullptr;
+
+    QWidget *mutualFriendsTab = nullptr;
+    QVBoxLayout *mutualFriendsLayout = nullptr;
+};
+
+} // namespace UI
+} // namespace Acheron

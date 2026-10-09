@@ -1,0 +1,286 @@
+#include "CdnUrls.hpp"
+
+#include <QDateTime>
+#include <QFileInfo>
+#include <QHash>
+#include <QUrlQuery>
+
+#include <algorithm>
+#include <array>
+
+namespace Acheron {
+namespace Discord {
+namespace Cdn {
+
+namespace {
+
+constexpr qint64 RefreshWindowSecs = 60 * 60;
+constexpr int MaxProxyRequestPx = 4096;
+constexpr int LoopingVideoLongSidePx = 6016;
+constexpr int LoopingVideoShortSidePx = 3384;
+
+bool hasExtension(const QString &url, QLatin1String extension)
+{
+    for (auto at = url.indexOf(extension, 0, Qt::CaseInsensitive); at >= 0; at = url.indexOf(extension, at + 1, Qt::CaseInsensitive)) {
+        const auto end = at + extension.size();
+        if (end == url.size() || url[end] == QLatin1Char('?') || url[end] == QLatin1Char('#'))
+            return true;
+    }
+    return false;
+}
+
+QSize fittedWithin(const QSize &size, int maxSide)
+{
+    if (size.isEmpty())
+        return size;
+
+    const double widthScale = size.width() > maxSide ? double(maxSide) / size.width() : 1.0;
+    const QSize narrowed(qRound(size.width() * widthScale), qRound(size.height() * widthScale));
+    const double heightScale = narrowed.height() > maxSide ? double(maxSide) / narrowed.height() : 1.0;
+    return QSize(qRound(narrowed.width() * heightScale), qRound(narrowed.height() * heightScale));
+}
+
+qint64 expiryEpochSecs(const QUrl &url)
+{
+    const QString ex = QUrlQuery(url).queryItemValue(QStringLiteral("ex"));
+    if (ex.isEmpty())
+        return 0;
+
+    bool ok = false;
+    const qint64 seconds = ex.toLongLong(&ok, 16);
+    return ok ? seconds : 0;
+}
+
+constexpr std::array OfficialClientAssetSizes = { 16, 20, 22, 24, 28, 32, 40, 44, 48, 56, 60, 64, 80, 96, 100, 128,
+                                                  160, 240, 256, 300, 320, 480, 512, 600, 640, 1024, 1280, 1536, 2048, 3072, 4096 };
+
+QUrl mediaProxySticker(Core::Snowflake stickerId, const QString &extension, int assetPx, const QString &extraQuery = {})
+{
+    return QUrl(QStringLiteral("https://media.discordapp.net/stickers/%1.%2?size=%3%4")
+                        .arg(QString::number(quint64(stickerId)), extension, QString::number(assetPx), extraQuery));
+}
+
+} // namespace
+
+Core::Snowflake stickerIdFromUrl(const QUrl &url)
+{
+    if (!isStickerUrl(url))
+        return {};
+
+    bool ok = false;
+    const quint64 id = QFileInfo(url.path()).completeBaseName().toULongLong(&ok);
+    return ok ? Core::Snowflake(id) : Core::Snowflake();
+}
+
+int stickerAssetPx(int logicalPx, qreal devicePixelRatio)
+{
+    const int wanted = qRound(logicalPx * std::min<qreal>(2.0, devicePixelRatio));
+    const auto roundedUp = std::find_if(OfficialClientAssetSizes.begin(), OfficialClientAssetSizes.end(),
+                                        [wanted](int size) { return wanted <= size; });
+    return roundedUp != OfficialClientAssetSizes.end() ? *roundedUp : OfficialClientAssetSizes.back();
+}
+
+QUrl stickerStill(Core::Snowflake stickerId, StickerFormatType format, int assetPx)
+{
+    if (!stickerId.isValid())
+        return {};
+
+    switch (format) {
+    case StickerFormatType::LOTTIE:
+        return {};
+    case StickerFormatType::APNG: {
+        const QString flattenToFirstFrame = "&passthrough=false";
+        return mediaProxySticker(stickerId, "png", assetPx, flattenToFirstFrame);
+    }
+    case StickerFormatType::PNG:
+    case StickerFormatType::GIF:
+        break;
+    }
+    return mediaProxySticker(stickerId, "webp", assetPx, "&quality=lossless");
+}
+
+QUrl stickerAnimated(Core::Snowflake stickerId, StickerFormatType format, int assetPx)
+{
+    if (!stickerId.isValid())
+        return {};
+
+    switch (format) {
+    case StickerFormatType::APNG:
+        return mediaProxySticker(stickerId, "png", assetPx);
+    case StickerFormatType::GIF:
+        return mediaProxySticker(stickerId, "gif", assetPx);
+    case StickerFormatType::LOTTIE:
+        return QUrl(QStringLiteral("https://discord.com/stickers/%1.json").arg(QString::number(quint64(stickerId))));
+    case StickerFormatType::PNG:
+        break;
+    }
+    return {};
+}
+
+bool isDiscordMediaUrl(const QUrl &url)
+{
+    if (url.scheme() != QLatin1String("https"))
+        return false;
+
+    const QString host = url.host();
+    return host == QLatin1String("cdn.discordapp.com") || host == QLatin1String("media.discordapp.net");
+}
+
+bool isAnimatedEmojiUrl(const QUrl &url)
+{
+    return isEmojiUrl(url) && url.query().contains(QLatin1String("animated=true"));
+}
+
+QUrl stillEmojiUrl(const QUrl &animatedUrl)
+{
+    QUrlQuery query(animatedUrl);
+    query.removeQueryItem(QStringLiteral("animated"));
+    QUrl still = animatedUrl;
+    still.setQuery(query);
+    return still;
+}
+
+bool isSigned(const QUrl &url)
+{
+    return isDiscordMediaUrl(url) && expiryEpochSecs(url) > 0;
+}
+
+bool hasExpired(const QUrl &url)
+{
+    if (!isSigned(url))
+        return false;
+    return QDateTime::currentSecsSinceEpoch() + RefreshWindowSecs >= expiryEpochSecs(url);
+}
+
+bool isDiscordAssetUrl(const QUrl &url)
+{
+    if (url.scheme() != QLatin1String("https"))
+        return false;
+
+    const QString host = url.host();
+    return host == QLatin1String("cdn.discordapp.com") || host.endsWith(QLatin1String(".discordapp.net"));
+}
+
+bool isAnimatedImage(const QUrl &originalUrl, bool flaggedAnimated)
+{
+    const QString original = originalUrl.toString();
+    if (hasExtension(original, QLatin1String(".gif")))
+        return true;
+    return flaggedAnimated && (hasExtension(original, QLatin1String(".webp")) || hasExtension(original, QLatin1String(".avif")));
+}
+
+QUrl animatedImageUrl(const QUrl &proxyUrl, bool flaggedAnimated, const QSize &sourceSize, const QSize &targetPixels)
+{
+    if (proxyUrl.host() == QLatin1String("cdn.discordapp.com"))
+        return proxyUrl;
+
+    const QString proxy = proxyUrl.toString();
+    const bool avif = hasExtension(proxy, QLatin1String(".avif"));
+
+    QUrlQuery query(proxyUrl);
+    if (flaggedAnimated && (avif || hasExtension(proxy, QLatin1String(".webp"))))
+        query.addQueryItem(QStringLiteral("animated"), QStringLiteral("true"));
+    if (avif)
+        query.addQueryItem(QStringLiteral("format"), QStringLiteral("webp"));
+
+    const QSize requested = fittedWithin(targetPixels, MaxProxyRequestPx);
+    if (!requested.isEmpty() && requested != sourceSize) {
+        query.addQueryItem(QStringLiteral("width"), QString::number(requested.width()));
+        query.addQueryItem(QStringLiteral("height"), QString::number(requested.height()));
+    }
+
+    QUrl animated = proxyUrl;
+    animated.setQuery(query);
+    return animated;
+}
+
+bool fitsLoopingVideoLimit(const QSize &naturalSize)
+{
+    return (naturalSize.width() <= LoopingVideoLongSidePx && naturalSize.height() <= LoopingVideoShortSidePx) ||
+           (naturalSize.width() <= LoopingVideoShortSidePx && naturalSize.height() <= LoopingVideoLongSidePx);
+}
+
+QUrl activityAsset(Core::Snowflake applicationId, const QString &key, int size)
+{
+    if (key.isEmpty())
+        return {};
+
+    const int separator = key.indexOf(QLatin1Char(':'));
+    if (separator > 0) {
+        const QString scheme = key.left(separator);
+        const QString value = key.mid(separator + 1);
+        if (value.isEmpty())
+            return {};
+
+        const QString encoded = QString::fromUtf8(QUrl::toPercentEncoding(value, "/"));
+
+        if (scheme == QLatin1String("mp")) {
+            QString url = QStringLiteral("https://media.discordapp.net/%1").arg(encoded);
+            if (value.endsWith(QLatin1String(".gif"), Qt::CaseInsensitive))
+                url += QStringLiteral("?format=webp&animated=true");
+            return QUrl(url);
+        }
+        if (scheme == QLatin1String("spotify"))
+            return QUrl(QStringLiteral("https://i.scdn.co/image/%1")
+                                .arg(encoded));
+        if (scheme == QLatin1String("youtube"))
+            return QUrl(QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault_live.jpg")
+                                .arg(encoded));
+        if (scheme == QLatin1String("twitch"))
+            return QUrl(QStringLiteral("https://static-cdn.jtvnw.net/previews-ttv/live_user_%1-%2x%3.jpg")
+                                .arg(encoded, QString::number(size), QString::number(size)));
+
+        return {};
+    }
+
+    if (!applicationId.isValid() ||
+        key.contains(QLatin1Char('/')) ||
+        key.contains(QLatin1String("..")))
+        return {};
+
+    return QUrl(QStringLiteral("https://cdn.discordapp.com/app-assets/%1/%2.png?size=%3")
+                        .arg(QString::number(quint64(applicationId)),
+                             QString::fromUtf8(QUrl::toPercentEncoding(key)),
+                             QString::number(size)));
+}
+
+QUrl connectionIcon(const QString &type)
+{
+    static const QHash<QString, QString> table = {
+        { QStringLiteral("twitch"), QStringLiteral("45900de231038a6d") },
+        { QStringLiteral("youtube"), QStringLiteral("c569f6e10f1fa390") },
+        { QStringLiteral("spotify"), QStringLiteral("40518c6ced9fed93") },
+        { QStringLiteral("github"), QStringLiteral("732989e3c998e808") },
+        { QStringLiteral("twitter"), QStringLiteral("afaf5671c31d4941") },
+        { QStringLiteral("reddit"), QStringLiteral("afc3f4fa75178004") },
+        { QStringLiteral("steam"), QStringLiteral("07ca603d9273b502") },
+        { QStringLiteral("xbox"), QStringLiteral("09781ebf5509f48e") },
+        { QStringLiteral("playstation"), QStringLiteral("46a23515a87620b9") },
+        { QStringLiteral("facebook"), QStringLiteral("bda550439e2a1af0") },
+        { QStringLiteral("battlenet"), QStringLiteral("0e1a419c00a471a2") },
+        { QStringLiteral("bluesky"), QStringLiteral("8a42ef6bc4dd4e0d") },
+        { QStringLiteral("bungie"), QStringLiteral("a35b652323167799") },
+        { QStringLiteral("leagueoflegends"), QStringLiteral("fc30b78cd5e1db04") },
+        { QStringLiteral("epicgames"), QStringLiteral("ecf035f3cf08a860") },
+        { QStringLiteral("riotgames"), QStringLiteral("fa9e14fc0fd3680f") },
+        { QStringLiteral("roblox"), QStringLiteral("5d078bf414a0124c") },
+        { QStringLiteral("tiktok"), QStringLiteral("d585ec74cbd4c723") },
+        { QStringLiteral("instagram"), QStringLiteral("ea0692691904fca9") },
+        { QStringLiteral("paypal"), QStringLiteral("81a39a4672d62d60") },
+        { QStringLiteral("ebay"), QStringLiteral("d0f7fa72a2ca6388") },
+        { QStringLiteral("mastodon"), QStringLiteral("53fcd6d102d44c2b") },
+        { QStringLiteral("crunchyroll"), QStringLiteral("4e56bb1ecb9b9dc3") },
+        { QStringLiteral("skype"), QStringLiteral("4f2cb7753e5d5e61") },
+        { QStringLiteral("samsung"), QStringLiteral("d50e7459b395e5d0") },
+        { QStringLiteral("domain"), QStringLiteral("fe9b03f9b097e2a9") },
+        { QStringLiteral("amazon-music"), QStringLiteral("cda6fb74e92e32f1") },
+    };
+    auto it = table.constFind(type);
+    if (it == table.constEnd())
+        return {};
+    return QUrl(QStringLiteral("https://discord.com/assets/%1.png").arg(it.value()));
+}
+
+} // namespace Cdn
+} // namespace Discord
+} // namespace Acheron

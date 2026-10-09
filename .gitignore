@@ -1,0 +1,8 @@
+scripts/
+out/
+acheron.slnx
+CMakeUserPresets.json
+.vs/
+*.aps
+.planning/
+/build
