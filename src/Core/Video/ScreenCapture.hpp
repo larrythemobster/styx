@@ -34,6 +34,8 @@ struct StackedWindow {
 };
 [[nodiscard]] bool windowIsCovered(const std::vector<StackedWindow> &topDown, std::size_t target);
 
+[[nodiscard]] bool screenCaptureAvailable();
+[[nodiscard]] bool windowCaptureAvailable();
 [[nodiscard]] CaptureMethod captureMethod();
 void setCaptureMethod(CaptureMethod method);
 [[nodiscard]] bool captureMethodUsable(CaptureMethod method);

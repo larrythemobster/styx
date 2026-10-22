@@ -39,13 +39,21 @@ constexpr int StalledWaitMs = 50;
 constexpr int NewFrameWaitMs = 25;
 constexpr int EmptyPicturesMs = 3000;
 
-std::atomic<CaptureMethod> requestedMethod{CaptureMethod::Auto};
 
 bool intersects(const CaptureRect &a, const CaptureRect &b) {
     if (a.empty() || b.empty()) return false;
     return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 FrameSize even(FrameSize size) { return {std::max(2, size.width & ~1), std::max(2, size.height & ~1)}; }
+FrameSize scaledKeepAspectRatio(FrameSize size, FrameSize bound) {
+    if (size.width <= 0 || size.height <= 0 || bound.width <= 0 || bound.height <= 0) return {};
+    const auto wAtBoundH = std::int64_t(bound.height) * size.width / size.height;
+    if (wAtBoundH <= bound.width) {
+        return {int(wAtBoundH), bound.height};
+    } else {
+        return {bound.width, int(std::int64_t(bound.width) * size.height / size.width)};
+    }
+}
 
 #ifdef _WIN32
 template <typename T> using Com = Microsoft::WRL::ComPtr<T>;
@@ -268,16 +276,29 @@ bool windowIsCovered(const std::vector<StackedWindow> &topDown, std::size_t targ
     }
     return false;
 }
+bool screenCaptureAvailable() {
+#ifdef _WIN32
+    return duplicationUsable();
+#else
+    return captureMethodUsable(CaptureMethod::Auto);
+#endif
+}
+bool windowCaptureAvailable() {
+#ifdef _WIN32
+    return graphicsUsable() || duplicationUsable();
+#else
+    return captureMethodUsable(CaptureMethod::Auto);
+#endif
+}
 CaptureMethod captureMethod() {
     const auto setting = Platform::Settings::instance().getString(captureMethodKey, "auto");
     if (setting == "graphics_capture") return CaptureMethod::GraphicsCapture;
     if (setting == "desktop_duplication") return CaptureMethod::DesktopDuplication;
     if (setting == "portal") return CaptureMethod::Portal;
     if (setting == "x11") return CaptureMethod::X11;
-    return requestedMethod.load();
+    return CaptureMethod::Auto;
 }
 void setCaptureMethod(CaptureMethod method) {
-    requestedMethod.store(method);
     const char *name = method == CaptureMethod::GraphicsCapture ? "graphics_capture" :
         method == CaptureMethod::DesktopDuplication ? "desktop_duplication" :
         method == CaptureMethod::Portal ? "portal" : method == CaptureMethod::X11 ? "x11" : "auto";
@@ -299,7 +320,8 @@ CaptureSources captureSources(CaptureMethod method) {
     if (method == CaptureMethod::Portal || method == CaptureMethod::X11) return {};
     CaptureSources sources;
     if (!captureMethodUsable(method)) return sources;
-    for (std::size_t i = 0; const auto &monitor : monitors()) sources.push_back({"screen:" + std::to_string(i), CaptureSource::Kind::Screen, "Screen " + std::to_string(i + 1), monitor.bounds, 0});
+    const auto all = monitors();
+    for (std::size_t i = 0; i < all.size(); ++i) sources.push_back({"screen:" + std::to_string(i), CaptureSource::Kind::Screen, "Screen " + std::to_string(i + 1), all[i].bounds, 0});
     return sources;
 #else
     if (method == CaptureMethod::Auto) method = X11Capture::usable() ? CaptureMethod::X11 : CaptureMethod::Portal;
@@ -338,42 +360,102 @@ Platform::ImageBuffer captureThumbnail(const CaptureSource &source, FrameSize bo
 #ifdef _WIN32
     if (bound.width <= 0 || bound.height <= 0) return image;
     const HWND window = source.kind == CaptureSource::Kind::Window ? windowFor(source.id) : nullptr;
-    if (source.kind == CaptureSource::Kind::Window && (!window || !IsWindow(window)))
+    if (source.kind == CaptureSource::Kind::Window && (!window || !IsWindow(window) || IsIconic(window)))
         return image;
-    const CaptureRect area = window ? visibleBounds(window) : source.geometry;
-    if (area.empty())
-        return image;
-    FrameSize size = encodeSizeFor({area.width, area.height}, bound.height);
-    if (size.width > bound.width) {
-        size = even({bound.width, std::max(2, int(std::int64_t(area.height) * bound.width / area.width))});
-    }
     HDC screen = GetDC(nullptr);
-    HDC memory = CreateCompatibleDC(screen);
-    HBITMAP bitmap = CreateCompatibleBitmap(screen, size.width, size.height);
-    const auto old = SelectObject(memory, bitmap);
-    SetStretchBltMode(memory, HALFTONE);
     bool drawn = false;
+    FrameSize size{};
+    HDC memory = nullptr;
+    HBITMAP bitmap = nullptr;
+    HGDIOBJ old = nullptr;
+
     if (window) {
-        // A window draws itself at its own size, which is then scaled down.
+        RECT outer{};
+        if (!GetWindowRect(window, &outer) || IsRectEmpty(&outer)) {
+            ReleaseDC(nullptr, screen);
+            return image;
+        }
+        const int outerW = outer.right - outer.left;
+        const int outerH = outer.bottom - outer.top;
+        if (outerW <= 0 || outerH <= 0) {
+            ReleaseDC(nullptr, screen);
+            return image;
+        }
+        RECT vis{};
+        if (FAILED(dwmAttribute(window, 9, &vis, sizeof(vis))) || IsRectEmpty(&vis)) {
+            vis = outer;
+        }
+        const int srcX = std::max(0, int(vis.left - outer.left));
+        const int srcY = std::max(0, int(vis.top - outer.top));
+        const int srcW = std::min(outerW - srcX, int(vis.right - vis.left));
+        const int srcH = std::min(outerH - srcY, int(vis.bottom - vis.top));
+        if (srcW <= 0 || srcH <= 0) {
+            ReleaseDC(nullptr, screen);
+            return image;
+        }
+
+        size = (srcW > bound.width || srcH > bound.height)
+            ? scaledKeepAspectRatio({srcW, srcH}, bound)
+            : FrameSize{srcW, srcH};
+        size.width = std::max(1, size.width);
+        size.height = std::max(1, size.height);
+
+        memory = CreateCompatibleDC(screen);
+        bitmap = CreateCompatibleBitmap(screen, size.width, size.height);
+        old = SelectObject(memory, bitmap);
+        SetStretchBltMode(memory, HALFTONE);
+
         HDC full = CreateCompatibleDC(screen);
-        HBITMAP fullBitmap = CreateCompatibleBitmap(screen, area.width, area.height);
+        HBITMAP fullBitmap = CreateCompatibleBitmap(screen, outerW, outerH);
         const auto fullOld = SelectObject(full, fullBitmap);
-        drawn = PrintWindow(window, full, 2) && StretchBlt(memory, 0, 0, size.width, size.height, full, 0, 0, area.width, area.height, SRCCOPY);
-        SelectObject(full, fullOld); DeleteObject(fullBitmap); DeleteDC(full);
+        drawn = PrintWindow(window, full, 2) && StretchBlt(memory, 0, 0, size.width, size.height, full, srcX, srcY, srcW, srcH, SRCCOPY);
+        SelectObject(full, fullOld);
+        DeleteObject(fullBitmap);
+        DeleteDC(full);
     } else {
+        const CaptureRect area = source.geometry;
+        if (area.empty()) {
+            ReleaseDC(nullptr, screen);
+            return image;
+        }
+        size = (area.width > bound.width || area.height > bound.height)
+            ? scaledKeepAspectRatio({area.width, area.height}, bound)
+            : FrameSize{area.width, area.height};
+        size.width = std::max(1, size.width);
+        size.height = std::max(1, size.height);
+
+        memory = CreateCompatibleDC(screen);
+        bitmap = CreateCompatibleBitmap(screen, size.width, size.height);
+        old = SelectObject(memory, bitmap);
+        SetStretchBltMode(memory, HALFTONE);
         drawn = StretchBlt(memory, 0, 0, size.width, size.height, screen, area.x, area.y, area.width, area.height, SRCCOPY | CAPTUREBLT);
     }
-    if (drawn) {
+
+    if (drawn && memory && bitmap) {
         image = {size.width, size.height, 4, std::vector<uint8_t>(size_t(size.width) * size.height * 4)};
-        BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER); info.bmiHeader.biWidth = size.width; info.bmiHeader.biHeight = -size.height; info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = size.width;
+        info.bmiHeader.biHeight = -size.height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
         if (GetDIBits(memory, bitmap, 0, size.height, image.pixels.data(), &info, DIB_RGB_COLORS) == 0) {
             image = {};
         } else {
             // GDI hands back BGRX: swap to RGBA and make every pixel opaque.
-            for (size_t i = 0; i < image.pixels.size(); i += 4) { std::swap(image.pixels[i], image.pixels[i + 2]); image.pixels[i + 3] = 255; }
+            for (size_t i = 0; i < image.pixels.size(); i += 4) {
+                std::swap(image.pixels[i], image.pixels[i + 2]);
+                image.pixels[i + 3] = 255;
+            }
         }
     }
-    SelectObject(memory, old); DeleteObject(bitmap); DeleteDC(memory); ReleaseDC(nullptr, screen);
+    if (memory) {
+        SelectObject(memory, old);
+        DeleteObject(bitmap);
+        DeleteDC(memory);
+    }
+    ReleaseDC(nullptr, screen);
 #endif
     return image;
 }
