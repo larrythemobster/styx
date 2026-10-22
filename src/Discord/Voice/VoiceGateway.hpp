@@ -32,7 +32,13 @@ public:
     void stop();
     void hardStop();
 
+    // A Go Live session identifies with video and its "screen" layer. Set before start().
+    void setVideoEnabled(bool enabled) { videoEnabled = enabled; }
+
     void sendSelectProtocol(const QString &address, int port, const QString &mode);
+    void sendSelectProtocolWebRtc(const QString &sdp, const QList<Codec> &codecs, const QString &rtcConnectionId);
+    void sendVideo(const Core::OrderedJson &d);
+    void sendMediaSinkWants(const Core::OrderedJson &d);
     void sendSpeaking(int flags, int delay, quint32 ssrc);
     void sendBinaryPayload(int opcode, const QByteArray &data);
     void sendDaveReadyForTransition(int transitionId);
@@ -49,6 +55,7 @@ signals:
     void readyReceived(const VoiceReady &data);
     void sessionDescriptionReceived(const SessionDescription &data);
     void speakingReceived(const SpeakingData &data);
+    void videoReceived(const VideoData &data);
     void clientConnected(const ClientConnectData &data);
     void clientsConnected(const QStringList &userIds);
     void clientDisconnected(Core::Snowflake userId);
@@ -94,6 +101,7 @@ private:
     QString sessionId;
     QString token;
     Core::ProxyConfig proxy;
+    bool videoEnabled = false;
 
     std::atomic<bool> running{ false };
 

@@ -93,25 +93,8 @@ void VoiceClient::start()
 
     connect(gateway, &VoiceGateway::binaryPayloadReceived,
             this, [this](int opcode, const QByteArray &payload) {
-                if (!daveSession)
-                    return;
-                switch (opcode) {
-                case static_cast<int>(VoiceOpCode::DAVE_MLS_EXTERNAL_SENDER_PACKAGE):
-                    daveSession->onExternalSenderPackage(payload);
-                    break;
-                case static_cast<int>(VoiceOpCode::DAVE_MLS_PROPOSALS):
-                    daveSession->onProposals(payload);
-                    break;
-                case static_cast<int>(VoiceOpCode::DAVE_MLS_ANNOUNCE_COMMIT_TRANSITION):
-                    daveSession->onAnnounceCommitTransition(payload);
-                    break;
-                case static_cast<int>(VoiceOpCode::DAVE_MLS_WELCOME):
-                    daveSession->onWelcome(payload);
-                    break;
-                default:
-                    qCDebug(LogVoice) << "Unhandled DAVE binary opcode:" << opcode;
-                    break;
-                }
+                if (daveSession)
+                    daveSession->handleBinaryPayload(opcode, payload);
             });
     connect(gateway, &VoiceGateway::daveTransitionPrepare,
             this, [this](int protocolVersion, int transitionId) {

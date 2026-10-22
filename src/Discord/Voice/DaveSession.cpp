@@ -54,6 +54,8 @@ void DaveSession::reinit()
     daveEncryptor = discord::dave::CreateEncryptor();
     if (localSsrc != 0)
         daveEncryptor->AssignSsrcToCodec(localSsrc, discord::dave::Codec::Opus);
+    for (const auto &[ssrc, codec] : extraCodecs)
+        daveEncryptor->AssignSsrcToCodec(ssrc, codec);
 
     auto keyPackage = mlsSession->GetMarshalledKeyPackage();
     if (!keyPackage.empty()) {
@@ -69,6 +71,27 @@ void DaveSession::onExternalSenderPackage(const QByteArray &payload)
 
     std::vector<uint8_t> data(payload.begin(), payload.end());
     mlsSession->SetExternalSender(data);
+}
+
+void DaveSession::handleBinaryPayload(int opcode, const QByteArray &payload)
+{
+    switch (opcode) {
+    case static_cast<int>(VoiceOpCode::DAVE_MLS_EXTERNAL_SENDER_PACKAGE):
+        onExternalSenderPackage(payload);
+        break;
+    case static_cast<int>(VoiceOpCode::DAVE_MLS_PROPOSALS):
+        onProposals(payload);
+        break;
+    case static_cast<int>(VoiceOpCode::DAVE_MLS_ANNOUNCE_COMMIT_TRANSITION):
+        onAnnounceCommitTransition(payload);
+        break;
+    case static_cast<int>(VoiceOpCode::DAVE_MLS_WELCOME):
+        onWelcome(payload);
+        break;
+    default:
+        qCDebug(LogVoice) << "Unhandled DAVE binary opcode:" << opcode;
+        break;
+    }
 }
 
 void DaveSession::onProposals(const QByteArray &payload)
@@ -264,6 +287,13 @@ void DaveSession::setLocalSsrc(quint32 ssrc)
     localSsrc = ssrc;
     if (daveEncryptor)
         daveEncryptor->AssignSsrcToCodec(ssrc, discord::dave::Codec::Opus);
+}
+
+void DaveSession::assignSsrcCodec(quint32 ssrc, discord::dave::Codec codec)
+{
+    extraCodecs[ssrc] = codec;
+    if (daveEncryptor)
+        daveEncryptor->AssignSsrcToCodec(ssrc, codec);
 }
 
 void DaveSession::addConnectedUser(const std::string &id)

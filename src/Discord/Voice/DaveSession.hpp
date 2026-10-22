@@ -26,13 +26,15 @@ class DaveSession : public QObject
 {
     Q_OBJECT
 public:
-    DaveSession(Core::Snowflake channelId, Core::Snowflake userId,
+    // groupId is the MLS group: the channel ID for voice, rtc_server_id - 1 for Go Live.
+    DaveSession(Core::Snowflake groupId, Core::Snowflake userId,
                 const QHash<quint32, uint64_t> &ssrcMap, QObject *parent = nullptr);
     ~DaveSession() override;
 
     void init(uint16_t protocolVersion);
 
     // binary
+    void handleBinaryPayload(int opcode, const QByteArray &payload);
     void onExternalSenderPackage(const QByteArray &payload);
     void onProposals(const QByteArray &payload);
     void onAnnounceCommitTransition(const QByteArray &payload);
@@ -56,6 +58,8 @@ public:
     std::vector<uint8_t> lastEpochAuthenticator() const;
 
     void setLocalSsrc(quint32 ssrc);
+    // Codec for a sending SSRC other than the Opus one; survives reinit().
+    void assignSsrcCodec(quint32 ssrc, discord::dave::Codec codec);
     void addConnectedUser(const std::string &userId);
     void removeConnectedUser(const std::string &userId);
     void applyKeyRatchetForSsrc(quint32 ssrc, uint64_t userId);
@@ -80,6 +84,7 @@ private:
     Core::Snowflake channelId;
     Core::Snowflake userId;
     quint32 localSsrc = 0;
+    std::unordered_map<quint32, discord::dave::Codec> extraCodecs;
 
     std::set<std::string> connectedUserIds;
     int pendingTransitionId = -1;

@@ -1,6 +1,9 @@
 #include "VoiceWindow.hpp"
 
 #include "Core/Audio/VoiceManager.hpp"
+#ifdef ACHERON_HAVE_SCREENSHARE
+#include "Core/Stream/StreamManager.hpp"
+#endif
 #include "Core/ImageManager.hpp"
 #include "UI/StatusIndicator.hpp"
 
@@ -168,8 +171,21 @@ VoiceUserWidget::VoiceUserWidget(Core::Snowflake userId, QWidget *parent)
     stateLabel->setAlignment(Qt::AlignCenter);
     stateLabel->setStyleSheet("QLabel { color: palette(mid); font-size: 9px; }");
 
+    // shown while this participant is live (Go Live)
+    watchBtn = new QPushButton(tr("LIVE"), this);
+    watchBtn->setFixedHeight(20);
+    watchBtn->setToolTip(tr("Watch stream"));
+    watchBtn->setCursor(Qt::PointingHandCursor);
+    watchBtn->setStyleSheet(
+            "QPushButton { background-color: #ed4245; color: #fff; border: none;"
+            "  border-radius: 3px; font-size: 9px; font-weight: bold; padding: 0 6px; }"
+            "QPushButton:hover { background-color: #c03537; }");
+    watchBtn->hide();
+    connect(watchBtn, &QPushButton::clicked, this, [this] { emit watchRequested(this->userId); });
+
     row->addWidget(avatarWidget);
     row->addWidget(nameLabel, 1);
+    row->addWidget(watchBtn);
     row->addWidget(meter);
     row->addWidget(volumeSlider, 1);
     row->addWidget(muteBtn);
@@ -224,6 +240,11 @@ void VoiceUserWidget::setVoiceStateFlags(bool selfMute, bool selfDeaf, bool serv
     if (suppress)
         flags += "S";
     stateLabel->setText(flags);
+}
+
+void VoiceUserWidget::setStreaming(bool streaming)
+{
+    watchBtn->setVisible(streaming);
 }
 
 void VoiceUserWidget::setLocallyMuted(bool muted)
@@ -675,6 +696,13 @@ void VoiceWindow::installResetOnDoubleClick(QWidget *widget, const QVariant &def
     widget->setToolTip(tr("Double-click to reset to default"));
 }
 
+#ifdef ACHERON_HAVE_SCREENSHARE
+void VoiceWindow::setStreamManager(Core::Stream::StreamManager *manager)
+{
+    streamManager = manager;
+}
+#endif
+
 void VoiceWindow::setVoiceManager(Core::Audio::VoiceManager *manager)
 {
     if (voiceManager == manager)
@@ -839,6 +867,8 @@ void VoiceWindow::onParticipantJoined(Core::Snowflake userId)
         const auto *p = voiceManager->participant(userId);
         if (p)
             widget->setVoiceStateFlags(p->selfMute, p->selfDeaf, p->serverMute, p->serverDeaf, p->suppress);
+        if (p)
+            widget->setStreaming(p->streaming);
     }
 
     connect(widget, &VoiceUserWidget::volumeChanged, this, [this](Core::Snowflake uid, int pct) {
@@ -863,6 +893,15 @@ void VoiceWindow::onParticipantJoined(Core::Snowflake userId)
 
     connect(widget, &VoiceUserWidget::profileRequested, this, [this](Core::Snowflake uid) {
         emit userProfileRequested(accountId, uid);
+    });
+
+    connect(widget, &VoiceUserWidget::watchRequested, this, [this](Core::Snowflake uid) {
+#ifdef ACHERON_HAVE_SCREENSHARE
+        if (streamManager)
+            streamManager->watchStream(uid);
+#else
+        Q_UNUSED(uid);
+#endif
     });
 
     userListLayout->insertWidget(userListLayout->count() - 1, widget);
@@ -894,8 +933,10 @@ void VoiceWindow::onParticipantUpdated(Core::Snowflake userId)
         return;
 
     const auto *p = voiceManager->participant(userId);
-    if (p)
+    if (p) {
         it.value()->setVoiceStateFlags(p->selfMute, p->selfDeaf, p->serverMute, p->serverDeaf, p->suppress);
+        it.value()->setStreaming(p->streaming);
+    }
 }
 
 void VoiceWindow::onParticipantSpeakingChanged(Core::Snowflake userId, bool speaking)

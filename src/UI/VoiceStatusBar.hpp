@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QWidget>
 #include <QLabel>
 #include <QPointer>
@@ -19,10 +20,14 @@ class ImageManager;
 namespace Audio {
 class VoiceManager;
 }
+namespace Stream {
+class StreamManager;
+}
 } // namespace Core
 namespace UI {
 
 class VoiceWindow;
+class StreamViewWindow;
 
 class VoiceStatusBar : public QWidget
 {
@@ -36,6 +41,9 @@ public:
     ~VoiceStatusBar() override;
 
     void setVoiceManager(Core::Audio::VoiceManager *manager);
+#ifdef ACHERON_HAVE_SCREENSHARE
+    void setStreamManager(Core::Stream::StreamManager *manager);
+#endif
     void setNameResolver(NameResolver resolver);
     void setAvatarResolver(AvatarResolver resolver);
     void setStatusResolver(StatusResolver resolver);
@@ -58,6 +66,11 @@ private:
     void toggleVoiceWindow();
     void showVoiceWindow();
     void configureVoiceWindow();
+#ifdef ACHERON_HAVE_SCREENSHARE
+    void onShareClicked();
+    void updateShareButton();
+    void openViewer(Core::Snowflake userId);
+#endif
 
     Core::Audio::VoiceManager *voiceManager = nullptr;
     Core::ImageManager *imageManager = nullptr;
@@ -70,6 +83,12 @@ private:
     QLabel *statusLabel;
     QLabel *channelLabel;
     QPushButton *disconnectBtn;
+    QPushButton *shareBtn = nullptr;
+#ifdef ACHERON_HAVE_SCREENSHARE
+    QPointer<Core::Stream::StreamManager> streamManager;
+    QHash<Core::Snowflake, QPointer<StreamViewWindow>> viewers;
+    QString streamStatus;
+#endif
 
     QPointer<VoiceWindow> voiceWindow;
     QTimer closeTimer;

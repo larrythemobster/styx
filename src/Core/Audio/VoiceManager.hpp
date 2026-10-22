@@ -34,6 +34,7 @@ struct VoiceParticipant
     bool serverDeaf = false;
     bool suppress = false;
     bool speaking = false;
+    bool streaming = false; // Go Live
 };
 
 class VoiceManager : public QObject
@@ -52,6 +53,10 @@ public:
     [[nodiscard]] Discord::Voice::VoiceClient::State clientState() const;
     [[nodiscard]] Snowflake currentChannelId() const { return channelId; }
     [[nodiscard]] Snowflake currentGuildId() const { return guildId; }
+    [[nodiscard]] const QString &sessionId() const { return voiceSessionId; }
+
+    // Mixes a watched Go Live stream's audio into the call output.
+    void playStreamAudio(quint32 ssrc, quint16 sequence, quint32 timestamp, const QByteArray &opus);
 
     void setInputGain(float gain);
     void setOutputVolume(float volume);

@@ -80,6 +80,32 @@ void VoiceGateway::sendSelectProtocol(const QString &address, int port, const QS
     sendPayload(VoiceOpCode::SELECT_PROTOCOL, data.toJson());
 }
 
+void VoiceGateway::sendSelectProtocolWebRtc(const QString &sdp, const QList<Codec> &codecs,
+                                           const QString &rtcConnectionId)
+{
+    Core::OrderedJson::Array codecArray;
+    for (const Codec &codec : codecs)
+        codecArray.append(codec.toJson());
+
+    Core::OrderedJson d;
+    d.insert("protocol", QStringLiteral("webrtc"));
+    d.insert("data", sdp);
+    d.insert("sdp", sdp);
+    d.insert("codecs", codecArray);
+    d.insert("rtc_connection_id", rtcConnectionId);
+    sendPayload(VoiceOpCode::SELECT_PROTOCOL, d);
+}
+
+void VoiceGateway::sendVideo(const Core::OrderedJson &d)
+{
+    sendPayload(VoiceOpCode::VIDEO, d);
+}
+
+void VoiceGateway::sendMediaSinkWants(const Core::OrderedJson &d)
+{
+    sendPayload(VoiceOpCode::MEDIA_SINK_WANTS, d);
+}
+
 void VoiceGateway::sendSpeaking(int flags, int delay, quint32 ssrc)
 {
     Core::OrderedJson d;
@@ -177,6 +203,9 @@ void VoiceGateway::onPayloadReceived(const QJsonObject &root)
         break;
     case VoiceOpCode::DAVE_PROTOCOL_PREPARE_EPOCH:
         handleDavePrepareEpoch(d.toObject());
+        break;
+    case VoiceOpCode::VIDEO:
+        emit videoReceived(VideoData::fromJson(d.toObject()));
         break;
     default:
         qCDebug(LogVoice) << "Unhandled voice opcode:" << op;
@@ -296,11 +325,14 @@ void VoiceGateway::identify()
     qCInfo(LogVoice) << "Sending voice Identify for server" << serverId;
 
     VoiceIdentifyData id;
-    id.channelId = channelId;
+    if (channelId.isValid())
+        id.channelId = channelId;
     id.serverId = serverId;
     id.userId = userId;
     id.sessionId = sessionId;
     id.token = token;
+    if (videoEnabled)
+        id.video = true;
     sendPayload(VoiceOpCode::IDENTIFY, id.toJson());
 }
 
@@ -312,7 +344,8 @@ void VoiceGateway::resume()
     data.token = token;
     data.sessionId = sessionId;
     data.serverId = serverId;
-    data.channelId = channelId;
+    if (channelId.isValid())
+        data.channelId = channelId;
     data.seqAck = lastReceivedSeq.load();
     sendPayload(VoiceOpCode::RESUME, data.toJson());
 }

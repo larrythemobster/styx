@@ -66,7 +66,8 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
                                 oldState.selfDeaf.get() != state.selfDeaf.get() ||
                                 oldState.mute.get() != state.mute.get() ||
                                 oldState.deaf.get() != state.deaf.get() ||
-                                oldState.suppress.get() != state.suppress.get();
+                                oldState.suppress.get() != state.suppress.get() ||
+                                oldState.selfStream.valueOr(false) != state.selfStream.valueOr(false);
             if (stateDiffers)
                 emit participantVoiceStateChanged(newChannel, userId);
         }
@@ -163,6 +164,7 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
         p.serverMute = state.mute.get();
         p.serverDeaf = state.deaf.get();
         p.suppress = state.suppress.get();
+        p.streaming = state.selfStream.valueOr(false);
 
         if (isNew)
             emit participantJoined(userId);
@@ -228,6 +230,14 @@ Discord::Voice::VoiceClient::State VoiceManager::clientState() const
     if (!voiceClient)
         return Discord::Voice::VoiceClient::State::Disconnected;
     return voiceClient->state();
+}
+
+void VoiceManager::playStreamAudio(quint32 ssrc, quint16 sequence, quint32 timestamp, const QByteArray &opus)
+{
+    if (audioPipeline && !selfDeaf)
+        QMetaObject::invokeMethod(audioPipeline, [p = audioPipeline, ssrc, sequence, timestamp, opus]() {
+            p->onAudioReceived(ssrc, sequence, timestamp, opus);
+        });
 }
 
 void VoiceManager::setInputGain(float gain)
@@ -644,6 +654,7 @@ void VoiceManager::populateParticipantsFromCache()
         p.serverMute = vs.mute.get();
         p.serverDeaf = vs.deaf.get();
         p.suppress = vs.suppress.get();
+        p.streaming = vs.selfStream.valueOr(false);
         participants.insert(it.key(), p);
         emit participantJoined(it.key());
     }

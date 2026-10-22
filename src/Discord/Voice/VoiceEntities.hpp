@@ -26,12 +26,36 @@ struct VoiceHello : Core::JsonUtils::JsonObject
     }
 };
 
+// One simulcast layer of a media session. Go Live sessions get one ("screen", rid "100").
+struct MediaStreamInfo : Core::JsonUtils::JsonObject
+{
+    Field<QString, true> type;
+    Field<QString, true> rid;
+    Field<quint32> ssrc;
+    Field<quint32, true> rtxSsrc;
+    Field<bool, true> active;
+    Field<int, true> quality;
+
+    static MediaStreamInfo fromJson(const QJsonObject &obj)
+    {
+        MediaStreamInfo info;
+        get(obj, "type", info.type);
+        get(obj, "rid", info.rid);
+        get(obj, "ssrc", info.ssrc);
+        get(obj, "rtx_ssrc", info.rtxSsrc);
+        get(obj, "active", info.active);
+        get(obj, "quality", info.quality);
+        return info;
+    }
+};
+
 struct VoiceReady : Core::JsonUtils::JsonObject
 {
     Field<quint32> ssrc;
     Field<QString> ip;
     Field<int> port;
     Field<QStringList> modes;
+    Field<QList<MediaStreamInfo>, true> streams;
 
     static VoiceReady fromJson(const QJsonObject &obj)
     {
@@ -40,7 +64,29 @@ struct VoiceReady : Core::JsonUtils::JsonObject
         get(obj, "ip", ready.ip);
         get(obj, "port", ready.port);
         get(obj, "modes", ready.modes);
+        get(obj, "streams", ready.streams);
         return ready;
+    }
+};
+
+// Inbound op 12: which SSRCs another participant sends video on.
+struct VideoData : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake, true> userId;
+    Field<quint32> audioSsrc;
+    Field<quint32> videoSsrc;
+    Field<quint32, true> rtxSsrc;
+    Field<QList<MediaStreamInfo>, true> streams;
+
+    static VideoData fromJson(const QJsonObject &obj)
+    {
+        VideoData data;
+        get(obj, "user_id", data.userId);
+        get(obj, "audio_ssrc", data.audioSsrc);
+        get(obj, "video_ssrc", data.videoSsrc);
+        get(obj, "rtx_ssrc", data.rtxSsrc);
+        get(obj, "streams", data.streams);
+        return data;
     }
 };
 
@@ -99,6 +145,8 @@ struct SessionDescription : Core::JsonUtils::JsonObject
     Field<QString> mode;
     Field<QByteArray> secretKey;
     Field<int, true> daveProtocolVersion;
+    Field<QString, true> sdp; // only for protocol "webrtc"
+    Field<QString, true> videoCodec;
 
     static SessionDescription fromJson(const QJsonObject &obj)
     {
@@ -106,6 +154,8 @@ struct SessionDescription : Core::JsonUtils::JsonObject
         get(obj, "mode", desc.mode);
         get(obj, "secret_key", desc.secretKey);
         get(obj, "dave_protocol_version", desc.daveProtocolVersion);
+        get(obj, "sdp", desc.sdp);
+        get(obj, "video_codec", desc.videoCodec);
         return desc;
     }
 };
@@ -155,12 +205,13 @@ struct ClientConnectData : Core::JsonUtils::JsonObject
 
 struct VoiceIdentifyData : Core::JsonUtils::JsonObject
 {
-    Field<Core::Snowflake> channelId;
+    Field<Core::Snowflake, true> channelId;
     Field<Core::Snowflake> serverId;
     Field<Core::Snowflake> userId;
     Field<QString> sessionId;
     Field<QString> token;
     Field<int> maxDaveProtocolVersion = 1;
+    Field<bool, true> video;
 
     Core::OrderedJson toJson() const
     {
@@ -171,6 +222,17 @@ struct VoiceIdentifyData : Core::JsonUtils::JsonObject
         insert(obj, "session_id", sessionId);
         insert(obj, "token", token);
         insert(obj, "max_dave_protocol_version", maxDaveProtocolVersion);
+        insert(obj, "video", video);
+        if (video.hasValue() && video.get()) {
+            // the one simulcast layer every Discord client asks for on a Go Live session
+            Core::OrderedJson layer;
+            layer.insert("type", QStringLiteral("screen"));
+            layer.insert("rid", QStringLiteral("100"));
+            layer.insert("quality", 100);
+            Core::OrderedJson::Array streams;
+            streams.append(layer);
+            obj.insert("streams", streams);
+        }
         return obj;
     }
 };
@@ -180,7 +242,7 @@ struct VoiceResumeData : Core::JsonUtils::JsonObject
     Field<QString> token;
     Field<QString> sessionId;
     Field<Core::Snowflake> serverId;
-    Field<Core::Snowflake> channelId;
+    Field<Core::Snowflake, true> channelId;
     Field<int> seqAck;
 
     Core::OrderedJson toJson() const

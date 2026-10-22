@@ -13,6 +13,13 @@
     {
       "name": "zlib",
       "platform": "windows"
+    },
+    {
+      "name": "rmlui",
+      "features": [
+        "freetype",
+        "svg"
+      ]
     }
   ],
   "features": {
@@ -37,6 +44,18 @@
       "description": "Lottie sticker playback (ENABLE_LOTTIE)",
       "dependencies": [
         "rlottie"
+      ]
+    },
+    "screenshare": {
+      "description": "Go Live screen sharing and stream viewing over WebRTC (ENABLE_SCREENSHARE)",
+      "dependencies": [
+        {
+          "name": "libdatachannel",
+          "default-features": false,
+          "features": [
+            "srtp"
+          ]
+        }
       ]
     }
   },

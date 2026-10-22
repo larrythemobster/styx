@@ -13,6 +13,7 @@
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QPointer>
 
 #include <functional>
 
@@ -25,6 +26,9 @@ namespace Core {
 class ImageManager;
 namespace Audio {
 class VoiceManager;
+}
+namespace Stream {
+class StreamManager;
 }
 } // namespace Core
 
@@ -94,6 +98,7 @@ public:
     void setAvatar(const QPixmap &pm);
     void setStatus(const Core::PresenceBadge &badge);
     void setDaveActive(bool active);
+    void setStreaming(bool streaming);
     int volume() const { return volumeSlider->value(); }
 
 signals:
@@ -101,6 +106,7 @@ signals:
     void muteToggled(Core::Snowflake userId, bool muted);
     void verificationCodeRequested(Core::Snowflake userId);
     void profileRequested(Core::Snowflake userId);
+    void watchRequested(Core::Snowflake userId);
 
 protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -113,6 +119,7 @@ private:
     QSlider *volumeSlider;
     QPushButton *muteBtn;
     QLabel *stateLabel;
+    QPushButton *watchBtn;
     QTimer speakingDecayTimer;
     bool locallyMuted = false;
     bool daveActive = false;
@@ -131,6 +138,9 @@ public:
     explicit VoiceWindow(QWidget *parent = nullptr);
 
     void setVoiceManager(Core::Audio::VoiceManager *manager);
+#ifdef ACHERON_HAVE_SCREENSHARE
+    void setStreamManager(Core::Stream::StreamManager *manager);
+#endif
     void setNameResolver(NameResolver resolver);
     void setAvatarResolver(AvatarResolver resolver);
     void setStatusResolver(StatusResolver resolver);
@@ -166,6 +176,9 @@ private:
     void showPrivacyCode();
 
     Core::Audio::VoiceManager *voiceManager = nullptr;
+#ifdef ACHERON_HAVE_SCREENSHARE
+    QPointer<Core::Stream::StreamManager> streamManager;
+#endif
     Core::ImageManager *imageManager = nullptr;
     Core::Snowflake accountId;
     QMetaObject::Connection imageFetchedConn;
