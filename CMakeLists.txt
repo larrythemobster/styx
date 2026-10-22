@@ -677,3 +677,6 @@ if(Catch2_FOUND)
     endif()
     add_test(NAME PlatformTests COMMAND TestPlatform)
 endif()
+
+# Video engine ported from ouwou/acheron upstream/video-streams.
+include(cmake/video-protocol.cmake)
