@@ -48,6 +48,10 @@ public:
     void requestForumUnreads(Core::Snowflake guildId, Core::Snowflake forumId,
                              const QList<QPair<Core::Snowflake, Core::Snowflake>> &threads);
     void sendVoiceStateUpdate(Core::Snowflake guildId, Core::Snowflake channelId, bool selfMute, bool selfDeaf);
+    void sendStreamCreate(Core::Snowflake guildId, Core::Snowflake channelId);
+    void sendStreamDelete(const QString &streamKey);
+    void sendStreamWatch(const QString &streamKey);
+    void sendStreamSetPaused(const QString &streamKey, bool paused);
 
     // for the qos heartbeat
     void setActiveState(bool focused, bool rtcConnected);
@@ -107,6 +111,10 @@ signals:
     void gatewayGuildMemberListUpdate(const GuildMemberListUpdate &data);
     void gatewayVoiceStateUpdate(const VoiceState &data);
     void gatewayVoiceServerUpdate(const VoiceServerUpdate &data);
+    void gatewayStreamCreate(const StreamCreate &data);
+    void gatewayStreamUpdate(const StreamUpdate &data);
+    void gatewayStreamServerUpdate(const StreamServerUpdate &data);
+    void gatewayStreamDelete(const StreamDelete &data);
     void gatewayRelationshipAdd(const Relationship &data);
     void gatewayRelationshipUpdate(const RelationshipPartial &data);
     void gatewayRelationshipRemove(const RelationshipPartial &data);

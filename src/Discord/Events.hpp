@@ -751,6 +751,73 @@ struct VoiceServerUpdate : Core::JsonUtils::JsonObject
     }
 };
 
+// Go Live. A stream key is "guild:<guild>:<channel>:<user>" or "call:<channel>:<user>".
+struct StreamCreate : Core::JsonUtils::JsonObject
+{
+    Field<QString> streamKey;
+    Field<Core::Snowflake> rtcServerId;
+    Field<QList<Core::Snowflake>, true> viewerIds;
+    Field<bool, true> paused;
+
+    static StreamCreate fromJson(const QJsonObject &obj)
+    {
+        StreamCreate event;
+        get(obj, "stream_key", event.streamKey);
+        get(obj, "rtc_server_id", event.rtcServerId);
+        get(obj, "viewer_ids", event.viewerIds);
+        get(obj, "paused", event.paused);
+        return event;
+    }
+};
+
+struct StreamUpdate : Core::JsonUtils::JsonObject
+{
+    Field<QString> streamKey;
+    Field<QList<Core::Snowflake>, true> viewerIds;
+    Field<bool, true> paused;
+
+    static StreamUpdate fromJson(const QJsonObject &obj)
+    {
+        StreamUpdate event;
+        get(obj, "stream_key", event.streamKey);
+        get(obj, "viewer_ids", event.viewerIds);
+        get(obj, "paused", event.paused);
+        return event;
+    }
+};
+
+struct StreamServerUpdate : Core::JsonUtils::JsonObject
+{
+    Field<QString> streamKey;
+    Field<QString> token;
+    Field<QString, false, true> endpoint;
+
+    static StreamServerUpdate fromJson(const QJsonObject &obj)
+    {
+        StreamServerUpdate event;
+        get(obj, "stream_key", event.streamKey);
+        get(obj, "token", event.token);
+        get(obj, "endpoint", event.endpoint);
+        return event;
+    }
+};
+
+struct StreamDelete : Core::JsonUtils::JsonObject
+{
+    Field<QString> streamKey;
+    Field<QString, true, true> reason;
+    Field<bool, true> unavailable;
+
+    static StreamDelete fromJson(const QJsonObject &obj)
+    {
+        StreamDelete event;
+        get(obj, "stream_key", event.streamKey);
+        get(obj, "reason", event.reason);
+        get(obj, "unavailable", event.unavailable);
+        return event;
+    }
+};
+
 struct VoiceStateUpdateBatch : Core::JsonUtils::JsonObject
 {
     Field<QList<VoiceState>, true> voiceStates;

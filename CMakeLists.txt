@@ -3,6 +3,13 @@ cmake_minimum_required(VERSION 3.16)
 option(USE_VCPKG "Use bundled vcpkg toolchain" ON)
 option(ENABLE_LOTTIE "Build with rlottie for Lottie sticker playback" ON)
 option(FFMPEG_FROM_VCPKG "Build ffmpeg from source through vcpkg and link it statically" OFF)
+# Capture is Windows Graphics Capture + WASAPI, so the feature is Windows-only for now.
+if(CMAKE_HOST_WIN32)
+    set(_screenshare_default ON)
+else()
+    set(_screenshare_default OFF)
+endif()
+option(ENABLE_SCREENSHARE "Build Go Live screen sharing and stream viewing (needs voice and ffmpeg)" ${_screenshare_default})
 
 # Must happen before project()
 if(USE_VCPKG AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -16,6 +23,9 @@ if(ENABLE_LOTTIE)
 endif()
 if(FFMPEG_FROM_VCPKG)
     list(APPEND VCPKG_MANIFEST_FEATURES "ffmpeg")
+endif()
+if(ENABLE_SCREENSHARE)
+    list(APPEND VCPKG_MANIFEST_FEATURES "screenshare")
 endif()
 
 project(acheron LANGUAGES CXX)
@@ -73,9 +83,13 @@ find_package(Qt${QT_VERSION_MAJOR}
         Network
         Sql
         Concurrent
+        OpenGL
+        OpenGLWidgets
         Test
         LinguistTools
 )
+# The main window is drawn with RmlUi (HTML/CSS-style UI) on an OpenGL 3.3 surface.
+find_package(RmlUi CONFIG REQUIRED)
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS ZlibPrivate QUIET)
 qt_standard_project_setup(I18N_TRANSLATED_LANGUAGES en)
 
@@ -153,6 +167,20 @@ endif()
 include(rnnoise.cmake)
 
 include(ffmpeg.cmake)
+
+if(ENABLE_SCREENSHARE AND NOT (WIN32 AND ENABLE_VOICE AND TARGET ffmpeg))
+    message(STATUS "Screen sharing needs Windows, ENABLE_VOICE and ffmpeg; building without it")
+    set(ENABLE_SCREENSHARE OFF)
+endif()
+# Windows Graphics Capture and process-loopback audio import WinRT/Windows 10 APIs, which
+# keep the executable from even loading on Windows 7, the platform the Qt 5 build targets.
+if(ENABLE_SCREENSHARE AND QT_VERSION_MAJOR LESS 6)
+    message(STATUS "Screen sharing is not built with Qt 5 (Windows 7 target)")
+    set(ENABLE_SCREENSHARE OFF)
+endif()
+if(ENABLE_SCREENSHARE)
+    find_package(LibDataChannel CONFIG REQUIRED)
+endif()
 
 include(lottie.cmake)
 
@@ -323,6 +351,18 @@ set(PROJECT_SOURCES
     src/Proto/FrecencySettings.cpp
     src/Core/TokenStore.cpp
     src/App.cpp
+    src/UI/Rml/RmlRuntime.cpp
+    src/UI/Rml/RmlView.cpp
+    src/UI/Rml/Controller.cpp
+    src/UI/Rml/Shell.cpp
+    src/UI/Rml/RailController.cpp
+    src/UI/Rml/ChannelListController.cpp
+    src/UI/Rml/UserPanelController.cpp
+    src/UI/Rml/ChatController.cpp
+    src/UI/Rml/MemberListController.cpp
+    src/UI/Rml/CallController.cpp
+    src/UI/Rml/FriendsController.cpp
+    vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )
 
 if(ENABLE_VOICE)
@@ -345,6 +385,25 @@ if(ENABLE_VOICE)
         src/Core/Audio/JitterBuffer.cpp
         src/Core/Audio/AudioMixer.cpp
         src/Core/Audio/NoiseSuppressor.cpp
+    )
+endif()
+
+if(ENABLE_SCREENSHARE)
+    list(APPEND PROJECT_SOURCES
+        src/Discord/Stream/StreamTransport.cpp
+        src/Discord/Stream/StreamConnection.cpp
+        src/Discord/Stream/VideoReceiver.cpp
+        src/Core/Stream/D3DDevice.cpp
+        src/Core/Stream/ScreenCapture.cpp
+        src/Core/Stream/FrameConverter.cpp
+        src/Core/Stream/SpsVuiRewriter.cpp
+        src/Core/Stream/VideoEncoder.cpp
+        src/Core/Stream/LoopbackCapture.cpp
+        src/Core/Stream/StreamSender.cpp
+        src/Core/Stream/StreamDecoder.cpp
+        src/Core/Stream/StreamManager.cpp
+        src/UI/Stream/SourcePickerDialog.cpp
+        src/UI/Stream/StreamViewWindow.cpp
     )
 endif()
 
@@ -427,6 +486,17 @@ if(BUILD_TESTS)
     target_include_directories(TestCdnUrls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME CdnUrlTests COMMAND TestCdnUrls)
 
+    qt_add_executable(TestRmlRender tests/tst_RmlRender.cpp
+        src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp
+        vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
+        src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
+        src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)
+    target_link_libraries(TestRmlRender PRIVATE Qt::Core Qt::Gui Qt::Widgets Qt::Network
+        Qt::Svg Qt::OpenGL Qt::OpenGLWidgets Qt::Test RmlUi::RmlUi)
+    target_include_directories(TestRmlRender PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/emoji-segmenter ${CMAKE_CURRENT_SOURCE_DIR}/vendor/rmlui-backend)
+    add_test(NAME RmlRenderTests COMMAND TestRmlRender)
+
     qt_add_executable(TestEmbeds tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     target_link_libraries(TestEmbeds PRIVATE Qt::Core Qt::Gui Qt::Test)
     target_include_directories(TestEmbeds PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -482,7 +552,7 @@ if (MSVC)
     endif()
 endif()
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/vendor/rmlui-backend)
 
 set_target_properties(${PROJECT_NAME}
     PROPERTIES
@@ -503,9 +573,12 @@ target_link_libraries(${PROJECT_NAME}
         Qt::Network
         Qt::Sql
         Qt::Concurrent
+        Qt::OpenGL
+        Qt::OpenGLWidgets
         CURL::libcurl
     PRIVATE
         qt${QT_VERSION_MAJOR}keychain
+        RmlUi::RmlUi
         OpenSSL::Crypto
 )
 if(ENABLE_VOICE)
@@ -528,6 +601,10 @@ if(TARGET ffmpeg)
     target_link_libraries(${PROJECT_NAME} PRIVATE ffmpeg)
     target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_FFMPEG)
 endif()
+if(ENABLE_SCREENSHARE)
+    target_link_libraries(${PROJECT_NAME} PRIVATE LibDataChannel::LibDataChannel d3d11 dxgi dwmapi windowsapp mmdevapi)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_SCREENSHARE)
+endif()
 if(TARGET lottie)
     target_link_libraries(${PROJECT_NAME} PRIVATE lottie)
     target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_RLOTTIE)
@@ -538,6 +615,8 @@ else()
     target_link_libraries(${PROJECT_NAME} PRIVATE QtZlibCompat)
 endif()
 target_precompile_headers(${PROJECT_NAME} PUBLIC src/pch.h)
+# glad (bundled with RmlUi's GL3 renderer) must be the first OpenGL header in its TU
+set_source_files_properties(vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 include(CheckCXXSymbolExists)
 get_target_property(_curl_incs CURL::libcurl INTERFACE_INCLUDE_DIRECTORIES)
@@ -607,3 +686,4 @@ if(UNIX AND NOT APPLE)
         RENAME io.github.ouwou.acheron.svg
     )
 endif()
+

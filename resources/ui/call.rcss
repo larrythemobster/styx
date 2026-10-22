@@ -1,0 +1,438 @@
+/* call.rcss - Discord call view styling */
+
+#call {
+    width: 100%;
+    height: 100%;
+    background-color: #000000;
+    display: none;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+}
+
+body.call-open #call {
+    display: flex;
+}
+
+/* Call Header */
+.call-header {
+    height: 48dp;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16dp;
+    border-bottom: 1dp #202024;
+    background-color: #000000;
+    z-index: 10;
+}
+
+.call-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+}
+
+.call-header-icon {
+    width: 20dp;
+    height: 20dp;
+    image-color: #80848e;
+    margin-right: 8dp;
+    flex-shrink: 0;
+}
+
+.call-header-title {
+    font-size: 16dp;
+    font-weight: 600;
+    color: #f2f3f5;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.call-header-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.call-header-btn {
+    width: 32dp;
+    height: 32dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4dp;
+    cursor: pointer;
+    margin-left: 8dp;
+}
+
+.call-header-btn:hover {
+    background-color: #19191c;
+}
+
+.call-header-btn img {
+    width: 20dp;
+    height: 20dp;
+    image-color: #b5bac1;
+}
+
+.call-header-btn:hover img {
+    image-color: #dbdee1;
+}
+
+/* Main Grid & Focus Area */
+.call-body {
+    flex: 1;
+    min-height: 0;
+    padding: 16dp;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Grid layout modes */
+.call-grid {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+}
+
+/* 1 Participant: Full / large tile */
+.call-grid.tiles-1 .call-tile {
+    width: 80%;
+    height: 85%;
+    max-width: 960dp;
+    max-height: 540dp;
+}
+
+/* 2 Participants: Side by side */
+.call-grid.tiles-2 .call-tile {
+    width: 46%;
+    height: 70%;
+    max-width: 580dp;
+    max-height: 400dp;
+    margin: 8dp;
+}
+
+/* 3-4 Participants: 2x2 */
+.call-grid.tiles-3 .call-tile,
+.call-grid.tiles-4 .call-tile {
+    width: 46%;
+    height: 44%;
+    max-width: 540dp;
+    max-height: 320dp;
+    margin: 8dp;
+}
+
+/* 5-6 Participants: 3x2 */
+.call-grid.tiles-5 .call-tile,
+.call-grid.tiles-6 .call-tile,
+.call-grid.tiles-more .call-tile {
+    width: 30%;
+    height: 44%;
+    max-width: 420dp;
+    max-height: 280dp;
+    margin: 6dp;
+}
+
+/* Focus Mode: Large tile on top/center + thumbnail strip at bottom */
+.call-focus-view {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.call-focus-main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.call-focus-main .call-tile {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+}
+
+.call-focus-strip {
+    height: 110dp;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    overflow-x: auto;
+    margin-top: 12dp;
+}
+
+.call-focus-strip .call-tile {
+    width: 160dp;
+    height: 90dp;
+    margin: 0 6dp;
+    flex-shrink: 0;
+}
+
+/* Individual Tile */
+.call-tile {
+    background-color: #111214;
+    border-radius: 8dp;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-sizing: border-box;
+    border: 3dp transparent;
+}
+
+.call-tile.speaking {
+    border: 3dp #23a55a;
+}
+
+.call-tile-avatar-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 80dp;
+    height: 80dp;
+    border-radius: 40dp;
+    overflow: hidden;
+}
+
+.call-focus-strip .call-tile-avatar-center {
+    width: 48dp;
+    height: 48dp;
+    border-radius: 24dp;
+}
+
+.call-tile-avatar {
+    width: 80dp;
+    height: 80dp;
+    display: block;
+}
+
+.call-focus-strip .call-tile-avatar {
+    width: 48dp;
+    height: 48dp;
+}
+
+.call-tile-avatar-fallback {
+    width: 80dp;
+    height: 80dp;
+    border-radius: 40dp;
+    background-color: #19191c;
+    color: #dbdee1;
+    font-size: 32dp;
+    font-weight: 600;
+    text-align: center;
+    line-height: 80dp;
+}
+
+.call-focus-strip .call-tile-avatar-fallback {
+    width: 48dp;
+    height: 48dp;
+    border-radius: 24dp;
+    font-size: 20dp;
+    line-height: 48dp;
+}
+
+/* Video Frame in Tile */
+.call-video-frame {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    background-color: #000000;
+}
+
+/* Name Pill (Bottom Left) */
+.call-tile-pill {
+    position: absolute;
+    bottom: 8dp;
+    left: 8dp;
+    height: 24dp;
+    background-color: #000000b3;
+    border-radius: 4dp;
+    padding: 0 8dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    z-index: 5;
+}
+
+.call-tile-name {
+    font-size: 13dp;
+    font-weight: 500;
+    color: #f2f3f5;
+    white-space: nowrap;
+    overflow: hidden;
+    max-width: 160dp;
+}
+
+.call-tile-icons {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-left: 6dp;
+}
+
+.call-tile-icon {
+    width: 14dp;
+    height: 14dp;
+    image-color: #f23f43;
+    margin-left: 4dp;
+}
+
+/* Badges (Top Left / Right) */
+.call-badge-live {
+    position: absolute;
+    top: 10dp;
+    left: 10dp;
+    background-color: #f23f43;
+    color: #ffffff;
+    font-size: 11dp;
+    font-weight: 700;
+    padding: 2dp 6dp;
+    border-radius: 4dp;
+    letter-spacing: 0.5px;
+    z-index: 5;
+}
+
+/* Watch Stream Overlay */
+.call-stream-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #00000099;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 6;
+}
+
+.call-watch-btn {
+    background-color: #5865f2;
+    color: #ffffff;
+    font-size: 14dp;
+    font-weight: 600;
+    padding: 8dp 16dp;
+    border-radius: 4dp;
+    cursor: pointer;
+}
+
+.call-watch-btn:hover {
+    background-color: #4752c4;
+}
+
+.call-stop-watch-btn {
+    position: absolute;
+    top: 10dp;
+    right: 10dp;
+    background-color: #00000099;
+    color: #ffffff;
+    font-size: 12dp;
+    font-weight: 600;
+    padding: 4dp 8dp;
+    border-radius: 4dp;
+    cursor: pointer;
+    z-index: 7;
+}
+
+.call-stop-watch-btn:hover {
+    background-color: #f23f43;
+}
+
+.call-self-preview-text {
+    position: absolute;
+    color: #949ba4;
+    font-size: 13dp;
+    font-weight: 500;
+    bottom: 38dp;
+    text-align: center;
+    z-index: 5;
+}
+
+/* Bottom Control Bar */
+.call-controls {
+    height: 80dp;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    background-color: #08080a;
+    border-top: 1dp #202024;
+    z-index: 10;
+}
+
+.call-btn {
+    width: 52dp;
+    height: 52dp;
+    border-radius: 26dp;
+    background-color: #19191c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 8dp;
+    cursor: pointer;
+}
+
+.call-btn:hover {
+    background-color: #242428;
+}
+
+.call-btn img {
+    width: 24dp;
+    height: 24dp;
+    image-color: #dbdee1;
+}
+
+.call-btn.active {
+    background-color: #f23f43;
+}
+
+.call-btn.active img {
+    image-color: #ffffff;
+}
+
+.call-btn.active:hover {
+    background-color: #da373c;
+}
+
+.call-btn-disconnect {
+    width: 56dp;
+    height: 56dp;
+    border-radius: 28dp;
+    background-color: #f23f43;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 12dp;
+    cursor: pointer;
+}
+
+.call-btn-disconnect:hover {
+    background-color: #da373c;
+}
+
+.call-btn-disconnect img {
+    width: 26dp;
+    height: 26dp;
+    image-color: #ffffff;
+}

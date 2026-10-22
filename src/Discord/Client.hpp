@@ -155,6 +155,10 @@ public:
     void ackBulk(const QList<AckEntry> &entries, std::function<void(bool success)> onFinished);
 
     void sendVoiceStateUpdate(Snowflake guildId, Snowflake channelId, bool selfMute, bool selfDeaf);
+    void sendStreamCreate(Snowflake guildId, Snowflake channelId);
+    void sendStreamDelete(const QString &streamKey);
+    void sendStreamWatch(const QString &streamKey);
+    void sendStreamSetPaused(const QString &streamKey, bool paused);
     void setVoiceConnected(bool connected);
 
     void restoreHeartbeatSession(const std::optional<HeartbeatSession> &stored);
@@ -263,6 +267,8 @@ public:
     };
     void fetchAuditLog(Snowflake guildId, const AuditLogQuery &query, ResultCallback<AuditLog> callback);
 
+    void sendFriendRequest(const QString &username, ActionCallback callback);
+
 signals:
     void stateChanged(Core::ConnectionState state);
     void ready(const Ready &data);
@@ -310,6 +316,10 @@ signals:
     void guildMemberListUpdate(const GuildMemberListUpdate &event);
     void voiceStateUpdated(const VoiceState &event);
     void voiceServerUpdated(const VoiceServerUpdate &event);
+    void streamCreated(const StreamCreate &event);
+    void streamUpdated(const StreamUpdate &event);
+    void streamServerUpdated(const StreamServerUpdate &event);
+    void streamDeleted(const StreamDelete &event);
     void relationshipAdded(const Relationship &event);
     void relationshipUpdated(const RelationshipPartial &event);
     void relationshipRemoved(const RelationshipPartial &event);

@@ -1,0 +1,686 @@
+/*
+ * Friends view styling (AMOLED dark)
+ */
+
+#friends
+{
+	display: none;
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	flex-direction: column;
+	background-color: #000000;
+}
+
+body.friends-open #header { display: none; }
+body.friends-open #chat { display: none; }
+body.friends-open #members { display: none; }
+body.friends-open #call { display: none; }
+body.friends-open #friends { display: flex; }
+
+/* Top header */
+#friends-header
+{
+	height: 48dp;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding: 0 16dp;
+	border-bottom: 1dp #202024;
+	flex-shrink: 0;
+	background-color: #000000;
+}
+
+.friends-header-title
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.friends-header-icon
+{
+	width: 20dp;
+	height: 20dp;
+	image-color: #949ba4;
+	margin-right: 8dp;
+}
+
+.friends-header-text
+{
+	font-size: 16dp;
+	font-weight: 600;
+	color: #f2f3f5;
+}
+
+.friends-header-divider
+{
+	width: 1dp;
+	height: 20dp;
+	background-color: #202024;
+	margin: 0 16dp;
+}
+
+.friends-tab
+{
+	padding: 4dp 10dp;
+	margin-right: 8dp;
+	border-radius: 4dp;
+	font-size: 14dp;
+	font-weight: 600;
+	color: #949ba4;
+	cursor: pointer;
+}
+
+.friends-tab:hover
+{
+	background-color: #19191c;
+	color: #dbdee1;
+}
+
+.friends-tab.selected
+{
+	background-color: #242428;
+	color: #ffffff;
+}
+
+.friends-tab-add
+{
+	padding: 4dp 10dp;
+    border-radius: 8dp;
+	font-size: 14dp;
+	font-weight: 600;
+    color: #ffffff;
+    background-color: #007aa7;
+	cursor: pointer;
+}
+
+.friends-tab-add:hover
+{
+    background-color: #00658a;
+}
+
+.friends-tab-add.selected
+{
+    background-color: #0b1f29;
+    color: #29b6f6;
+}
+
+/* Body */
+#friends-body
+{
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: row;
+}
+
+/* Main column */
+#friends-main
+{
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	padding: 16dp 20dp 0 30dp;
+}
+
+.friends-search-box
+{
+	width: 100%;
+	height: 34dp;
+	background-color: #111214;
+	border-radius: 4dp;
+	display: flex;
+	align-items: center;
+	padding: 0 12dp;
+	position: relative;
+	margin-bottom: 20dp;
+	box-sizing: border-box;
+}
+
+.friends-search-input
+{
+	flex: 1;
+	min-width: 0;
+	height: 26dp;
+	background-color: transparent;
+	border: 0;
+	color: #dbdee1;
+	font-size: 14dp;
+    font-weight: normal;
+	padding: 0;
+}
+
+.friends-search-placeholder
+{
+	position: absolute;
+	left: 12dp;
+	top: 7dp;
+	color: #949ba4;
+	font-size: 14dp;
+    font-weight: normal;
+	pointer-events: none;
+}
+
+.friends-search-icon
+{
+	width: 16dp;
+	height: 16dp;
+	image-color: #949ba4;
+	flex-shrink: 0;
+	margin-left: 8dp;
+}
+
+.friends-search-clear
+{
+	width: 14dp;
+	height: 14dp;
+	image-color: #949ba4;
+	cursor: pointer;
+	flex-shrink: 0;
+	margin-left: 8dp;
+}
+
+.friends-search-clear:hover
+{
+	image-color: #dbdee1;
+}
+
+#friends-list-container
+{
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.friends-section-title
+{
+	font-size: 12dp;
+	font-weight: 700;
+	color: #949ba4;
+    text-transform: none;
+    letter-spacing: 0;
+	margin-bottom: 12dp;
+    flex-shrink: 0;
+}
+
+#friends-list
+{
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding-right: 6dp;
+}
+
+.friend-row
+{
+	height: 60dp;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding: 0 12dp;
+	border-top: 1dp #202024;
+	border-radius: 8dp;
+	cursor: pointer;
+}
+
+.friend-row:hover
+{
+	background-color: #19191c;
+}
+
+.friend-avatar-wrap
+{
+	position: relative;
+	width: 36dp;
+	height: 36dp;
+	margin-right: 12dp;
+	flex-shrink: 0;
+}
+
+.avatar-clip
+{
+	width: 36dp;
+	height: 36dp;
+	border-radius: 18dp;
+	overflow: hidden;
+}
+
+.friend-avatar
+{
+	width: 36dp;
+	height: 36dp;
+}
+
+.friend-avatar-wrap .status-dot
+{
+	position: absolute;
+	right: -2dp;
+	bottom: -2dp;
+	width: 12dp;
+	height: 12dp;
+	border-radius: 6dp;
+	border: 2dp #000000;
+	clip: 1;
+}
+
+.friend-row:hover .friend-avatar-wrap .status-dot
+{
+	border: 2dp #19191c;
+}
+
+.friend-info
+{
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.friend-name-line
+{
+	display: flex;
+	flex-direction: row;
+	align-items: baseline;
+	overflow: hidden;
+}
+
+.friend-display-name
+{
+	font-size: 15dp;
+	font-weight: 600;
+	color: #f2f3f5;
+	white-space: nowrap;
+	overflow: hidden;
+	margin-right: 6dp;
+}
+
+.friend-username
+{
+	font-size: 13dp;
+    font-weight: normal;
+	color: #949ba4;
+	white-space: nowrap;
+	overflow: hidden;
+    display: none;
+}
+
+.friend-row:hover .friend-username { display: inline; }
+
+.friend-subtext
+{
+	font-size: 12dp;
+	color: #949ba4;
+	white-space: nowrap;
+	overflow: hidden;
+	margin-top: 2dp;
+}
+
+.friend-actions
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-left: 8dp;
+}
+
+.friend-action-btn
+{
+    width: 40dp;
+    height: 40dp;
+    border-radius: 20dp;
+    background-color: transparent;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin-left: 8dp;
+	cursor: pointer;
+}
+
+.friend-action-more { display: none; }
+.friend-row:hover .friend-action-more { display: flex; }
+
+.friend-action-btn:hover
+{
+	background-color: #242428;
+}
+
+.friend-action-btn .icon
+{
+	width: 18dp;
+	height: 18dp;
+	image-color: #b5bac1;
+}
+
+.friend-action-btn:hover .icon
+{
+	image-color: #ffffff;
+}
+
+/* Empty states */
+.friends-empty-state
+{
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 60dp 20dp;
+	text-align: center;
+}
+
+.empty-state-icon
+{
+	width: 48dp;
+	height: 48dp;
+	image-color: #949ba4;
+	margin-bottom: 16dp;
+}
+
+.empty-state-title
+{
+	font-size: 16dp;
+	font-weight: 700;
+	color: #f2f3f5;
+	margin-bottom: 8dp;
+}
+
+.empty-state-subtitle
+{
+	font-size: 13dp;
+	color: #949ba4;
+}
+
+/* Active Now right rail */
+#friends-active-now
+{
+    width: 400dp;
+	flex-shrink: 0;
+    min-height: 0;
+	border-left: 1dp #202024;
+	padding: 16dp 16dp 0 16dp;
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+}
+
+.active-now-title
+{
+	font-size: 20dp;
+    font-weight: 700;
+	color: #f2f3f5;
+	margin-bottom: 16dp;
+}
+
+#active-now-list
+{
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.active-card
+{
+	background-color: #0b0b0c;
+	border: 1dp #202024;
+	border-radius: 8dp;
+	padding: 12dp;
+	margin-bottom: 12dp;
+	cursor: pointer;
+}
+
+.active-card:hover
+{
+	background-color: #111214;
+	border: 1dp #242428;
+}
+
+.active-card-top
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 8dp;
+}
+
+.active-card-avatar-wrap
+{
+	position: relative;
+	width: 32dp;
+	height: 32dp;
+	margin-right: 10dp;
+	flex-shrink: 0;
+}
+
+.active-card-avatar-clip
+{
+	width: 32dp;
+	height: 32dp;
+	border-radius: 16dp;
+	overflow: hidden;
+}
+
+.active-card-avatar
+{
+	width: 32dp;
+	height: 32dp;
+}
+
+.active-card-user-info
+{
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.active-card-user
+{
+	font-size: 14dp;
+	font-weight: 600;
+	color: #f2f3f5;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.active-card-activity-type
+{
+    font-size: 12dp;
+	color: #949ba4;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.active-card-type-icon
+{
+	width: 18dp;
+	height: 18dp;
+	image-color: #b5bac1;
+	flex-shrink: 0;
+	margin-left: 6dp;
+}
+
+.active-card-body
+{
+	display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12dp;
+}
+
+.active-card-text { flex: 1; min-width: 0; }
+.active-card-art
+{
+    width: 64dp;
+    height: 64dp;
+    flex-shrink: 0;
+    border-radius: 6dp;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #000000;
+}
+.active-card-art img { max-width: 100%; max-height: 100%; }
+.active-card.streaming .active-card-body { flex-direction: column; align-items: stretch; }
+.active-card.streaming .active-card-art { width: 100%; height: 180dp; }
+
+.active-card-heading
+{
+    font-size: 14dp;
+	font-weight: 600;
+	color: #f2f3f5;
+	margin-bottom: 2dp;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.active-card-details
+{
+    font-size: 13dp;
+	color: #dbdee1;
+	margin-bottom: 2dp;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.active-card-state
+{
+	font-size: 12dp;
+	color: #949ba4;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.active-now-empty
+{
+	padding: 24dp 8dp;
+}
+
+.active-now-empty-heading
+{
+	font-size: 16dp;
+	font-weight: 700;
+	color: #f2f3f5;
+	margin-bottom: 8dp;
+	text-align: center;
+}
+
+.active-now-empty-text
+{
+	font-size: 13dp;
+	color: #949ba4;
+	line-height: 18dp;
+	text-align: center;
+}
+
+/* Add Friend tab */
+.add-friend-container
+{
+	display: flex;
+	flex-direction: column;
+	padding: 10dp 0;
+}
+
+.add-friend-header
+{
+	font-size: 16dp;
+	font-weight: 700;
+	color: #f2f3f5;
+	margin-bottom: 8dp;
+	text-transform: uppercase;
+}
+
+.add-friend-subtitle
+{
+	font-size: 13dp;
+	color: #949ba4;
+	margin-bottom: 16dp;
+}
+
+.add-friend-input-wrap
+{
+	width: 100%;
+	height: 50dp;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 8dp;
+	display: flex;
+	align-items: center;
+	padding: 0 12dp;
+	position: relative;
+	box-sizing: border-box;
+}
+
+.add-friend-input
+{
+	flex: 1;
+	min-width: 0;
+	height: 32dp;
+	background-color: transparent;
+	border: 0;
+	color: #dbdee1;
+	font-size: 15dp;
+	padding: 0;
+}
+
+.add-friend-placeholder
+{
+	position: absolute;
+	left: 12dp;
+	top: 15dp;
+	color: #80848e;
+	font-size: 14dp;
+	pointer-events: none;
+}
+
+.add-friend-btn
+{
+	height: 32dp;
+	padding: 0 16dp;
+	border-radius: 4dp;
+    background-color: #007aa7;
+	color: #ffffff;
+	font-size: 13dp;
+	font-weight: 600;
+	cursor: pointer;
+	flex-shrink: 0;
+	margin-left: 12dp;
+	border: 0;
+}
+
+.add-friend-btn:hover
+{
+    background-color: #00658a;
+}
+
+.add-friend-btn.disabled
+{
+	opacity: 0.5;
+	cursor: default;
+}
+
+.add-friend-feedback
+{
+	margin-top: 14dp;
+	font-size: 13dp;
+    font-weight: normal;
+}
+
+.add-friend-feedback.feedback-success
+{
+	color: #23a55a;
+}
+
+.add-friend-feedback.feedback-error
+{
+	color: #f23f43;
+}
+
+@media (max-width: 1280dp)
+{
+    #friends-active-now { display: none; }
+}

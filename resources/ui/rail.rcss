@@ -1,0 +1,308 @@
+/*
+ * Rail component styles (server rail, left 72dp)
+ */
+
+#rail
+{
+	width: 72dp;
+	height: 100%;
+	background-color: #000000;
+	display: flex;
+	flex-direction: row;
+	flex-shrink: 0;
+	overflow: hidden;
+}
+
+body.rail-folder-open #rail
+{
+	width: 136dp;
+}
+
+.rail-primary
+{
+	width: 72dp;
+	height: 100%;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding-top: 12dp;
+	padding-bottom: 72dp;
+	box-sizing: border-box;
+	flex-shrink: 0;
+}
+
+.rail-expanded
+{
+	display: none;
+}
+
+body.rail-folder-open .rail-expanded
+{
+	display: flex;
+	width: 64dp;
+	height: 100%;
+	overflow-y: auto;
+	flex-direction: column;
+	align-items: center;
+	padding-top: 12dp;
+	padding-bottom: 72dp;
+	box-sizing: border-box;
+	border-left: 1dp #202024;
+	background-color: #000000;
+	flex-shrink: 0;
+}
+
+#rail scrollbarhorizontal,
+#rail scrollbarvertical,
+.rail-primary scrollbarhorizontal,
+.rail-primary scrollbarvertical,
+.rail-expanded scrollbarhorizontal,
+.rail-expanded scrollbarvertical
+{
+	width: 0;
+	height: 0;
+}
+
+.rail-separator
+{
+	width: 32dp;
+	height: 2dp;
+	background-color: #202024;
+	border-radius: 1dp;
+	margin: 4dp 0 8dp 0;
+	flex-shrink: 0;
+}
+
+.rail-separator.account-separator
+{
+	width: 40dp;
+	height: 2dp;
+	background-color: #2b2d31;
+	margin: 8dp 0 10dp 0;
+}
+
+.rail-item
+{
+	position: relative;
+	width: 72dp;
+	height: 48dp;
+	margin-bottom: 8dp;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.rail-item .pill
+{
+	position: absolute;
+	left: 0;
+	top: 20dp;
+	width: 4dp;
+	height: 0;
+	border-radius: 0 4dp 4dp 0;
+	background-color: #ffffff;
+	transition: height 0.15s, top 0.15s;
+}
+
+.rail-item.unread .pill
+{
+	height: 8dp;
+	top: 20dp;
+}
+
+.rail-item:hover .pill
+{
+	height: 20dp;
+	top: 14dp;
+}
+
+.rail-item.selected .pill
+{
+	height: 40dp;
+	top: 4dp;
+}
+
+.rail-btn
+{
+	width: 48dp;
+	height: 48dp;
+	border-radius: 24dp;
+	background-color: #111214;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	overflow: hidden;
+	transition: border-radius 0.15s, background-color 0.15s;
+	position: relative;
+}
+
+.rail-btn:hover,
+.rail-item.selected .rail-btn
+{
+	border-radius: 16dp;
+	background-color: #5865f2;
+}
+
+.rail-item.selected .rail-btn
+{
+	background-color: #5865f2;
+}
+
+.rail-btn img.rail-avatar
+{
+	width: 48dp;
+	height: 48dp;
+}
+
+.rail-btn img.rail-icon
+{
+	width: 26dp;
+	height: 26dp;
+	image-color: #dbdee1;
+	transition: image-color 0.15s;
+}
+
+.rail-btn:hover img.rail-icon,
+.rail-item.selected .rail-btn img.rail-icon
+{
+	image-color: #ffffff;
+}
+
+.rail-monogram
+{
+	font-size: 14dp;
+	font-weight: 700;
+	color: #dbdee1;
+	text-align: center;
+}
+
+.rail-item:hover .rail-monogram,
+.rail-item.selected .rail-monogram
+{
+	color: #ffffff;
+}
+
+/* Folder styles */
+.folder-btn
+{
+	background-color: #19191c;
+}
+
+.folder-btn:hover
+{
+	background-color: #242428;
+}
+
+.folder-grid
+{
+	width: 40dp;
+	height: 40dp;
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	align-items: center;
+	gap: 2dp;
+}
+
+.folder-grid-item
+{
+	width: 18dp;
+	height: 18dp;
+	border-radius: 9dp;
+	background-color: #111214;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	overflow: hidden;
+}
+
+.folder-grid-item img
+{
+	width: 18dp;
+	height: 18dp;
+}
+
+.folder-grid-acr
+{
+	font-size: 9dp;
+	font-weight: 700;
+	color: #949ba4;
+}
+
+.rail-expanded .rail-item
+{
+	width: 64dp;
+	height: 48dp;
+	margin-bottom: 8dp;
+}
+
+.rail-expanded .rail-btn
+{
+	width: 44dp;
+	height: 44dp;
+	border-radius: 22dp;
+}
+
+.rail-expanded .rail-btn:hover,
+.rail-expanded .rail-item.selected .rail-btn
+{
+	border-radius: 14dp;
+}
+
+.rail-expanded .rail-btn img.rail-avatar
+{
+	width: 44dp;
+	height: 44dp;
+}
+
+.rail-expanded .rail-tooltip
+{
+	left: 72dp;
+}
+
+/* Mention badge */
+.mention-badge
+{
+	position: absolute;
+	right: -4dp;
+	bottom: -4dp;
+	min-width: 16dp;
+	height: 16dp;
+	padding: 0 4dp;
+	border-radius: 11dp;
+	background-color: #f23f43;
+	color: #ffffff;
+	font-size: 11dp;
+	font-weight: bold;
+	text-align: center;
+	line-height: 16dp;
+	border: 3dp #000000;
+	clip: 1;
+	z-index: 10;
+}
+
+/* Tooltip on hover */
+.rail-tooltip
+{
+	position: absolute;
+	left: 80dp;
+	top: 10dp;
+	padding: 6dp 10dp;
+	background-color: #111214;
+	color: #dbdee1;
+	font-size: 14dp;
+	font-weight: 600;
+	border-radius: 4dp;
+	white-space: nowrap;
+	display: none;
+	z-index: 1000;
+	border: 1dp #202024;
+}
+
+.rail-item:hover .rail-tooltip
+{
+	display: block;
+}

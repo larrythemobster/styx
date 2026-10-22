@@ -1,0 +1,270 @@
+/*
+ * User panel & Voice status panel styles (owned by UserPanelController)
+ */
+
+#voice-panel
+{
+	background-color: #08080a;
+	border-bottom: 1dp #202024;
+	padding: 8dp 12dp;
+	display: flex;
+	flex-direction: column;
+	flex-shrink: 0;
+}
+
+.voice-panel-header
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 2dp;
+}
+
+.voice-status-icon
+{
+	width: 14dp;
+	height: 14dp;
+	margin-right: 6dp;
+	flex-shrink: 0;
+}
+
+.voice-conn-status
+{
+	font-size: 13dp;
+	font-weight: 700;
+	color: #23a55a;
+	flex: 1;
+}
+
+.voice-conn-status.connecting
+{
+	color: #faa61a;
+}
+
+.voice-panel-info
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 6dp;
+}
+
+.voice-channel-link
+{
+	font-size: 12dp;
+	font-weight: 500;
+	color: #b5bac1;
+	cursor: pointer;
+	overflow: hidden;
+	white-space: nowrap;
+	flex: 1;
+}
+
+.voice-channel-link:hover
+{
+	color: #dbdee1;
+	text-decoration: underline;
+}
+
+.voice-panel-actions
+{
+	display: flex;
+	flex-direction: row;
+	justify-content: flex-end;
+	gap: 6dp;
+}
+
+.voice-action-btn
+{
+	width: 32dp;
+	height: 32dp;
+	border-radius: 4dp;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background-color: #111214;
+	cursor: pointer;
+	transition: background-color 0.15s;
+}
+
+.voice-action-btn:hover
+{
+	background-color: #19191c;
+}
+
+.voice-action-btn img
+{
+	width: 18dp;
+	height: 18dp;
+	image-color: #b5bac1;
+}
+
+.voice-action-btn:hover img
+{
+	image-color: #dbdee1;
+}
+
+.voice-action-btn.disconnect img
+{
+	image-color: #f23f43;
+}
+
+.voice-action-btn.streaming
+{
+	background-color: #f23f43;
+}
+
+.voice-action-btn.streaming img
+{
+	image-color: #ffffff;
+}
+
+/* User Panel */
+#user-panel
+{
+	position: absolute;
+	left: 8dp;
+	bottom: 8dp;
+	width: 416dp;
+	height: 56dp;
+	border: 1dp #202024;
+	border-radius: 8dp;
+	background-color: #08080a;
+	padding: 0 8dp;
+	display: flex;
+	align-items: center;
+	box-sizing: border-box;
+	z-index: 100;
+}
+
+body.rail-folder-open #user-panel
+{
+	width: 480dp;
+}
+
+.user-panel-info
+{
+	display: flex;
+	align-items: center;
+	flex: 1;
+	min-width: 0;
+	height: 40dp;
+	cursor: pointer;
+	border-radius: 4dp;
+	padding: 0 4dp;
+	margin-right: 4dp;
+	transition: background-color 0.15s;
+}
+
+.user-panel-info:hover
+{
+	background-color: #19191c;
+}
+
+.user-avatar-wrap
+{
+	position: relative;
+	width: 32dp;
+	height: 32dp;
+	margin-right: 8dp;
+	flex-shrink: 0;
+}
+.user-avatar-clip
+{
+	width: 32dp;
+	height: 32dp;
+	border-radius: 16dp;
+	overflow: hidden;
+}
+
+.user-avatar
+{
+	width: 32dp;
+	height: 32dp;
+	display: block;
+}
+
+.user-avatar-wrap .status-dot
+{
+	position: absolute;
+	right: -2dp;
+	bottom: -2dp;
+	width: 10dp;
+	height: 10dp;
+	border-radius: 5dp;
+	border: 2dp #08080a;
+	clip: 1;
+}
+
+.user-names
+{
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	min-width: 0;
+	flex: 1;
+}
+
+.user-display-name
+{
+	font-size: 14dp;
+	font-weight: 600;
+	color: #f2f3f5;
+	overflow: hidden;
+	white-space: nowrap;
+	line-height: 18dp;
+}
+
+.user-sub-name
+{
+	font-size: 12dp;
+	color: #b5bac1;
+	overflow: hidden;
+	white-space: nowrap;
+	line-height: 14dp;
+}
+
+.user-panel-buttons
+{
+	display: flex;
+	flex-direction: row;
+	gap: 2dp;
+	flex-shrink: 0;
+}
+
+.panel-btn
+{
+	width: 32dp;
+	height: 32dp;
+	border-radius: 4dp;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	transition: background-color 0.15s;
+}
+
+.panel-btn:hover
+{
+	background-color: #19191c;
+}
+
+.panel-btn img
+{
+	width: 20dp;
+	height: 20dp;
+	image-color: #b5bac1;
+	transition: image-color 0.15s;
+}
+
+.panel-btn:hover img
+{
+	image-color: #dbdee1;
+}
+
+.panel-btn.active img,
+.panel-btn.muted img,
+.panel-btn.deafened img
+{
+	image-color: #f23f43;
+}

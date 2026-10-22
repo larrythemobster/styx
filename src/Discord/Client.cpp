@@ -193,6 +193,10 @@ Client::Client(const QString &token, const QString &gatewayUrl, const QString &b
     connect(gateway, &Gateway::gatewayGuildMemberListUpdate, this, &Client::guildMemberListUpdate);
     connect(gateway, &Gateway::gatewayVoiceStateUpdate, this, &Client::voiceStateUpdated);
     connect(gateway, &Gateway::gatewayVoiceServerUpdate, this, &Client::voiceServerUpdated);
+    connect(gateway, &Gateway::gatewayStreamCreate, this, &Client::streamCreated);
+    connect(gateway, &Gateway::gatewayStreamUpdate, this, &Client::streamUpdated);
+    connect(gateway, &Gateway::gatewayStreamServerUpdate, this, &Client::streamServerUpdated);
+    connect(gateway, &Gateway::gatewayStreamDelete, this, &Client::streamDeleted);
     connect(gateway, &Gateway::gatewayRelationshipAdd, this, &Client::relationshipAdded);
     connect(gateway, &Gateway::gatewayRelationshipUpdate, this, &Client::relationshipUpdated);
     connect(gateway, &Gateway::gatewayRelationshipRemove, this, &Client::relationshipRemoved);
@@ -1378,6 +1382,26 @@ void Client::sendVoiceStateUpdate(Snowflake guildId, Snowflake channelId, bool s
     gateway->sendVoiceStateUpdate(guildId, channelId, selfMute, selfDeaf);
 }
 
+void Client::sendStreamCreate(Snowflake guildId, Snowflake channelId)
+{
+    gateway->sendStreamCreate(guildId, channelId);
+}
+
+void Client::sendStreamDelete(const QString &streamKey)
+{
+    gateway->sendStreamDelete(streamKey);
+}
+
+void Client::sendStreamWatch(const QString &streamKey)
+{
+    gateway->sendStreamWatch(streamKey);
+}
+
+void Client::sendStreamSetPaused(const QString &streamKey, bool paused)
+{
+    gateway->sendStreamSetPaused(streamKey, paused);
+}
+
 void Client::requestGuildMembers(Snowflake guildId, const QList<Snowflake> &userIds, bool presences)
 {
     gateway->requestGuildMembers(guildId, userIds, presences);
@@ -1926,6 +1950,20 @@ void Client::fetchAuditLog(Snowflake guildId, const AuditLogQuery &auditQuery, R
                     valueHandler<AuditLog>("Fetching the audit log", std::move(callback),
                                            [](const QJsonDocument &doc) { return AuditLog::fromJson(doc.object()); }));
 }
+
+void Client::sendFriendRequest(const QString &username, ActionCallback callback)
+{
+    QJsonObject body;
+    int hashIdx = username.lastIndexOf('#');
+    if (hashIdx != -1) {
+        body["username"] = username.left(hashIdx);
+        body["discriminator"] = username.mid(hashIdx + 1).toInt();
+    } else {
+        body["username"] = username;
+    }
+    httpClient->post("/users/@me/relationships", body, actionHandler("Sending a friend request", std::move(callback)));
+}
+
 
 void Client::setState(Core::ConnectionState state)
 {

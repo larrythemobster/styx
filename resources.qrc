@@ -16,6 +16,7 @@
         <file>resources/icons/lucide/chevron-right.svg</file>
         <file>resources/icons/lucide/clock.svg</file>
         <file>resources/icons/lucide/compass.svg</file>
+        <file>resources/icons/lucide/crown.svg</file>
         <file>resources/icons/lucide/ellipsis.svg</file>
         <file>resources/icons/lucide/eye.svg</file>
         <file>resources/icons/lucide/file-audio.svg</file>
@@ -26,6 +27,8 @@
         <file>resources/icons/lucide/gem.svg</file>
         <file>resources/icons/lucide/hand.svg</file>
         <file>resources/icons/lucide/handshake.svg</file>
+        <file>resources/icons/lucide/headphones.svg</file>
+        <file>resources/icons/lucide/headphone-off.svg</file>
         <file>resources/icons/lucide/hash.svg</file>
         <file>resources/icons/lucide/heart.svg</file>
         <file>resources/icons/lucide/id-card.svg</file>
@@ -40,18 +43,21 @@
         <file>resources/icons/lucide/message-circle.svg</file>
         <file>resources/icons/lucide/messages-square.svg</file>
         <file>resources/icons/lucide/mic.svg</file>
+        <file>resources/icons/lucide/mic-off.svg</file>
         <file>resources/icons/lucide/minimize.svg</file>
         <file>resources/icons/lucide/monitor.svg</file>
         <file>resources/icons/lucide/music.svg</file>
         <file>resources/icons/lucide/pause.svg</file>
         <file>resources/icons/lucide/pencil.svg</file>
         <file>resources/icons/lucide/phone.svg</file>
+        <file>resources/icons/lucide/phone-off.svg</file>
         <file>resources/icons/lucide/pin.svg</file>
         <file>resources/icons/lucide/play.svg</file>
         <file>resources/icons/lucide/radio.svg</file>
         <file>resources/icons/lucide/reply.svg</file>
         <file>resources/icons/lucide/rss.svg</file>
         <file>resources/icons/lucide/search.svg</file>
+        <file>resources/icons/lucide/settings.svg</file>
         <file>resources/icons/lucide/shield-alert.svg</file>
         <file>resources/icons/lucide/smile.svg</file>
         <file>resources/icons/lucide/smile-plus.svg</file>
@@ -66,5 +72,17 @@
         <file>resources/icons/lucide/volume-2.svg</file>
         <file>resources/icons/lucide/volume-x.svg</file>
         <file>resources/icons/lucide/x.svg</file>
+    </qresource>
+    <qresource prefix="/ui">
+        <file alias="main.rml">resources/ui/main.rml</file>
+        <file alias="base.rcss">resources/ui/base.rcss</file>
+        <file alias="theme.rcss">resources/ui/theme.rcss</file>
+        <file alias="rail.rcss">resources/ui/rail.rcss</file>
+        <file alias="channels.rcss">resources/ui/channels.rcss</file>
+        <file alias="userpanel.rcss">resources/ui/userpanel.rcss</file>
+        <file alias="chat.rcss">resources/ui/chat.rcss</file>
+        <file alias="members.rcss">resources/ui/members.rcss</file>
+        <file alias="call.rcss">resources/ui/call.rcss</file>
+        <file alias="friends.rcss">resources/ui/friends.rcss</file>
     </qresource>
 </RCC>

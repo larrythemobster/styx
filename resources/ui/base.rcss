@@ -1,0 +1,27 @@
+/* RmlUi has no user-agent stylesheet: give the HTML elements we use their usual defaults. */
+
+body, div, p, h1, h2, h3, h4, section, header, footer, ul, li, form, blockquote, pre, hr
+{
+	display: block;
+}
+
+h1 { font-size: 24dp; font-weight: bold; }
+h2 { font-size: 20dp; font-weight: bold; }
+h3 { font-size: 16dp; font-weight: bold; }
+
+b, strong { font-weight: bold; }
+i, em { font-style: italic; }
+u { text-decoration: underline; }
+s, strike { text-decoration: line-through; }
+code, pre { font-family: mono; }
+pre { white-space: pre-wrap; }
+
+input, textarea, select { display: inline-block; }
+textarea { white-space: pre-wrap; }
+
+scrollbarvertical { width: 8dp; scrollbar-margin: 0; margin: 2dp; }
+scrollbarvertical slidertrack { background-color: transparent; }
+scrollbarvertical sliderbar { background-color: #111214; border-radius: 4dp; min-height: 24dp; }
+scrollbarvertical sliderbar:hover { background-color: #19191c; }
+scrollbarvertical sliderarrowdec, scrollbarvertical sliderarrowinc { height: 0; width: 0; }
+scrollbarhorizontal { height: 0; }

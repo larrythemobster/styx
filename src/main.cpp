@@ -1,5 +1,5 @@
 #include "App.hpp"
-#include "UI/MainWindow.hpp"
+#include "UI/Rml/Shell.hpp"
 #include "Storage/DatabaseManager.hpp"
 #include "Core/Session.hpp"
 #include "Core/Logging.hpp"
@@ -119,7 +119,7 @@ int main(int argc, char *argv[])
 
     {
         Core::Session session;
-        UI::MainWindow window(&session);
+        UI::Shell window(&session);
         window.show();
 
         session.autoConnectAccounts();

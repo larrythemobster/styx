@@ -302,6 +302,18 @@ void Gateway::handleDispatch(const Inbound &data)
     case GatewayEvent::VOICE_SERVER_UPDATE:
         handleVoiceServerUpdate(data);
         break;
+    case GatewayEvent::STREAM_CREATE:
+        emit gatewayStreamCreate(data.getData<StreamCreate>());
+        break;
+    case GatewayEvent::STREAM_UPDATE:
+        emit gatewayStreamUpdate(data.getData<StreamUpdate>());
+        break;
+    case GatewayEvent::STREAM_SERVER_UPDATE:
+        emit gatewayStreamServerUpdate(data.getData<StreamServerUpdate>());
+        break;
+    case GatewayEvent::STREAM_DELETE:
+        emit gatewayStreamDelete(data.getData<StreamDelete>());
+        break;
     case GatewayEvent::RELATIONSHIP_ADD:
         handleRelationshipAdd(data);
         break;
@@ -762,6 +774,40 @@ void Gateway::sendVoiceStateUpdate(Core::Snowflake guildId, Core::Snowflake chan
     msg.selfMute = selfMute;
     msg.selfDeaf = selfDeaf;
 
+    sendPayload(msg.toJson());
+}
+
+void Gateway::sendStreamCreate(Core::Snowflake guildId, Core::Snowflake channelId)
+{
+    StreamCreateRequest msg;
+    msg.type = guildId.isValid() ? QStringLiteral("guild") : QStringLiteral("call");
+    if (guildId.isValid())
+        msg.guildId = guildId;
+    else
+        msg.guildId = nullptr;
+    msg.channelId = channelId;
+    sendPayload(msg.toJson());
+}
+
+void Gateway::sendStreamDelete(const QString &streamKey)
+{
+    StreamDeleteRequest msg;
+    msg.streamKey = streamKey;
+    sendPayload(msg.toJson());
+}
+
+void Gateway::sendStreamWatch(const QString &streamKey)
+{
+    StreamWatchRequest msg;
+    msg.streamKey = streamKey;
+    sendPayload(msg.toJson());
+}
+
+void Gateway::sendStreamSetPaused(const QString &streamKey, bool paused)
+{
+    StreamSetPausedRequest msg;
+    msg.streamKey = streamKey;
+    msg.paused = paused;
     sendPayload(msg.toJson());
 }
 

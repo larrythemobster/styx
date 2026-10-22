@@ -31,6 +31,11 @@ namespace Audio {
 class VoiceManager;
 }
 #endif
+#ifdef ACHERON_HAVE_SCREENSHARE
+namespace Stream {
+class StreamManager;
+}
+#endif
 
 class ReadStateManager;
 class ForumManager;
@@ -60,6 +65,9 @@ public:
     [[nodiscard]] FavoriteGifs *favoriteGifs() const;
 #ifndef ACHERON_NO_VOICE
     [[nodiscard]] Audio::VoiceManager *voice() const;
+#endif
+#ifdef ACHERON_HAVE_SCREENSHARE
+    [[nodiscard]] Stream::StreamManager *streams() const;
 #endif
 
     [[nodiscard]] QList<Discord::Role> getRolesForGuild(Snowflake guildId);
@@ -192,6 +200,9 @@ private:
     FavoriteGifs *favoriteGifManager;
 #ifndef ACHERON_NO_VOICE
     Audio::VoiceManager *voiceManager;
+#endif
+#ifdef ACHERON_HAVE_SCREENSHARE
+    Stream::StreamManager *streamManager;
 #endif
 
     Storage::RoleRepository roleRepo;

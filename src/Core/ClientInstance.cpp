@@ -3,6 +3,9 @@
 #ifndef ACHERON_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
 #endif
+#ifdef ACHERON_HAVE_SCREENSHARE
+#include "Core/Stream/StreamManager.hpp"
+#endif
 
 #include <algorithm>
 
@@ -78,6 +81,18 @@ ClientInstance::ClientInstance(const AccountInfo &info,
     voiceManager = new Audio::VoiceManager(info.id, info.proxy, this);
     connect(voiceManager, &Audio::VoiceManager::voiceConnected, this, &ClientInstance::onVoiceConnected);
     connect(voiceManager, &Audio::VoiceManager::voiceDisconnected, this, &ClientInstance::onVoiceDisconnected);
+#endif
+#ifdef ACHERON_HAVE_SCREENSHARE
+    streamManager = new Stream::StreamManager(info.id, info.proxy, client, voiceManager, this);
+    connect(client, &Discord::Client::streamCreated, streamManager, &Stream::StreamManager::handleStreamCreate);
+    connect(client, &Discord::Client::streamServerUpdated, streamManager, &Stream::StreamManager::handleStreamServerUpdate);
+    connect(client, &Discord::Client::streamDeleted, streamManager, &Stream::StreamManager::handleStreamDelete);
+    connect(voiceManager, &Audio::VoiceManager::voiceDisconnected, streamManager, &Stream::StreamManager::stopAll);
+    // a watched streamer who stops sharing leaves the call or flips self_stream off
+    connect(voiceManager, &Audio::VoiceManager::participantLeft, streamManager, [this](Snowflake userId) {
+        if (streamManager->isWatching(userId))
+            streamManager->stopWatching(userId);
+    });
 #endif
 
     connect(client, &Discord::Client::stateChanged, this, &ClientInstance::stateChanged);
@@ -1445,6 +1460,13 @@ Audio::VoiceManager *ClientInstance::voice() const
 {
     return voiceManager;
 }
+
+#ifdef ACHERON_HAVE_SCREENSHARE
+Stream::StreamManager *ClientInstance::streams() const
+{
+    return streamManager;
+}
+#endif
 #endif
 
 QList<Discord::Role> ClientInstance::getRolesForGuild(Snowflake guildId)

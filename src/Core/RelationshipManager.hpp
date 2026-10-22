@@ -26,6 +26,7 @@ public:
 
     [[nodiscard]] bool isFriend(Snowflake userId) const;
     [[nodiscard]] bool isBlockedOrIgnored(Snowflake userId) const;
+    [[nodiscard]] const QHash<Snowflake, Discord::Relationship> &all() const { return store; }
 
 public slots:
     void onRelationshipAdded(const Discord::Relationship &rel);
@@ -34,6 +35,7 @@ public slots:
 
 signals:
     void relationshipChanged(Snowflake userId);
+    void relationshipsReset();
 
 private:
     QHash<Snowflake, Discord::Relationship> store;

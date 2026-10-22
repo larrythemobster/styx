@@ -16,6 +16,7 @@ void RelationshipManager::loadFromReady(const QList<Discord::Relationship> &rela
             store.insert(r.id.get(), r);
     }
     qCInfo(LogCore) << "Loaded" << store.size() << "relationships from READY";
+    emit relationshipsReset();
 }
 
 std::optional<Discord::Relationship> RelationshipManager::getRelationship(Snowflake userId) const

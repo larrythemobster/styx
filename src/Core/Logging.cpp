@@ -18,6 +18,7 @@ Q_LOGGING_CATEGORY(LogDave, "acheron.dave");
 Q_LOGGING_CATEGORY(LogMiniaudio, "acheron.miniaudio");
 Q_LOGGING_CATEGORY(LogVoice, "acheron.voice");
 Q_LOGGING_CATEGORY(LogVideo, "acheron.video");
+Q_LOGGING_CATEGORY(LogStream, "acheron.stream");
 
 namespace Acheron {
 namespace Core {

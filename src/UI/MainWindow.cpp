@@ -2014,6 +2014,9 @@ void MainWindow::updateVoiceStatusLabel()
 
     Core::Audio::VoiceManager *vm = voiceInstance ? voiceInstance->voice() : nullptr;
     voiceStatusBar->setVoiceManager(vm);
+#ifdef ACHERON_HAVE_SCREENSHARE
+    voiceStatusBar->setStreamManager(voiceInstance ? voiceInstance->streams() : nullptr);
+#endif
     voiceStatusBar->setAccount(voiceInstance ? voiceInstance->accountId() : Core::Snowflake());
 
     if (voiceInstance) {
