@@ -6,7 +6,7 @@
 
 #include <QColor>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Theme {
 
@@ -91,4 +91,4 @@ QString buildStyleSheet()
 
 } // namespace Theme
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

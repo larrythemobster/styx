@@ -20,7 +20,7 @@
 
 class QWidget;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ImageManager;
 }
@@ -111,4 +111,4 @@ QString escape(const QString &plain);
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

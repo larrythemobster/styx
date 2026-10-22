@@ -18,7 +18,7 @@
 
 class QAbstractItemModel;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ChatView;
@@ -135,4 +135,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

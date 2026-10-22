@@ -9,10 +9,10 @@ class QLabel;
 class QPushButton;
 class QComboBox;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
-using Acheron::Core::Snowflake;
+using Styx::Core::Snowflake;
 
 class ForumPostModel;
 
@@ -39,4 +39,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

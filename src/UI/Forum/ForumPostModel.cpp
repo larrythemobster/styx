@@ -12,7 +12,7 @@
 #include "Discord/Entities.hpp"
 #include "UI/Chat/ChatLayout.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ForumPostModel::ForumPostModel(Core::ImageManager *imageManager, QObject *parent)
@@ -450,4 +450,4 @@ void ForumPostModel::onPostRemoved(Snowflake forumId, Snowflake threadId)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

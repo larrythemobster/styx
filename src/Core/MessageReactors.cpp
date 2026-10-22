@@ -7,7 +7,7 @@
 #include "Discord/Client.hpp"
 #include "UserManager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 bool ReactionRef::sameReaction(const ReactionRef &other) const
@@ -117,4 +117,4 @@ void MessageReactors::forgetReactors(Snowflake messageId, const Discord::Emoji &
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

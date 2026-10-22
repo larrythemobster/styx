@@ -4,11 +4,11 @@
 #include <cctype>
 #include <cmath>
 
-#ifdef ACHERON_HAVE_RLOTTIE
+#ifdef STYX_HAVE_RLOTTIE
 #include <rlottie.h>
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Lottie {
 
@@ -18,7 +18,7 @@ bool looksLikeLottie(const QByteArray &data)
     return firstInk != data.cend() && *firstInk == '{';
 }
 
-#ifdef ACHERON_HAVE_RLOTTIE
+#ifdef STYX_HAVE_RLOTTIE
 
 namespace {
 constexpr double MaxRenderedFps = 30.0;
@@ -113,4 +113,4 @@ Animation::~Animation() = default;
 
 } // namespace Lottie
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

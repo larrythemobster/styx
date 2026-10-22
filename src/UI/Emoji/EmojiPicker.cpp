@@ -18,7 +18,7 @@
 #include "UI/Emoji/EmojiSectionRail.hpp"
 #include "UI/Emoji/PaintedImages.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -272,4 +272,4 @@ bool EmojiPicker::eventFilter(QObject *watched, QEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

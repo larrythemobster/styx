@@ -59,7 +59,7 @@
 
 #include <RmlUi/Core/ElementDocument.h>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using Core::Snowflake;
@@ -197,13 +197,13 @@ Shell::Shell(Core::Session *session, QWidget *parent) : QMainWindow(parent), cor
                     auto accPtr = idx.data(AccountsModel::AccountObjectRole).value<void *>();
                     if (!accPtr)
                         continue;
-                    auto acc = *static_cast<Acheron::Core::AccountInfo *>(accPtr);
-                    if (acc.state == Acheron::Core::ConnectionState::Connected) {
+                    auto acc = *static_cast<Styx::Core::AccountInfo *>(accPtr);
+                    if (acc.state == Styx::Core::ConnectionState::Connected) {
                         channelTreeModel->addAccount(acc);
                         Core::ClientInstance *inst = coreSession->client(acc.id);
                         if (inst)
                             setupPermanentConnections(inst);
-                    } else if (acc.state == Acheron::Core::ConnectionState::Disconnected) {
+                    } else if (acc.state == Styx::Core::ConnectionState::Disconnected) {
                         if (instance && instance->accountId() == acc.id) {
                             switchActiveInstance(nullptr);
                         }
@@ -226,7 +226,7 @@ Shell::Shell(Core::Session *session, QWidget *parent) : QMainWindow(parent), cor
     connect(rmlView, &Rml::View::documentLoaded, this, &Shell::onDocumentLoaded);
     rmlView->loadDocument(QStringLiteral("main.rml"));
 
-    setWindowTitle(QStringLiteral("Acheron"));
+    setWindowTitle(QStringLiteral("Styx"));
     resize(1280, 800);
 }
 
@@ -577,7 +577,7 @@ void Shell::setupPermanentConnections(Core::ClientInstance *inst)
             [this, inst](Core::Snowflake channelId, Core::Snowflake) {
                 channelTreeModel->setAccountVoiceChannel(inst->accountId(), channelId);
             });
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     if (inst->voice()) {
         connect(inst->voice(), &Core::Audio::VoiceManager::channelVoiceMemberChanged, this,
                 [this, inst](Core::Snowflake channelId, Core::Snowflake userId, bool joined) {
@@ -905,7 +905,7 @@ void Shell::joinVoice(Core::Snowflake accountId, Core::Snowflake guildId, Core::
     if (inst != instance)
         switchActiveInstance(inst);
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     if (!inst->discord()->getProxy().canRelayUdp()) {
         QMessageBox::warning(this,
                              tr("Voice unavailable"),
@@ -925,7 +925,7 @@ void Shell::leaveVoice()
 {
     if (!instance)
         return;
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     if (instance->isInVoice()) {
         qCInfo(LogVoice) << "Disconnecting from voice";
         instance->discord()->sendVoiceStateUpdate(instance->voiceGuildId(), Snowflake::Invalid, false, false);
@@ -1257,7 +1257,7 @@ void Shell::showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake
     if (isVoice || isDm) {
         QString joinText = isDm ? tr("Join Call") : tr("Join Voice Channel");
         QAction *joinAction = menu.addAction(joinText);
-#ifdef ACHERON_NO_VOICE
+#ifdef STYX_NO_VOICE
         joinAction->setEnabled(false);
 #else
         connect(joinAction, &QAction::triggered, this, [this, accountId, guildId, channelId]() {
@@ -1268,7 +1268,7 @@ void Shell::showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake
 
         bool inVoice = inst->isInVoice() && inst->voiceChannelId() == channelId;
         QAction *disconnectAction = menu.addAction(tr("Disconnect from Voice"));
-#ifdef ACHERON_NO_VOICE
+#ifdef STYX_NO_VOICE
         disconnectAction->setEnabled(false);
 #else
         disconnectAction->setEnabled(inVoice);
@@ -1294,4 +1294,4 @@ void Shell::showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

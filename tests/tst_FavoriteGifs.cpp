@@ -3,10 +3,10 @@
 
 #include <QTest>
 
-using namespace Acheron;
-using namespace Acheron::Core;
-using Acheron::Proto::FavoriteGif;
-using Acheron::Proto::GifType;
+using namespace Styx;
+using namespace Styx::Core;
+using Styx::Proto::FavoriteGif;
+using Styx::Proto::GifType;
 
 class TestFavoriteGifs : public QObject
 {

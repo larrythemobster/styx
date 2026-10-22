@@ -11,7 +11,7 @@ class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class GuildStickersPage : public GuildSettingsPage
@@ -47,4 +47,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

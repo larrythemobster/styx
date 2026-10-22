@@ -7,7 +7,7 @@ class QCheckBox;
 class QComboBox;
 class QRadioButton;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class UnsavedChangesBar;
@@ -64,4 +64,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

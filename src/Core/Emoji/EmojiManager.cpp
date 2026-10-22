@@ -21,7 +21,7 @@
 #include "Proto/ProtoReader.hpp"
 #include "Proto/UserSettings.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -767,4 +767,4 @@ void EmojiManager::savePendingUsage()
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

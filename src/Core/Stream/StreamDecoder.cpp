@@ -1,6 +1,6 @@
 #include "StreamDecoder.hpp"
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include "Core/Logging.hpp"
 
@@ -11,7 +11,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -165,6 +165,6 @@ void StreamDecoder::present(AVFrame *decoded)
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
 #endif

@@ -2,7 +2,7 @@
 #include "VoiceWindow.hpp"
 
 #include "Core/Audio/VoiceManager.hpp"
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 #include "Core/Stream/StreamManager.hpp"
 #include "UI/Stream/SourcePickerDialog.hpp"
 #include "UI/Stream/StreamViewWindow.hpp"
@@ -14,7 +14,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 VoiceStatusBar::VoiceStatusBar(QWidget *parent) : QWidget(parent)
@@ -83,7 +83,7 @@ void VoiceStatusBar::setupUi()
     layout->addWidget(statusLabel);
     layout->addWidget(channelLabel);
     layout->addStretch();
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     shareBtn = new QPushButton(this);
     shareBtn->setFixedSize(24, 24);
     shareBtn->setIconSize(QSize(16, 16));
@@ -276,7 +276,7 @@ void VoiceStatusBar::configureVoiceWindow()
         voiceWindow->setStatusResolver(statusResolver);
     if (voiceManager)
         voiceWindow->setVoiceManager(voiceManager);
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     voiceWindow->setStreamManager(streamManager);
 #endif
 }
@@ -288,7 +288,7 @@ void VoiceStatusBar::disconnectManager()
     voiceManager = nullptr;
 }
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 void VoiceStatusBar::setStreamManager(Core::Stream::StreamManager *manager)
 {
     if (streamManager == manager)
@@ -410,4 +410,4 @@ void VoiceStatusBar::openViewer(Core::Snowflake userId)
 #endif
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

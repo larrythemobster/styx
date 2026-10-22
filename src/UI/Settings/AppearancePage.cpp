@@ -29,7 +29,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using Core::Theme::FontRole;
@@ -392,4 +392,4 @@ void AppearancePage::generateInto(const QColor &seed, int schemeIndex, bool dark
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

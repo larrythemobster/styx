@@ -14,7 +14,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace VideoControls {
 
@@ -160,7 +160,7 @@ void paintCaption(QPainter *painter, const QRect &videoRect, const QRect &badge,
 
 QString translated(const char *text)
 {
-    return QCoreApplication::translate("Acheron::UI::VideoControls", text);
+    return QCoreApplication::translate("Styx::UI::VideoControls", text);
 }
 
 QString statusText(const State &state)
@@ -617,4 +617,4 @@ QRect fitRect(const QSize &content, const QRect &bounds)
 
 } // namespace VideoControls
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

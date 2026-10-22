@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace Acheron {
+namespace Styx {
 namespace Proto {
 
 class ProtoReader;
@@ -71,4 +71,4 @@ struct FrecencyUserSettings
 };
 
 } // namespace Proto
-} // namespace Acheron
+} // namespace Styx

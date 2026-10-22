@@ -4,7 +4,7 @@
 #include <QLocale>
 #include <QString>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace TimeUtils {
 
@@ -35,4 +35,4 @@ static QString absoluteTime(const QDateTime &dt)
 
 } // namespace TimeUtils
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

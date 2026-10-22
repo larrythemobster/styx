@@ -27,7 +27,7 @@
 #include "Discord/CdnUrls.hpp"
 #include "ImageUpload.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -485,4 +485,4 @@ void GuildStickersPage::showContextMenu(const QPoint &pos)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

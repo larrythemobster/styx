@@ -6,7 +6,7 @@
 
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Proto {
 
 class ProtoReader;
@@ -72,4 +72,4 @@ struct PreloadedUserSettings
 };
 
 } // namespace Proto
-} // namespace Acheron
+} // namespace Styx

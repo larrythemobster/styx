@@ -11,7 +11,7 @@
 
 #include "Core/Theme/Manager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace EmojiGlyphs {
 
@@ -140,4 +140,4 @@ QPixmap pixmap(const QString &surrogates, int px, qreal devicePixelRatio)
 
 } // namespace EmojiGlyphs
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

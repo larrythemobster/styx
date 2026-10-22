@@ -11,7 +11,7 @@
 
 #include <iterator>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -201,4 +201,4 @@ QString UnicodeEmojiIndex::translateNamesToSurrogates(const QString &text) const
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -9,7 +9,7 @@
 #include "Core/Presence/PresenceManager.hpp"
 #include "UI/AvatarRequestTracker.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 struct MemberActivity
@@ -74,6 +74,6 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx
 
-Q_DECLARE_METATYPE(Acheron::UI::MemberActivity)
+Q_DECLARE_METATYPE(Styx::UI::MemberActivity)

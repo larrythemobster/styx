@@ -1,7 +1,7 @@
 #pragma once
 #include <QLabel>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ElidedLabel : public QLabel
@@ -21,4 +21,4 @@ protected:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

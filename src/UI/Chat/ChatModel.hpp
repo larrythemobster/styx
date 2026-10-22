@@ -8,9 +8,9 @@
 #include "Core/MessageManager.hpp"
 #include "UI/AvatarRequestTracker.hpp"
 
-using Acheron::Core::ClientInstance;
+using Styx::Core::ClientInstance;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 class ImageManager;
@@ -371,17 +371,17 @@ private:
     friend class ChatDelegate;
 };
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx
 
-Q_DECLARE_METATYPE(Acheron::ReplyData)
-Q_DECLARE_METATYPE(Acheron::ForwardOriginData)
-Q_DECLARE_METATYPE(Acheron::AttachmentData)
-Q_DECLARE_METATYPE(QList<Acheron::AttachmentData>)
-Q_DECLARE_METATYPE(Acheron::EmbedFieldData)
-Q_DECLARE_METATYPE(Acheron::EmbedImageData)
-Q_DECLARE_METATYPE(Acheron::EmbedData)
-Q_DECLARE_METATYPE(QList<Acheron::EmbedData>)
-Q_DECLARE_METATYPE(Acheron::StickerData)
-Q_DECLARE_METATYPE(QList<Acheron::StickerData>)
-Q_DECLARE_METATYPE(Acheron::ReactionData)
-Q_DECLARE_METATYPE(QList<Acheron::ReactionData>)
+Q_DECLARE_METATYPE(Styx::ReplyData)
+Q_DECLARE_METATYPE(Styx::ForwardOriginData)
+Q_DECLARE_METATYPE(Styx::AttachmentData)
+Q_DECLARE_METATYPE(QList<Styx::AttachmentData>)
+Q_DECLARE_METATYPE(Styx::EmbedFieldData)
+Q_DECLARE_METATYPE(Styx::EmbedImageData)
+Q_DECLARE_METATYPE(Styx::EmbedData)
+Q_DECLARE_METATYPE(QList<Styx::EmbedData>)
+Q_DECLARE_METATYPE(Styx::StickerData)
+Q_DECLARE_METATYPE(QList<Styx::StickerData>)
+Q_DECLARE_METATYPE(Styx::ReactionData)
+Q_DECLARE_METATYPE(QList<Styx::ReactionData>)

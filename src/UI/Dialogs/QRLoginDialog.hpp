@@ -7,7 +7,7 @@
 
 class QLabel;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 class Session;
@@ -55,4 +55,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -6,7 +6,7 @@
 
 #include "BasePopup.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ConfirmPopup : public BasePopup
@@ -18,4 +18,4 @@ public:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

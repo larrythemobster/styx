@@ -13,7 +13,7 @@
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -52,7 +52,7 @@ public:
         while (cbMatch.hasMatch()) {
             QString lang = cbMatch.captured(1).toHtmlEscaped();
             QString code = cbMatch.captured(2).toHtmlEscaped();
-            QString placeholder = QStringLiteral("ACHERONCODEBLOCK%1TAG").arg(++codeBlockCounter);
+            QString placeholder = QStringLiteral("STYXCODEBLOCK%1TAG").arg(++codeBlockCounter);
             QString rmlCode = QStringLiteral("<pre class=\"code-block\"><code>%1</code></pre>").arg(code);
             codeBlockPlaceholders.insert(placeholder, rmlCode);
             processed.replace(cbMatch.capturedStart(0), cbMatch.capturedLength(0), placeholder);
@@ -66,7 +66,7 @@ public:
         auto spMatch = spoilerRegex.match(processed);
         while (spMatch.hasMatch()) {
             QString inner = spMatch.captured(1);
-            QString placeholder = QStringLiteral("ACHERONSPOILER%1TAG").arg(++spoilerCounter);
+            QString placeholder = QStringLiteral("STYXSPOILER%1TAG").arg(++spoilerCounter);
             // We will render inner markdown when resolving placeholders
             spoilerPlaceholders.insert(placeholder, inner);
             processed.replace(spMatch.capturedStart(0), spMatch.capturedLength(0), placeholder);
@@ -140,7 +140,7 @@ private:
                 }
                 if (name.isEmpty())
                     name = node.content;
-                out += QStringLiteral("<a href=\"acheron://channel/%1\" class=\"mention mention-channel\" data-action=\"channel-mention\" data-channel-id=\"%1\">#%2</a>")
+                out += QStringLiteral("<a href=\"styx://channel/%1\" class=\"mention mention-channel\" data-action=\"channel-mention\" data-channel-id=\"%1\">#%2</a>")
                     .arg(node.content.toHtmlEscaped(), name.toHtmlEscaped());
             } else if (node.type == QStringLiteral("channelLink")) {
                 QString href = node.attributes.value(QStringLiteral("href")).toString();
@@ -196,4 +196,4 @@ private:
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

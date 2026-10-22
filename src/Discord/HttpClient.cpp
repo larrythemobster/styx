@@ -6,7 +6,7 @@
 #include <QPointer>
 #include <QUrlQuery>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 HttpClient::HttpClient(const QString &baseUrl, const QString &token, ClientIdentity &identity,
@@ -229,4 +229,4 @@ void HttpClient::onRequestComplete(RequestDescriptor descriptor, HttpResponse re
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

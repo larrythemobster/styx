@@ -5,7 +5,7 @@
 
 #include <optional>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 struct ProxyConfig
@@ -37,4 +37,4 @@ struct ProxyConfig
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

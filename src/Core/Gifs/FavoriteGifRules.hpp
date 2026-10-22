@@ -7,7 +7,7 @@
 
 #include "Proto/FrecencySettings.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 struct FavoriteGifCandidate
@@ -38,4 +38,4 @@ inline constexpr int CountThatHidesTheTooltip = 2;
 } // namespace FavoriteGifRules
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

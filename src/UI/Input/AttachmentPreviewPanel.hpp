@@ -9,7 +9,7 @@ class QLabel;
 class QScrollArea;
 class QTimer;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class AttachmentPreviewPanel : public QWidget
@@ -48,4 +48,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

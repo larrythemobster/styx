@@ -9,7 +9,7 @@
 
 #include "UI/Chat/ChatView.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -355,4 +355,4 @@ void FrameAnimator::onFramesReady(const QUrl &url, const QSize &size, const Core
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

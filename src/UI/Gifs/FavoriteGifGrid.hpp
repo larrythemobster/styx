@@ -10,7 +10,7 @@
 #include "Core/Snowflake.hpp"
 #include "UI/Gifs/GifMasonryLayout.hpp"
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 class ImageManager;
@@ -98,4 +98,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

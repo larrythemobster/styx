@@ -1,6 +1,6 @@
 #include "PermissionComputer.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 QHash<Snowflake, Discord::Role> PermissionComputer::buildRoleMap(const QList<Discord::Role> &roles)
@@ -108,4 +108,4 @@ Discord::Permissions PermissionComputer::computeChannelPermissions(
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

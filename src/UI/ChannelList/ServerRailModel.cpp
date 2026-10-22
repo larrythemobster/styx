@@ -10,7 +10,7 @@
 
 #include <QPixmap>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using Core::Snowflake;
@@ -389,4 +389,4 @@ void ServerRailModel::onSourceDataChanged(const QModelIndex &topLeft, const QMod
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

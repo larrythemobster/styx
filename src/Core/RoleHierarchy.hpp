@@ -7,7 +7,7 @@
 #include "Discord/Entities.hpp"
 #include "Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class RoleHierarchy
@@ -40,4 +40,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -5,7 +5,7 @@
 
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 struct EmojiMatch
@@ -21,4 +21,4 @@ struct EmojiMatch
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

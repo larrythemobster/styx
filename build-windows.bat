@@ -17,5 +17,5 @@ if "%1"=="configure" (
     -DCURL_LIBRARY="%DEPS%\curl-impersonate\lib\libcurl-impersonate_imp.lib" ^
     -DBUILD_TESTS=ON || exit /b 1
 )
-cmake --build build --parallel --target acheron || exit /b 1
-"%DEPS%\Qt\6.12.0\msvc2022_64\bin\windeployqt6.exe" --release --no-translations build\acheron.exe || exit /b 1
+cmake --build build --parallel --target styx || exit /b 1
+"%DEPS%\Qt\6.12.0\msvc2022_64\bin\windeployqt6.exe" --release --no-translations build\styx.exe || exit /b 1

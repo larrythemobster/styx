@@ -6,7 +6,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 namespace {
@@ -176,4 +176,4 @@ std::optional<Discord::Guild> GuildRepository::getGuild(Core::Snowflake guildId)
     return guild;
 }
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

@@ -3,7 +3,7 @@
 #include "Core/Presence/ActivityFormat.hpp"
 #include "Discord/CdnUrls.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 constexpr static QSize AvatarRequestSize = QSize(32, 32);
@@ -248,4 +248,4 @@ void MemberListModel::disconnectManager()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -5,7 +5,7 @@
 
 #include <QDateTime>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -237,4 +237,4 @@ QHash<QString, FrecencyTracker::Entry> FrecencyTracker::capForPersistence(const 
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

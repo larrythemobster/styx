@@ -5,7 +5,7 @@
 #include <QSignalSpy>
 #include <QTest>
 
-using namespace Acheron;
+using namespace Styx;
 using UI::EmojiGridView;
 
 class TestEmojiGrid : public QObject

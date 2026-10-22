@@ -1,7 +1,7 @@
 #include "TypingTracker.hpp"
 #include "UserManager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 TypingTracker::TypingTracker(QObject *parent) : QObject(parent)
@@ -122,4 +122,4 @@ void TypingTracker::cleanupExpired()
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

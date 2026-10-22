@@ -6,7 +6,7 @@
 #include "UI/Chat/ChatView.hpp"
 #include "UI/VideoFullscreenWindow.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using Core::Media::MediaKind;
@@ -441,4 +441,4 @@ void InlineVideoController::openFullscreen(const MediaTarget &target)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

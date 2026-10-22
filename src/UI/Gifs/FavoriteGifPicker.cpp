@@ -11,7 +11,7 @@
 #include "UI/Gifs/FavoriteGifGrid.hpp"
 #include "UI/Gifs/GifMasonryLayout.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -109,4 +109,4 @@ void FavoriteGifPicker::showMatchingFavorites()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

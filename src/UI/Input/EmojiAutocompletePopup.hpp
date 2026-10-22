@@ -16,7 +16,7 @@ class QLabel;
 class QListView;
 class QTextEdit;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 class ImageManager;
@@ -122,4 +122,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

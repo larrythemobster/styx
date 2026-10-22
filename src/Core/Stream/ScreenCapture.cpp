@@ -23,7 +23,7 @@
 #include <atomic>
 #include <mutex>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -374,4 +374,4 @@ bool ScreenCapture::isClosed() const
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

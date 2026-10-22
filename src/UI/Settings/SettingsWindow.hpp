@@ -2,7 +2,7 @@
 
 #include <QtWidgets>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class SettingsWindow : public QWidget
@@ -29,4 +29,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

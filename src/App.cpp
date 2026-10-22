@@ -1,5 +1,5 @@
 #include "App.hpp"
 
-namespace Acheron {
+namespace Styx {
 App::App(int &argc, char **argv) : QApplication(argc, argv) {}
-} // namespace Acheron
+} // namespace Styx

@@ -11,7 +11,7 @@
 #include "Core/AnimatedImageCache.hpp"
 #include "Core/ImageManager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class Session : public QObject
@@ -60,4 +60,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

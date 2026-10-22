@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -32,4 +32,4 @@ int rtpHeaderSize(const QByteArray &packet);
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

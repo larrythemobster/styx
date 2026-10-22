@@ -6,7 +6,7 @@
 
 #include <memory>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -25,4 +25,4 @@ public:
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

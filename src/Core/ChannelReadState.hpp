@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 struct ChannelReadState
@@ -14,4 +14,4 @@ struct ChannelReadState
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

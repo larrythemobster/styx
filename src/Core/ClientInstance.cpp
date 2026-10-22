@@ -1,9 +1,9 @@
 #include "ClientInstance.hpp"
 #include "ReadStateManager.hpp"
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
 #endif
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 #include "Core/Stream/StreamManager.hpp"
 #endif
 
@@ -22,7 +22,7 @@
 #include "Storage/MemberRepository.hpp"
 #include "Storage/Transaction.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -77,12 +77,12 @@ ClientInstance::ClientInstance(const AccountInfo &info,
     emojiManager = new EmojiManager(client, this, this);
     favoriteGifManager = new FavoriteGifs(client, this);
     messageManager->setEmojiManager(emojiManager);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     voiceManager = new Audio::VoiceManager(info.id, info.proxy, this);
     connect(voiceManager, &Audio::VoiceManager::voiceConnected, this, &ClientInstance::onVoiceConnected);
     connect(voiceManager, &Audio::VoiceManager::voiceDisconnected, this, &ClientInstance::onVoiceDisconnected);
 #endif
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     streamManager = new Stream::StreamManager(info.id, info.proxy, client, voiceManager, this);
     connect(client, &Discord::Client::streamCreated, streamManager, &Stream::StreamManager::handleStreamCreate);
     connect(client, &Discord::Client::streamServerUpdated, streamManager, &Stream::StreamManager::handleStreamServerUpdate);
@@ -206,7 +206,7 @@ ClientInstance::ClientInstance(const AccountInfo &info,
                     presenceManager->loadMergedPresences(data.mergedPresences.get(), guildIds);
                 }
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
                 for (const auto &guild : data.guilds.get()) {
                     if (!guild.voiceStates.hasValue())
                         continue;
@@ -326,12 +326,12 @@ ClientInstance::ClientInstance(const AccountInfo &info,
                     emit voiceStateChanged(currentVoiceChannelId, currentVoiceGuildId);
                 }
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
                 voiceManager->handleVoiceStateUpdate(event);
 #endif
             });
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     connect(client, &Discord::Client::voiceServerUpdated, this,
             [this](const Discord::VoiceServerUpdate &event) {
                 qCInfo(LogVoice) << "VOICE_SERVER_UPDATE: guild" << event.guildId.get()
@@ -1393,7 +1393,7 @@ void ClientInstance::stop()
 
     if (isInVoice()) {
         discord()->sendVoiceStateUpdate(currentVoiceGuildId, Snowflake::Invalid, false, false);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
         voiceManager->disconnect();
 #endif
     }
@@ -1455,13 +1455,13 @@ FavoriteGifs *ClientInstance::favoriteGifs() const
     return favoriteGifManager;
 }
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 Audio::VoiceManager *ClientInstance::voice() const
 {
     return voiceManager;
 }
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 Stream::StreamManager *ClientInstance::streams() const
 {
     return streamManager;
@@ -1574,4 +1574,4 @@ bool ClientInstance::isInVoice() const
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

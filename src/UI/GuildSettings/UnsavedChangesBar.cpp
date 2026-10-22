@@ -9,7 +9,7 @@
 
 #include "Core/Theme/Manager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using Core::Theme::Manager;
@@ -107,4 +107,4 @@ void UnsavedChangesBar::hideEvent(QHideEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

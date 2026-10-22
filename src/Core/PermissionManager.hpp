@@ -14,7 +14,7 @@
 #include "Storage/RoleRepository.hpp"
 #include "Storage/MemberRepository.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class PermissionManager : public QObject
@@ -62,4 +62,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -17,7 +17,7 @@
 #include "Outbound.hpp"
 #include "Events.hpp"
 
-namespace Acheron {
+namespace Styx {
 
 namespace Proto {
 struct PreloadedUserSettings;
@@ -239,4 +239,4 @@ private:
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

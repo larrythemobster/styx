@@ -8,7 +8,7 @@
 
 #include "UI/Chat/MessageTextBrowser.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -48,4 +48,4 @@ ChannelTopicPopup::ChannelTopicPopup(const QString &channelName, const QString &
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -26,7 +26,7 @@
 class QAbstractItemModel;
 class QAbstractItemView;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 enum class ClipFit {
@@ -246,4 +246,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

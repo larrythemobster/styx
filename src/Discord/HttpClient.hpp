@@ -16,7 +16,7 @@
 #include "Core/OrderedJson.hpp"
 #include "Core/ProxyConfig.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 class ClientIdentity;
@@ -128,4 +128,4 @@ private:
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

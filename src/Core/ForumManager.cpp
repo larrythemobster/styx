@@ -12,7 +12,7 @@
 #include "Discord/Client.hpp"
 #include "Storage/ChannelRepository.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 bool ForumManager::RequestBatch::add(Snowflake forumId, Snowflake threadId)
@@ -795,4 +795,4 @@ ForumBadge ForumManager::badge(Snowflake forumId) const
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -6,7 +6,7 @@ class QLabel;
 class QPushButton;
 class QTimer;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class UnsavedChangesBar : public QFrame
@@ -38,4 +38,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

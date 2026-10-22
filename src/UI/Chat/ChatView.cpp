@@ -23,7 +23,7 @@
 #include "UI/ImageViewer.hpp"
 #include "UI/Input/TextEdgeNavigation.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 struct MediaHit
@@ -386,7 +386,7 @@ void ChatView::openLink(const QString &url)
     if (url.isEmpty())
         return;
 
-    const QLatin1String channelMention("acheron://channel/");
+    const QLatin1String channelMention("styx://channel/");
     if (url.startsWith(channelMention)) {
         bool ok = false;
         quint64 id = url.mid(channelMention.size()).toULongLong(&ok);
@@ -1266,7 +1266,7 @@ void ChatView::contextMenuEvent(QContextMenuEvent *event)
     QString linkUrl = region ? region->url : QString();
     if (hit.hasLink())
         linkUrl = hit.linkUrl.toString(QUrl::FullyEncoded);
-    if (!linkUrl.isEmpty() && !linkUrl.startsWith(QLatin1String("acheron://"))) {
+    if (!linkUrl.isEmpty() && !linkUrl.startsWith(QLatin1String("styx://"))) {
         const bool onSticker = region && region->kind == ChatLayout::HitRegion::Kind::Sticker;
         const QString copyLinkLabel = onSticker ? tr("Copy Sticker Link") : hit.isImage() ? tr("Copy Image Link")
                                                                                           : tr("Copy Link");
@@ -1594,4 +1594,4 @@ bool ChatView::eventFilter(QObject *obj, QEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Theme {
 
@@ -136,4 +136,4 @@ QHash<Token, QColor> generate(const QColor &seed, Scheme scheme, bool dark)
 
 } // namespace Theme
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

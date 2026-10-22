@@ -7,9 +7,9 @@
 #include <QStringList>
 #include <QUrl>
 
-using Acheron::Core::countUnicodeEmojisSegmented;
+using Styx::Core::countUnicodeEmojisSegmented;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Markdown {
 
@@ -170,7 +170,7 @@ QString Parser::toHtmlInternal(const QList<AstNode> &nodes, bool jumboEmoji)
             else
                 displayName = node.content;
 
-            result += QString("<a href=\"acheron://channel/%1\" class=\"mention\">#%2</a>")
+            result += QString("<a href=\"styx://channel/%1\" class=\"mention\">#%2</a>")
                               .arg(node.content.toHtmlEscaped())
                               .arg(displayName.toHtmlEscaped());
             continue;
@@ -191,7 +191,7 @@ QString Parser::toHtmlInternal(const QList<AstNode> &nodes, bool jumboEmoji)
             }
 
             auto iconHtml = [](const QString &icon) {
-                return QString("<img src=\"acheron-icon:mention-%1\" width=\"14\" height=\"14\" style=\"vertical-align: middle\" />")
+                return QString("<img src=\"styx-icon:mention-%1\" width=\"14\" height=\"14\" style=\"vertical-align: middle\" />")
                         .arg(icon);
             };
 
@@ -678,4 +678,4 @@ void Parser::sortRules()
 
 } // namespace Markdown
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

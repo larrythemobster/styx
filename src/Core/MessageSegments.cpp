@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <set>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 MessageSegments::Location MessageSegments::locate(Snowflake id) const
@@ -103,4 +103,4 @@ void MessageSegments::remove(Snowflake id)
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -3,7 +3,7 @@
 #include "Core/Media/PlayerPool.hpp"
 #include "UI/Chat/ChatModel.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace MediaTargets {
 
@@ -79,4 +79,4 @@ MediaTarget forRegion(const ChatLayout::ResolvedLayout &resolved, const ChatLayo
 
 } // namespace MediaTargets
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

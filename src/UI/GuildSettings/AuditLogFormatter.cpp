@@ -12,7 +12,7 @@
 
 #include "Core/ClientInstance.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using Action = Discord::AuditLogAction;
@@ -1968,4 +1968,4 @@ QList<QPair<Discord::AuditLogAction, QString>> AuditLogFormatter::actionFilters(
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

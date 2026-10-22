@@ -6,12 +6,12 @@
 #include "Core/ClientInstance.hpp"
 #include "Core/Emoji/UnicodeEmojiIndex.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static QString translated(const char *text)
 {
-    return QCoreApplication::translate("Acheron::UI::ReactionTooltip", text);
+    return QCoreApplication::translate("Styx::UI::ReactionTooltip", text);
 }
 
 static QString namesAndOthers(QStringList names, int others)
@@ -58,4 +58,4 @@ QString reactionTooltip(Core::ClientInstance *instance, Core::Snowflake channelI
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

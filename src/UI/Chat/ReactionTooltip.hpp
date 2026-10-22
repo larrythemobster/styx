@@ -5,7 +5,7 @@
 #include "Core/MessageReactors.hpp"
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 }
@@ -16,4 +16,4 @@ namespace UI {
 [[nodiscard]] QString reactionTooltip(Core::ClientInstance *instance, Core::Snowflake channelId, Core::Snowflake guildId, const Core::ReactionRef &reaction, int reactionCount);
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

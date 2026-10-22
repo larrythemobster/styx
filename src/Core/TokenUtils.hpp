@@ -5,7 +5,7 @@
 
 #include "Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace TokenUtils {
 
@@ -32,4 +32,4 @@ static Snowflake getIdAndCheckToken(const QString &token)
 
 } // namespace TokenUtils
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -4,7 +4,7 @@
 
 #include <QSettings>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -106,4 +106,4 @@ bool initAudioDevice(const ma_device_config *config, ma_device *device)
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

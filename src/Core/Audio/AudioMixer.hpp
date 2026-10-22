@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -19,4 +19,4 @@ public:
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

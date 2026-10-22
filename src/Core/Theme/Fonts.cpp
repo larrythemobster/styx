@@ -3,7 +3,7 @@
 #include <QApplication>
 #include <QFontDatabase>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Theme {
 
@@ -38,4 +38,4 @@ const FontDescriptor &fontDescriptor(FontRole role)
 
 } // namespace Theme
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

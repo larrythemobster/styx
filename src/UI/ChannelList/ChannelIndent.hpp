@@ -3,7 +3,7 @@
 #include <QFlags>
 #include <QSettings>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace ChannelIndent {
 
@@ -47,4 +47,4 @@ inline Scopes activeScopes()
 
 } // namespace ChannelIndent
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

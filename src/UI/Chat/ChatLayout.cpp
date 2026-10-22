@@ -15,7 +15,7 @@
 #include <QTextBlock>
 #include <QUrl>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace ChatLayout {
 
@@ -52,7 +52,7 @@ QString richTextStyleSheet()
 
 static QString editedMarkerText()
 {
-    return QCoreApplication::translate("Acheron::UI::ChatLayout", "(edited)");
+    return QCoreApplication::translate("Styx::UI::ChatLayout", "(edited)");
 }
 
 static QString editedMarkerHtml(const QPalette &palette)
@@ -69,21 +69,21 @@ void setupDocument(QTextDocument &doc, const QString &htmlContent, const QFont &
     doc.setDefaultFont(font);
     doc.setDefaultStyleSheet(richTextStyleSheet());
 
-    if (htmlContent.contains(QLatin1String("acheron-icon:view-thread"))) {
+    if (htmlContent.contains(QLatin1String("styx-icon:view-thread"))) {
         const QColor threadColor = Core::Theme::Manager::instance().color(Core::Theme::Token::LinkText);
         doc.addResource(QTextDocument::ImageResource,
-                        QUrl(QStringLiteral("acheron-icon:view-thread")),
+                        QUrl(QStringLiteral("styx-icon:view-thread")),
                         Core::Theme::Icons::pixmap(Core::Theme::Icons::Name::Spool, 14, threadColor, 2.0));
     }
 
-    if (htmlContent.contains(QLatin1String("acheron-icon:forwarded"))) {
+    if (htmlContent.contains(QLatin1String("styx-icon:forwarded"))) {
         const QColor mutedColor = Core::Theme::Manager::instance().color(Core::Theme::Token::PlaceholderText);
         doc.addResource(QTextDocument::ImageResource,
-                        QUrl(QStringLiteral("acheron-icon:forwarded")),
+                        QUrl(QStringLiteral("styx-icon:forwarded")),
                         Core::Theme::Icons::pixmap(Core::Theme::Icons::Name::Forward, 12, mutedColor, 2.0));
     }
 
-    if (htmlContent.contains(QLatin1String("acheron-icon:mention-"))) {
+    if (htmlContent.contains(QLatin1String("styx-icon:mention-"))) {
         using namespace Core::Theme::Icons;
         static const QList<QPair<QString, QString>> mentionIcons = {
             { "hash", Name::Hash },
@@ -98,7 +98,7 @@ void setupDocument(QTextDocument &doc, const QString &htmlContent, const QFont &
         };
         const QColor mentionColor = Core::Theme::Manager::instance().color(Core::Theme::Token::MentionText);
         for (const auto &icon : mentionIcons) {
-            QString url = "acheron-icon:mention-" + icon.first;
+            QString url = "styx-icon:mention-" + icon.first;
             if (htmlContent.contains(url))
                 doc.addResource(QTextDocument::ImageResource, QUrl(url), pixmap(icon.second, 14, mentionColor, 2.0));
         }
@@ -890,7 +890,7 @@ MessageLayout calculateMessageLayout(const LayoutContext &ctx)
         totalHeight += forwardOriginHeight;
         layout.hitRegions.append(
                 { HitRegion::Kind::ForwardOrigin, layout.forwardOriginRect, -1, -1,
-                  QStringLiteral("acheron://channel/%1")
+                  QStringLiteral("styx://channel/%1")
                           .arg(QString::number(static_cast<quint64>(ctx.forwardOrigin.channelId))) });
     }
 
@@ -1327,4 +1327,4 @@ QPixmap createBlurredPixmap(const QPixmap &source, int blurRadius)
 
 } // namespace ChatLayout
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

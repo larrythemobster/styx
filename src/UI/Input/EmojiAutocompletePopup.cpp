@@ -19,7 +19,7 @@
 #include "Core/ImageManager.hpp"
 #include "Core/Theme/Manager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static constexpr int kPadX = 12;
@@ -491,4 +491,4 @@ bool EmojiAutocomplete::eventFilter(QObject *watched, QEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

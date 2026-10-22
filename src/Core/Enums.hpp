@@ -2,7 +2,7 @@
 
 #include <QMetaType>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 enum class ConnectionState {
@@ -13,6 +13,6 @@ enum class ConnectionState {
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-Q_DECLARE_METATYPE(Acheron::Core::ConnectionState)
+Q_DECLARE_METATYPE(Styx::Core::ConnectionState)

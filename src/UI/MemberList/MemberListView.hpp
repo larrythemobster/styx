@@ -2,7 +2,7 @@
 
 #include <QListView>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class MemberListView : public QListView
@@ -27,4 +27,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

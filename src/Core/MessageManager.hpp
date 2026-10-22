@@ -17,7 +17,7 @@
 #include "Discord/Client.hpp"
 #include "Markdown/Parser.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class UserManager;
@@ -73,7 +73,7 @@ public:
     Q_ENUM(ReactionRejection)
 
 signals:
-    void reactionRejected(Acheron::Core::MessageManager::ReactionRejection reason);
+    void reactionRejected(Styx::Core::MessageManager::ReactionRejection reason);
     void reactionsChanged(Core::Snowflake messageId);
     void messagesReceived(const MessageRequestResult &result);
     void messageErrored(const QString &nonce);
@@ -147,4 +147,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

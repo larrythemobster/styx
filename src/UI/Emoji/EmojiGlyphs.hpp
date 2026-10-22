@@ -3,7 +3,7 @@
 #include <QPixmap>
 #include <QString>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace EmojiGlyphs {
 
@@ -11,4 +11,4 @@ namespace EmojiGlyphs {
 
 } // namespace EmojiGlyphs
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

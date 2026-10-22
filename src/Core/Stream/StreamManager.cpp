@@ -14,7 +14,7 @@
 #include <objbase.h>
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -412,7 +412,7 @@ void StreamManager::connectViewer(Session &session)
     connection->moveToThread(streamThread);
     session.connection = connection;
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
     session.decoderThread = new QThread;
     session.decoderThread->setObjectName(QStringLiteral("StreamDecodeThread"));
     session.decoderThread->start();
@@ -474,4 +474,4 @@ void StreamManager::destroyConnection(Session &session)
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

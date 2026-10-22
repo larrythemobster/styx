@@ -7,7 +7,7 @@
 
 #include "Core/Theme/Tokens.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Theme {
 namespace Icons {
@@ -87,4 +87,4 @@ QIcon icon(const QString &name, Token token);
 } // namespace Icons
 } // namespace Theme
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

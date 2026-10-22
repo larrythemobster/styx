@@ -12,7 +12,7 @@ class QListWidget;
 class QPushButton;
 class QTabWidget;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 // Pick what to Go Live with: a screen or a window (with live thumbnails), the quality
@@ -42,4 +42,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

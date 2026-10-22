@@ -8,7 +8,7 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using ThreadListPage = Core::ClientInstance::ThreadListPage;
@@ -166,4 +166,4 @@ void ThreadBrowserPopup::onItemClicked(QListWidgetItem *item)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

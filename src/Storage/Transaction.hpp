@@ -3,7 +3,7 @@
 #include <QSqlDatabase>
 #include <QString>
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 class Transaction
@@ -27,4 +27,4 @@ private:
 };
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

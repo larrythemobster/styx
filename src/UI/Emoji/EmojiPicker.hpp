@@ -11,7 +11,7 @@
 
 class QLineEdit;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 class AnimatedImageCache;
@@ -35,7 +35,7 @@ public:
     [[nodiscard]] QLineEdit *searchField() const { return search; }
 
 signals:
-    void emojiPicked(const Acheron::Core::PickerEmoji &emoji, bool pickerStaysOpen);
+    void emojiPicked(const Styx::Core::PickerEmoji &emoji, bool pickerStaysOpen);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -67,4 +67,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

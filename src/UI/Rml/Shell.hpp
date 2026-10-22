@@ -15,7 +15,7 @@ class ElementDocument;
 class Element;
 } // namespace Rml
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class Session;
 class ClientInstance;
@@ -131,7 +131,7 @@ public:
     void openForum(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake forumId);
     void openThreadBrowser(Core::Snowflake channelId);
 signals:
-    void locationChanged(const Acheron::UI::Location &location);
+    void locationChanged(const Styx::UI::Location &location);
     void instanceChanged(Core::ClientInstance *instance);
     void callOpenChanged(bool open);
     void memberListVisibleChanged(bool visible);
@@ -189,4 +189,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

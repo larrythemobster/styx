@@ -7,7 +7,7 @@
 #include <objbase.h>
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -727,4 +727,4 @@ void VoiceManager::onDevicesChanged(const QList<AudioDeviceInfo> &inputs, const 
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

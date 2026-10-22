@@ -16,7 +16,7 @@
 
 struct AVFrame;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 class OpusEncoder;
@@ -39,7 +39,7 @@ public:
     ~StreamSender() override;
 
 public slots:
-    void start(const Acheron::Core::Stream::CaptureSource &source, const Acheron::Core::Stream::StreamQuality &quality,
+    void start(const Styx::Core::Stream::CaptureSource &source, const Styx::Core::Stream::StreamQuality &quality,
                bool includeAudio);
     void stop();
     void requestKeyframe();
@@ -89,4 +89,4 @@ private:
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

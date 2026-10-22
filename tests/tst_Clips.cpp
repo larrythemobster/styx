@@ -9,7 +9,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using namespace Acheron::Core::Media;
+using namespace Styx::Core::Media;
 
 namespace {
 

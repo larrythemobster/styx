@@ -5,7 +5,7 @@
 #include "ActivityFormat.hpp"
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -442,4 +442,4 @@ void PresenceManager::onGuildMembersChunk(const Discord::GuildMembersChunk &chun
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

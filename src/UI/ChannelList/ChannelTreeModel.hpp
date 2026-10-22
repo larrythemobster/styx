@@ -10,18 +10,18 @@
 #include "Discord/Events.hpp"
 #include "UI/AvatarRequestTracker.hpp"
 
-using Acheron::Core::Session;
-using Acheron::Core::Snowflake;
+using Styx::Core::Session;
+using Styx::Core::Snowflake;
 
-namespace Acheron::Core {
+namespace Styx::Core {
 class ClientInstance;
-} // namespace Acheron::Core
+} // namespace Styx::Core
 
-namespace Acheron::Proto {
+namespace Styx::Proto {
 struct GuildFolder;
-} // namespace Acheron::Proto
+} // namespace Styx::Proto
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 class ChannelTreeModel : public QAbstractItemModel
 {
@@ -57,7 +57,7 @@ public:
     QVariant data(const QModelIndex &index, int role) const override;
     Qt::ItemFlags flags(const QModelIndex &index) const override;
 
-    void addAccount(const Acheron::Core::AccountInfo &account);
+    void addAccount(const Styx::Core::AccountInfo &account);
     void removeAccount(Snowflake accountId);
 
     void populateFromReady(const Discord::Ready &ready);
@@ -142,4 +142,4 @@ private:
     Snowflake temporaryThreadAccount;
 };
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

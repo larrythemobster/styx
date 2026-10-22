@@ -2,7 +2,7 @@
 
 #include <QVarLengthArray>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 #define EMOJI_LINKAGE
@@ -240,4 +240,4 @@ QStringList extractEmojiSequences(const QString &text)
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

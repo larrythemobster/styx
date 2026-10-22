@@ -19,7 +19,7 @@
 
 #include <utility>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -415,4 +415,4 @@ QString richText(const QString &plain)
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

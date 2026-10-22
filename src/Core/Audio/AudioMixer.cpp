@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -41,4 +41,4 @@ QByteArray AudioMixer::mix(const QVector<std::pair<QByteArray, float>> &inputs)
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

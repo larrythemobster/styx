@@ -4,7 +4,7 @@
 
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ImageManager;
 }
@@ -35,4 +35,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -16,7 +16,7 @@
 #include "UI/Emoji/EmojiPicker.hpp"
 #include "UI/Gifs/FavoriteGifPicker.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -202,4 +202,4 @@ void ExpressionPicker::hideEvent(QHideEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

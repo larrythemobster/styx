@@ -11,7 +11,7 @@
 #include "Storage/UserRepository.hpp"
 #include "Storage/MemberRepository.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class RelationshipManager;
@@ -81,4 +81,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

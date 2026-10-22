@@ -6,7 +6,7 @@
 #include <QMouseEvent>
 #include <QEvent>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 BasePopup::BasePopup(QWidget *parent) : QDialog(parent, Qt::FramelessWindowHint | Qt::Dialog)
@@ -74,4 +74,4 @@ bool BasePopup::eventFilter(QObject *obj, QEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

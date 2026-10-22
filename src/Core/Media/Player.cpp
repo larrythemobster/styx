@@ -9,7 +9,7 @@
 #include <initializer_list>
 #include <utility>
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include "Core/Media/AudioOutput.hpp"
 #include "Core/Media/MediaDecoder.hpp"
@@ -26,9 +26,9 @@
 #include <thread>
 #include <vector>
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -60,7 +60,7 @@ bool hasSuffixIn(const QUrl &url, std::initializer_list<const char *> suffixes)
 
 bool isSupported()
 {
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
     return true;
 #else
     return false;
@@ -135,7 +135,7 @@ struct OwnerThreadState
     }
 };
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 namespace {
 
@@ -314,7 +314,7 @@ struct Player::Impl : OwnerThreadState
     }
 };
 
-#else // ACHERON_HAVE_FFMPEG
+#else // STYX_HAVE_FFMPEG
 
 struct Player::Impl : OwnerThreadState
 {
@@ -331,7 +331,7 @@ struct Player::Impl : OwnerThreadState
     [[nodiscard]] qint64 bufferedPosition() const { return 0; }
 };
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG
 
 Player::Player(QObject *parent) : QObject(parent), d(std::make_unique<Impl>(this)) {}
 
@@ -439,7 +439,7 @@ bool Player::isSeekable() const
     return d->seekable;
 }
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 void Player::Impl::open(const QUrl &url, const ProxyConfig &proxyConfig)
 {
@@ -1134,8 +1134,8 @@ void Player::Impl::present()
     scheduleNextPresent(clock);
 }
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

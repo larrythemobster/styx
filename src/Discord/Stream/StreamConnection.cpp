@@ -12,7 +12,7 @@
 
 #include <vector>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Stream {
 
@@ -431,4 +431,4 @@ void StreamConnection::requestKeyframe()
 
 } // namespace Stream
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

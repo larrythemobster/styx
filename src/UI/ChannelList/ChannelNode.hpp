@@ -9,7 +9,7 @@
 #include "Core/ChannelReadState.hpp"
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 struct ChannelNode
@@ -81,4 +81,4 @@ struct ChannelNode
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

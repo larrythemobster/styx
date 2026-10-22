@@ -10,7 +10,7 @@
 
 #include "Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 QString TokenStore::keyForAccount(Snowflake accountId)
@@ -22,7 +22,7 @@ QString TokenStore::describeKeychainFailure(const QString &keychainError)
 {
     QString description = tr("The system keychain reported: %1").arg(keychainError);
 #if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS)
-    description += "\n\n" + tr("Acheron keeps tokens in the system keyring, which needs a Secret Service provider such as GNOME Keyring, KWallet or KeePassXC to be installed and running.");
+    description += "\n\n" + tr("Styx keeps tokens in the system keyring, which needs a Secret Service provider such as GNOME Keyring, KWallet or KeePassXC to be installed and running.");
 #endif
     return description;
 }
@@ -93,4 +93,4 @@ bool TokenStore::deleteToken(Snowflake accountId)
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

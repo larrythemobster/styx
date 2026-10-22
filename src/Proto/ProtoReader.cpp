@@ -2,7 +2,7 @@
 
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Proto {
 
 ProtoReader::ProtoReader(const QByteArray &data) : data(data) {}
@@ -214,4 +214,4 @@ bool readBoolValue(ProtoReader &reader)
 }
 
 } // namespace Proto
-} // namespace Acheron
+} // namespace Styx

@@ -4,7 +4,7 @@
 #include <QTextCursor>
 #include <QTextEdit>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static bool hasLineToMoveTo(QTextCursor cursor, bool upward)
@@ -32,4 +32,4 @@ bool moveCursorToTextEdgeFromOuterLine(QTextEdit *edit, const QKeyEvent *e)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

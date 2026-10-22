@@ -2,7 +2,7 @@
 
 #include "Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 RelationshipManager::RelationshipManager(QObject *parent) : QObject(parent) {}
@@ -93,4 +93,4 @@ void RelationshipManager::onRelationshipRemoved(const Discord::RelationshipParti
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

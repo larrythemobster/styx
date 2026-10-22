@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace GifMasonry {
 
@@ -48,4 +48,4 @@ Arrangement arrange(const QList<QSize> &naturalSizes, int availableWidth, int re
 
 } // namespace GifMasonry
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

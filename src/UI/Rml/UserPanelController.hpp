@@ -7,7 +7,7 @@
 #include <QString>
 #include <QTimer>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 }
@@ -27,7 +27,7 @@ private:
     void renderVoicePanel();
     void renderUserPanel();
     void connectInstanceVoice(Core::ClientInstance *instance);
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     void onShareClicked();
 #endif
 
@@ -39,4 +39,4 @@ private:
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

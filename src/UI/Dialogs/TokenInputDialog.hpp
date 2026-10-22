@@ -5,7 +5,7 @@
 #include "Core/ProxyConfig.hpp"
 #include "UI/ProxyLineEdit.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class TokenInputDialog : public QDialog
@@ -33,4 +33,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

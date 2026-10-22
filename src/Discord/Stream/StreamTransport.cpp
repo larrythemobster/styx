@@ -10,7 +10,7 @@
 #include <deque>
 #include <unordered_map>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Stream {
 
@@ -199,20 +199,20 @@ void StreamTransport::createOffer()
     config.disableAutoNegotiation = true;
     pc = std::make_shared<rtc::PeerConnection>(config);
 
-    const std::string cname = "acheron";
+    const std::string cname = "styx";
 
     rtc::Description::Audio audio("0", rtc::Description::Direction::SendRecv);
     audio.addOpusCodec(OPUS_PAYLOAD_TYPE);
     if (audioSsrc != 0)
-        audio.addSSRC(audioSsrc, cname, "acheron-stream", "audio");
+        audio.addSSRC(audioSsrc, cname, "styx-stream", "audio");
 
     rtc::Description::Video video("1", rtc::Description::Direction::SendRecv);
     video.addH264Codec(H264_PAYLOAD_TYPE);
     video.addRtxCodec(H264_RTX_PAYLOAD_TYPE, H264_PAYLOAD_TYPE, VIDEO_CLOCK_RATE);
     if (videoSsrc != 0) {
-        video.addSSRC(videoSsrc, cname, "acheron-stream", "video");
+        video.addSSRC(videoSsrc, cname, "styx-stream", "video");
         if (rtxSsrc != 0) {
-            video.addSSRC(rtxSsrc, cname, "acheron-stream", "video");
+            video.addSSRC(rtxSsrc, cname, "styx-stream", "video");
             video.addAttribute("ssrc-group:FID " + std::to_string(videoSsrc) + " " + std::to_string(rtxSsrc));
         }
     }
@@ -272,7 +272,7 @@ void StreamTransport::createOffer()
 
 void StreamTransport::setupSenderChain()
 {
-    const std::string cname = "acheron";
+    const std::string cname = "styx";
     auto g = guard;
 
     auto audioConfig = std::make_shared<rtc::RtpPacketizationConfig>(audioSsrc, cname, OPUS_PAYLOAD_TYPE, OPUS_CLOCK_RATE);
@@ -353,7 +353,7 @@ bool StreamTransport::applyServerSdp(const QString &serverSdp)
     // from the media server (NACK, PLI, REMB) names our SSRCs as its media source, so list
     // them here or it never reaches the NACK responder and PLI handler.
     if (audioSsrc != 0)
-        sdp << QStringLiteral("a=ssrc:%1 cname:acheron").arg(audioSsrc);
+        sdp << QStringLiteral("a=ssrc:%1 cname:styx").arg(audioSsrc);
 
     sdp << QStringLiteral("m=video %1 UDP/TLS/RTP/SAVPF %2 %3").arg(port).arg(H264_PAYLOAD_TYPE).arg(H264_RTX_PAYLOAD_TYPE)
         << connection
@@ -376,9 +376,9 @@ bool StreamTransport::applyServerSdp(const QString &serverSdp)
         << QStringLiteral("a=rtcp-fb:%1 goog-remb").arg(H264_PAYLOAD_TYPE)
         << QStringLiteral("a=rtcp-fb:%1 transport-cc").arg(H264_PAYLOAD_TYPE);
     if (videoSsrc != 0)
-        sdp << QStringLiteral("a=ssrc:%1 cname:acheron").arg(videoSsrc);
+        sdp << QStringLiteral("a=ssrc:%1 cname:styx").arg(videoSsrc);
     if (rtxSsrc != 0)
-        sdp << QStringLiteral("a=ssrc:%1 cname:acheron").arg(rtxSsrc);
+        sdp << QStringLiteral("a=ssrc:%1 cname:styx").arg(rtxSsrc);
 
     try {
         pc->setRemoteDescription(rtc::Description(sdp.join(QStringLiteral("\r\n")).toStdString() + "\r\n", rtc::Description::Type::Answer));
@@ -446,4 +446,4 @@ void StreamTransport::close()
 
 } // namespace Stream
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

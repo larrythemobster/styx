@@ -45,7 +45,7 @@
 #include <QGuiApplication>
 #include <QMenu>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -192,7 +192,7 @@ void ChatController::setupEventListeners()
             ::Rml::Element *linkEl = closest(target, "href");
             if (linkEl) {
                 QString url = attribute(linkEl, "href");
-                if (url.startsWith(QStringLiteral("acheron://channel/"))) {
+                if (url.startsWith(QStringLiteral("styx://channel/"))) {
                     quint64 chId = url.mid(18).toULongLong();
                     if (chId != 0)
                         shell.openChannel(currentAccountId, currentGuildId, Core::Snowflake(chId));
@@ -1446,4 +1446,4 @@ void ChatController::openEmojiPickerForComposer()
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -17,7 +17,7 @@
 #include "GuildSettings/GuildSettingsSection.hpp"
 #include "Discord/Entities.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class Session;
 class ClientInstance;
@@ -49,13 +49,13 @@ class ConnectionBanner;
 class ChannelTopicLine;
 class GuildSettingsWindow;
 class TrayIcon;
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 class VoiceStatusBar;
 #endif
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class MainWindow : public QMainWindow
@@ -129,7 +129,7 @@ private:
     bool channelReadable(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId);
     void markIndexAsRead(Core::Snowflake accountId, const QModelIndex &sourceIndex);
     void recordLastViewedChannel(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     void updateVoiceStatusLabel();
 #endif
 
@@ -229,7 +229,7 @@ private:
     MemberListModel *memberListModel;
     Core::TypingTracker *typingTracker;
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     VoiceStatusBar *voiceStatusBar;
 #endif
     AccountsWindow *accountsWindow = nullptr;
@@ -283,4 +283,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

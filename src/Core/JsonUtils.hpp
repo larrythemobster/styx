@@ -15,7 +15,7 @@
 #include "qt_flags.hpp"
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace JsonUtils {
 
@@ -30,7 +30,7 @@ struct is_qflags<QFlags<T>> : std::true_type
 };
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 template <typename T>
-struct is_qflags<::Acheron::Compat::Flags<T>> : std::true_type
+struct is_qflags<::Styx::Compat::Flags<T>> : std::true_type
 {
 };
 #endif
@@ -337,4 +337,4 @@ protected:
 
 } // namespace JsonUtils
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

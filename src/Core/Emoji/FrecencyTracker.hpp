@@ -8,7 +8,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 // port from discord
@@ -77,4 +77,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

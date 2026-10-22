@@ -10,7 +10,7 @@
 #include <QLocale>
 #include <QMimeDatabase>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace ImageUpload {
 
@@ -127,4 +127,4 @@ PreparedImage prepareRaw(const QString &path, qint64 maxBytes)
 
 } // namespace ImageUpload
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

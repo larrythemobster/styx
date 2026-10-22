@@ -9,7 +9,7 @@
 
 #include "BaseRepository.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 class GuildRepository : BaseRepository
@@ -25,4 +25,4 @@ private:
 };
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

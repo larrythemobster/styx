@@ -6,21 +6,21 @@
 
 #include <iostream>
 
-Q_LOGGING_CATEGORY(LogCore, "acheron.core");
-Q_LOGGING_CATEGORY(LogNetwork, "acheron.network");
-Q_LOGGING_CATEGORY(LogDiscord, "acheron.discord");
-Q_LOGGING_CATEGORY(LogDB, "acheron.db");
-Q_LOGGING_CATEGORY(LogUI, "acheron.ui");
-Q_LOGGING_CATEGORY(LogProto, "acheron.proto");
-#ifndef ACHERON_NO_VOICE
-Q_LOGGING_CATEGORY(LogDave, "acheron.dave");
+Q_LOGGING_CATEGORY(LogCore, "styx.core");
+Q_LOGGING_CATEGORY(LogNetwork, "styx.network");
+Q_LOGGING_CATEGORY(LogDiscord, "styx.discord");
+Q_LOGGING_CATEGORY(LogDB, "styx.db");
+Q_LOGGING_CATEGORY(LogUI, "styx.ui");
+Q_LOGGING_CATEGORY(LogProto, "styx.proto");
+#ifndef STYX_NO_VOICE
+Q_LOGGING_CATEGORY(LogDave, "styx.dave");
 #endif
-Q_LOGGING_CATEGORY(LogMiniaudio, "acheron.miniaudio");
-Q_LOGGING_CATEGORY(LogVoice, "acheron.voice");
-Q_LOGGING_CATEGORY(LogVideo, "acheron.video");
-Q_LOGGING_CATEGORY(LogStream, "acheron.stream");
+Q_LOGGING_CATEGORY(LogMiniaudio, "styx.miniaudio");
+Q_LOGGING_CATEGORY(LogVoice, "styx.voice");
+Q_LOGGING_CATEGORY(LogVideo, "styx.video");
+Q_LOGGING_CATEGORY(LogStream, "styx.stream");
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 void Logger::init()
@@ -30,7 +30,7 @@ void Logger::init()
     if (!dir.exists())
         dir.mkpath(".");
 
-    logFilePath = dir.filePath("acheron.log");
+    logFilePath = dir.filePath("styx.log");
 
     logFile = new QFile(logFilePath);
     if (logFile->open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Append)) {
@@ -38,7 +38,7 @@ void Logger::init()
             rotateLogFile();
 
         QTextStream stream(logFile);
-        stream << "\n=== Acheron startup: " << QDateTime::currentDateTime().toString() << " ===\n";
+        stream << "\n=== Styx startup: " << QDateTime::currentDateTime().toString() << " ===\n";
     }
 
     stopping = false;
@@ -171,4 +171,4 @@ void Logger::messageHandler(QtMsgType type, const QMessageLogContext &context, c
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

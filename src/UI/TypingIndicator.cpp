@@ -2,7 +2,7 @@
 #include <QHBoxLayout>
 #include <QMovie>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 TypingIndicator::TypingIndicator(QWidget *parent) : QWidget(parent)
@@ -78,4 +78,4 @@ QString TypingIndicator::formatText(const QList<Core::TyperInfo> &typers)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

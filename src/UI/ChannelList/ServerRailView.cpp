@@ -9,7 +9,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ServerRailView::ServerRailView(QWidget *parent)
@@ -129,4 +129,4 @@ void ServerRailView::mouseMoveEvent(QMouseEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

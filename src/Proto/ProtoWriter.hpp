@@ -7,7 +7,7 @@
 
 #include "ProtoReader.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Proto {
 
 class ProtoWriter
@@ -29,4 +29,4 @@ private:
 };
 
 } // namespace Proto
-} // namespace Acheron
+} // namespace Styx

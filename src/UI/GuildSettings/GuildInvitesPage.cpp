@@ -26,7 +26,7 @@
 #include "Core/Theme/Icons.hpp"
 #include "Discord/ApiError.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -534,4 +534,4 @@ void GuildInvitesPage::showContextMenu(const QPoint &pos)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

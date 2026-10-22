@@ -6,7 +6,7 @@
 #include <QSize>
 #include <QString>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -52,6 +52,6 @@ struct StreamQuality
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-Q_DECLARE_METATYPE(Acheron::Core::Stream::StreamQuality)
+Q_DECLARE_METATYPE(Styx::Core::Stream::StreamQuality)

@@ -1,6 +1,6 @@
 #include "ProxyInputDialog.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ProxyInputDialog::ProxyInputDialog(const QString &title, const QString &prompt, QWidget *parent)
@@ -36,4 +36,4 @@ void ProxyInputDialog::accept()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

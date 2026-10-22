@@ -7,7 +7,7 @@
 #include <QSet>
 #include <QTimer>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 namespace Audio {
@@ -53,7 +53,7 @@ private:
     QTimer updateDebounceTimer;
     QPointer<Core::ClientInstance> currentInstance;
     QPointer<Core::Audio::VoiceManager> currentVoiceManager;
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     QPointer<Core::Stream::StreamManager> currentStreamManager;
 #endif
 
@@ -63,4 +63,4 @@ private:
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

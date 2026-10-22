@@ -7,7 +7,7 @@
 #include <QJsonObject>
 #include <QUrlQuery>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 static constexpr const char *apiBase = "https://discord.com/api/v9";
@@ -229,4 +229,4 @@ std::optional<LoginError> LoginClient::commonFailure(const HttpResponse &respons
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

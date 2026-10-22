@@ -14,7 +14,7 @@
 #include <chrono>
 #include <vector>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -188,6 +188,6 @@ void LoopbackCapture::run(Mode mode, quint32 processId)
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
 #endif

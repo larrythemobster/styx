@@ -10,7 +10,7 @@
 
 #include "UI/Chat/MessageTextDocument.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -86,4 +86,4 @@ void ChannelTopicLine::mouseReleaseEvent(QMouseEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

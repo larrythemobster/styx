@@ -6,7 +6,7 @@
 
 #include "Core/ClientInstance.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace GuildSettingsAccess {
 
@@ -212,4 +212,4 @@ void addMenu(QMenu *menu, const SectionsProvider &provider, Core::Snowflake acco
 
 } // namespace GuildSettingsAccess
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

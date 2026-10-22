@@ -31,7 +31,7 @@ QColor blendOver(const QColor &base, const QColor &tint)
 
 } // namespace
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 MemberListDelegate::MemberListDelegate(QObject *parent)
@@ -273,4 +273,4 @@ void MemberListDelegate::paintPlaceholder(QPainter *painter,
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

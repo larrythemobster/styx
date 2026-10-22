@@ -2,11 +2,11 @@
 
 #include <QtWidgets/QApplication>
 
-namespace Acheron {
+namespace Styx {
 class App : public QApplication
 {
     Q_OBJECT
 public:
     explicit App(int &argc, char **argv);
 };
-} // namespace Acheron
+} // namespace Styx

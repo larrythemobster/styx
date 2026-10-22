@@ -9,7 +9,7 @@
 #include "Core/ImageManager.hpp"
 #include "Discord/CdnUrls.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 constexpr static int LargeImageSize = 60;
@@ -191,4 +191,4 @@ bool ActivityCard::eventFilter(QObject *watched, QEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

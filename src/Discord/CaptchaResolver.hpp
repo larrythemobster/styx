@@ -12,7 +12,7 @@
 
 #include "Core/ProxyConfig.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 inline constexpr int kMaxCaptchaAttempts = 3;
@@ -77,4 +77,4 @@ inline std::optional<CaptchaChallenge> CaptchaChallenge::fromResponseBody(const 
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

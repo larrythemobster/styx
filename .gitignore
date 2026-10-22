@@ -1,6 +1,6 @@
 scripts/
 out/
-acheron.slnx
+styx.slnx
 CMakeUserPresets.json
 .vs/
 *.aps

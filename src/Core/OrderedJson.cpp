@@ -6,7 +6,7 @@
 
 #include <cmath>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -158,4 +158,4 @@ QByteArray OrderedJson::serialize(const QJsonValue &value)
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

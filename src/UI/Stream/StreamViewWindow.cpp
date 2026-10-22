@@ -4,7 +4,7 @@
 #include <QKeyEvent>
 #include <QPainter>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 StreamViewWindow::StreamViewWindow(Core::Snowflake streamerId, const QString &streamerName, QWidget *parent)
@@ -110,4 +110,4 @@ void StreamViewWindow::toggleFullscreen()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -14,7 +14,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -435,4 +435,4 @@ void AudioPipeline::sendTrailingSilence()
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

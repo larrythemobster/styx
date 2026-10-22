@@ -29,10 +29,10 @@
 #include <cstring>
 #include <tuple>
 
-using Acheron::Core::ImageManager;
-using Acheron::Core::ProxyConfig;
-using Acheron::Core::Snowflake;
-using Acheron::Discord::Voice::Socks5UdpAssociation;
+using Styx::Core::ImageManager;
+using Styx::Core::ProxyConfig;
+using Styx::Core::Snowflake;
+using Styx::Discord::Voice::Socks5UdpAssociation;
 
 Q_DECLARE_METATYPE(ProxyConfig)
 

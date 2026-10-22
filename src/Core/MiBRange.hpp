@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 struct MiBRange
@@ -11,4 +11,4 @@ struct MiBRange
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

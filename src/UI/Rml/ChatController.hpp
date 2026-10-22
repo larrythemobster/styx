@@ -15,7 +15,7 @@ class Element;
 class ElementFormControlTextArea;
 } // namespace Rml
 
-namespace Acheron {
+namespace Styx {
 
 namespace Discord {
 struct Emoji;
@@ -101,4 +101,4 @@ private:
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -25,9 +25,9 @@
 #include "HttpClient.hpp"
 #include "ClientIdentity.hpp"
 
-using Acheron::Core::Snowflake;
+using Styx::Core::Snowflake;
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 class Client : public QObject
@@ -438,4 +438,4 @@ inline uint qHash(Client::MessageLoadType type, uint seed = 0) noexcept
 #endif
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

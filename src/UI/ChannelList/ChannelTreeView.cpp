@@ -8,7 +8,7 @@
 #include <QGuiApplication>
 #include <QMenu>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static bool isAlwaysExpanded(ChannelNode::Type type)
@@ -198,7 +198,7 @@ void ChannelTreeView::contextMenuEvent(QContextMenuEvent *event)
     if (isVoiceChannel || isDMChannel) {
         QString joinText = isDMChannel ? tr("Join Call") : tr("Join Voice Channel");
         QAction *joinAction = menu.addAction(joinText);
-#ifdef ACHERON_NO_VOICE
+#ifdef STYX_NO_VOICE
         joinAction->setEnabled(false);
 #else
         connect(joinAction, &QAction::triggered, this, [this, proxyIndex]() {
@@ -210,7 +210,7 @@ void ChannelTreeView::contextMenuEvent(QContextMenuEvent *event)
         bool inVoice = isAccountInVoice(acctId);
 
         QAction *disconnectAction = menu.addAction(tr("Disconnect from Voice"));
-#ifdef ACHERON_NO_VOICE
+#ifdef STYX_NO_VOICE
         disconnectAction->setEnabled(false);
 #else
         disconnectAction->setEnabled(inVoice);
@@ -288,4 +288,4 @@ Core::Snowflake ChannelTreeView::findAccountIdForIndex(const QModelIndex &source
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

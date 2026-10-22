@@ -28,7 +28,7 @@
 #include "UI/Emoji/EmojiPainting.hpp"
 #include "UI/Emoji/PaintedImages.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ReactorListModel : public QAbstractListModel
@@ -453,4 +453,4 @@ void ReactionsPopup::onReactorsScrolled()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

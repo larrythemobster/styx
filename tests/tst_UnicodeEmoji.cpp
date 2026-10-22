@@ -2,7 +2,7 @@
 
 #include <QTest>
 
-using namespace Acheron::Core;
+using namespace Styx::Core;
 
 class TestUnicodeEmoji : public QObject
 {

@@ -8,7 +8,7 @@
 #include "ProxyConfig.hpp"
 #include "Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 struct AccountInfo
 {
@@ -38,6 +38,6 @@ struct AccountInfo
     }
 };
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-Q_DECLARE_METATYPE(Acheron::Core::AccountInfo)
+Q_DECLARE_METATYPE(Styx::Core::AccountInfo)

@@ -30,7 +30,7 @@
 
 #include "GuildSettingsPage.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace MemberModeration {
 
@@ -571,4 +571,4 @@ void addModerationActions(QMenu *menu, QWidget *dialogParent, Core::ClientInstan
 
 } // namespace MemberModeration
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -23,15 +23,15 @@ class QSqlDatabase;
 #include "PermissionManager.hpp"
 #include "Storage/AccountRepository.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 namespace Audio {
 class VoiceManager;
 }
 #endif
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 namespace Stream {
 class StreamManager;
 }
@@ -63,10 +63,10 @@ public:
     [[nodiscard]] PresenceManager *presences() const;
     [[nodiscard]] EmojiManager *emojis() const;
     [[nodiscard]] FavoriteGifs *favoriteGifs() const;
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     [[nodiscard]] Audio::VoiceManager *voice() const;
 #endif
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     [[nodiscard]] Stream::StreamManager *streams() const;
 #endif
 
@@ -198,10 +198,10 @@ private:
     PresenceManager *presenceManager;
     EmojiManager *emojiManager;
     FavoriteGifs *favoriteGifManager;
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     Audio::VoiceManager *voiceManager;
 #endif
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     Stream::StreamManager *streamManager;
 #endif
 
@@ -231,4 +231,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

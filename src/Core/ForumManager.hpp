@@ -9,7 +9,7 @@
 #include "Discord/Entities.hpp"
 #include "Discord/Events.hpp"
 
-namespace Acheron {
+namespace Styx {
 
 namespace Discord {
 class Client;
@@ -182,4 +182,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -19,14 +19,14 @@
 #include "Core/Logging.hpp"
 #include "UI/Dialogs/ConfirmPopup.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static const char *kHarnessTemplate = R"HTML(<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Acheron Captcha Challenge</title>
+<title>Styx Captcha Challenge</title>
 <script src="https://js.hcaptcha.com/1/api.js?render=explicit" async defer></script>
 <script id="cfg" type="application/json">__CONFIG_JSON__</script>
 <style>
@@ -46,7 +46,7 @@ function postBack(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   }).then(function () {
-    document.body.innerHTML = '<p>You can close this tab and return to Acheron.</p>';
+    document.body.innerHTML = '<p>You can close this tab and return to Styx.</p>';
   });
 }
 function onSolved(token) { postBack({ token: token }); }
@@ -456,4 +456,4 @@ QByteArray BrowserCaptchaResolver::buildHarnessHtml() const
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

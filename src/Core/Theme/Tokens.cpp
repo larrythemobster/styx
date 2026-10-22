@@ -1,6 +1,6 @@
 #include "Tokens.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Theme {
 
@@ -90,4 +90,4 @@ const TokenDescriptor &descriptor(Token token)
 
 } // namespace Theme
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

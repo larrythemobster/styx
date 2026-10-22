@@ -14,7 +14,7 @@
 
 class QJsonObject;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Theme {
 
@@ -84,4 +84,4 @@ private:
 
 } // namespace Theme
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -7,7 +7,7 @@
 
 #include "HttpClient.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 namespace {
@@ -47,4 +47,4 @@ ApiError ApiError::fromResponse(const HttpResponse &response)
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

@@ -4,7 +4,7 @@
 #include <QElapsedTimer>
 #include <QTest>
 
-using namespace Acheron::Core::Markdown;
+using namespace Styx::Core::Markdown;
 
 class TestMarkdown : public QObject
 {
@@ -119,8 +119,8 @@ void TestMarkdown::testSingleLink()
 
 void TestMarkdown::testEmojiSequences()
 {
-    using Acheron::Core::countUnicodeEmojisSegmented;
-    using Acheron::Core::extractEmojiSequences;
+    using Styx::Core::countUnicodeEmojisSegmented;
+    using Styx::Core::extractEmojiSequences;
 
     const QString thumbsUp = QString::fromUtf8("\xF0\x9F\x91\x8D");
     const QString thumbsUpTone2 = QString::fromUtf8("\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBC");

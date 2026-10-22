@@ -14,7 +14,7 @@
 #include "Discord/Voice/VoiceClient.hpp"
 #include "Core/Presence/PresenceBadge.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ImageManager;
 namespace Audio {
@@ -41,7 +41,7 @@ public:
     ~VoiceStatusBar() override;
 
     void setVoiceManager(Core::Audio::VoiceManager *manager);
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     void setStreamManager(Core::Stream::StreamManager *manager);
 #endif
     void setNameResolver(NameResolver resolver);
@@ -66,7 +66,7 @@ private:
     void toggleVoiceWindow();
     void showVoiceWindow();
     void configureVoiceWindow();
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     void onShareClicked();
     void updateShareButton();
     void openViewer(Core::Snowflake userId);
@@ -84,7 +84,7 @@ private:
     QLabel *channelLabel;
     QPushButton *disconnectBtn;
     QPushButton *shareBtn = nullptr;
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     QPointer<Core::Stream::StreamManager> streamManager;
     QHash<Core::Snowflake, QPointer<StreamViewWindow>> viewers;
     QString streamStatus;
@@ -96,4 +96,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

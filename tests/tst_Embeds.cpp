@@ -3,7 +3,7 @@
 #include <QJsonDocument>
 #include <QTest>
 
-using namespace Acheron::Discord;
+using namespace Styx::Discord;
 
 class TestEmbeds : public QObject
 {

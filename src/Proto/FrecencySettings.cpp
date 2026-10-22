@@ -3,7 +3,7 @@
 #include "ProtoReader.hpp"
 #include "ProtoWriter.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Proto {
 
 namespace {
@@ -364,4 +364,4 @@ QByteArray FrecencyUserSettings::toProtoPartial() const
 }
 
 } // namespace Proto
-} // namespace Acheron
+} // namespace Styx

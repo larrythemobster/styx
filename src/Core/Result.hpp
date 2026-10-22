@@ -3,7 +3,7 @@
 #include <QString>
 #include <optional>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 template <typename T>
@@ -43,4 +43,4 @@ struct Result<void>
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

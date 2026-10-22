@@ -4,7 +4,7 @@
 #include <QSqlQuery>
 #include <QVariant>
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 class BaseRepository
@@ -32,4 +32,4 @@ protected:
 };
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

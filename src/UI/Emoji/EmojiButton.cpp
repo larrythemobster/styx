@@ -6,7 +6,7 @@
 #include "UI/Emoji/EmojiPainting.hpp"
 #include "UI/Emoji/PaintedImages.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 EmojiButton::EmojiButton(int buttonPx, int emojiPx, QWidget *parent)
@@ -71,4 +71,4 @@ void EmojiButton::paintEvent(QPaintEvent *)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

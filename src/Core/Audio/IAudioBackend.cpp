@@ -1,7 +1,7 @@
 #include "IAudioBackend.hpp"
 #include "MiniaudioAudioBackend.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -12,4 +12,4 @@ std::unique_ptr<IAudioBackend> IAudioBackend::create(QObject *parent)
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -18,7 +18,7 @@
 #include <QModelIndex>
 #include <QRegularExpression>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -342,4 +342,4 @@ void RailController::renderRail()
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

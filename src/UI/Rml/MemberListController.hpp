@@ -7,7 +7,7 @@
 #include <QSet>
 #include <QTimer>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 class MemberListManager;
@@ -54,4 +54,4 @@ private:
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

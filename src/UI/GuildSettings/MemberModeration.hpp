@@ -11,7 +11,7 @@
 class QMenu;
 class QWidget;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 } // namespace Core
@@ -52,4 +52,4 @@ void addModerationActions(QMenu *menu, QWidget *dialogParent, Core::ClientInstan
 
 } // namespace MemberModeration
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

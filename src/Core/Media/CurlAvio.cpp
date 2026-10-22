@@ -1,6 +1,6 @@
 #include "CurlAvio.hpp"
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include <QByteArray>
 #include <QUrl>
@@ -19,7 +19,7 @@ extern "C" {
 #include <libavutil/mem.h>
 }
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 namespace CurlAvio {
@@ -307,6 +307,6 @@ void destroy(AVIOContext *context)
 } // namespace CurlAvio
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG

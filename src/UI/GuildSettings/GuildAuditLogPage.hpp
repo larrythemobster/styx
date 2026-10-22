@@ -15,7 +15,7 @@ class QScrollArea;
 class QStackedWidget;
 class QVBoxLayout;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class AuditLogRowWidget;
@@ -67,4 +67,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

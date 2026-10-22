@@ -3,7 +3,7 @@
 #include <QDateTime>
 #include <QMetaType>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class Snowflake
@@ -38,23 +38,23 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
 namespace std {
 template <>
-struct hash<Acheron::Core::Snowflake>
+struct hash<Styx::Core::Snowflake>
 {
-    std::size_t operator()(const Acheron::Core::Snowflake &k) const { return k.value; }
+    std::size_t operator()(const Styx::Core::Snowflake &k) const { return k.value; }
 };
 
 template <>
-struct less<Acheron::Core::Snowflake>
+struct less<Styx::Core::Snowflake>
 {
-    bool operator()(const Acheron::Core::Snowflake &l, const Acheron::Core::Snowflake &r) const
+    bool operator()(const Styx::Core::Snowflake &l, const Styx::Core::Snowflake &r) const
     {
         return l.value < r.value;
     }
 };
 } // namespace std
 
-Q_DECLARE_METATYPE(Acheron::Core::Snowflake)
+Q_DECLARE_METATYPE(Styx::Core::Snowflake)

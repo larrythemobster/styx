@@ -19,7 +19,7 @@
 
 class QNetworkAccessManager;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 enum class PinGroup {
@@ -118,4 +118,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

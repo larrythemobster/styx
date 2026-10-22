@@ -2,7 +2,7 @@
 
 #include <QTest>
 
-using namespace Acheron::Discord;
+using namespace Styx::Discord;
 
 class TestCdnUrls : public QObject
 {

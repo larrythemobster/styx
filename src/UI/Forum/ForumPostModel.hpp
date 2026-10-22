@@ -15,7 +15,7 @@
 
 class QTextDocument;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Discord {
 struct Message;
@@ -30,7 +30,7 @@ class ImageManager;
 
 namespace UI {
 
-using Acheron::Core::Snowflake;
+using Styx::Core::Snowflake;
 
 struct ForumTagChip
 {
@@ -128,7 +128,7 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx
 
-Q_DECLARE_METATYPE(Acheron::UI::ForumTagChip)
-Q_DECLARE_METATYPE(QList<Acheron::UI::ForumTagChip>)
+Q_DECLARE_METATYPE(Styx::UI::ForumTagChip)
+Q_DECLARE_METATYPE(QList<Styx::UI::ForumTagChip>)

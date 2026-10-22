@@ -7,7 +7,7 @@
 
 #include <QTest>
 
-using namespace Acheron::Core;
+using namespace Styx::Core;
 
 static constexpr uint64_t DAY = 86400000ULL;
 static constexpr uint64_t NOW = 1700000000000ULL;

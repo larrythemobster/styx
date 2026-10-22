@@ -1,6 +1,6 @@
 #include "VideoEncoder.hpp"
 
-#if defined(_WIN32) && defined(ACHERON_HAVE_FFMPEG)
+#if defined(_WIN32) && defined(STYX_HAVE_FFMPEG)
 
 #include "D3DDevice.hpp"
 #include "SpsVuiRewriter.hpp"
@@ -15,7 +15,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -399,6 +399,6 @@ bool VideoEncoder::drain(std::vector<EncodedPacket> &out)
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
 #endif

@@ -1,6 +1,6 @@
 #include "MemberListView.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 MemberListView::MemberListView(QWidget *parent)
@@ -53,4 +53,4 @@ void MemberListView::emitVisibleRange()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

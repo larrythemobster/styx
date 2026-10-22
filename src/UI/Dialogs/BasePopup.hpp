@@ -3,7 +3,7 @@
 #include <QDialog>
 #include <QFrame>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class BasePopup : public QDialog
@@ -25,4 +25,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

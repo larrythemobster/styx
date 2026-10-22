@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include <QImage>
 #include <QSize>
@@ -17,7 +17,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -98,6 +98,6 @@ private:
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG

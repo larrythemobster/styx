@@ -5,7 +5,7 @@
 
 class QImage;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace ImageUpload {
 
@@ -28,4 +28,4 @@ QByteArray encodePng(const QImage &image);
 
 } // namespace ImageUpload
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

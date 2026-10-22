@@ -7,7 +7,7 @@
 
 #include "Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class MessageSegments
@@ -46,4 +46,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

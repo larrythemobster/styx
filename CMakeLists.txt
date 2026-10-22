@@ -28,7 +28,7 @@ if(ENABLE_SCREENSHARE)
     list(APPEND VCPKG_MANIFEST_FEATURES "screenshare")
 endif()
 
-project(acheron LANGUAGES CXX)
+project(styx LANGUAGES CXX)
 
 include(qt.cmake)
 
@@ -187,6 +187,7 @@ include(lottie.cmake)
 set(PROJECT_SOURCES
     resources.qrc
     src/main.cpp
+    src/Core/Migration.cpp
     src/Core/Snowflake.cpp
     src/Core/OrderedJson.cpp
     src/Core/ProxyConfig.cpp
@@ -511,13 +512,13 @@ if(BUILD_TESTS)
     if(TARGET ffmpeg)
         qt_add_executable(TestClips tests/tst_Clips.cpp src/Core/Media/ClipDecoder.cpp src/Core/Media/ClipPlayer.cpp)
         target_link_libraries(TestClips PRIVATE Qt::Core Qt::Gui Qt::Test ffmpeg)
-        target_compile_definitions(TestClips PRIVATE ACHERON_HAVE_FFMPEG)
+        target_compile_definitions(TestClips PRIVATE STYX_HAVE_FFMPEG)
         target_include_directories(TestClips PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         add_test(NAME ClipTests COMMAND TestClips)
 
         qt_add_executable(TestApng tests/tst_Apng.cpp src/Core/ApngDecoder.cpp)
         target_link_libraries(TestApng PRIVATE Qt::Core Qt::Gui Qt::Test ffmpeg)
-        target_compile_definitions(TestApng PRIVATE ACHERON_HAVE_FFMPEG)
+        target_compile_definitions(TestApng PRIVATE STYX_HAVE_FFMPEG)
         target_include_directories(TestApng PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         add_test(NAME ApngTests COMMAND TestApng)
     endif()
@@ -561,7 +562,7 @@ set_target_properties(${PROJECT_NAME}
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
 if(NOT ENABLE_VOICE)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_NO_VOICE)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE STYX_NO_VOICE)
 endif()
 
 target_link_libraries(${PROJECT_NAME}
@@ -590,24 +591,24 @@ if(ENABLE_VOICE)
 
     if(ENABLE_RNNOISE)
         target_link_libraries(${PROJECT_NAME} PRIVATE rnnoise)
-        target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_RNNOISE)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE STYX_HAVE_RNNOISE)
     endif()
 endif()
 if(ENABLE_VOICE OR TARGET ffmpeg)
     target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/miniaudio")
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_MINIAUDIO)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE STYX_HAVE_MINIAUDIO)
 endif()
 if(TARGET ffmpeg)
     target_link_libraries(${PROJECT_NAME} PRIVATE ffmpeg)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_FFMPEG)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE STYX_HAVE_FFMPEG)
 endif()
 if(ENABLE_SCREENSHARE)
     target_link_libraries(${PROJECT_NAME} PRIVATE LibDataChannel::LibDataChannel d3d11 dxgi dwmapi windowsapp mmdevapi)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_SCREENSHARE)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE STYX_HAVE_SCREENSHARE)
 endif()
 if(TARGET lottie)
     target_link_libraries(${PROJECT_NAME} PRIVATE lottie)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_RLOTTIE)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE STYX_HAVE_RLOTTIE)
 endif()
 if(TARGET Qt::ZlibPrivate)
     target_link_libraries(${PROJECT_NAME} PRIVATE Qt::ZlibPrivate)
@@ -678,12 +679,12 @@ install(TARGETS ${PROJECT_NAME}
 )
 
 if(UNIX AND NOT APPLE)
-    install(FILES resources/desktop/io.github.ouwou.acheron.desktop
+    install(FILES resources/desktop/io.github.larrythemobster.styx.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
     )
-    install(FILES acheron.svg
+    install(FILES styx.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
-        RENAME io.github.ouwou.acheron.svg
+        RENAME io.github.larrythemobster.styx.svg
     )
 endif()
 

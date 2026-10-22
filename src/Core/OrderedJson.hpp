@@ -5,7 +5,7 @@
 #include <QList>
 #include <QString>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class OrderedJson
@@ -38,4 +38,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

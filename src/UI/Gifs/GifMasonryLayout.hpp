@@ -4,7 +4,7 @@
 #include <QRect>
 #include <QSize>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace GifMasonry {
 
@@ -28,4 +28,4 @@ struct Arrangement
 
 } // namespace GifMasonry
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

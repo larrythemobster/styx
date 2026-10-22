@@ -2,7 +2,7 @@
 
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -129,4 +129,4 @@ void PlayerPool::enforceLimit()
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

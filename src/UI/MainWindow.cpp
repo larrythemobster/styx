@@ -61,14 +61,14 @@
 #include "Core/Presence/PresenceManager.hpp"
 #include "Core/Session.hpp"
 #include "Core/Theme/Manager.hpp"
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
 #include "VoiceStatusBar.hpp"
 #endif
 
-using namespace Acheron::Core;
+using namespace Styx::Core;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -241,10 +241,10 @@ MainWindow::MainWindow(Session *session, QWidget *parent) : QMainWindow(parent),
                     QModelIndex idx = accountsModel->index(row, 0);
                     auto accPtr = idx.data(AccountsModel::AccountObjectRole).value<void *>();
 
-                    Acheron::Core::AccountInfo acc =
-                            *static_cast<Acheron::Core::AccountInfo *>(accPtr);
+                    Styx::Core::AccountInfo acc =
+                            *static_cast<Styx::Core::AccountInfo *>(accPtr);
 
-                    if (acc.state == Acheron::Core::ConnectionState::Connected) {
+                    if (acc.state == Styx::Core::ConnectionState::Connected) {
                         channelTreeModel->addAccount(acc);
 
                         ClientInstance *instance = session->client(acc.id);
@@ -258,7 +258,7 @@ MainWindow::MainWindow(Session *session, QWidget *parent) : QMainWindow(parent),
                                 break;
                             }
                         }
-                    } else if (acc.state == Acheron::Core::ConnectionState::Disconnected) {
+                    } else if (acc.state == Styx::Core::ConnectionState::Disconnected) {
                         detachInstance(acc.id);
                         bool wasShowing = channelListMode == ChannelListMode::Classic && railSelectedAccountId == acc.id;
                         channelTreeModel->removeAccount(acc.id);
@@ -606,7 +606,7 @@ void MainWindow::switchActiveInstance(Core::ClientInstance *newInstance)
     connect(currentInstance->relationships(), &Core::RelationshipManager::relationshipChanged, this,
             [this](Snowflake userId) { chatModel->refreshUsersInView({ userId }); });
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     updateVoiceStatusLabel();
 #endif
 }
@@ -1005,7 +1005,7 @@ void MainWindow::setupPermanentConnections(Core::ClientInstance *instance)
     connect(instance->presences(), &Core::PresenceManager::presencesChanged, this,
             [this, instance](const QList<Core::Snowflake> &userIds) {
                 channelTreeModel->updatePresence(instance->accountId(), userIds);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
                 if (voiceStatusBar)
                     voiceStatusBar->refreshPresences(userIds);
 #endif
@@ -1067,12 +1067,12 @@ void MainWindow::setupPermanentConnections(Core::ClientInstance *instance)
             [this, instance](Core::Snowflake channelId, Core::Snowflake) {
                 channelTree->setAccountVoiceChannel(instance->accountId(), channelId);
                 channelTreeModel->setAccountVoiceChannel(instance->accountId(), channelId);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
                 updateVoiceStatusLabel();
 #endif
             });
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     connect(instance->voice(), &Core::Audio::VoiceManager::voiceStateChanged,
             this, &MainWindow::updateVoiceStatusLabel);
 
@@ -1099,7 +1099,7 @@ void MainWindow::setupUi()
 
     channelTree = new ChannelTreeView(this);
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     voiceStatusBar = new VoiceStatusBar(this);
     voiceStatusBar->setImageManager(session->getImageManager());
     connect(voiceStatusBar, &VoiceStatusBar::disconnectRequested, this, [this]() {
@@ -1564,7 +1564,7 @@ void MainWindow::setupUi()
     channelTree->setGuildSettingsProvider(std::bind_front(&MainWindow::guildSettingsSections, this));
     connect(channelTree, &ChannelTreeView::guildSettingsRequested, this, &MainWindow::openGuildSettings);
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     connect(channelTree, &ChannelTreeView::joinVoiceChannelRequested, this,
             [this](const QModelIndex &proxyIndex) {
                 QModelIndex sourceIndex = channelFilterProxy->mapToSource(proxyIndex);
@@ -1652,7 +1652,7 @@ QWidget *MainWindow::buildLeftSide()
         guildHeaderLabel->setVisible(!guildHeaderLabel->text().isEmpty());
         channelTree->show();
         v->addWidget(channelTree, 1);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
         if (voiceStatusBar)
             v->addWidget(voiceStatusBar, 0);
 #endif
@@ -1663,7 +1663,7 @@ QWidget *MainWindow::buildLeftSide()
         v->setSpacing(0);
         channelTree->show();
         v->addWidget(channelTree, 1);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
         if (voiceStatusBar)
             v->addWidget(voiceStatusBar, 0);
 #endif
@@ -1689,7 +1689,7 @@ void MainWindow::setChannelListMode(ChannelListMode mode)
     applyChannelIndent();
 
     QList<int> splitterSizes = mainSplitter ? mainSplitter->sizes() : QList<int>();
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     bool voiceVisible = voiceStatusBar && voiceStatusBar->isVisible();
 #endif
 
@@ -1699,7 +1699,7 @@ void MainWindow::setChannelListMode(ChannelListMode mode)
     serverRail->hide();
     guildHeaderLabel->setParent(this);
     guildHeaderLabel->hide();
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     if (voiceStatusBar) {
         voiceStatusBar->setParent(this);
         voiceStatusBar->hide();
@@ -1727,7 +1727,7 @@ void MainWindow::setChannelListMode(ChannelListMode mode)
         mainSplitter->setSizes(splitterSizes);
     }
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     if (voiceStatusBar)
         voiceStatusBar->setVisible(voiceVisible);
 #endif
@@ -1998,7 +1998,7 @@ void MainWindow::recordLastViewedChannel(Snowflake accountId, Snowflake guildId,
     lastViewedChannel.insert(guildChannelKey(accountId, guildId), channelId);
 }
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 void MainWindow::updateVoiceStatusLabel()
 {
     using VState = Discord::Voice::VoiceClient::State;
@@ -2014,7 +2014,7 @@ void MainWindow::updateVoiceStatusLabel()
 
     Core::Audio::VoiceManager *vm = voiceInstance ? voiceInstance->voice() : nullptr;
     voiceStatusBar->setVoiceManager(vm);
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     voiceStatusBar->setStreamManager(voiceInstance ? voiceInstance->streams() : nullptr);
 #endif
     voiceStatusBar->setAccount(voiceInstance ? voiceInstance->accountId() : Core::Snowflake());
@@ -3009,4 +3009,4 @@ void MainWindow::jumpToMessageLink(Core::Snowflake channelId, Core::Snowflake me
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

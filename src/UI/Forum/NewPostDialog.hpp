@@ -14,7 +14,7 @@ class QListWidget;
 class QPushButton;
 class QDialogButtonBox;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class AttachmentPreviewPanel;
@@ -60,4 +60,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -1,7 +1,7 @@
 #include "SlowModeIndicator.hpp"
 #include <QHBoxLayout>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 SlowModeIndicator::SlowModeIndicator(QWidget *parent) : QWidget(parent)
@@ -91,4 +91,4 @@ void SlowModeIndicator::updateDisplay()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

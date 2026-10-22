@@ -9,7 +9,7 @@ class QSqlQuery;
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 class MemberRepository : public BaseRepository
@@ -34,4 +34,4 @@ private:
 };
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

@@ -17,7 +17,7 @@ class QTcpSocket;
 class QTimer;
 class QWidget;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class BrowserCaptchaResolver : public QObject, public Discord::CaptchaResolver
@@ -82,4 +82,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

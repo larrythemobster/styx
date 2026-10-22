@@ -13,7 +13,7 @@
 #include "Core/ClientInstance.hpp"
 #include "Core/Theme/Icons.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 GuildSettingsPage::GuildSettingsPage(Core::ClientInstance *instance, Core::ImageManager *images,
@@ -219,4 +219,4 @@ QPixmap GuildSettingsPage::roundedPixmap(const QPixmap &source, int size, qreal 
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

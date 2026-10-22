@@ -8,7 +8,7 @@ struct ma_context_config;
 struct ma_device;
 struct ma_device_config;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -22,4 +22,4 @@ bool initAudioDevice(const ma_device_config *config, ma_device *device);
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

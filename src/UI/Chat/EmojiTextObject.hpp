@@ -9,7 +9,7 @@
 
 class QTextDocument;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ImageManager;
 } // namespace Core
@@ -49,4 +49,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

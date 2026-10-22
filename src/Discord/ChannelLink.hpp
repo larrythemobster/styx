@@ -7,7 +7,7 @@
 
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 // https://[canary.|ptb.]discord[app].com/channels/<guild or @me>/<channel>[/<message>]
@@ -56,4 +56,4 @@ struct ChannelLink
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

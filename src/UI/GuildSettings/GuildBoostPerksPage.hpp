@@ -10,7 +10,7 @@ class QLabel;
 class QPushButton;
 class QVBoxLayout;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class UnsavedChangesBar;
@@ -63,4 +63,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -2,7 +2,7 @@
 
 #include <QStyledItemDelegate>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ForumPostDelegate : public QStyledItemDelegate
@@ -16,4 +16,4 @@ public:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

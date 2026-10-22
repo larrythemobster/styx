@@ -1,6 +1,6 @@
 #include "Core/Media/MediaDecoder.hpp"
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include "Core/Logging.hpp"
 #include "Core/Media/AudioOutput.hpp"
@@ -21,7 +21,7 @@ extern "C" {
 #error "ffmpeg 5.1 or newer is required for video support"
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -59,7 +59,7 @@ bool MediaDecoder::open(const QString &input, const ProxyConfig &proxy, QString 
     fmtCtx = avformat_alloc_context();
     if (!fmtCtx) {
         if (error)
-            *error = QCoreApplication::translate("Acheron::Core::Media::Player", "out of memory");
+            *error = QCoreApplication::translate("Styx::Core::Media::Player", "out of memory");
         return false;
     }
 
@@ -73,7 +73,7 @@ bool MediaDecoder::open(const QString &input, const ProxyConfig &proxy, QString 
             curlIo = CurlAvio::create(input, proxy, fmtCtx->interrupt_callback);
         if (!curlIo) {
             if (error)
-                *error = QCoreApplication::translate("Acheron::Core::Media::Player", "could not open a proxied connection");
+                *error = QCoreApplication::translate("Styx::Core::Media::Player", "could not open a proxied connection");
             return false;
         }
 
@@ -116,7 +116,7 @@ bool MediaDecoder::open(const QString &input, const ProxyConfig &proxy, QString 
 
     if (videoStream < 0 && audioStream < 0) {
         if (error)
-            *error = QCoreApplication::translate("Acheron::Core::Media::Player", "no playable stream found");
+            *error = QCoreApplication::translate("Styx::Core::Media::Player", "no playable stream found");
         return false;
     }
 
@@ -389,6 +389,6 @@ int MediaDecoder::appendResampledFrames(const AVFrame *frame, std::vector<float>
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG

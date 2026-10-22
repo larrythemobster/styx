@@ -9,7 +9,7 @@
 
 class QTimer;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 namespace Media {
@@ -60,4 +60,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -7,7 +7,7 @@
 #include "Transaction.hpp"
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 namespace {
@@ -193,4 +193,4 @@ QList<Discord::Member> MemberRepository::getMembersWithUsers(Core::Snowflake gui
 }
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

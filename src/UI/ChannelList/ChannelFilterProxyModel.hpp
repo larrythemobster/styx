@@ -5,7 +5,7 @@
 #include "Core/Session.hpp"
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ChannelTreeModel;
@@ -45,4 +45,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

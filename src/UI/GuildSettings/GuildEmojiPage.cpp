@@ -33,7 +33,7 @@
 #include "Discord/CdnUrls.hpp"
 #include "ImageUpload.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -641,4 +641,4 @@ void GuildEmojiPage::finishUploads()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

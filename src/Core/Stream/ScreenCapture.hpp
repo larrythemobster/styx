@@ -13,7 +13,7 @@
 #include <wrl/client.h>
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -74,4 +74,4 @@ private:
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

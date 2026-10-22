@@ -19,7 +19,7 @@ class QTimer;
 class QVBoxLayout;
 class QWidget;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 class ImageManager;
@@ -140,4 +140,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -7,11 +7,11 @@
 #include "Discord/CdnUrls.hpp"
 #include <QMimeData>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
-using namespace Acheron::Core;
-using namespace Acheron::Storage;
+using namespace Styx::Core;
+using namespace Styx::Storage;
 
 AccountsModel::AccountsModel(Core::Session *session, QObject *parent)
     : QAbstractListModel(parent), session(session)
@@ -200,7 +200,7 @@ Qt::DropActions AccountsModel::supportedDropActions() const
 
 QStringList AccountsModel::mimeTypes() const
 {
-    return { "application/x-acheron-account-index" };
+    return { "application/x-styx-account-index" };
 }
 
 QMimeData *AccountsModel::mimeData(const QModelIndexList &indexes) const
@@ -217,14 +217,14 @@ QMimeData *AccountsModel::mimeData(const QModelIndexList &indexes) const
             stream << index.row();
     }
 
-    mimeData->setData("application/x-acheron-account-index", encodedData);
+    mimeData->setData("application/x-styx-account-index", encodedData);
     return mimeData;
 }
 
 bool AccountsModel::dropMimeData(const QMimeData *data, Qt::DropAction action, int row, int column,
                                  const QModelIndex &parent)
 {
-    if (!data->hasFormat("application/x-acheron-account-index"))
+    if (!data->hasFormat("application/x-styx-account-index"))
         return false;
 
     if (action == Qt::IgnoreAction)
@@ -238,7 +238,7 @@ bool AccountsModel::dropMimeData(const QMimeData *data, Qt::DropAction action, i
             targetRow = rowCount();
     }
 
-    QByteArray encodedData = data->data("application/x-acheron-account-index");
+    QByteArray encodedData = data->data("application/x-styx-account-index");
     QDataStream stream(&encodedData, QIODevice::ReadOnly);
 
     int sourceRow;
@@ -270,4 +270,4 @@ bool AccountsModel::dropMimeData(const QMimeData *data, Qt::DropAction action, i
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

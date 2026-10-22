@@ -15,7 +15,7 @@ class QPushButton;
 class QStackedWidget;
 class QToolButton;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class UnsavedChangesBar;
@@ -76,4 +76,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

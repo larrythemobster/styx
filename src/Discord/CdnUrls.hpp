@@ -7,7 +7,7 @@
 #include "Core/Snowflake.hpp"
 #include "Discord/Enums.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Cdn {
 
@@ -168,4 +168,4 @@ bool hasExpired(const QUrl &url);
 
 } // namespace Cdn
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

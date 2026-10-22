@@ -12,7 +12,7 @@
 
 class QNetworkAccessManager;
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 class ClientIdentity;
@@ -58,4 +58,4 @@ void waitOnSocket(curl_socket_t sockfd, bool forWrite, long timeoutMs);
 
 } // namespace CurlUtils
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

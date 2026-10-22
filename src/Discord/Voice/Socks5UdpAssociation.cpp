@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -345,4 +345,4 @@ QByteArray Socks5UdpAssociation::decapsulate(const QByteArray &datagram)
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

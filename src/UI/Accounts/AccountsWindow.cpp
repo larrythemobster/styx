@@ -10,10 +10,10 @@
 #include "UI/Dialogs/DirectLoginDialog.hpp"
 #include "UI/Dialogs/QRLoginDialog.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
-using namespace Acheron::Core;
+using namespace Styx::Core;
 
 AccountsWindow::AccountsWindow(Session *session, AccountsModel *sharedModel, QWidget *parent)
     : QWidget(parent, Qt::Window), session(session)
@@ -91,7 +91,7 @@ void AccountsWindow::setupUi()
     detailStatus->setStyleSheet("font-weight: bold;");
 
     autoConnectCheck = new QCheckBox(tr("Connect on startup"), detailsContainer);
-    autoConnectCheck->setToolTip(tr("Connect this account automatically when Acheron starts"));
+    autoConnectCheck->setToolTip(tr("Connect this account automatically when Styx starts"));
 
     proxyEdit = new ProxyLineEdit(detailsContainer);
     proxyEdit->setToolTip(tr("Can only be changed while disconnected. Voice requires a SOCKS5 proxy."));
@@ -290,7 +290,7 @@ void AccountsWindow::onContextMenuRequested(const QPoint &pos)
 
     if (state == ConnectionState::Connected || state == ConnectionState::Connecting)
         actConnect->setEnabled(false);
-#ifndef ACHERON_MULTI_ACCOUNT
+#ifndef STYX_MULTI_ACCOUNT
     else if (session->hasActiveConnection())
         actConnect->setEnabled(false);
 #endif
@@ -409,7 +409,7 @@ void AccountsWindow::updateDetails(const AccountInfo *info)
     case ConnectionState::Disconnected:
         detailStatus->setText(tr("Disconnected"));
         detailStatus->setStyleSheet("color: red; font-weight: bold;");
-#ifdef ACHERON_MULTI_ACCOUNT
+#ifdef STYX_MULTI_ACCOUNT
         connectButton->setEnabled(true);
 #else
         connectButton->setEnabled(!session->hasActiveConnection());
@@ -459,4 +459,4 @@ void AccountsWindow::onRemoveClicked()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

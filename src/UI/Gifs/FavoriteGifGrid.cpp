@@ -16,7 +16,7 @@
 #include "UI/Chat/GifPlayback.hpp"
 #include "UI/Emoji/PaintedImages.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -355,4 +355,4 @@ void FavoriteGifGrid::hideEvent(QHideEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

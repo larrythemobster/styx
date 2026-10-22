@@ -20,7 +20,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ChatDelegate::ChatDelegate(Core::ImageManager *imageManager, ChatView *view)
@@ -1126,4 +1126,4 @@ QSize ChatDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelInd
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

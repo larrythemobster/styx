@@ -4,7 +4,7 @@
 
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 namespace {
@@ -35,7 +35,7 @@ bool DatabaseManager::init()
     if (!dir.exists())
         dir.mkpath(".");
 
-    persistentPath = dir.filePath("acheron.sqlite");
+    persistentPath = dir.filePath("styx.sqlite");
     persistentDb = QSqlDatabase::addDatabase("QSQLITE", PERSISTENT_CONN_NAME);
     persistentDb.setDatabaseName(persistentPath);
 
@@ -110,7 +110,7 @@ void DatabaseManager::closeCacheDatabase(Core::Snowflake accountId)
 
 QString DatabaseManager::getCacheConnectionName(Core::Snowflake accountId)
 {
-    return QString("Acheron_Cache_%1").arg(accountId.toString());
+    return QString("Styx_Cache_%1").arg(accountId.toString());
 }
 
 void DatabaseManager::setupPersistentTables()
@@ -330,4 +330,4 @@ void DatabaseManager::setupCacheTables(const QString &connName)
     query.exec("CREATE INDEX idx_channel_recipients_channel ON channel_recipients(channel_id);");
 }
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

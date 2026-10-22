@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <array>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Cdn {
 
@@ -283,4 +283,4 @@ QUrl connectionIcon(const QString &type)
 
 } // namespace Cdn
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

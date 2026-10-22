@@ -8,7 +8,7 @@
 #include "Discord/CdnUrls.hpp"
 #include "UI/Chat/FrameAnimator.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -84,4 +84,4 @@ void EmojiTextObject::drawObject(QPainter *painter, const QRectF &rect, QTextDoc
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

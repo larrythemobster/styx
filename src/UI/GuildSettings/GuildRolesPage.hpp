@@ -27,7 +27,7 @@ class QTimer;
 class QToolButton;
 class QTreeWidget;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class UnsavedChangesBar;
@@ -221,4 +221,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

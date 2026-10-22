@@ -7,7 +7,7 @@
 #include "Core/Snowflake.hpp"
 #include "Core/TypingTracker.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class TypingIndicator : public QWidget
@@ -30,4 +30,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

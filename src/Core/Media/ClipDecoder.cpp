@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <optional>
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -19,9 +19,9 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -112,7 +112,7 @@ private:
     qint64 elapsedMs = 0;
 };
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 constexpr int SwscaleOverrunBytes = 64;
 constexpr qint64 UnknownLastFrameMs = 100;
@@ -344,14 +344,14 @@ std::unique_ptr<ClipDecoder> openWithFfmpeg(const QString &path, Container conta
     return nullptr;
 }
 
-#else // ACHERON_HAVE_FFMPEG
+#else // STYX_HAVE_FFMPEG
 
 std::unique_ptr<ClipDecoder> openWithFfmpeg(const QString &, Container)
 {
     return nullptr;
 }
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG
 
 } // namespace
 
@@ -367,4 +367,4 @@ std::unique_ptr<ClipDecoder> ClipDecoder::open(const QString &path)
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

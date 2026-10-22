@@ -2,7 +2,7 @@
 #include "VoiceEnums.hpp"
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -346,4 +346,4 @@ void DaveSession::applyKeyRatchetForSsrc(quint32 ssrc, uint64_t uid)
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

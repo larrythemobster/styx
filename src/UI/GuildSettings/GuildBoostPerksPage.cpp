@@ -14,7 +14,7 @@
 #include "ImageUpload.hpp"
 #include "UnsavedChangesBar.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -303,4 +303,4 @@ void GuildBoostPerksPage::save()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

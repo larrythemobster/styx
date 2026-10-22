@@ -7,7 +7,7 @@
 #include "Core/Theme/Icons.hpp"
 #include "UI/StatusIndicator.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ChannelDelegate::ChannelDelegate(QAbstractProxyModel *proxyModel, QObject *parent)
@@ -647,4 +647,4 @@ QSize ChannelDelegate::sizeHint(const QStyleOptionViewItem &option, const QModel
     return QSize(sz.width(), 24);
 }
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -10,7 +10,7 @@
 #include "Core/AccountInfo.hpp"
 #include "Discord/ClientIdentity.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 class AccountRepository
@@ -31,4 +31,4 @@ public:
 };
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

@@ -7,7 +7,7 @@
 
 #include "Objects.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 struct ClientPropertiesBuildParams
@@ -61,4 +61,4 @@ private:
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

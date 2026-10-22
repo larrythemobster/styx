@@ -13,7 +13,7 @@
 #include "UI/Chat/ChatLayout.hpp"
 #include "UI/Chat/VideoControls.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ChatModel;
@@ -51,4 +51,4 @@ MediaTarget forRegion(const ChatLayout::ResolvedLayout &resolved, const ChatLayo
 } // namespace MediaTargets
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

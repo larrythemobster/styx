@@ -35,7 +35,7 @@
 #include "Discord/Client.hpp"
 #include "UI/Chat/MessageTextBrowser.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -1120,4 +1120,4 @@ bool UserProfilePopup::isBot() const
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

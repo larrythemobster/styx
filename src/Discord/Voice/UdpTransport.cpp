@@ -5,7 +5,7 @@
 #include <QDataStream>
 #include <QtEndian>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -198,4 +198,4 @@ void UdpTransport::parseIpDiscoveryResponse(const QByteArray &data)
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

@@ -10,7 +10,7 @@
 #include "Core/Snowflake.hpp"
 #include "VoiceEnums.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -259,4 +259,4 @@ struct VoiceResumeData : Core::JsonUtils::JsonObject
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

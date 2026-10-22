@@ -13,7 +13,7 @@
 #include "Core/Theme/Icons.hpp"
 #include "UnsavedChangesBar.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using Discord::SystemChannelFlag;
@@ -358,4 +358,4 @@ void GuildEngagementPage::save()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

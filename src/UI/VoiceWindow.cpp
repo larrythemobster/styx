@@ -1,7 +1,7 @@
 #include "VoiceWindow.hpp"
 
 #include "Core/Audio/VoiceManager.hpp"
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 #include "Core/Stream/StreamManager.hpp"
 #endif
 #include "Core/ImageManager.hpp"
@@ -26,7 +26,7 @@
 #include <QLinearGradient>
 #include <QFrame>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 VolumeMeter::VolumeMeter(QWidget *parent) : QWidget(parent)
@@ -533,7 +533,7 @@ void VoiceWindow::buildAdvancedSection(QVBoxLayout *parentLayout)
     advLayout->addRow(tr("Packet Loss"),
                       makeSliderRow(packetLossSlider, packetLossValue, 0, 100, 36));
 
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     noiseSuppressionCheckbox = new QCheckBox(tr("Noise Suppression"), advancedContainer);
     advLayout->addRow(QString(), noiseSuppressionCheckbox);
 
@@ -549,7 +549,7 @@ void VoiceWindow::buildAdvancedSection(QVBoxLayout *parentLayout)
     installResetOnDoubleClick(signalTypeCombo, OPUS_SIGNAL_VOICE);
     installResetOnDoubleClick(fecCheckbox, true);
     installResetOnDoubleClick(packetLossSlider, 0);
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     installResetOnDoubleClick(noiseSuppressionCheckbox, true);
     installResetOnDoubleClick(rnnoiseVadCheckbox, true);
 #endif
@@ -602,7 +602,7 @@ void VoiceWindow::buildAdvancedSection(QVBoxLayout *parentLayout)
             voiceManager->setOpusPacketLossPercent(value);
     });
 
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     connect(noiseSuppressionCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
         QSettings().setValue("voice/noise_suppression", checked);
         if (voiceManager)
@@ -641,7 +641,7 @@ void VoiceWindow::loadCodecSettings()
     packetLossSlider->setValue(packetLoss);
     packetLossValue->setText(QString("%1%").arg(packetLoss));
 
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     noiseSuppressionCheckbox->setChecked(settings.value("voice/noise_suppression", true).toBool());
     rnnoiseVadCheckbox->setChecked(settings.value("voice/rnnoise_vad", true).toBool());
 #endif
@@ -657,7 +657,7 @@ void VoiceWindow::applyCodecSettingsToManager()
     voiceManager->setOpusSignalType(signalTypeCombo->currentData().toInt());
     voiceManager->setOpusFec(fecCheckbox->isChecked());
     voiceManager->setOpusPacketLossPercent(packetLossSlider->value());
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     voiceManager->setNoiseSuppressionEnabled(noiseSuppressionCheckbox->isChecked());
     voiceManager->setUseRnnoiseVad(rnnoiseVadCheckbox->isChecked());
 #endif
@@ -696,7 +696,7 @@ void VoiceWindow::installResetOnDoubleClick(QWidget *widget, const QVariant &def
     widget->setToolTip(tr("Double-click to reset to default"));
 }
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 void VoiceWindow::setStreamManager(Core::Stream::StreamManager *manager)
 {
     streamManager = manager;
@@ -896,7 +896,7 @@ void VoiceWindow::onParticipantJoined(Core::Snowflake userId)
     });
 
     connect(widget, &VoiceUserWidget::watchRequested, this, [this](Core::Snowflake uid) {
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
         if (streamManager)
             streamManager->watchStream(uid);
 #else
@@ -1090,4 +1090,4 @@ void VoiceWindow::requestAvatar(Core::Snowflake userId, VoiceUserWidget *widget)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

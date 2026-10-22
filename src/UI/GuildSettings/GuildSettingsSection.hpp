@@ -9,7 +9,7 @@
 
 class QMenu;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 }
@@ -61,4 +61,4 @@ inline size_t qHash(GuildSettingsSection key, size_t seed = 0) noexcept
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

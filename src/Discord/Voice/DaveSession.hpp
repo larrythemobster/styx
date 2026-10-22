@@ -18,7 +18,7 @@ namespace mlspp {
 struct SignaturePrivateKey;
 }
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -99,4 +99,4 @@ private:
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

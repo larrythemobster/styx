@@ -9,7 +9,7 @@
 
 class QToolButton;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 class ImageManager;
@@ -53,10 +53,10 @@ public:
     [[nodiscard]] QRect reactionPickerButtonGlobalRect() const;
 
 signals:
-    void triggered(Acheron::UI::MessageActionBar::Action action);
+    void triggered(Styx::UI::MessageActionBar::Action action);
     void moreRequested(const QPoint &buttonTopLeft);
     void shiftHeldChanged(bool held);
-    void quickReactionTriggered(const Acheron::Core::PickerEmoji &emoji, bool reacted);
+    void quickReactionTriggered(const Styx::Core::PickerEmoji &emoji, bool reacted);
     void reactionPickerRequested();
 
 protected:
@@ -84,4 +84,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

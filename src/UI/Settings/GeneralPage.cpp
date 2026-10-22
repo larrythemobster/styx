@@ -13,7 +13,7 @@
 #include "Core/MiBRange.hpp"
 #include "UI/Chat/GifPlayback.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static QSpinBox *addMemoryLimit(QVBoxLayout *layout, QWidget *parent, const QString &title, const QString &explanation,
@@ -70,7 +70,7 @@ GeneralPage::GeneralPage(QWidget *parent)
     auto *gifRow = new QHBoxLayout();
     gifRow->addWidget(new QLabel(tr("GIFs"), this));
     auto *gifPlayModeCombo = new QComboBox(this);
-    gifPlayModeCombo->addItem(tr("Play when Acheron is focused"), "focused");
+    gifPlayModeCombo->addItem(tr("Play when Styx is focused"), "focused");
     gifPlayModeCombo->addItem(tr("Play on hover"), "hover");
     gifPlayModeCombo->addItem(tr("Never play"), "never");
     gifPlayModeCombo->setCurrentIndex(qMax(0, gifPlayModeCombo->findData(QSettings().value("chat/gif_playback", "focused").toString())));
@@ -105,9 +105,9 @@ GeneralPage::GeneralPage(QWidget *parent)
     QSpinBox *cacheLimit = addMemoryLimit(
             layout, this, tr("Memory for animations"),
             tr("Animated emoji and stickers are unpacked into memory so they can play smoothly. This is the most "
-               "memory Acheron will use for that. Once it is full, the animations you have not seen for the longest "
+               "memory Styx will use for that. Once it is full, the animations you have not seen for the longest "
                "are dropped, and they take a moment to start moving again the next time they show up. Raise this if "
-               "that happens a lot in busy channels, or lower it if Acheron is using more memory than you would like."),
+               "that happens a lot in busy channels, or lower it if Styx is using more memory than you would like."),
             "chat/animation_cache_mb", AnimatedImageCache::CacheLimit);
     connect(cacheLimit, qOverload<int>(&QSpinBox::valueChanged), this, &GeneralPage::animationCacheLimitChanged);
 
@@ -153,4 +153,4 @@ GeneralPage::GeneralPage(QWidget *parent)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

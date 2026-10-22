@@ -14,7 +14,7 @@
 #include "UI/Chat/MediaTarget.hpp"
 #include "UI/Chat/VideoControls.hpp"
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 namespace Media {
@@ -110,4 +110,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

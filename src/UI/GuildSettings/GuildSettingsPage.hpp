@@ -13,7 +13,7 @@
 class QLabel;
 class QToolButton;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 class ImageManager;
@@ -64,4 +64,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

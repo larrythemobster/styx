@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include <QString>
 
@@ -10,7 +10,7 @@ extern "C" {
 #include <libavformat/avio.h>
 }
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -25,6 +25,6 @@ void destroy(AVIOContext *context);
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG

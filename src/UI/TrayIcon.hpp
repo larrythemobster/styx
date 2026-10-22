@@ -3,7 +3,7 @@
 #include <QMenu>
 #include <QSystemTrayIcon>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class TrayIcon : public QObject
@@ -24,4 +24,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

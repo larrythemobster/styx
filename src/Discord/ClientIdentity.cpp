@@ -5,7 +5,7 @@
 #include <QMutexLocker>
 #include <QUuid>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 namespace {
@@ -148,4 +148,4 @@ ClientProperties ClientIdentity::buildClientProperties(
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

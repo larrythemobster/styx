@@ -7,7 +7,7 @@
 
 #include "Core/ImageManager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 template <typename Target>
@@ -53,4 +53,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

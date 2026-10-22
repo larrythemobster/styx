@@ -10,7 +10,7 @@
 
 #include <QTest>
 
-using namespace Acheron::Proto;
+using namespace Styx::Proto;
 
 class TestProto : public QObject
 {

@@ -11,7 +11,7 @@ class QLineEdit;
 class QStackedWidget;
 class QToolButton;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 class AnimatedImageCache;
@@ -42,9 +42,9 @@ public:
     void openForChat(Core::EmojiManager *emojiManager, Core::FavoriteGifs *favoriteGifs, Core::Snowflake accountId, Core::Snowflake channelId, Tab tab, const QRect &globalAnchor);
 
 signals:
-    void emojiPicked(const Acheron::Core::PickerEmoji &emoji, bool pickerStaysOpen);
+    void emojiPicked(const Styx::Core::PickerEmoji &emoji, bool pickerStaysOpen);
     void gifPicked(const QString &url);
-    void chatTabShown(Acheron::UI::ExpressionPicker::Tab tab);
+    void chatTabShown(Styx::UI::ExpressionPicker::Tab tab);
     void closed();
 
 protected:
@@ -72,4 +72,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

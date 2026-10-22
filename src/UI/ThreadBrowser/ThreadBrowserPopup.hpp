@@ -12,7 +12,7 @@ class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 }
@@ -51,4 +51,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

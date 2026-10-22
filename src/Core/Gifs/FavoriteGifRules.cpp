@@ -7,7 +7,7 @@
 
 #include "Discord/CdnUrls.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace FavoriteGifRules {
 
@@ -181,4 +181,4 @@ QUrl stillServedByDiscord(const Proto::FavoriteGif &gif)
 
 } // namespace FavoriteGifRules
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

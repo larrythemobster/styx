@@ -14,7 +14,7 @@
 #include "Logging.hpp"
 #include "LottieDecoder.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -283,4 +283,4 @@ void AnimatedImageCache::publish(const ImageRequestKey &key, const Decoded &deco
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -8,7 +8,7 @@
 #include "Logging.hpp"
 #include "TokenStore.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 Session::Session(QObject *parent) : QObject(parent)
@@ -161,4 +161,4 @@ bool Session::hasActiveConnection() const
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

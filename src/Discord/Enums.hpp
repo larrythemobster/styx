@@ -7,7 +7,7 @@
 
 #include "qt_flags.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 constexpr uint32_t BLURPLE = 0x5865F2;
@@ -108,7 +108,7 @@ enum class Capability : quint32 {
     UNK19 = 1 << 19,
     UNK20 = 1 << 20,
 };
-ACHERON_DECLARE_FLAGS(Capabilities, Capability)
+STYX_DECLARE_FLAGS(Capabilities, Capability)
 
 // clang-format off
 constexpr static auto CURRENT_CAPABILITIES = Capability::LAZY_USER_NOTES |
@@ -310,7 +310,7 @@ enum class ActivityFlag {
     EMBEDDED = 1 << 8,
     CONTEXTLESS = 1 << 9,
 };
-ACHERON_DECLARE_FLAGS(ActivityFlags, ActivityFlag)
+STYX_DECLARE_FLAGS(ActivityFlags, ActivityFlag)
 
 enum class ChannelType {
     GUILD_TEXT = 0,
@@ -367,7 +367,7 @@ enum class ChannelFlag {
     IS_GAME_INVITES_CHANNEL = 1 << 22,
     HAS_ONLY_SYSTEM_MESSAGES = 1 << 23,
 };
-ACHERON_DECLARE_FLAGS(ChannelFlags, ChannelFlag)
+STYX_DECLARE_FLAGS(ChannelFlags, ChannelFlag)
 
 // /users/@me/settings-proto/{type}
 enum class UserSettingsProtoType {
@@ -508,7 +508,7 @@ enum class SystemChannelFlag {
     SUPPRESS_ROLE_SUBSCRIPTION_PURCHASE_NOTIFICATION_REPLIES = 1 << 5,
     SUPPRESS_CHANNEL_PROMPT_DEADCHAT = 1 << 7,
 };
-ACHERON_DECLARE_FLAGS(SystemChannelFlags, SystemChannelFlag)
+STYX_DECLARE_FLAGS(SystemChannelFlags, SystemChannelFlag)
 
 enum class MessageType {
     DEFAULT = 0,
@@ -607,7 +607,7 @@ enum class MessageFlag {
     IS_COMPONENTS_V2 = 1 << 15,
     SENT_BY_SOCIAL_LAYER_INTEGRATION = 1 << 16,
 };
-ACHERON_DECLARE_FLAGS(MessageFlags, MessageFlag)
+STYX_DECLARE_FLAGS(MessageFlags, MessageFlag)
 
 enum class Permission : quint64 {
     CREATE_INSTANT_INVITE = 1ULL << 0,
@@ -664,7 +664,7 @@ enum class Permission : quint64 {
     PIN_MESSAGES = 1ULL << 51,
     BYPASS_SLOWMODE = 1ULL << 52,
 };
-ACHERON_DECLARE_FLAGS(Permissions, Permission)
+STYX_DECLARE_FLAGS(Permissions, Permission)
 
 constexpr Permissions ALL_PERMISSIONS = Permissions::fromInt(0xFFFFFFFFFFFFFFFFULL);
 constexpr Permissions NO_PERMISSIONS = Permissions::fromInt(0ULL);
@@ -684,7 +684,7 @@ enum class ReadStateFlag {
     IS_THREAD = 1 << 1,
     IS_MENTION_LOW_IMPORTANCE = 1 << 2,
 };
-ACHERON_DECLARE_FLAGS(ReadStateFlags, ReadStateFlag)
+STYX_DECLARE_FLAGS(ReadStateFlags, ReadStateFlag)
 
 enum class NotificationSettingsFlag {
     USE_NEW_NOTIFICATIONS = 1 << 4,
@@ -717,14 +717,14 @@ enum class AttachmentFlag {
     CONTAINS_GORE_CONTENT = 1 << 6,
     CONTAINS_SELF_HARM_CONTENT = 1 << 7,
 };
-ACHERON_DECLARE_FLAGS(AttachmentFlags, AttachmentFlag)
+STYX_DECLARE_FLAGS(AttachmentFlags, AttachmentFlag)
 
 enum class VoiceFlag {
     CLIPS_ENABLED = 1 << 0,
     ALLOW_VOICE_RECORDINGS = 1 << 1,
     ALLOW_ANY_VIEWER_CLIPS = 1 << 2,
 };
-ACHERON_DECLARE_FLAGS(VoiceFlags, VoiceFlag)
+STYX_DECLARE_FLAGS(VoiceFlags, VoiceFlag)
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

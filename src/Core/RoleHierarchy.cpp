@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 RoleHierarchy::RoleHierarchy(Snowflake guildId, Snowflake ownerId, Snowflake selfId, const QList<Discord::Role> &roles,
@@ -67,4 +67,4 @@ bool RoleHierarchy::outranksMember(Snowflake userId, const QList<Snowflake> &rol
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -12,7 +12,7 @@
 #include "ForumPostDelegate.hpp"
 #include "ForumPostModel.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ForumBrowser::ForumBrowser(QWidget *parent) : QWidget(parent)
@@ -82,4 +82,4 @@ void ForumBrowser::setSortMode(int mode)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

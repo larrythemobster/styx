@@ -22,7 +22,7 @@
 #include "ImageUpload.hpp"
 #include "UnsavedChangesBar.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -500,4 +500,4 @@ void GuildProfilePage::onGuildUpdated(const Discord::Guild &guild)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

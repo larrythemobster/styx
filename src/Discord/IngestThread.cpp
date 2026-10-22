@@ -8,7 +8,7 @@
 
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 IngestThread::IngestThread(QObject *parent)
@@ -150,4 +150,4 @@ void IngestThread::threadLoop()
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

@@ -9,13 +9,13 @@
 
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 class DatabaseManager
 {
 public:
-    static constexpr char const *PERSISTENT_CONN_NAME = "Acheron_Persistent";
-    static constexpr char const *CACHE_CONN_NAME = "Acheron_Cache";
+    static constexpr char const *PERSISTENT_CONN_NAME = "Styx_Persistent";
+    static constexpr char const *CACHE_CONN_NAME = "Styx_Cache";
 
     static DatabaseManager &instance();
 
@@ -34,4 +34,4 @@ private:
     QString persistentPath;
 };
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

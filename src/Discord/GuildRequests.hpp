@@ -8,7 +8,7 @@
 
 #include "Entities.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 struct GuildEdit : Core::JsonUtils::JsonObject
@@ -226,4 +226,4 @@ struct MemberSearchQuery
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

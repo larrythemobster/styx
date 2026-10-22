@@ -6,7 +6,7 @@
 
 #include <memory>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Apng {
 
@@ -32,4 +32,4 @@ private:
 
 } // namespace Apng
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

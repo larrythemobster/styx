@@ -11,7 +11,7 @@
 class QAbstractButton;
 class QAbstractItemView;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class MentionJumpIndicator : public QObject
@@ -55,4 +55,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

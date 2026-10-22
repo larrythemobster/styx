@@ -5,7 +5,7 @@
 class QCheckBox;
 class QComboBox;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class GeneralPage : public QWidget
@@ -30,4 +30,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

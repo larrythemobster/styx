@@ -14,7 +14,7 @@
 #include "UI/ChannelList/ChannelNode.hpp"
 #include "UI/ChannelList/ChannelTreeModel.hpp"
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 #include "Core/Stream/StreamManager.hpp"
 #include "UI/Stream/SourcePickerDialog.hpp"
 #include <QMessageBox>
@@ -24,7 +24,7 @@
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Event.h>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -72,7 +72,7 @@ UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root, QOb
                 } else if (action == QLatin1String("open-call")) {
                     this->shell.setCallOpen(true);
                 } else if (action == QLatin1String("toggle-share")) {
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
                     this->onShareClicked();
 #endif
                 }
@@ -120,7 +120,7 @@ void UserPanelController::connectInstanceVoice(Core::ClientInstance *instance)
         connect(pres, &Core::PresenceManager::presencesChanged, this, [this]() { rebuildTimer.start(); });
     }
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     if (auto *vm = instance->voice()) {
         connect(vm, &Core::Audio::VoiceManager::voiceConnected, this, [this]() { rebuildTimer.start(); });
         connect(vm, &Core::Audio::VoiceManager::voiceDisconnected, this, [this]() { rebuildTimer.start(); });
@@ -128,7 +128,7 @@ void UserPanelController::connectInstanceVoice(Core::ClientInstance *instance)
     }
 #endif
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     if (auto *sm = instance->streams()) {
         connect(sm, &Core::Stream::StreamManager::streamingChanged, this, [this]() { rebuildTimer.start(); });
     }
@@ -152,7 +152,7 @@ void UserPanelController::renderVoicePanel()
     Snowflake currentChannelId;
     Snowflake currentGuildId;
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     auto *inst = shell.currentInstance();
     if (inst) {
         if (auto *vm = inst->voice()) {
@@ -215,7 +215,7 @@ void UserPanelController::renderVoicePanel()
     rml += QStringLiteral("<div class=\"voice-channel-link\" data-action=\"open-call\" title=\"Open Call\">%1</div>")
                .arg(Rml::escape(channelLabel));
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     if (auto *inst = shell.currentInstance()) {
         auto *sm = inst->streams();
         const bool isStreaming = sm && sm->isStreaming();
@@ -291,7 +291,7 @@ void UserPanelController::renderUserPanel()
     // Mute and deaf state (from Shell and VoiceManager)
     bool isMuted = shell.isSelfMute();
     bool isDeafened = shell.isSelfDeaf();
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     if (auto *vm = inst->voice()) {
         auto vs = vm->voiceStateForUser(accountId);
         if (vs.has_value()) {
@@ -343,7 +343,7 @@ void UserPanelController::renderUserPanel()
     userPanel->SetInnerRML(rml.toUtf8().constData());
 }
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 void UserPanelController::onShareClicked()
 {
     auto *inst = shell.currentInstance();
@@ -376,4 +376,4 @@ void UserPanelController::onShareClicked()
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

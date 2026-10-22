@@ -6,7 +6,7 @@
 
 #include <memory>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Lottie {
 
@@ -34,4 +34,4 @@ private:
 
 } // namespace Lottie
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

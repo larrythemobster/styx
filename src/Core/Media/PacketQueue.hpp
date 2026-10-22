@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include <QtGlobal>
 
@@ -11,7 +11,7 @@ extern "C" {
 #include <libavcodec/packet.h>
 }
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -73,6 +73,6 @@ private:
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG

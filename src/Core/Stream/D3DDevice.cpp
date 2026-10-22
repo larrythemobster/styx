@@ -6,7 +6,7 @@
 
 #include <d3d10.h>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -33,6 +33,6 @@ std::shared_ptr<D3DDevice> D3DDevice::create()
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
 #endif

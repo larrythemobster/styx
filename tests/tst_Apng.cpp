@@ -9,7 +9,7 @@
 #include <QTest>
 #include <QtEndian>
 
-using namespace Acheron::Core;
+using namespace Styx::Core;
 
 namespace {
 

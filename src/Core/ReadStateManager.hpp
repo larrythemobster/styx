@@ -10,7 +10,7 @@
 #include "Discord/Entities.hpp"
 #include "Discord/Events.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class PermissionManager;
@@ -136,4 +136,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

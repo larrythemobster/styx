@@ -5,7 +5,7 @@
 #include <QDialogButtonBox>
 #include <QPushButton>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ConfirmPopup::ConfirmPopup(const QString &title, const QString &text, const QString &yesLabel,
@@ -51,4 +51,4 @@ ConfirmPopup::ConfirmPopup(const QString &title, const QString &text, const QStr
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

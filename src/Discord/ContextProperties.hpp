@@ -6,7 +6,7 @@
 
 #include "Core/OrderedJson.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 class ContextProperties
@@ -24,4 +24,4 @@ private:
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

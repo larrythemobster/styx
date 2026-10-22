@@ -1,6 +1,6 @@
 #include "TokenInputDialog.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 TokenInputDialog::TokenInputDialog(const QString &title, const QString &prompt, QWidget *parent, ProxyField proxyField)
@@ -49,4 +49,4 @@ QString TokenInputDialog::getToken() const
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

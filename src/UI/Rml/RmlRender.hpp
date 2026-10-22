@@ -7,7 +7,7 @@
 
 #include <vector>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -31,4 +31,4 @@ private:
 };
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

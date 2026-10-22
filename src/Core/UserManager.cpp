@@ -4,7 +4,7 @@
 #include "RelationshipManager.hpp"
 #include "Discord/CdnUrls.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 UserManager::UserManager(Snowflake accountId, QObject *parent)
@@ -188,4 +188,4 @@ std::optional<QString> UserManager::getCachedNote(Snowflake userId) const
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

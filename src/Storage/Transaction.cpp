@@ -5,7 +5,7 @@
 #include <QSet>
 #include <QSqlError>
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 namespace {
@@ -54,4 +54,4 @@ bool Transaction::commit()
 }
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

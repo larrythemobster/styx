@@ -3,7 +3,7 @@
 #include "BasePopup.hpp"
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ImageManager;
 }
@@ -20,4 +20,4 @@ signals:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

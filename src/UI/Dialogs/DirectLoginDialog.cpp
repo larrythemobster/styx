@@ -14,7 +14,7 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static QLabel *makeStatusLabel(QWidget *parent)
@@ -338,4 +338,4 @@ void DirectLoginDialog::setBusy(bool busy)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

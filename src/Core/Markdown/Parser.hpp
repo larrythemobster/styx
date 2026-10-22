@@ -6,7 +6,7 @@
 
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Markdown {
 
@@ -103,4 +103,4 @@ private:
 
 } // namespace Markdown
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace ActivityFormat {
 
@@ -283,4 +283,4 @@ double progress(const TimerInfo &info, qint64 nowMs)
 
 } // namespace ActivityFormat
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

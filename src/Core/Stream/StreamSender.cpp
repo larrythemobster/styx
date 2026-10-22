@@ -12,7 +12,7 @@
 
 #include <cstring>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -313,4 +313,4 @@ void StreamSender::onAudioSamples(const int16_t *samples, int frames)
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

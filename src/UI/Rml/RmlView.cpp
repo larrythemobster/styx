@@ -14,7 +14,7 @@
 #include <QSurfaceFormat>
 #include <QWheelEvent>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -365,4 +365,4 @@ bool View::event(QEvent *event)
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

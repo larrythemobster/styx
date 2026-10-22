@@ -1,6 +1,6 @@
 #include "JitterBuffer.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -98,4 +98,4 @@ void JitterBuffer::reset()
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

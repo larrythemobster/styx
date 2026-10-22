@@ -6,7 +6,7 @@
 
 #include "qt_flags.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -77,7 +77,7 @@ enum class SpeakingFlag {
     SOUNDSHARE = 1 << 1,
     PRIORITY = 1 << 2,
 };
-ACHERON_DECLARE_FLAGS(SpeakingFlags, SpeakingFlag)
+STYX_DECLARE_FLAGS(SpeakingFlags, SpeakingFlag)
 
 enum class EncryptionMode {
     AEAD_AES256_GCM_RTPSIZE,
@@ -110,4 +110,4 @@ static constexpr int VOICE_GATEWAY_VERSION = 9;
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

@@ -7,7 +7,7 @@
 
 struct ma_device;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -64,4 +64,4 @@ private:
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

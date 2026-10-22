@@ -8,7 +8,7 @@
 #include "Discord/Client.hpp"
 #include "Proto/ProtoReader.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -169,4 +169,4 @@ void FavoriteGifs::reloadFromServer()
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

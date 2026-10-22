@@ -9,7 +9,7 @@
 
 class QPainter;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class PaintedImages;
@@ -22,4 +22,4 @@ void drawCentered(QPainter &painter, const QRect &box, const QPixmap &pixmap);
 bool drawEmojiStill(QPainter &painter, const QRect &squareBox, const Core::PickerEmoji &emoji, PaintedImages &images, const QRect &repaintRect);
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -9,7 +9,7 @@
 
 class QPainter;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace StatusIndicator {
@@ -43,4 +43,4 @@ private:
 StatusDot *attachStatusDot(QWidget *parent, const QRect &avatarRect, int dotSize);
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

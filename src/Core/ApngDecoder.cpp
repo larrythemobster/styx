@@ -1,6 +1,6 @@
 #include "ApngDecoder.hpp"
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include <algorithm>
 #include <cstring>
@@ -15,11 +15,11 @@ extern "C" {
 
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Apng {
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 namespace {
 
@@ -286,4 +286,4 @@ Reader::~Reader() = default;
 
 } // namespace Apng
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

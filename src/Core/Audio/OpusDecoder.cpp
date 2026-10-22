@@ -3,7 +3,7 @@
 
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -104,4 +104,4 @@ QVector<QByteArray> OpusDecoder::splitFrames(const QByteArray &pcm, int totalSam
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

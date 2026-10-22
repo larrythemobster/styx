@@ -10,7 +10,7 @@
 
 #include "Core/ProxyConfig.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -76,7 +76,7 @@ signals:
     void frameReady();
     void positionChanged(qint64 positionMs);
     void durationChanged(qint64 durationMs);
-    void stateChanged(Acheron::Core::Media::Player::State state);
+    void stateChanged(Styx::Core::Media::Player::State state);
     void errorOccurred(const QString &message);
 
 private:
@@ -86,4 +86,4 @@ private:
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

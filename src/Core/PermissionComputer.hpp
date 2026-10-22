@@ -6,7 +6,7 @@
 #include "Discord/Enums.hpp"
 #include "Discord/Entities.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class PermissionComputer
@@ -33,4 +33,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

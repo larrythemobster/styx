@@ -8,7 +8,7 @@
 #include <QOpenGLFunctions>
 #include <QTest>
 
-using namespace Acheron::UI::Rml;
+using namespace Styx::UI::Rml;
 
 class TestRmlRender : public QObject
 {

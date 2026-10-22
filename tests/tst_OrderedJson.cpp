@@ -13,7 +13,7 @@
 
 #include <cmath>
 
-using namespace Acheron;
+using namespace Styx;
 using Core::OrderedJson;
 
 class TestOrderedJson : public QObject

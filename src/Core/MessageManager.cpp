@@ -17,7 +17,7 @@
 #include "Logging.hpp"
 #include "UserManager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 static QString resolveUserJoinMessage(const Discord::Message &msg, const QString &author)
@@ -1006,4 +1006,4 @@ void MessageManager::onApiMessagesReceived(const QList<Discord::Message> &messag
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -6,7 +6,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 // `<:name:id>` / `<a:name:id>`.
@@ -62,4 +62,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

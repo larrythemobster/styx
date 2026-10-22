@@ -6,7 +6,7 @@
 #include <QPainter>
 #include <QScrollBar>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -158,4 +158,4 @@ QModelIndex MentionJumpIndicator::farthestMentionFrom(QModelIndex row, const Row
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

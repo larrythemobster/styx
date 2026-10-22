@@ -19,7 +19,7 @@
 #include "Core/Theme/Icons.hpp"
 #include "Core/Theme/Manager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -438,4 +438,4 @@ void GuildAuditLogPage::onImageFetched(const QUrl &url, const QSize &size, const
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

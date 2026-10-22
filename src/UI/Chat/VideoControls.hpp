@@ -6,7 +6,7 @@
 
 class QPainter;
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 namespace Media {
@@ -135,4 +135,4 @@ QRect fitRect(const QSize &content, const QRect &bounds);
 
 } // namespace VideoControls
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

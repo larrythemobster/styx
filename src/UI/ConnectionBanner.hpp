@@ -5,7 +5,7 @@
 #include <QTimer>
 #include <QPalette>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ConnectionBanner : public QWidget
@@ -31,4 +31,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

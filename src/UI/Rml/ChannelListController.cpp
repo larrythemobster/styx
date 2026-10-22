@@ -20,7 +20,7 @@
 
 #include <QSettings>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -207,7 +207,7 @@ void ChannelListController::connectInstanceVoice(Core::ClientInstance *instance)
         return;
     if (lastInstance) {
         disconnect(lastInstance->presences(), nullptr, this, nullptr);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
         if (auto *voice = lastInstance->voice())
             disconnect(voice, nullptr, this, nullptr);
 #endif
@@ -225,7 +225,7 @@ void ChannelListController::connectInstanceVoice(Core::ClientInstance *instance)
             rebuildTimer.start();
     });
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     if (auto *vm = instance->voice()) {
         connect(vm, &Core::Audio::VoiceManager::channelVoiceMemberChanged, this, [this]() { rebuildTimer.start(); });
         connect(vm, &Core::Audio::VoiceManager::participantSpeakingChanged, this, [this]() { rebuildTimer.start(); });
@@ -593,7 +593,7 @@ void ChannelListController::renderChannelNode(const QModelIndex &proxyIndex, QSt
         bool isMuted = proxyIndex.data(ChannelTreeModel::IsVoiceMutedRole).toBool();
         bool isDeafened = proxyIndex.data(ChannelTreeModel::IsVoiceDeafenedRole).toBool();
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
         if (auto *inst = shell.currentInstance()) {
             if (auto *vm = inst->voice()) {
                 if (const auto *p = vm->participant(userId)) {
@@ -641,4 +641,4 @@ void ChannelListController::renderChannelNode(const QModelIndex &proxyIndex, QSt
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

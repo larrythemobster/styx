@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 [[nodiscard]] inline int normalizedFrameDelayMs(int delayMs)
@@ -13,4 +13,4 @@ namespace Core {
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

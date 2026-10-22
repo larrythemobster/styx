@@ -8,7 +8,7 @@
 
 class QPainter;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace GifPainting {
 
@@ -20,4 +20,4 @@ void drawStar(QPainter *painter, const QRect &mediaRect, GifStar star);
 
 } // namespace GifPainting
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -23,7 +23,7 @@
 #include "UI/Chat/ChatLayout.hpp"
 #include "UI/Dialogs/BasePopup.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -377,4 +377,4 @@ void AttachmentPreviewPanel::updateVisibility()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -18,7 +18,7 @@
 #include "Core/ClientInstance.hpp"
 #include "Core/ImageManager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -349,4 +349,4 @@ void GuildBansPage::showContextMenu(const QPoint &pos)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

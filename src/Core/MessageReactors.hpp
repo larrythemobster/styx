@@ -11,7 +11,7 @@
 #include "Result.hpp"
 #include "Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 
 namespace Discord {
 class Client;
@@ -89,4 +89,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

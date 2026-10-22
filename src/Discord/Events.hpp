@@ -7,7 +7,7 @@
 #include "Core/Snowflake.hpp"
 #include "Entities.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 struct MergedPresences : Core::JsonUtils::JsonObject
@@ -867,4 +867,4 @@ struct UserNoteUpdate : Core::JsonUtils::JsonObject
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

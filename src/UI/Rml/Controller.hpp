@@ -13,7 +13,7 @@ class Element;
 class Event;
 } // namespace Rml
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class Shell;
@@ -67,4 +67,4 @@ private:
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

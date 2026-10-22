@@ -6,7 +6,7 @@
 #include <limits>
 #include <utility>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -298,4 +298,4 @@ void ClipPlayer::presentDueFrames()
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

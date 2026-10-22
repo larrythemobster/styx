@@ -16,7 +16,7 @@
 #include <QVBoxLayout>
 #include <QtConcurrent>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -174,4 +174,4 @@ bool SourcePickerDialog::includeAudio() const
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

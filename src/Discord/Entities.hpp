@@ -17,7 +17,7 @@
 #include "Core/JsonUtils.hpp"
 #include "CdnUrls.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 struct User : Core::JsonUtils::JsonObject
@@ -1848,4 +1848,4 @@ struct MemberSearchResult : Core::JsonUtils::JsonObject
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

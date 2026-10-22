@@ -5,7 +5,7 @@
 #include "Core/Snowflake.hpp"
 #include "UI/GuildSettings/GuildSettingsSection.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class MentionJumpIndicator;
@@ -38,4 +38,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -7,7 +7,7 @@
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 enum class EmojiIntention {
@@ -56,4 +56,4 @@ struct PickerSection
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -11,7 +11,7 @@
 #include "Discord/Entities.hpp"
 #include "Discord/Events.hpp"
 
-namespace Acheron {
+namespace Styx {
 
 namespace Storage {
 class ChannelRepository;
@@ -142,4 +142,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

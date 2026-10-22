@@ -6,7 +6,7 @@
 #include <deque>
 #include <thread>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 class IngestThread : public QObject
@@ -49,4 +49,4 @@ private:
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

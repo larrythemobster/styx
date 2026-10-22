@@ -9,7 +9,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Theme {
 
@@ -68,4 +68,4 @@ inline size_t qHash(Token key, size_t seed = 0) noexcept
 
 } // namespace Theme
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -1,7 +1,7 @@
 #include "NoiseSuppressor.hpp"
 #include "IAudioBackend.hpp"
 
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
 #include <rnnoise.h>
 #endif
 
@@ -10,11 +10,11 @@
 #include <cmath>
 #include <cstdint>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
 static int16_t floatToSample(float v)
 {
     v = std::clamp(v, -32768.0f, 32767.0f);
@@ -26,7 +26,7 @@ NoiseSuppressor::NoiseSuppressor() = default;
 
 NoiseSuppressor::~NoiseSuppressor()
 {
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     for (DenoiseState *s : states) {
         if (s)
             rnnoise_destroy(s);
@@ -36,7 +36,7 @@ NoiseSuppressor::~NoiseSuppressor()
 
 bool NoiseSuppressor::init()
 {
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     states[0] = rnnoise_create(nullptr);
     return states[0] != nullptr;
 #else
@@ -46,7 +46,7 @@ bool NoiseSuppressor::init()
 
 void NoiseSuppressor::reconfigure(int channels)
 {
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     const bool wantStereo = channels >= 2;
     const bool haveStereo = states[1] != nullptr;
     if (wantStereo == haveStereo)
@@ -67,7 +67,7 @@ QByteArray NoiseSuppressor::process(const QByteArray &pcmFrame, float &outVoiceP
 {
     outVoiceProb = -1.0f;
 
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     if (!states[0] || pcmFrame.size() != AUDIO_FRAME_SIZE)
         return pcmFrame;
 
@@ -120,4 +120,4 @@ QByteArray NoiseSuppressor::process(const QByteArray &pcmFrame, float &outVoiceP
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -646,4 +646,4 @@ QByteArray rewriteAccessUnitSps(const QByteArray &annexB)
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -2,7 +2,7 @@
 
 #include <QUrl>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -131,4 +131,4 @@ std::optional<ProxyConfig> ProxyConfig::parse(const QString &text)
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

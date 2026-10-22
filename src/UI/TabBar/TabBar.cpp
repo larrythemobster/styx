@@ -8,7 +8,7 @@
 #include <QFontMetrics>
 #include <QApplication>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 TabBar::TabBar(Core::ImageManager *imageManager, QWidget *parent)
@@ -520,4 +520,4 @@ QSize TabBar::minimumSizeHint() const
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

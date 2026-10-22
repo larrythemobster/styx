@@ -14,7 +14,7 @@
 #include <QStandardPaths>
 #include <QStyle>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Theme {
 
@@ -314,4 +314,4 @@ bool Manager::importFrom(const QString &path)
 
 } // namespace Theme
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

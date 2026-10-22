@@ -20,7 +20,7 @@
 #include <QDateTime>
 #include <utility>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -745,4 +745,4 @@ void FriendsController::renderAddFriend(QString &rml)
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

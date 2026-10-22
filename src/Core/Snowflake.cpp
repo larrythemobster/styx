@@ -3,7 +3,7 @@
 #include <QDateTime>
 #include <QRandomGenerator>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 constexpr quint64 DISCORD_EPOCH = 1420070400000ULL;
@@ -53,4 +53,4 @@ Snowflake Snowflake::fromUnixMs(qint64 ms)
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

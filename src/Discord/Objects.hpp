@@ -13,10 +13,10 @@
 #undef compress
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
-struct ClientProperties : Acheron::Core::JsonUtils::JsonObject
+struct ClientProperties : Styx::Core::JsonUtils::JsonObject
 {
     Field<QString> os;
     Field<QString> browser;
@@ -69,7 +69,7 @@ struct ClientProperties : Acheron::Core::JsonUtils::JsonObject
     }
 };
 
-struct UpdatePresence : Acheron::Core::JsonUtils::JsonObject
+struct UpdatePresence : Styx::Core::JsonUtils::JsonObject
 {
     Field<QString> status;
     Field<int> since;
@@ -86,7 +86,7 @@ struct UpdatePresence : Acheron::Core::JsonUtils::JsonObject
     }
 };
 
-struct ClientState : Acheron::Core::JsonUtils::JsonObject
+struct ClientState : Styx::Core::JsonUtils::JsonObject
 {
     // Map guild_versions;
 
@@ -99,4 +99,4 @@ struct ClientState : Acheron::Core::JsonUtils::JsonObject
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

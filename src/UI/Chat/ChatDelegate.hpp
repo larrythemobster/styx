@@ -2,7 +2,7 @@
 
 #include <QStyledItemDelegate>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ImageManager;
 } // namespace Core
@@ -29,4 +29,4 @@ private:
     EmojiTextObject *emojiHandler;
 };
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -5,7 +5,7 @@
 #include <QPainter>
 #include <QPainterPath>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -270,4 +270,4 @@ QSize ServerRailDelegate::sizeHint(const QStyleOptionViewItem &, const QModelInd
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

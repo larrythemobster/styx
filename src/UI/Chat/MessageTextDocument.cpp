@@ -3,7 +3,7 @@
 #include "Core/ImageManager.hpp"
 #include "UI/Chat/ChatLayout.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 MessageTextDocument::MessageTextDocument(Core::ImageManager *images, Core::Snowflake accountId, QObject *parent)
@@ -20,4 +20,4 @@ void MessageTextDocument::setMessageHtml(const QString &html, const QFont &font,
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

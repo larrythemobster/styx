@@ -6,7 +6,7 @@
 
 class QAbstractProxyModel;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 class ChannelDelegate : public QStyledItemDelegate
 {
@@ -25,4 +25,4 @@ private:
     ChannelIndent::Scopes indentScopes;
 };
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

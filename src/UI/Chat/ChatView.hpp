@@ -15,7 +15,7 @@
 #include "Core/Snowflake.hpp"
 #include "Discord/Client.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class FrameAnimator;
@@ -136,8 +136,8 @@ signals:
     void reactionPickerRequested(Core::Snowflake channelId, Core::Snowflake messageId, const QRect &globalAnchor);
     void cancelUploadRequested(Core::Snowflake channelId, Core::Snowflake messageId);
     void filesDropped(const QList<QUrl> &urls);
-    void reactionToggleRequested(Core::Snowflake channelId, Core::Snowflake messageId, const Acheron::Discord::Emoji &emoji, bool currentlyReacted, bool isBurst, Acheron::Discord::Client::ReactionLocation location);
-    void reactorsRequested(Core::Snowflake channelId, Core::Snowflake messageId, const std::optional<Acheron::Core::ReactionRef> &selected);
+    void reactionToggleRequested(Core::Snowflake channelId, Core::Snowflake messageId, const Styx::Discord::Emoji &emoji, bool currentlyReacted, bool isBurst, Styx::Discord::Client::ReactionLocation location);
+    void reactorsRequested(Core::Snowflake channelId, Core::Snowflake messageId, const std::optional<Styx::Core::ReactionRef> &selected);
     void channelMentionClicked(Core::Snowflake channelId);
     void messageLinkClicked(Core::Snowflake channelId, Core::Snowflake messageId);
     void userContextMenuRequested(Core::Snowflake userId, QPoint globalPos);
@@ -253,4 +253,4 @@ private:
     std::optional<ReactionPill> reactionTooltipPill;
 };
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

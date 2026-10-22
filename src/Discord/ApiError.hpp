@@ -2,7 +2,7 @@
 
 #include <QString>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 struct HttpResponse;
@@ -24,4 +24,4 @@ struct ApiError
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

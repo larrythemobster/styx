@@ -7,7 +7,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 AudioPage::AudioPage(QWidget *parent)
@@ -46,4 +46,4 @@ AudioPage::AudioPage(QWidget *parent)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

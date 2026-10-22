@@ -6,7 +6,7 @@
 #include <QSqlError>
 #include <QVariant>
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 static Discord::Role readRoleFromQuery(const QSqlQuery &q)
@@ -167,4 +167,4 @@ void RoleRepository::deleteRolesForGuild(Core::Snowflake guildId, QSqlDatabase &
 }
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

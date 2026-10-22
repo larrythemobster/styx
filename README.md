@@ -50,8 +50,8 @@ them and frees them on the next frame.
 
 Styx is experimental and mainly tested on Windows 11. The RmlUi window and Go
 Live are Windows-first. Upstream Acheron's Linux and macOS support has not been
-re-tested with the new UI. The executable is still named `acheron.exe` and
-keeps Acheron's settings directory.
+re-tested with the new UI. The executable is named `styx.exe` and automatically
+migrates existing Acheron data on first launch.
 
 ## Building on Windows
 
@@ -75,7 +75,7 @@ build-windows.bat configure
 
 `DEPS` should contain `Qt\6.12.0\msvc2022_64`, `ffmpeg` and `curl-impersonate`.
 If it isn't set, the script looks for `..\deps`. Later builds only need
-`build-windows.bat`. The script builds `build\acheron.exe` and runs
+`build-windows.bat`. The script builds `build\styx.exe` and runs
 `windeployqt`. FFmpeg and curl-impersonate DLLs must be beside the executable
 or on `PATH`.
 

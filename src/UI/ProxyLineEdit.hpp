@@ -6,7 +6,7 @@
 
 #include "Core/ProxyConfig.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class ProxyLineEdit : public QLineEdit
@@ -21,4 +21,4 @@ public:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

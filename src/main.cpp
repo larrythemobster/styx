@@ -1,6 +1,7 @@
 #include "App.hpp"
 #include "UI/Rml/Shell.hpp"
 #include "Storage/DatabaseManager.hpp"
+#include "Core/Migration.hpp"
 #include "Core/Session.hpp"
 #include "Core/Logging.hpp"
 #include "Core/Theme/Manager.hpp"
@@ -11,7 +12,7 @@
 #include <QFontDatabase>
 #include <QSettings>
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 #include <dave/dave.h>
 #include <dave/logger.h>
 #endif
@@ -22,13 +23,13 @@
 
 void registerMetatypes()
 {
-    qRegisterMetaType<Acheron::Core::Snowflake>("Snowflake");
+    qRegisterMetaType<Styx::Core::Snowflake>("Snowflake");
 
     QMetaType::registerConverter<Snowflake, QString>(
             [](const Snowflake &s) { return s.toString(); });
 }
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 static void DaveLogSink(discord::dave::LoggingSeverity severity, const char *file, int line, const std::string &message)
 {
     switch (severity) {
@@ -62,7 +63,7 @@ static void applyFontEngineSetting()
 
 int main(int argc, char *argv[])
 {
-    using namespace Acheron;
+    using namespace Styx;
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
@@ -71,12 +72,13 @@ int main(int argc, char *argv[])
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 #endif
 
-    QApplication::setOrganizationName("ouwou");
-    QApplication::setApplicationName("Acheron");
+    QApplication::setOrganizationName("larrythemobster");
+    QApplication::setApplicationName("Styx");
+    Core::Migration::migrateSettingsAndData();
     applyFontEngineSetting();
 
     App app(argc, argv);
-    app.setDesktopFileName("io.github.ouwou.acheron");
+    app.setDesktopFileName("io.github.larrythemobster.styx");
     if (!Core::Theme::Manager::startsWithSystemStyle())
         app.setStyle("Fusion");
 
@@ -86,13 +88,14 @@ int main(int argc, char *argv[])
 
     registerMetatypes();
 
-    Acheron::Core::Logger::init();
+    Styx::Core::Logger::init();
+    Core::Migration::migrateKeychain();
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
     discord::dave::SetLogSink(DaveLogSink);
 #endif
 
-    qCInfo(LogCore) << "Starting Acheron...";
+    qCInfo(LogCore) << "Starting Styx...";
 
 #ifdef Q_OS_WINDOWS
     int emojiFontId = QFontDatabase::addApplicationFont(
@@ -111,7 +114,7 @@ int main(int argc, char *argv[])
 
     if (!Storage::DatabaseManager::instance().init()) {
         QMessageBox::critical(nullptr, "Fatal error",
-                              "Could not initialize the database. Acheron will now close.");
+                              "Could not initialize the database. Styx will now close.");
         return -1;
     }
 

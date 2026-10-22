@@ -6,7 +6,7 @@
 #include <QUrl>
 #include <QVersionNumber>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 // QTBUG-147237: an HTTP/2 connection error leaves the dead connection cached, and every later request to that host hangs
@@ -37,4 +37,4 @@ inline QNetworkRequest networkRequest(const QUrl &url)
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

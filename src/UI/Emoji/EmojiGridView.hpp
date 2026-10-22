@@ -13,7 +13,7 @@
 #include "Core/Emoji/PickerEmoji.hpp"
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class PaintedImages;
@@ -57,7 +57,7 @@ public:
     [[nodiscard]] QSize sizeHint() const override;
 
 signals:
-    void emojiClicked(const Acheron::Core::PickerEmoji &emoji, Qt::KeyboardModifiers modifiers);
+    void emojiClicked(const Styx::Core::PickerEmoji &emoji, Qt::KeyboardModifiers modifiers);
     void activeEmojiChanged();
     void topSectionChanged(int section);
     void collapsedSectionsChanged();
@@ -151,4 +151,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

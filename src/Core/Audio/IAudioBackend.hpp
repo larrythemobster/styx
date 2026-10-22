@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -67,4 +67,4 @@ signals:
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

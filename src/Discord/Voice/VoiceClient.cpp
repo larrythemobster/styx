@@ -11,7 +11,7 @@
 
 #include <array>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -636,4 +636,4 @@ void VoiceClient::setState(State state)
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

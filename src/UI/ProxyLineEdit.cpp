@@ -2,7 +2,7 @@
 
 #include <QMessageBox>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ProxyLineEdit::ProxyLineEdit(QWidget *parent)
@@ -24,4 +24,4 @@ std::optional<Core::ProxyConfig> ProxyLineEdit::parseOrWarn()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

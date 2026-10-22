@@ -8,7 +8,7 @@
 
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 MessageRepository::MessageRepository(Core::Snowflake accountId)
@@ -446,4 +446,4 @@ void MessageRepository::loadAttachmentsForMessages(QList<Discord::Message> &mess
 }
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

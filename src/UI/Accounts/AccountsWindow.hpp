@@ -7,7 +7,7 @@
 #include "UI/Dialogs/TokenInputDialog.hpp"
 #include "UI/ProxyLineEdit.hpp"
 
-namespace Acheron {
+namespace Styx {
 
 namespace Core {
 class Session;
@@ -59,7 +59,7 @@ private:
 
     void setupUi();
     void addAccountWithToken(const QString &token, const QString &username, const Core::ProxyConfig &proxy);
-    void updateDetails(const Acheron::Core::AccountInfo *info);
+    void updateDetails(const Styx::Core::AccountInfo *info);
     void performConnect(int row);
     void performDisconnect(int row);
 
@@ -67,4 +67,4 @@ protected:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

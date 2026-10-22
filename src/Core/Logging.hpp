@@ -16,7 +16,7 @@ Q_DECLARE_LOGGING_CATEGORY(LogDiscord);
 Q_DECLARE_LOGGING_CATEGORY(LogDB);
 Q_DECLARE_LOGGING_CATEGORY(LogUI);
 Q_DECLARE_LOGGING_CATEGORY(LogProto);
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 Q_DECLARE_LOGGING_CATEGORY(LogDave);
 #endif
 Q_DECLARE_LOGGING_CATEGORY(LogMiniaudio);
@@ -24,7 +24,7 @@ Q_DECLARE_LOGGING_CATEGORY(LogVoice);
 Q_DECLARE_LOGGING_CATEGORY(LogVideo);
 Q_DECLARE_LOGGING_CATEGORY(LogStream);
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class Logger
@@ -53,4 +53,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

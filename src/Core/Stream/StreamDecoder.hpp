@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include <QByteArray>
 #include <QImage>
@@ -15,7 +15,7 @@ struct AVPacket;
 struct AVBufferRef;
 struct SwsContext;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -61,6 +61,6 @@ private:
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
 #endif

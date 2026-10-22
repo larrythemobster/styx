@@ -11,7 +11,7 @@
 #include "Core/Theme/Manager.hpp"
 #include "UI/Emoji/PaintedImages.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -205,4 +205,4 @@ bool EmojiSectionRail::event(QEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

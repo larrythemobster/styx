@@ -19,7 +19,7 @@
 #include "Discord/Events.hpp"
 #include "Discord/Voice/VoiceClient.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -164,7 +164,7 @@ private:
     bool cachedOpusFec = true;
     int cachedOpusPacketLossPercent = 0;
     bool cachedNoiseSuppression = true;
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     bool cachedUseRnnoiseVad = true;
 #else
     bool cachedUseRnnoiseVad = false;
@@ -187,4 +187,4 @@ private:
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

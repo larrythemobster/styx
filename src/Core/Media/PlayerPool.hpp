@@ -7,7 +7,7 @@
 
 #include "Core/Media/Player.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -50,4 +50,4 @@ private:
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

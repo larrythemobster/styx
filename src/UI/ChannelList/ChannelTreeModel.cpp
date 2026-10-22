@@ -14,11 +14,11 @@
 #include <Storage/ChannelRepository.hpp>
 #include <Storage/UserRepository.hpp>
 
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
 #include <Core/Audio/VoiceManager.hpp>
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 constexpr static int VoiceParticipantAvatarPx = 32;
@@ -249,7 +249,7 @@ QVariant ChannelTreeModel::data(const QModelIndex &index, int role) const
     if (role == IsVoiceMutedRole || role == IsVoiceDeafenedRole) {
         if (node->type != ChannelNode::Type::VoiceParticipant)
             return false;
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
         ChannelNode *accNode = getAccountNodeFor(node);
         if (!accNode)
             return false;
@@ -288,7 +288,7 @@ Qt::ItemFlags ChannelTreeModel::flags(const QModelIndex &index) const
     return f & ~Qt::ItemIsSelectable;
 }
 
-void ChannelTreeModel::addAccount(const Acheron::Core::AccountInfo &account)
+void ChannelTreeModel::addAccount(const Styx::Core::AccountInfo &account)
 {
     if (accountNodes.contains(account.id))
         return;
@@ -1900,4 +1900,4 @@ QList<Snowflake> ChannelTreeModel::getMarkableChannelIds(const QModelIndex &inde
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

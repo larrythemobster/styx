@@ -31,7 +31,7 @@
 #include "GuildRolesPage.hpp"
 #include "GuildStickersPage.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -417,4 +417,4 @@ void GuildSettingsWindow::closeEvent(QCloseEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

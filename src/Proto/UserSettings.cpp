@@ -3,7 +3,7 @@
 #include "ProtoReader.hpp"
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Proto {
 
 GuildFolder GuildFolder::fromProto(ProtoReader &reader)
@@ -381,4 +381,4 @@ void PreloadedUserSettings::mergeFrom(const PreloadedUserSettings &other)
 }
 
 } // namespace Proto
-} // namespace Acheron
+} // namespace Styx

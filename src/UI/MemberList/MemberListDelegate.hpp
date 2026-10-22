@@ -4,7 +4,7 @@
 
 #include "MemberListModel.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class MemberListDelegate : public QStyledItemDelegate
@@ -31,4 +31,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

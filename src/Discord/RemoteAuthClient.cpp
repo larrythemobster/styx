@@ -27,7 +27,7 @@
 #include <cstdint>
 #include <string>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 static constexpr const char *gatewayUrl = "wss://remote-auth-gateway.discord.gg/?v=2";
@@ -516,4 +516,4 @@ void RemoteAuthClient::cancel()
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

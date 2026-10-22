@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace CurlUtils {
 
@@ -286,4 +286,4 @@ void wsRecvWait(CURL *&curl, std::mutex &mutex)
 
 } // namespace CurlUtils
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

@@ -7,7 +7,7 @@
 
 #include <cstring>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -201,4 +201,4 @@ QByteArray VoiceEncryption::decryptXChacha20(const QByteArray &rtpHeader, const 
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

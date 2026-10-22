@@ -2,7 +2,7 @@
 
 #include <QWidget>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 PaintedImages::PaintedImages(QWidget *paintedWidget, int budgetKiB) : QObject(paintedWidget), widget(paintedWidget), loaded(budgetKiB) {}
@@ -94,4 +94,4 @@ void PaintedImages::onImageUnavailable(const QUrl &url, const QSize &size)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

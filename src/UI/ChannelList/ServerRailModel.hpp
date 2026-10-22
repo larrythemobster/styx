@@ -13,7 +13,7 @@
 
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class Session;
 struct AccountInfo;
@@ -107,4 +107,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

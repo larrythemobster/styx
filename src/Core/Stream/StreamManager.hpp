@@ -15,7 +15,7 @@
 
 class QThread;
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 class Client;
 namespace Stream {
@@ -121,4 +121,4 @@ private:
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

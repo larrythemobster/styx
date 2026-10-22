@@ -9,7 +9,7 @@
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Entities.hpp"
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
 #include "Core/Stream/StreamManager.hpp"
 #include "UI/Stream/SourcePickerDialog.hpp"
 #include <QMessageBox>
@@ -20,7 +20,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -130,16 +130,16 @@ void CallController::onInstanceChanged()
 
     currentInstance = shell.currentInstance();
     if (currentInstance) {
-#ifndef ACHERON_NO_VOICE
+#ifndef STYX_NO_VOICE
         currentVoiceManager = currentInstance->voice();
 #endif
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
         currentStreamManager = currentInstance->streams();
 #endif
         connectCurrentVoice();
     } else {
         currentVoiceManager = nullptr;
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
         currentStreamManager = nullptr;
 #endif
     }
@@ -169,7 +169,7 @@ void CallController::connectCurrentVoice()
                 this, [this](Snowflake, bool) { updateDebounceTimer.start(); });
     }
 
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     if (currentStreamManager) {
         connect(currentStreamManager, &Core::Stream::StreamManager::streamingChanged,
                 this, [this](bool) { updateDebounceTimer.start(); });
@@ -198,7 +198,7 @@ void CallController::disconnectCurrentVoice()
 {
     if (currentVoiceManager)
         QObject::disconnect(currentVoiceManager, nullptr, this, nullptr);
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     if (currentStreamManager)
         QObject::disconnect(currentStreamManager, nullptr, this, nullptr);
 #endif
@@ -244,7 +244,7 @@ void CallController::onDeafClicked()
 
 void CallController::onShareClicked()
 {
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     if (!currentStreamManager)
         return;
 
@@ -279,7 +279,7 @@ void CallController::onDisconnectClicked()
 
 void CallController::onWatchClicked(Snowflake userId)
 {
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     if (!currentStreamManager)
         return;
 
@@ -293,7 +293,7 @@ void CallController::onWatchClicked(Snowflake userId)
 
 void CallController::onStopWatchClicked(Snowflake userId)
 {
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     if (!currentStreamManager)
         return;
 
@@ -351,7 +351,7 @@ void CallController::updateCallView()
     auto *users = currentInstance ? currentInstance->users() : nullptr;
 
     bool isSelfStreaming = false;
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     if (currentStreamManager) {
         isSelfStreaming = currentStreamManager->isStreaming();
     }
@@ -381,7 +381,7 @@ void CallController::updateCallView()
         bool isSpeaking = p.speaking;
         bool isStreaming = p.streaming;
         bool isWatching = false;
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
         if (currentStreamManager)
             isWatching = currentStreamManager->isWatching(uid);
 #endif
@@ -558,4 +558,4 @@ void CallController::updateCallView()
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

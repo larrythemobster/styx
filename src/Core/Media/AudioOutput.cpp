@@ -1,6 +1,6 @@
 #include "Core/Media/AudioOutput.hpp"
 
-#ifdef ACHERON_HAVE_FFMPEG
+#ifdef STYX_HAVE_FFMPEG
 
 #include "Core/Audio/AudioBackends.hpp"
 #include "Core/Audio/Miniaudio.hpp"
@@ -11,7 +11,7 @@
 #include <cstring>
 #include <mutex>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Media {
 
@@ -295,6 +295,6 @@ void AudioOutput::mixInto(float *output, uint32_t frameCount, std::vector<float>
 
 } // namespace Media
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-#endif // ACHERON_HAVE_FFMPEG
+#endif // STYX_HAVE_FFMPEG

@@ -3,7 +3,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 // https://github.com/google/emoji-segmenter/blob/1cada87c62550446fca6a42a69743688b4539a4c/emoji_presentation_scanner.rl#L30-L45
@@ -39,4 +39,4 @@ int countUnicodeEmojisSegmented(const QString &text);
 QStringList extractEmojiSequences(const QString &text);
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

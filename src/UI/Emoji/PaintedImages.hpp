@@ -12,7 +12,7 @@
 
 class QWidget;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class PaintedImages : public QObject
@@ -51,4 +51,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

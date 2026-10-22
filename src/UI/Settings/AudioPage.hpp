@@ -4,7 +4,7 @@
 
 class QComboBox;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class AudioPage : public QWidget
@@ -18,4 +18,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

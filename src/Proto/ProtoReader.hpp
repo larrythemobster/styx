@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace Acheron {
+namespace Styx {
 namespace Proto {
 
 enum class WireType : uint8_t {
@@ -56,4 +56,4 @@ std::optional<uint64_t> readUInt64Value(ProtoReader &reader);
 bool readBoolValue(ProtoReader &reader);
 
 } // namespace Proto
-} // namespace Acheron
+} // namespace Styx

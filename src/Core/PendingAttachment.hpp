@@ -4,7 +4,7 @@
 #include <QImage>
 #include <QString>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 struct PendingAttachment
@@ -20,4 +20,4 @@ struct PendingAttachment
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -9,7 +9,7 @@
 
 #include "UI/Chat/GifPainting.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -636,4 +636,4 @@ void GifPlayback::onClipFailed(quint64 clip)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

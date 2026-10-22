@@ -14,7 +14,7 @@ class QListWidget;
 class QListWidgetItem;
 class QStackedWidget;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ClientInstance;
 class ImageManager;
@@ -64,4 +64,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -8,7 +8,7 @@
 
 #include <vector>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Stream {
 
@@ -459,4 +459,4 @@ void VideoReceiver::onTick()
 
 } // namespace Stream
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

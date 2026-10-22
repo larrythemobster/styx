@@ -19,7 +19,7 @@ class Track;
 class RtpPacketizationConfig;
 } // namespace rtc
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Stream {
 
@@ -111,4 +111,4 @@ private:
 
 } // namespace Stream
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

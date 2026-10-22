@@ -8,7 +8,7 @@
 #include "Core/Theme/Icons.hpp"
 #include "UI/Emoji/EmojiButton.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -197,4 +197,4 @@ void MessageActionBar::updateButtons()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

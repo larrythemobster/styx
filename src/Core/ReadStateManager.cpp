@@ -10,7 +10,7 @@
 #include "Core/PermissionManager.hpp"
 #include "Discord/Enums.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -799,4 +799,4 @@ void ReadStateManager::rebuildChannelOverrideCache(Snowflake guildSettingsKey)
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

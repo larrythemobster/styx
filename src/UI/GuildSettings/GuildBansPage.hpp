@@ -13,7 +13,7 @@ class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class GuildBansPage : public GuildSettingsPage
@@ -59,4 +59,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

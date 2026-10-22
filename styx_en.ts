@@ -2,7 +2,7 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="en_US" sourcelanguage="en_US">
 <context>
-    <name>Acheron::Core::UserManager</name>
+    <name>Styx::Core::UserManager</name>
     <message>
         <location filename="src/Core/UserManager.cpp" line="51"/>
         <source>Unknown User</source>
@@ -10,7 +10,7 @@
     </message>
 </context>
 <context>
-    <name>Acheron::UI::AccountsWindow</name>
+    <name>Styx::UI::AccountsWindow</name>
     <message>
         <location filename="src/UI/AccountsWindow.cpp" line="16"/>
         <source>Manage Accounts</source>
@@ -88,7 +88,7 @@
     </message>
 </context>
 <context>
-    <name>Acheron::UI::AddAccountDialog</name>
+    <name>Styx::UI::AddAccountDialog</name>
     <message>
         <location filename="src/UI/Dialogs/AddAccountDialog.cpp" line="8"/>
         <source>Add Account</source>
@@ -101,7 +101,7 @@
     </message>
 </context>
 <context>
-    <name>Acheron::UI::MainWindow</name>
+    <name>Styx::UI::MainWindow</name>
     <message>
         <location filename="src/UI/MainWindow.cpp" line="238"/>
         <source>&amp;View</source>
@@ -114,7 +114,7 @@
     </message>
 </context>
 <context>
-    <name>Acheron::UI::TypingIndicator</name>
+    <name>Styx::UI::TypingIndicator</name>
     <message>
         <location filename="src/UI/TypingIndicator.cpp" line="49"/>
         <source>%1 is typing</source>

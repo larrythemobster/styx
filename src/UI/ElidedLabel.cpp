@@ -2,7 +2,7 @@
 #include <QPainter>
 #include <QFontMetrics>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ElidedLabel::ElidedLabel(QWidget *parent) : QLabel(parent)
@@ -45,4 +45,4 @@ void ElidedLabel::paintEvent(QPaintEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -9,7 +9,7 @@
 
 #include "Core/ImageManager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ImageViewer::ImageViewer(Core::ImageManager *imageManager, Core::Snowflake accountId, QWidget *parent)
@@ -249,4 +249,4 @@ QPointF ImageViewer::widgetToImage(const QPointF &widgetPoint) const
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

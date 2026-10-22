@@ -8,7 +8,7 @@
 
 #include <cstdlib>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 
@@ -596,4 +596,4 @@ void VoiceGateway::heartbeatLoop()
 
 } // namespace Voice
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

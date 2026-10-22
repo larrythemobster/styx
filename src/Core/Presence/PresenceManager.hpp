@@ -14,7 +14,7 @@
 #include "Core/Snowflake.hpp"
 #include "Proto/UserSettings.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 struct PresenceEntry
@@ -79,4 +79,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

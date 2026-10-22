@@ -13,7 +13,7 @@
 #include <QPixmap>
 #include <QVBoxLayout>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 QRLoginDialog::QRLoginDialog(Core::Session *session, const Core::ProxyConfig &proxy, QWidget *parent)
@@ -145,4 +145,4 @@ void QRLoginDialog::onCanceled()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

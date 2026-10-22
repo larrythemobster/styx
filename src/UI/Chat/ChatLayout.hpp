@@ -10,7 +10,7 @@
 
 #include "ChatModel.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace ChatLayout {
 
@@ -348,4 +348,4 @@ QPixmap createBlurredPixmap(const QPixmap &source, int blurRadius = 30);
 
 } // namespace ChatLayout
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

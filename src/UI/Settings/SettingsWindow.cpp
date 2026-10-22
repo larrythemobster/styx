@@ -3,11 +3,11 @@
 #include "AppearancePage.hpp"
 #include "GeneralPage.hpp"
 
-#ifdef ACHERON_HAVE_MINIAUDIO
+#ifdef STYX_HAVE_MINIAUDIO
 #include "AudioPage.hpp"
 #endif
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 SettingsWindow::SettingsWindow(QWidget *parent)
@@ -47,7 +47,7 @@ void SettingsWindow::setupUi()
     connect(appearance, &AppearancePage::channelListModeChanged, this, &SettingsWindow::channelListModeChanged);
     connect(appearance, &AppearancePage::channelListIndentChanged, this, &SettingsWindow::channelListIndentChanged);
 
-#ifdef ACHERON_HAVE_MINIAUDIO
+#ifdef STYX_HAVE_MINIAUDIO
     addPage(tr("Audio"), new AudioPage(this));
 #endif
 
@@ -60,4 +60,4 @@ void SettingsWindow::setupUi()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

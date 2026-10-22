@@ -12,7 +12,7 @@
 #include "Proto/ProtoReader.hpp"
 #include "Proto/UserSettings.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 namespace {
@@ -1974,4 +1974,4 @@ void Client::setState(Core::ConnectionState state)
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

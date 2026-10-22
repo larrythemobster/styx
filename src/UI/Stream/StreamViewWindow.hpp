@@ -7,7 +7,7 @@
 
 #include "Core/Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 // A watched Go Live stream. Paints the newest decoded frame, letterboxed; double-click or
@@ -49,4 +49,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

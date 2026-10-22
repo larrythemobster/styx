@@ -11,7 +11,7 @@
 
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 static size_t readCallback(char *buffer, size_t size, size_t nitems, void *userp)
@@ -391,4 +391,4 @@ void RequestWorker::abortAllInFlight()
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

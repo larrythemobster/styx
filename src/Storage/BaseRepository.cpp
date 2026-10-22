@@ -4,7 +4,7 @@
 
 #include <QSqlError>
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 BaseRepository::BaseRepository(const QString &connName) : connName(connName) {}
 
@@ -23,4 +23,4 @@ bool BaseRepository::execLogged(QSqlQuery &q, const char *context)
 }
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

@@ -14,7 +14,7 @@
 #include "Core/Theme/Manager.hpp"
 #include "UI/Input/AttachmentPreviewPanel.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 NewPostDialog::NewPostDialog(const QList<Discord::ForumTag> &availableTags, bool tagRequired, QWidget *parent)
@@ -191,4 +191,4 @@ QList<Core::Snowflake> NewPostDialog::selectedTagIds() const
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

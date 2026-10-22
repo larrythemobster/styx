@@ -1,6 +1,6 @@
 #include "ProtoWriter.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Proto {
 
 void ProtoWriter::writeRawVarint(uint64_t value)
@@ -56,4 +56,4 @@ void ProtoWriter::writePackedVarints(uint32_t fieldNumber, const QList<uint64_t>
 }
 
 } // namespace Proto
-} // namespace Acheron
+} // namespace Styx

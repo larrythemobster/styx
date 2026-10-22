@@ -9,7 +9,7 @@
 #include <map>
 #include <optional>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Stream {
 
@@ -103,4 +103,4 @@ private:
 
 } // namespace Stream
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

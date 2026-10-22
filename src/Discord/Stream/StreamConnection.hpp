@@ -14,7 +14,7 @@
 #include "Discord/Voice/VoiceEntities.hpp"
 #include "Discord/Voice/VoiceEnums.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 namespace Voice {
 class VoiceGateway;
@@ -133,4 +133,4 @@ private:
 
 } // namespace Stream
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

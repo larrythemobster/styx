@@ -2,7 +2,7 @@
 
 #include "Objects.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 template <OpCode op, typename T>
@@ -274,4 +274,4 @@ struct StreamSetPausedData : Core::JsonUtils::JsonObject
 using StreamSetPausedRequest = Outbound<OpCode::STREAM_SET_PAUSED, StreamSetPausedData>;
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

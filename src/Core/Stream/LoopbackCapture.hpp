@@ -9,7 +9,7 @@
 #include <functional>
 #include <thread>
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -53,6 +53,6 @@ private:
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
 #endif

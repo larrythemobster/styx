@@ -9,7 +9,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 static Discord::Channel readChannelFromQuery(const QSqlQuery &q)
@@ -331,4 +331,4 @@ QList<Discord::Channel> ChannelRepository::getChannelsForGuild(Core::Snowflake g
 }
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

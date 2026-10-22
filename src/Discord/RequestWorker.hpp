@@ -22,7 +22,7 @@
 #include "Core/ProxyConfig.hpp"
 #include "HttpClient.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 class ClientIdentity;
@@ -108,4 +108,4 @@ private:
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

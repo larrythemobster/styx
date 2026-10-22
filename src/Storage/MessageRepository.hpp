@@ -10,7 +10,7 @@
 #include "Discord/Entities.hpp"
 #include "UserRepository.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 class MessageRepository : public QObject, public BaseRepository
@@ -37,4 +37,4 @@ private:
 };
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

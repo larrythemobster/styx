@@ -9,7 +9,7 @@
 
 #include "Core/Theme/Manager.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 using Core::PresenceBadge;
@@ -224,4 +224,4 @@ void StatusDot::paintEvent(QPaintEvent *)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -16,7 +16,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -348,4 +348,4 @@ void MessageInput::adjustHeight()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

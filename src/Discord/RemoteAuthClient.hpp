@@ -20,7 +20,7 @@ struct evp_pkey_ctx_st;
 
 class QJsonObject;
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 enum class RemoteAuthError {
@@ -95,4 +95,4 @@ private:
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

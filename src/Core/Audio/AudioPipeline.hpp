@@ -15,7 +15,7 @@
 
 class QTimer;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Audio {
 
@@ -100,7 +100,7 @@ private:
     int vadHoldoffCounter = 0;
 
     bool noiseSuppressionEnabled = true;
-#ifdef ACHERON_HAVE_RNNOISE
+#ifdef STYX_HAVE_RNNOISE
     bool useRnnoiseVad = true;
 #else
     bool useRnnoiseVad = false;
@@ -124,4 +124,4 @@ private:
 
 } // namespace Audio
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

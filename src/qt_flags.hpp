@@ -6,7 +6,7 @@
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 
-#define ACHERON_DECLARE_FLAGS(FlagsName, EnumName) \
+#define STYX_DECLARE_FLAGS(FlagsName, EnumName) \
     Q_DECLARE_FLAGS(FlagsName, EnumName)           \
     Q_DECLARE_OPERATORS_FOR_FLAGS(FlagsName)
 
@@ -16,7 +16,7 @@
 
 #include <type_traits>
 
-namespace Acheron {
+namespace Styx {
 namespace Compat {
 
 template <typename Enum>
@@ -95,10 +95,10 @@ private:
 };
 
 } // namespace Compat
-} // namespace Acheron
+} // namespace Styx
 
-#define ACHERON_DECLARE_FLAGS(FlagsName, EnumName)                        \
-    using FlagsName = ::Acheron::Compat::Flags<EnumName>;                 \
+#define STYX_DECLARE_FLAGS(FlagsName, EnumName)                        \
+    using FlagsName = ::Styx::Compat::Flags<EnumName>;                 \
     constexpr inline FlagsName operator|(EnumName a, EnumName b) noexcept \
     {                                                                     \
         return FlagsName(a) | b;                                          \

@@ -18,7 +18,7 @@
 
 #include <algorithm>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 namespace Rml {
 
@@ -595,4 +595,4 @@ void MemberListController::renderSingleDmProfile(Snowflake targetUserId)
 
 } // namespace Rml
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

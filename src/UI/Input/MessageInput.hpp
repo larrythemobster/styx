@@ -10,7 +10,7 @@
 
 class QToolButton;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class AttachmentPreviewPanel;
@@ -97,4 +97,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

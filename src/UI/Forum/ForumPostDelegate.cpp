@@ -11,7 +11,7 @@
 #include "ForumPostModel.hpp"
 #include "UI/Chat/ChatLayout.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static constexpr int kPadX = 12;
@@ -281,4 +281,4 @@ QSize ForumPostDelegate::sizeHint(const QStyleOptionViewItem &option, const QMod
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

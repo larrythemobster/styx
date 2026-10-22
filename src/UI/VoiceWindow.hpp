@@ -21,7 +21,7 @@
 #include "UI/AvatarRequestTracker.hpp"
 #include "Core/Presence/PresenceBadge.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 class ImageManager;
 namespace Audio {
@@ -138,7 +138,7 @@ public:
     explicit VoiceWindow(QWidget *parent = nullptr);
 
     void setVoiceManager(Core::Audio::VoiceManager *manager);
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     void setStreamManager(Core::Stream::StreamManager *manager);
 #endif
     void setNameResolver(NameResolver resolver);
@@ -176,7 +176,7 @@ private:
     void showPrivacyCode();
 
     Core::Audio::VoiceManager *voiceManager = nullptr;
-#ifdef ACHERON_HAVE_SCREENSHARE
+#ifdef STYX_HAVE_SCREENSHARE
     QPointer<Core::Stream::StreamManager> streamManager;
 #endif
     Core::ImageManager *imageManager = nullptr;
@@ -221,4 +221,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

@@ -23,7 +23,7 @@ static uint32_t mmh32(const std::string &input, uint32_t seed)
     return result;
 }
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 MemberListManager::MemberListManager(Storage::ChannelRepository &channelRepo,
@@ -685,4 +685,4 @@ QString MemberListManager::computeListId(const QList<Discord::PermissionOverwrit
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

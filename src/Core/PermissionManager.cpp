@@ -7,7 +7,7 @@
 #include "Storage/ChannelRepository.hpp"
 #include "Storage/MemberRepository.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 PermissionManager::PermissionManager(Snowflake accountId, QObject *parent)
@@ -212,4 +212,4 @@ void PermissionManager::invalidateUserGuildCache(Snowflake userId, Snowflake gui
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

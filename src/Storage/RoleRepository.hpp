@@ -7,7 +7,7 @@
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 class RoleRepository : public BaseRepository
@@ -28,4 +28,4 @@ private:
 };
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

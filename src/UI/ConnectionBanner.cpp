@@ -2,7 +2,7 @@
 #include <QHBoxLayout>
 #include <QPainter>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ConnectionBanner::ConnectionBanner(QWidget *parent) : QWidget(parent)
@@ -72,4 +72,4 @@ void ConnectionBanner::updateDots()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

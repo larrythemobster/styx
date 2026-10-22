@@ -13,7 +13,7 @@
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Enums.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 static QUrl reactionEmojiUrl(const Discord::Emoji &emoji)
@@ -410,7 +410,7 @@ QVariant ChatModel::data(const QModelIndex &index, int role) const
 
             QString label = threadName.isEmpty() ? tr("a thread") : threadName;
             QString threadHtml = threadId.isValid()
-                                         ? QStringLiteral("<a href=\"acheron://channel/%1\">%2</a>")
+                                         ? QStringLiteral("<a href=\"styx://channel/%1\">%2</a>")
                                                    .arg(QString::number(static_cast<quint64>(threadId)), label)
                                          : QStringLiteral("<b>%1</b>").arg(label);
 
@@ -435,8 +435,8 @@ QVariant ChatModel::data(const QModelIndex &index, int role) const
         if (msg.flags.hasValue() && msg.flags->testFlag(Discord::MessageFlag::HAS_THREAD)) {
             QString sep = html.isEmpty() ? QString() : QStringLiteral("<br>");
             html += sep +
-                    QStringLiteral("<a href=\"acheron://channel/%1\">"
-                                   "<img src=\"acheron-icon:view-thread\" width=\"14\" height=\"14\""
+                    QStringLiteral("<a href=\"styx://channel/%1\">"
+                                   "<img src=\"styx-icon:view-thread\" width=\"14\" height=\"14\""
                                    " style=\"vertical-align: middle\">"
                                    " %2</a>")
                             .arg(QString::number(static_cast<quint64>(msg.id.get())),
@@ -447,7 +447,7 @@ QVariant ChatModel::data(const QModelIndex &index, int role) const
             QString mutedColor = Core::Theme::Manager::instance()
                                          .color(Core::Theme::Token::PlaceholderText)
                                          .name();
-            QString header = QStringLiteral("<img src=\"acheron-icon:forwarded\" width=\"12\" height=\"12\""
+            QString header = QStringLiteral("<img src=\"styx-icon:forwarded\" width=\"12\" height=\"12\""
                                             " style=\"vertical-align: middle\">"
                                             " <span style=\"color: %1; font-size: small\"><i>%2</i></span>")
                                      .arg(mutedColor, tr("Forwarded"));
@@ -1427,4 +1427,4 @@ void ChatModel::invalidateDocCacheForMessage(Snowflake messageId)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

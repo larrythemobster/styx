@@ -1,6 +1,6 @@
 #include "ContextProperties.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 ContextProperties ContextProperties::empty()
@@ -25,4 +25,4 @@ QByteArray ContextProperties::toHeaderValue() const
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

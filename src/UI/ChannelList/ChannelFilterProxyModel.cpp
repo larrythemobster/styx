@@ -6,7 +6,7 @@
 #include "Core/PermissionManager.hpp"
 #include "Discord/Enums.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 ChannelFilterProxyModel::ChannelFilterProxyModel(Core::Session *session, QObject *parent)
@@ -218,4 +218,4 @@ Core::Snowflake ChannelFilterProxyModel::getUserIdForNode(const QModelIndex &ind
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

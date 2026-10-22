@@ -4,7 +4,7 @@
 
 #include "Discord/Enums.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 struct PresenceBadge
@@ -15,6 +15,6 @@ struct PresenceBadge
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
-Q_DECLARE_METATYPE(Acheron::Core::PresenceBadge)
+Q_DECLARE_METATYPE(Styx::Core::PresenceBadge)

@@ -17,7 +17,7 @@
 #include <algorithm>
 #include <cstdlib>
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 static size_t write_cb(char *b, size_t size, size_t nmemb, void *userdata)
@@ -1213,4 +1213,4 @@ bool Gateway::isFatalCloseCode(CloseCode code) const
 }
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

@@ -8,7 +8,7 @@
 #include "HttpClient.hpp"
 #include "Core/ProxyConfig.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 enum class LoginError {
@@ -71,4 +71,4 @@ private:
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

@@ -16,7 +16,7 @@
 #include "NetworkRequest.hpp"
 #include "Discord/CdnUrls.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 namespace {
@@ -505,4 +505,4 @@ void ImageManager::download(const QUrl &url, Snowflake accountId, const QString 
 }
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

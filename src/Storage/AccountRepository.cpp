@@ -3,7 +3,7 @@
 #include "Core/Logging.hpp"
 #include "Core/TokenStore.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 namespace {
@@ -248,4 +248,4 @@ void AccountRepository::updateAutoConnect(quint64 id, bool autoConnect)
 }
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

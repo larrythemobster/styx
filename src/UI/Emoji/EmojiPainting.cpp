@@ -7,7 +7,7 @@
 #include "UI/Emoji/EmojiGlyphs.hpp"
 #include "UI/Emoji/PaintedImages.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -59,4 +59,4 @@ bool drawEmojiStill(QPainter &painter, const QRect &squareBox, const Core::Picke
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

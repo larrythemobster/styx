@@ -9,7 +9,7 @@
 #include "Discord/Events.hpp"
 #include "Snowflake.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 
 class RelationshipManager : public QObject
@@ -42,4 +42,4 @@ private:
 };
 
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx

@@ -4,7 +4,7 @@
 #include "Transaction.hpp"
 #include "Core/Logging.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Storage {
 
 UserRepository::UserRepository(Core::Snowflake accountId)
@@ -81,4 +81,4 @@ std::optional<Discord::User> UserRepository::getUser(Core::Snowflake userId)
 }
 
 } // namespace Storage
-} // namespace Acheron
+} // namespace Styx

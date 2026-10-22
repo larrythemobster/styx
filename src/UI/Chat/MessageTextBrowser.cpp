@@ -6,7 +6,7 @@
 
 #include "UI/Chat/MessageTextDocument.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 MessageTextBrowser::MessageTextBrowser(Core::ImageManager *images, Core::Snowflake accountId, QWidget *parent)
@@ -34,4 +34,4 @@ void MessageTextBrowser::fitHeightToDocument()
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

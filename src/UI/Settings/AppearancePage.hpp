@@ -14,7 +14,7 @@ class QGroupBox;
 class QSpinBox;
 class QToolButton;
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 class AppearancePage : public QWidget
@@ -45,4 +45,4 @@ private:
 };
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

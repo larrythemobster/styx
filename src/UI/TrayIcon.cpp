@@ -4,7 +4,7 @@
 #include <QPainter>
 #include <QSvgRenderer>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 #ifdef Q_OS_MACOS
@@ -15,7 +15,7 @@ static constexpr bool ClickOpensTheMenu = false;
 
 static QIcon applicationIcon()
 {
-    QSvgRenderer renderer(QStringLiteral(":/acheron.svg"));
+    QSvgRenderer renderer(QStringLiteral(":/styx.svg"));
     QIcon rendered;
     for (int side : { 16, 24, 32, 48, 64 }) {
         QPixmap pixmap(side, side);
@@ -34,7 +34,7 @@ static QIcon applicationIcon()
 
 TrayIcon::TrayIcon(QObject *parent) : QObject(parent), icon(applicationIcon())
 {
-    menu.addAction(tr("Show Acheron"), this, &TrayIcon::showWindowRequested);
+    menu.addAction(tr("Show Styx"), this, &TrayIcon::showWindowRequested);
     menu.addSeparator();
     menu.addAction(tr("Quit"), this, &TrayIcon::quitRequested);
     icon.setContextMenu(&menu);
@@ -54,4 +54,4 @@ void TrayIcon::setToolTip(const QString &windowTitle)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx

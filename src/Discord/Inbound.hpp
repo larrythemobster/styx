@@ -2,7 +2,7 @@
 
 #include "Objects.hpp"
 
-namespace Acheron {
+namespace Styx {
 namespace Discord {
 
 struct Inbound
@@ -48,4 +48,4 @@ struct Hello
 };
 
 } // namespace Discord
-} // namespace Acheron
+} // namespace Styx

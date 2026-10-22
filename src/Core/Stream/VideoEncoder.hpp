@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(_WIN32) && defined(ACHERON_HAVE_FFMPEG)
+#if defined(_WIN32) && defined(STYX_HAVE_FFMPEG)
 
 #include <QByteArray>
 #include <QSize>
@@ -18,7 +18,7 @@ extern "C" {
 
 struct SwsContext;
 
-namespace Acheron {
+namespace Styx {
 namespace Core {
 namespace Stream {
 
@@ -86,6 +86,6 @@ private:
 
 } // namespace Stream
 } // namespace Core
-} // namespace Acheron
+} // namespace Styx
 
 #endif

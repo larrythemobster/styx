@@ -10,7 +10,7 @@
 #include <QScreen>
 #include <QTimer>
 
-namespace Acheron {
+namespace Styx {
 namespace UI {
 
 namespace {
@@ -272,4 +272,4 @@ void VideoFullscreenWindow::closeEvent(QCloseEvent *event)
 }
 
 } // namespace UI
-} // namespace Acheron
+} // namespace Styx
