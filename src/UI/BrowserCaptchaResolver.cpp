@@ -3,14 +3,13 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QHostAddress>
+
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QPushButton>
 #include <QRandomGenerator>
-#include <QTcpServer>
-#include <QTcpSocket>
+#include "Platform/Dispatcher.hpp"
 #include <QTimer>
 #include <QUrl>
 #include <QUuid>
@@ -72,7 +71,35 @@ var _poll = setInterval(function () {
 </html>
 )HTML";
 
-static void sendHttp(QTcpSocket *socket, int code, const QByteArray &contentType,
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using native_socket_t = SOCKET;
+constexpr native_socket_t kInvalidNativeSocket = INVALID_SOCKET;
+inline int closeNativeSocket(native_socket_t s) { return ::closesocket(s); }
+inline bool setNonBlocking(native_socket_t s) {
+    u_long mode = 1;
+    return ioctlsocket(s, FIONBIO, &mode) == 0;
+}
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+using native_socket_t = int;
+constexpr native_socket_t kInvalidNativeSocket = -1;
+inline int closeNativeSocket(native_socket_t s) { return ::close(s); }
+inline bool setNonBlocking(native_socket_t s) {
+    int flags = fcntl(s, F_GETFL, 0);
+    return fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
+}
+#endif
+
+static void sendHttp(intptr_t clientSock, int code, const QByteArray &contentType,
                      const QByteArray &body)
 {
     QByteArray status;
@@ -99,9 +126,8 @@ static void sendHttp(QTcpSocket *socket, int code, const QByteArray &contentType
     resp += "\r\n";
     resp += body;
 
-    socket->write(resp);
-    socket->flush();
-    socket->disconnectFromHost();
+    ::send(static_cast<native_socket_t>(clientSock), resp.constData(), static_cast<int>(resp.size()), 0);
+    closeNativeSocket(static_cast<native_socket_t>(clientSock));
 }
 
 BrowserCaptchaResolver::BrowserCaptchaResolver(QWidget *parentWindow, QObject *parent)
@@ -234,15 +260,39 @@ void BrowserCaptchaResolver::beginChallenge(bool isRetry)
     state = State::Waiting;
     nonce = QUuid::createUuid().toString(QUuid::WithoutBraces) + QString::number(QRandomGenerator::global()->generate64(), 16);
 
-    server = new QTcpServer(this);
-    if (!server->listen(QHostAddress::LocalHost, 0)) {
-        qCWarning(LogUI) << "Failed to start captcha loopback server:" << server->errorString();
+    native_socket_t sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == kInvalidNativeSocket) {
+        qCWarning(LogUI) << "Failed to create captcha loopback socket";
         cancelCurrent();
         return;
     }
-    port = server->serverPort();
-    connect(server, &QTcpServer::newConnection, this, &BrowserCaptchaResolver::onNewConnection);
 
+    sockaddr_in bindAddr{};
+    bindAddr.sin_family = AF_INET;
+    bindAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bindAddr.sin_port = 0;
+
+    if (::bind(sock, reinterpret_cast<sockaddr *>(&bindAddr), sizeof(bindAddr)) != 0 ||
+        ::listen(sock, 5) != 0) {
+        qCWarning(LogUI) << "Failed to bind/listen captcha loopback server";
+        closeNativeSocket(sock);
+        cancelCurrent();
+        return;
+    }
+
+    setNonBlocking(sock);
+
+    sockaddr_in boundAddr{};
+    socklen_t len = sizeof(boundAddr);
+    if (::getsockname(sock, reinterpret_cast<sockaddr *>(&boundAddr), &len) == 0) {
+        port = ntohs(boundAddr.sin_port);
+    }
+
+    serverSocket = static_cast<intptr_t>(sock);
+
+    timerId = Platform::Dispatcher::main().setTimer(std::chrono::milliseconds(20), true, [this]() {
+        pollSockets();
+    });
     if (statusLabel) {
         if (isRetry)
             statusLabel->setText(tr("Failed. Click below to open your browser and try again."));
@@ -305,33 +355,63 @@ void BrowserCaptchaResolver::cancelCurrent()
         startNext();
 }
 
-void BrowserCaptchaResolver::onNewConnection()
+void BrowserCaptchaResolver::pollSockets()
 {
-    while (server && server->hasPendingConnections()) {
-        QTcpSocket *socket = server->nextPendingConnection();
-        connect(socket, &QTcpSocket::readyRead, this, [this, socket]() { handleSocket(socket); });
-        connect(socket, &QTcpSocket::disconnected, this, [this, socket]() {
-            buffers.remove(socket);
-            socket->deleteLater();
-        });
+    if (serverSocket == -1)
+        return;
+
+    native_socket_t srv = static_cast<native_socket_t>(serverSocket);
+
+    while (true) {
+        sockaddr_in clientAddr{};
+        socklen_t clientLen = sizeof(clientAddr);
+        native_socket_t client = ::accept(srv, reinterpret_cast<sockaddr *>(&clientAddr), &clientLen);
+        if (client == kInvalidNativeSocket)
+            break;
+        setNonBlocking(client);
+        buffers.insert(static_cast<intptr_t>(client), QByteArray());
+    }
+
+    QList<intptr_t> clients = buffers.keys();
+    for (intptr_t clientSock : clients) {
+        char buf[4096];
+        int n = ::recv(static_cast<native_socket_t>(clientSock), buf, sizeof(buf), 0);
+        if (n > 0) {
+            buffers[clientSock].append(buf, n);
+            handleClient(clientSock);
+        } else if (n == 0) {
+            closeNativeSocket(static_cast<native_socket_t>(clientSock));
+            buffers.remove(clientSock);
+        } else {
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err != WSAEWOULDBLOCK) {
+                closeNativeSocket(static_cast<native_socket_t>(clientSock));
+                buffers.remove(clientSock);
+            }
+#else
+            if (errno != EWOULDBLOCK && errno != EAGAIN) {
+                closeNativeSocket(static_cast<native_socket_t>(clientSock));
+                buffers.remove(clientSock);
+            }
+#endif
+        }
     }
 }
 
-void BrowserCaptchaResolver::handleSocket(QTcpSocket *socket)
+void BrowserCaptchaResolver::handleClient(intptr_t clientSock)
 {
-    QByteArray &buf = buffers[socket];
-    buf += socket->readAll();
+    QByteArray &buf = buffers[clientSock];
 
-    // juuuust in case
     if (buf.size() > 64 * 1024) {
-        buffers.remove(socket);
-        sendHttp(socket, 400, "text/plain", "too large");
+        buffers.remove(clientSock);
+        sendHttp(clientSock, 400, "text/plain", "too large");
         return;
     }
 
     const int headerEnd = buf.indexOf("\r\n\r\n");
     if (headerEnd < 0)
-        return; // headers not complete yet
+        return;
 
     const QByteArray header = buf.left(headerEnd);
     const QList<QByteArray> lines = header.split('\n');
@@ -340,8 +420,8 @@ void BrowserCaptchaResolver::handleSocket(QTcpSocket *socket)
 
     const QList<QByteArray> reqLine = lines.first().trimmed().split(' ');
     if (reqLine.size() < 2) {
-        buffers.remove(socket);
-        sendHttp(socket, 400, "text/plain", "bad request");
+        buffers.remove(clientSock);
+        sendHttp(clientSock, 400, "text/plain", "bad request");
         return;
     }
     const QByteArray method = reqLine[0];
@@ -359,30 +439,30 @@ void BrowserCaptchaResolver::handleSocket(QTcpSocket *socket)
 
     const int bodyStart = headerEnd + 4;
     if (buf.size() - bodyStart < contentLength)
-        return; // body not fully received yet
+        return;
 
     const QByteArray body = buf.mid(bodyStart, contentLength);
-    buffers.remove(socket);
+    buffers.remove(clientSock);
 
     const QByteArray expectedPath = "/" + nonce.toUtf8();
     if (nonce.isEmpty() || !path.startsWith(expectedPath)) {
-        sendHttp(socket, 404, "text/plain", "not found");
+        sendHttp(clientSock, 404, "text/plain", "not found");
         return;
     }
 
     if (method == "GET" && path == expectedPath) {
-        sendHttp(socket, 200, "text/html; charset=utf-8", buildHarnessHtml());
+        sendHttp(clientSock, 200, "text/html; charset=utf-8", buildHarnessHtml());
         return;
     }
 
     if (method == "POST" && path == expectedPath + "/token") {
         const QByteArray expectedOrigin = "http://127.0.0.1:" + QByteArray::number(port);
         if (!origin.isEmpty() && origin != expectedOrigin) {
-            sendHttp(socket, 403, "text/plain", "bad origin");
+            sendHttp(clientSock, 403, "text/plain", "bad origin");
             return;
         }
 
-        sendHttp(socket, 200, "application/json", "{\"ok\":true}");
+        sendHttp(clientSock, 200, "application/json", "{\"ok\":true}");
 
         const QJsonObject obj = QJsonDocument::fromJson(body).object();
         const QString token = obj.value("token").toString();
@@ -400,16 +480,23 @@ void BrowserCaptchaResolver::handleSocket(QTcpSocket *socket)
         return;
     }
 
-    sendHttp(socket, 404, "text/plain", "not found");
+    sendHttp(clientSock, 404, "text/plain", "not found");
 }
 
 void BrowserCaptchaResolver::teardownServer()
 {
+    if (timerId != 0) {
+        Platform::Dispatcher::main().cancelTimer(timerId);
+        timerId = 0;
+    }
+    for (intptr_t clientSock : buffers.keys()) {
+        closeNativeSocket(static_cast<native_socket_t>(clientSock));
+    }
     buffers.clear();
-    if (server) {
-        server->close();
-        server->deleteLater();
-        server = nullptr;
+
+    if (serverSocket != -1) {
+        closeNativeSocket(static_cast<native_socket_t>(serverSocket));
+        serverSocket = -1;
     }
     port = 0;
     nonce.clear();

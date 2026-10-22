@@ -20,8 +20,17 @@
 #include "Core/Snowflake.hpp"
 #include "Discord/Voice/Socks5UdpAssociation.hpp"
 
-#include <QHostAddress>
-#include <QNetworkAccessManager>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#endif
 #include <QList>
 #include <QTest>
 #include <QtEndian>
@@ -57,7 +66,7 @@ struct Header
     bool valid = false;
     quint8 fragment = 0;
     quint8 addressType = 0;
-    QHostAddress destination;
+    QString destination;
     quint16 port = 0;
     QByteArray payload;
 };
@@ -75,16 +84,16 @@ Header decodeHeader(const QByteArray &datagram)
     if (header.addressType == 1) {
         if (datagram.size() < cursor + 4)
             return header;
-        quint32 raw = 0;
-        memcpy(&raw, datagram.constData() + cursor, 4);
-        header.destination = QHostAddress(qFromBigEndian(raw));
+        char ipBuf[INET_ADDRSTRLEN]{};
+        inet_ntop(AF_INET, datagram.constData() + cursor, ipBuf, sizeof(ipBuf));
+        header.destination = QString::fromLatin1(ipBuf);
         cursor += 4;
     } else if (header.addressType == 4) {
         if (datagram.size() < cursor + 16)
             return header;
-        Q_IPV6ADDR raw;
-        memcpy(raw.c, datagram.constData() + cursor, 16);
-        header.destination = QHostAddress(raw);
+        char ipBuf[INET6_ADDRSTRLEN]{};
+        inet_ntop(AF_INET6, datagram.constData() + cursor, ipBuf, sizeof(ipBuf));
+        header.destination = QString::fromLatin1(ipBuf);
         cursor += 16;
     } else {
         return header;
@@ -146,12 +155,11 @@ private slots:
     void formattersEmptyWhenDirect();
 
     // --- Qt proxy --------------------------------------------------------
-    void qtProxyTypes_data();
-    void qtProxyTypes();
-    void qtProxyResolvesDnsAtProxy_data();
-    void qtProxyResolvesDnsAtProxy();
-    void qtProxyCarriesCredentials();
-
+    void curlProxyStringFormat_data();
+    void curlProxyStringFormat();
+    void curlProxyResolvesDnsAtProxy_data();
+    void curlProxyResolvesDnsAtProxy();
+    void curlProxyCarriesCredentials();
     // --- storage round trip ----------------------------------------------
     void roundTripsThroughStorage_data();
     void roundTripsThroughStorage();
@@ -449,42 +457,30 @@ void TestProxy::formattersEmptyWhenDirect()
 // Qt proxy
 // ---------------------------------------------------------------------------
 
-void TestProxy::qtProxyTypes_data()
+void TestProxy::curlProxyStringFormat_data()
 {
     QTest::addColumn<ProxyConfig>("config");
-    QTest::addColumn<int>("expected");
+    QTest::addColumn<QString>("expected");
 
     QTest::newRow("socks5") << make(ProxyConfig::Type::Socks5, "h", 1080)
-                            << int(QNetworkProxy::Socks5Proxy);
+                            << QStringLiteral("socks5h://h:1080");
     QTest::newRow("http") << make(ProxyConfig::Type::Http, "h", 8080)
-                          << int(QNetworkProxy::HttpProxy);
-
-    // Qt has no TLS-to-proxy transport, so https deliberately degrades to a
-    // plain CONNECT. Traffic still goes through the proxy; only the hop to the
-    // proxy is unencrypted.
-    QTest::newRow("https degrades") << make(ProxyConfig::Type::Https, "h", 8443)
-                                    << int(QNetworkProxy::HttpProxy);
-
-    QTest::newRow("none") << ProxyConfig() << int(QNetworkProxy::NoProxy);
-    QTest::newRow("incomplete") << make(ProxyConfig::Type::Socks5, "h", 0)
-                                << int(QNetworkProxy::NoProxy);
+                          << QStringLiteral("http://h:8080");
+    QTest::newRow("https") << make(ProxyConfig::Type::Https, "h", 8443)
+                           << QStringLiteral("https://h:8443");
+    QTest::newRow("none") << ProxyConfig() << QString();
+    QTest::newRow("incomplete") << make(ProxyConfig::Type::Socks5, "h", 0) << QString();
 }
 
-void TestProxy::qtProxyTypes()
+void TestProxy::curlProxyStringFormat()
 {
     QFETCH(ProxyConfig, config);
-    QFETCH(int, expected);
+    QFETCH(QString, expected);
 
-    const QNetworkProxy proxy = config.toQtProxy();
-    QCOMPARE(int(proxy.type()), expected);
-
-    if (config.enabled()) {
-        QCOMPARE(proxy.hostName(), config.host);
-        QCOMPARE(proxy.port(), config.port);
-    }
+    QCOMPARE(config.toCurlProxyString(), expected);
 }
 
-void TestProxy::qtProxyResolvesDnsAtProxy_data()
+void TestProxy::curlProxyResolvesDnsAtProxy_data()
 {
     QTest::addColumn<ProxyConfig>("config");
 
@@ -493,26 +489,26 @@ void TestProxy::qtProxyResolvesDnsAtProxy_data()
     QTest::newRow("https") << make(ProxyConfig::Type::Https, "h", 8443);
 }
 
-void TestProxy::qtProxyResolvesDnsAtProxy()
+void TestProxy::curlProxyResolvesDnsAtProxy()
 {
     QFETCH(ProxyConfig, config);
 
-    // Without this capability Qt resolves image hostnames locally, which leaks
-    // DNS for every avatar and attachment even though the fetch is proxied.
-    const QNetworkProxy proxy = config.toQtProxy();
-    QVERIFY(proxy.capabilities().testFlag(QNetworkProxy::HostNameLookupCapability));
+    const QString proxy = config.toCurlProxyString();
+    if (config.type == ProxyConfig::Type::Socks5) {
+        QVERIFY(proxy.startsWith(QStringLiteral("socks5h://")));
+    } else {
+        QVERIFY(!proxy.isEmpty());
+    }
 }
 
-void TestProxy::qtProxyCarriesCredentials()
+void TestProxy::curlProxyCarriesCredentials()
 {
-    const QNetworkProxy authenticated =
-            make(ProxyConfig::Type::Socks5, "h", 1080, "user", "pass").toQtProxy();
-    QCOMPARE(authenticated.user(), QStringLiteral("user"));
-    QCOMPARE(authenticated.password(), QStringLiteral("pass"));
+    const QString authenticated =
+            make(ProxyConfig::Type::Socks5, "h", 1080, "user", "pass").toCurlProxyString();
+    QVERIFY(authenticated.contains(QStringLiteral("user:pass@")));
 
-    const QNetworkProxy anonymous = make(ProxyConfig::Type::Socks5, "h", 1080).toQtProxy();
-    QVERIFY(anonymous.user().isEmpty());
-    QVERIFY(anonymous.password().isEmpty());
+    const QString anonymous = make(ProxyConfig::Type::Socks5, "h", 1080).toCurlProxyString();
+    QVERIFY(!anonymous.contains(QLatin1Char('@')));
 }
 
 // ---------------------------------------------------------------------------
@@ -593,17 +589,10 @@ void TestProxy::proxiedAccountGetsItsOwnManager()
 
     images.setAccountProxy(account, config);
 
-    QNetworkAccessManager *manager = images.networkManagerFor(account);
-    QVERIFY(manager != nullptr);
-    QVERIFY(images.networkManagerFor(Snowflake()) == nullptr);
-
-    const QNetworkProxy applied = manager->proxy();
-    QCOMPARE(applied.type(), QNetworkProxy::Socks5Proxy);
-    QCOMPARE(applied.hostName(), config.host);
-    QCOMPARE(applied.port(), config.port);
-    QCOMPARE(applied.user(), config.username);
-    QCOMPARE(applied.password(), config.password);
-    QVERIFY(applied.capabilities().testFlag(QNetworkProxy::HostNameLookupCapability));
+    QVERIFY(images.hasRouteFor(account));
+    QVERIFY(!images.hasRouteFor(Snowflake()));
+    QCOMPARE(images.accountProxy(account), config);
+    QCOMPARE(images.curlProxyFor(account), config.toCurlProxyString());
 }
 
 void TestProxy::accountsRouteIndependently()
@@ -615,15 +604,11 @@ void TestProxy::accountsRouteIndependently()
     images.setAccountProxy(first, make(ProxyConfig::Type::Socks5, "first.test", 1080));
     images.setAccountProxy(second, make(ProxyConfig::Type::Http, "second.test", 8080));
 
-    QNetworkAccessManager *firstManager = images.networkManagerFor(first);
-    QNetworkAccessManager *secondManager = images.networkManagerFor(second);
-
-    QVERIFY(firstManager != secondManager);
-    QCOMPARE(firstManager->proxy().hostName(), QStringLiteral("first.test"));
-    QCOMPARE(secondManager->proxy().hostName(), QStringLiteral("second.test"));
+    QCOMPARE(images.curlProxyFor(first), QStringLiteral("socks5h://first.test:1080"));
+    QCOMPARE(images.curlProxyFor(second), QStringLiteral("http://second.test:8080"));
 
     // An unconfigured account gets no route at all, so it cannot inherit either proxy.
-    QVERIFY(images.networkManagerFor(Snowflake(3)) == nullptr);
+    QVERIFY(!images.hasRouteFor(Snowflake(3)));
 }
 
 void TestProxy::changingProxySwapsRoute()
@@ -634,7 +619,7 @@ void TestProxy::changingProxySwapsRoute()
     images.setAccountProxy(account, make(ProxyConfig::Type::Socks5, "old.test", 1080));
     images.setAccountProxy(account, make(ProxyConfig::Type::Socks5, "new.test", 1080));
 
-    QCOMPARE(images.networkManagerFor(account)->proxy().hostName(), QStringLiteral("new.test"));
+    QCOMPARE(images.curlProxyFor(account), QStringLiteral("socks5h://new.test:1080"));
 }
 
 void TestProxy::reapplyingSameProxyKeepsManager()
@@ -644,12 +629,10 @@ void TestProxy::reapplyingSameProxyKeepsManager()
     const ProxyConfig config = make(ProxyConfig::Type::Socks5, "proxy.test", 1080);
 
     images.setAccountProxy(account, config);
-    QNetworkAccessManager *manager = images.networkManagerFor(account);
+    QCOMPARE(images.curlProxyFor(account), config.toCurlProxyString());
 
-    // Re-applying an unchanged proxy must not churn the manager, or every
-    // in-flight image fetch would be cancelled.
     images.setAccountProxy(account, config);
-    QCOMPARE(images.networkManagerFor(account), manager);
+    QCOMPARE(images.curlProxyFor(account), config.toCurlProxyString());
 }
 
 void TestProxy::clearingProxyFallsBackToDirect()
@@ -658,10 +641,11 @@ void TestProxy::clearingProxyFallsBackToDirect()
     const Snowflake account(1);
 
     images.setAccountProxy(account, make(ProxyConfig::Type::Socks5, "proxy.test", 1080));
-    QCOMPARE(images.networkManagerFor(account)->proxy().type(), QNetworkProxy::Socks5Proxy);
+    QCOMPARE(images.curlProxyFor(account), QStringLiteral("socks5h://proxy.test:1080"));
 
     images.setAccountProxy(account, ProxyConfig());
-    QCOMPARE(images.networkManagerFor(account)->proxy().type(), QNetworkProxy::NoProxy);
+    QVERIFY(images.curlProxyFor(account).isEmpty());
+    QVERIFY(!images.accountProxy(account).enabled());
 }
 
 void TestProxy::incompleteProxyIsNotAppliedSilently()
@@ -669,13 +653,13 @@ void TestProxy::incompleteProxyIsNotAppliedSilently()
     ImageManager images;
     const Snowflake account(1);
 
-    // Half-filled configs are not enabled, so they route directly. parse() never
-    // produces one, which is why parseFailsClosed matters.
     images.setAccountProxy(account, make(ProxyConfig::Type::Socks5, "proxy.test", 0));
-    QCOMPARE(images.networkManagerFor(account)->proxy().type(), QNetworkProxy::NoProxy);
+    QVERIFY(images.curlProxyFor(account).isEmpty());
+    QVERIFY(!images.accountProxy(account).enabled());
 
     images.setAccountProxy(account, make(ProxyConfig::Type::Socks5, QString(), 1080));
-    QCOMPARE(images.networkManagerFor(account)->proxy().type(), QNetworkProxy::NoProxy);
+    QVERIFY(images.curlProxyFor(account).isEmpty());
+    QVERIFY(!images.accountProxy(account).enabled());
 }
 
 // ---------------------------------------------------------------------------
@@ -686,7 +670,7 @@ void TestProxy::encapsulateIpv4Layout()
 {
     const QByteArray payload("audio");
     const QByteArray datagram =
-            Socks5UdpAssociation::encapsulate(payload, QHostAddress("1.2.3.4"), 0x1234);
+            Socks5UdpAssociation::encapsulate(payload, QStringLiteral("1.2.3.4"), 0x1234);
 
     QCOMPARE(datagram.size(), 10 + payload.size());
     QCOMPARE(datagram.mid(0, 3), QByteArray("\x00\x00\x00", 3)); // RSV + FRAG
@@ -700,7 +684,7 @@ void TestProxy::encapsulateIpv6Layout()
 {
     const QByteArray payload("x");
     const QByteArray datagram =
-            Socks5UdpAssociation::encapsulate(payload, QHostAddress("2001:db8::1"), 443);
+            Socks5UdpAssociation::encapsulate(payload, QStringLiteral("2001:db8::1"), 443);
 
     QCOMPARE(datagram.size(), 22 + payload.size());
     QCOMPARE(quint8(datagram.at(3)), quint8(4)); // ATYP = IPv6
@@ -728,16 +712,15 @@ void TestProxy::encapsulateAddressesExactDestination()
     QFETCH(QString, address);
     QFETCH(quint16, port);
 
-    const QHostAddress destination(address);
     const QByteArray datagram =
-            Socks5UdpAssociation::encapsulate(QByteArray("payload"), destination, port);
+            Socks5UdpAssociation::encapsulate(QByteArray("payload"), address, port);
 
     // Decoded independently of the encoder: a mistake here would relay voice to
     // the wrong host rather than fail visibly.
     const Header header = decodeHeader(datagram);
     QVERIFY(header.valid);
     QCOMPARE(header.fragment, quint8(0));
-    QCOMPARE(header.destination, destination);
+    QCOMPARE(header.destination, address);
     QCOMPARE(header.port, port);
     QCOMPARE(header.payload, QByteArray("payload"));
 }
@@ -759,7 +742,7 @@ void TestProxy::encapsulatePreservesPayload()
     QFETCH(QByteArray, payload);
 
     const QByteArray datagram =
-            Socks5UdpAssociation::encapsulate(payload, QHostAddress("1.2.3.4"), 19334);
+            Socks5UdpAssociation::encapsulate(payload, QStringLiteral("1.2.3.4"), 19334);
     QCOMPARE(datagram.size(), 10 + payload.size());
     QCOMPARE(datagram.mid(10), payload);
 }
@@ -781,7 +764,7 @@ void TestProxy::decapsulateRoundTrip()
     QFETCH(QByteArray, payload);
 
     const QByteArray wrapped =
-            Socks5UdpAssociation::encapsulate(payload, QHostAddress(address), 19334);
+            Socks5UdpAssociation::encapsulate(payload, address, 19334);
     QCOMPARE(Socks5UdpAssociation::decapsulate(wrapped), payload);
 }
 
@@ -869,7 +852,7 @@ void TestProxy::decapsulateSurvivesTruncationFuzz()
 
     for (const auto &entry : cases) {
         const QByteArray full = Socks5UdpAssociation::encapsulate(
-                QByteArray("\x80\x78payload", 9), QHostAddress(entry.first), 19334);
+                QByteArray("\x80\x78payload", 9), entry.first, 19334);
         QCOMPARE(full.size(), entry.second + 9);
 
         for (int length = 0; length < full.size(); ++length) {
@@ -887,16 +870,8 @@ void TestProxy::encapsulateRefusesUnknownDestination()
     // Discord hands us the voice address as a string; if it ever fails to parse,
     // the datagram must not end up aimed at something routable.
     const QByteArray datagram =
-            Socks5UdpAssociation::encapsulate(QByteArray("x"), QHostAddress(), 19334);
-
-    if (datagram.isEmpty())
-        return;
-
-    const Header header = decodeHeader(datagram);
-    QVERIFY(header.valid);
-    QVERIFY(header.destination.isNull()
-            || header.destination == QHostAddress(QHostAddress::AnyIPv4)
-            || header.destination == QHostAddress(QHostAddress::AnyIPv6));
+            Socks5UdpAssociation::encapsulate(QByteArray("x"), QString(), 19334);
+    QVERIFY(datagram.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestProxy)

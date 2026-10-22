@@ -10,7 +10,7 @@
 #include <functional>
 #include <mutex>
 
-class QNetworkAccessManager;
+
 
 namespace Styx {
 namespace Discord {
@@ -33,7 +33,7 @@ QString getImpersonateTarget();
 UserAgentProps getUserAgentProps();
 QString getSystemLocale();
 
-void ensureBuildNumber(QNetworkAccessManager *nam, std::function<void()> done);
+void ensureBuildNumber(const Core::ProxyConfig &proxy, std::function<void()> done);
 int getBuildNumber();
 
 // cacert, curl-impersonate, user-agent

@@ -2,7 +2,7 @@
 
 #include "ClientIdentity.hpp"
 #include "Core/Logging.hpp"
-#include "Core/NetworkRequest.hpp"
+#include "Platform/Http.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -10,10 +10,6 @@
 #include <QLocale>
 #include <QRegularExpression>
 #include <QTimeZone>
-#include <QNetworkAccessManager>
-#include <QNetworkRequest>
-#include <QNetworkReply>
-
 #include <utility>
 #include <vector>
 
@@ -37,7 +33,7 @@ static void resolveBuildNumberWaiters()
         waiter();
 }
 
-void ensureBuildNumber(QNetworkAccessManager *nam, std::function<void()> done)
+void ensureBuildNumber(const Core::ProxyConfig &proxy, std::function<void()> done)
 {
     if (cachedBuildNumber > 0) {
         done();
@@ -51,23 +47,23 @@ void ensureBuildNumber(QNetworkAccessManager *nam, std::function<void()> done)
 
     qCInfo(LogNetwork) << "Fetching Discord build number...";
 
-    QNetworkRequest request = Core::networkRequest(QUrl("https://discord.com/app"));
-    request.setHeader(QNetworkRequest::UserAgentHeader, getUserAgent());
-    request.setTransferTimeout(BUILD_NUMBER_TIMEOUT_MS);
+    Platform::HttpRequest req;
+    req.url = "https://discord.com/app";
+    req.timeout = std::chrono::milliseconds(BUILD_NUMBER_TIMEOUT_MS);
+    req.headers.emplace_back("User-Agent", getUserAgent().toStdString());
+    if (proxy.enabled()) {
+        req.proxy = proxy.toCurlProxyString().toStdString();
+    }
 
-    QNetworkReply *appReply = nam->get(request);
-    QObject::connect(appReply, &QNetworkReply::finished, [nam, appReply]() {
-        appReply->deleteLater();
-
-        if (appReply->error() != QNetworkReply::NoError) {
-            qCWarning(LogNetwork) << "Failed to fetch Discord app page:" << appReply->errorString();
+    Platform::HttpClient::instance().request(std::move(req), [proxy](const Platform::HttpResponse &appReply) {
+        if (!appReply.ok()) {
+            qCWarning(LogNetwork) << "Failed to fetch Discord app page:" << QString::fromStdString(appReply.error);
             resolveBuildNumberWaiters();
             return;
         }
 
-        QByteArray appPage = appReply->readAll();
         QRegularExpression sentryRegex("/assets/sentry.*?\\.js");
-        QRegularExpressionMatch sentryMatch = sentryRegex.match(appPage);
+        QRegularExpressionMatch sentryMatch = sentryRegex.match(QString::fromStdString(appReply.body));
 
         if (!sentryMatch.hasMatch()) {
             qCWarning(LogNetwork) << "Failed to find sentry JS path";
@@ -76,27 +72,28 @@ void ensureBuildNumber(QNetworkAccessManager *nam, std::function<void()> done)
         }
 
         QString sentryPath = sentryMatch.captured(0);
-        QString sentryUrl = "https://discord.com" + sentryPath;
+        std::string sentryUrl = "https://discord.com" + sentryPath.toStdString();
 
-        QNetworkRequest sentryRequest = Core::networkRequest(QUrl(sentryUrl));
-        sentryRequest.setHeader(QNetworkRequest::UserAgentHeader, getUserAgent());
-        sentryRequest.setTransferTimeout(BUILD_NUMBER_TIMEOUT_MS);
+        Platform::HttpRequest sentryReq;
+        sentryReq.url = sentryUrl;
+        sentryReq.timeout = std::chrono::milliseconds(BUILD_NUMBER_TIMEOUT_MS);
+        sentryReq.headers.emplace_back("User-Agent", getUserAgent().toStdString());
+        if (proxy.enabled()) {
+            sentryReq.proxy = proxy.toCurlProxyString().toStdString();
+        }
 
-        QNetworkReply *sentryReply = nam->get(sentryRequest);
-        QObject::connect(sentryReply, &QNetworkReply::finished, [sentryReply]() {
-            sentryReply->deleteLater();
-
-            QByteArray sentryJs = sentryReply->readAll();
-            QRegularExpression buildRegex("buildNumber\",\"(\\d+)");
-            QRegularExpressionMatch buildMatch = buildRegex.match(sentryJs);
-
-            if (sentryReply->error() != QNetworkReply::NoError)
-                qCWarning(LogNetwork) << "Failed to fetch sentry JS:" << sentryReply->errorString();
-            else if (!buildMatch.hasMatch())
-                qCWarning(LogNetwork) << "Failed to extract build number";
-            else {
-                cachedBuildNumber = buildMatch.captured(1).toInt();
-                qCInfo(LogNetwork) << "Discord build number:" << cachedBuildNumber;
+        Platform::HttpClient::instance().request(std::move(sentryReq), [](const Platform::HttpResponse &sentryReply) {
+            if (!sentryReply.ok()) {
+                qCWarning(LogNetwork) << "Failed to fetch sentry JS:" << QString::fromStdString(sentryReply.error);
+            } else {
+                QRegularExpression buildRegex("buildNumber\",\"(\\d+)");
+                QRegularExpressionMatch buildMatch = buildRegex.match(QString::fromStdString(sentryReply.body));
+                if (!buildMatch.hasMatch()) {
+                    qCWarning(LogNetwork) << "Failed to extract build number";
+                } else {
+                    cachedBuildNumber = buildMatch.captured(1).toInt();
+                    qCInfo(LogNetwork) << "Discord build number:" << cachedBuildNumber;
+                }
             }
 
             resolveBuildNumberWaiters();

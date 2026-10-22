@@ -1,10 +1,31 @@
 #include "Socks5UdpAssociation.hpp"
-
 #include "Core/Logging.hpp"
 
 #include <QtEndian>
+#include <QMetaObject>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using native_socket_t = SOCKET;
+constexpr native_socket_t kInvalidNativeSocket = INVALID_SOCKET;
+inline int closeNativeSocket(native_socket_t s) { return ::closesocket(s); }
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+using native_socket_t = int;
+constexpr native_socket_t kInvalidNativeSocket = -1;
+inline int closeNativeSocket(native_socket_t s) { return ::close(s); }
+#endif
 
 #include <algorithm>
+#include <vector>
 
 namespace Styx {
 namespace Discord {
@@ -18,34 +39,44 @@ constexpr char METHOD_NONE = 0x00;
 constexpr char METHOD_USERPASS = 0x02;
 constexpr char METHOD_UNACCEPTABLE = char(0xFF);
 constexpr char CMD_UDP_ASSOCIATE = 0x03;
-constexpr char ATYP_IPV4 = 0x01;
-constexpr char ATYP_DOMAIN = 0x03;
-constexpr char ATYP_IPV6 = 0x04;
+constexpr quint8 ATYP_IPV4 = 0x01;
+constexpr quint8 ATYP_DOMAIN = 0x03;
+constexpr quint8 ATYP_IPV6 = 0x04;
 constexpr char REPLY_SUCCEEDED = 0x00;
 
-void appendAddress(QByteArray &out, const QHostAddress &address, quint16 port)
+void appendAddress(QByteArray &out, const QString &destination, quint16 port)
 {
-    if (address.protocol() == QAbstractSocket::IPv6Protocol) {
-        out.append(ATYP_IPV6);
-        Q_IPV6ADDR raw = address.toIPv6Address();
-        out.append(reinterpret_cast<const char *>(raw.c), 16);
+    std::string destStr = destination.toStdString();
+    in_addr addr4{};
+    in6_addr addr6{};
+
+    if (inet_pton(AF_INET, destStr.c_str(), &addr4) == 1) {
+        out.append(char(ATYP_IPV4));
+        out.append(reinterpret_cast<const char *>(&addr4), 4);
+    } else if (inet_pton(AF_INET6, destStr.c_str(), &addr6) == 1) {
+        out.append(char(ATYP_IPV6));
+        out.append(reinterpret_cast<const char *>(&addr6), 16);
     } else {
-        out.append(ATYP_IPV4);
-        quint32 raw = qToBigEndian(address.toIPv4Address());
-        out.append(reinterpret_cast<const char *>(&raw), 4);
+        QByteArray domainUtf8 = destination.toUtf8();
+        if (!domainUtf8.isEmpty() && domainUtf8.size() <= 255) {
+            out.append(char(ATYP_DOMAIN));
+            out.append(static_cast<char>(domainUtf8.size()));
+            out.append(domainUtf8);
+        } else {
+            return;
+        }
     }
 
     quint16 portBE = qToBigEndian(port);
     out.append(reinterpret_cast<const char *>(&portBE), 2);
 }
 
-// Length of the ATYP+ADDR+PORT tail starting at `offset`, or -1 if incomplete or unknown.
 int addressFieldLength(const QByteArray &data, int offset)
 {
     if (data.size() <= offset)
         return -1;
 
-    switch (data.at(offset)) {
+    switch (static_cast<quint8>(data.at(offset))) {
     case ATYP_IPV4:
         return 1 + 4 + 2;
     case ATYP_IPV6:
@@ -83,256 +114,288 @@ QString replyErrorString(quint8 code)
     }
 }
 
+int recvExact(native_socket_t sock, char *buf, int total)
+{
+    int received = 0;
+    while (received < total) {
+        int n = ::recv(sock, buf + received, total - received, 0);
+        if (n <= 0)
+            return -1;
+        received += n;
+    }
+    return received;
+}
+
 } // namespace
 
 Socks5UdpAssociation::Socks5UdpAssociation(QObject *parent)
     : QObject(parent)
 {
-    timeout.setSingleShot(true);
-    connect(&timeout, &QTimer::timeout, this,
-            [this] { fail(QStringLiteral("SOCKS5 handshake timed out")); });
+}
+
+Socks5UdpAssociation::~Socks5UdpAssociation()
+{
+    close();
 }
 
 void Socks5UdpAssociation::open(const Core::ProxyConfig &config)
 {
     close();
 
-    proxy = config;
-    stage = Stage::AwaitingMethod;
-
-    control = new QTcpSocket(this);
-    connect(control, &QTcpSocket::connected, this, &Socks5UdpAssociation::sendGreeting);
-    connect(control, &QTcpSocket::readyRead, this, &Socks5UdpAssociation::onReadyRead);
-    connect(control, &QTcpSocket::disconnected, this, [this] {
-        fail(stage == Stage::Established ? QStringLiteral("proxy closed the UDP association")
-                                         : QStringLiteral("proxy closed the connection during handshake"));
-    });
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-    connect(control, &QTcpSocket::errorOccurred, this, [this] { fail(control->errorString()); });
-#else
-    connect(control, QOverload<QAbstractSocket::SocketError>::of(&QTcpSocket::error), this,
-            [this] { fail(control->errorString()); });
-#endif
-
-    timeout.start(HANDSHAKE_TIMEOUT_MS);
-    control->connectToHost(proxy.host, proxy.port);
+    m_closing = false;
+    m_established = false;
+    m_workerThread = std::thread(&Socks5UdpAssociation::runHandshake, this, config);
 }
 
 void Socks5UdpAssociation::close()
 {
-    timeout.stop();
-    releaseControlSocket();
+    m_closing = true;
+    m_established = false;
 
-    buffer.clear();
-    stage = Stage::Idle;
-    relay = QHostAddress();
-    relayPortNumber = 0;
+    if (m_controlSocket != -1) {
+        native_socket_t s = static_cast<native_socket_t>(m_controlSocket);
+        m_controlSocket = -1;
+#ifdef _WIN32
+        ::shutdown(s, SD_BOTH);
+#else
+        ::shutdown(s, SHUT_RDWR);
+#endif
+        closeNativeSocket(s);
+    }
+
+    if (m_workerThread.joinable()) {
+        m_workerThread.join();
+    }
+
+    m_relayAddress.clear();
+    m_relayPort = 0;
 }
 
-void Socks5UdpAssociation::releaseControlSocket()
+void Socks5UdpAssociation::runHandshake(Core::ProxyConfig config)
 {
-    if (!control)
-        return;
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo *res = nullptr;
 
-    control->disconnect(this);
-    control->deleteLater();
-    control = nullptr;
-}
+    std::string portStr = std::to_string(config.port);
+    std::string hostStr = config.host.toStdString();
 
-void Socks5UdpAssociation::sendGreeting()
-{
-    QByteArray methods(1, METHOD_NONE);
-    if (!proxy.username.isEmpty())
-        methods.append(METHOD_USERPASS);
-
-    QByteArray greeting;
-    greeting.append(SOCKS_VERSION);
-    greeting.append(static_cast<char>(methods.size()));
-    greeting.append(methods);
-
-    control->write(greeting);
-}
-
-void Socks5UdpAssociation::sendCredentials()
-{
-    const QByteArray user = proxy.username.toUtf8();
-    const QByteArray pass = proxy.password.toUtf8();
-
-    if (user.size() > 255 || pass.size() > 255) {
-        fail(QStringLiteral("SOCKS5 credentials exceed 255 bytes"));
+    int rc = getaddrinfo(hostStr.c_str(), portStr.c_str(), &hints, &res);
+    if (rc != 0 || !res) {
+        fail(QStringLiteral("Failed to resolve SOCKS5 proxy host: %1").arg(config.host));
         return;
     }
 
-    QByteArray request;
-    request.append(AUTH_VERSION);
-    request.append(static_cast<char>(user.size()));
-    request.append(user);
-    request.append(static_cast<char>(pass.size()));
-    request.append(pass);
+    native_socket_t sock = kInvalidNativeSocket;
+    for (addrinfo *ai = res; ai != nullptr; ai = ai->ai_next) {
+        sock = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (sock == kInvalidNativeSocket)
+            continue;
 
-    stage = Stage::AwaitingAuthReply;
-    control->write(request);
-}
+#ifdef _WIN32
+        DWORD timeoutMs = 10000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeoutMs), sizeof(timeoutMs));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&timeoutMs), sizeof(timeoutMs));
+#else
+        timeval tv{10, 0};
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
 
-void Socks5UdpAssociation::sendAssociateRequest()
-{
-    QByteArray request;
-    request.append(SOCKS_VERSION);
-    request.append(CMD_UDP_ASSOCIATE);
-    request.append(char(0));
-    appendAddress(request, QHostAddress(QHostAddress::AnyIPv4), 0);
-
-    stage = Stage::AwaitingAssociateReply;
-    control->write(request);
-}
-
-void Socks5UdpAssociation::onReadyRead()
-{
-    buffer.append(control->readAll());
-
-    bool progressed = true;
-    while (progressed) {
-        switch (stage) {
-        case Stage::AwaitingMethod:
-            progressed = consumeMethodReply();
-            break;
-        case Stage::AwaitingAuthReply:
-            progressed = consumeAuthReply();
-            break;
-        case Stage::AwaitingAssociateReply:
-            progressed = consumeAssociateReply();
-            break;
-        default:
-            progressed = false;
+        if (::connect(sock, ai->ai_addr, static_cast<int>(ai->ai_addrlen)) == 0) {
             break;
         }
+
+        closeNativeSocket(sock);
+        sock = kInvalidNativeSocket;
     }
-}
+    freeaddrinfo(res);
 
-bool Socks5UdpAssociation::consumeMethodReply()
-{
-    if (buffer.size() < 2)
-        return false;
-
-    const char method = buffer.at(1);
-    buffer.remove(0, 2);
-
-    if (method == METHOD_UNACCEPTABLE) {
-        fail(QStringLiteral("proxy rejected all offered authentication methods"));
-        return false;
+    if (sock == kInvalidNativeSocket) {
+        fail(QStringLiteral("Failed to connect to SOCKS5 proxy at %1:%2").arg(config.host).arg(config.port));
+        return;
     }
 
-    if (method == METHOD_USERPASS) {
-        sendCredentials();
-        return true;
+    m_controlSocket = static_cast<intptr_t>(sock);
+
+    // 1. Send greeting
+    std::vector<char> greeting = {SOCKS_VERSION, 1, METHOD_NONE};
+    if (!config.username.isEmpty()) {
+        greeting[1] = 2;
+        greeting.push_back(METHOD_USERPASS);
     }
 
-    if (method != METHOD_NONE) {
-        fail(QStringLiteral("proxy selected unsupported authentication method %1").arg(int(method)));
-        return false;
+    if (::send(sock, greeting.data(), static_cast<int>(greeting.size()), 0) <= 0) {
+        fail(QStringLiteral("Failed to send greeting to SOCKS5 proxy"));
+        return;
     }
 
-    sendAssociateRequest();
-    return true;
-}
-
-bool Socks5UdpAssociation::consumeAuthReply()
-{
-    if (buffer.size() < 2)
-        return false;
-
-    const char status = buffer.at(1);
-    buffer.remove(0, 2);
-
-    if (status != 0) {
-        fail(QStringLiteral("proxy rejected the supplied credentials"));
-        return false;
+    // 2. Receive method selection
+    char methodReply[2]{};
+    if (recvExact(sock, methodReply, 2) != 2) {
+        fail(QStringLiteral("Failed to receive method selection from SOCKS5 proxy"));
+        return;
     }
 
-    sendAssociateRequest();
-    return true;
-}
-
-bool Socks5UdpAssociation::consumeAssociateReply()
-{
-    if (buffer.size() < 4)
-        return false;
-
-    const quint8 reply = static_cast<quint8>(buffer.at(1));
-    if (reply != REPLY_SUCCEEDED) {
-        fail(QStringLiteral("UDP ASSOCIATE failed: %1").arg(replyErrorString(reply)));
-        return false;
+    if (methodReply[0] != SOCKS_VERSION) {
+        fail(QStringLiteral("Invalid SOCKS version received from proxy"));
+        return;
     }
 
-    const char atyp = buffer.at(3);
-    if (atyp != ATYP_IPV4 && atyp != ATYP_IPV6) {
-        fail(QStringLiteral("proxy returned an unsupported relay address type %1").arg(int(atyp)));
-        return false;
+    if (methodReply[1] == METHOD_UNACCEPTABLE) {
+        fail(QStringLiteral("Proxy rejected all offered authentication methods"));
+        return;
     }
 
-    const int addressSize = atyp == ATYP_IPV4 ? 4 : 16;
-    const int replySize = 4 + addressSize + 2;
-    if (buffer.size() < replySize)
-        return false;
+    if (methodReply[1] == METHOD_USERPASS) {
+        QByteArray user = config.username.toUtf8();
+        QByteArray pass = config.password.toUtf8();
+        if (user.size() > 255 || pass.size() > 255) {
+            fail(QStringLiteral("SOCKS5 credentials exceed 255 bytes"));
+            return;
+        }
 
-    const char *address = buffer.constData() + 4;
+        std::vector<char> authReq;
+        authReq.push_back(AUTH_VERSION);
+        authReq.push_back(static_cast<char>(user.size()));
+        authReq.insert(authReq.end(), user.begin(), user.end());
+        authReq.push_back(static_cast<char>(pass.size()));
+        authReq.insert(authReq.end(), pass.begin(), pass.end());
+
+        if (::send(sock, authReq.data(), static_cast<int>(authReq.size()), 0) <= 0) {
+            fail(QStringLiteral("Failed to send credentials to SOCKS5 proxy"));
+            return;
+        }
+
+        char authReply[2]{};
+        if (recvExact(sock, authReply, 2) != 2 || authReply[1] != 0) {
+            fail(QStringLiteral("Proxy rejected the supplied credentials"));
+            return;
+        }
+    } else if (methodReply[1] != METHOD_NONE) {
+        fail(QStringLiteral("Proxy selected unsupported authentication method %1").arg(int(methodReply[1])));
+        return;
+    }
+
+    // 3. Send UDP ASSOCIATE request (dst 0.0.0.0:0)
+    char assocReq[10] = {SOCKS_VERSION, CMD_UDP_ASSOCIATE, 0x00, static_cast<char>(ATYP_IPV4), 0, 0, 0, 0, 0, 0};
+    if (::send(sock, assocReq, 10, 0) <= 0) {
+        fail(QStringLiteral("Failed to send UDP ASSOCIATE request to SOCKS5 proxy"));
+        return;
+    }
+
+    // 4. Receive associate reply
+    char assocHdr[4]{};
+    if (recvExact(sock, assocHdr, 4) != 4) {
+        fail(QStringLiteral("Failed to receive UDP ASSOCIATE reply"));
+        return;
+    }
+
+    if (assocHdr[0] != SOCKS_VERSION || assocHdr[1] != REPLY_SUCCEEDED) {
+        fail(QStringLiteral("UDP ASSOCIATE failed: %1").arg(replyErrorString(static_cast<quint8>(assocHdr[1]))));
+        return;
+    }
+
+    quint8 atyp = static_cast<quint8>(assocHdr[3]);
+    int addrLen = 0;
     if (atyp == ATYP_IPV4) {
-        relay = QHostAddress(qFromBigEndian<quint32>(address));
+        addrLen = 4;
+    } else if (atyp == ATYP_IPV6) {
+        addrLen = 16;
     } else {
-        Q_IPV6ADDR raw;
-        std::copy(address, address + 16, raw.c);
-        relay = QHostAddress(raw);
-    }
-    relayPortNumber = qFromBigEndian<quint16>(address + addressSize);
-    buffer.remove(0, replySize);
-
-    // a wildcard bind address means "reach me at the address you already used"
-    if (relay.isNull() || relay == QHostAddress(QHostAddress::AnyIPv4) || relay == QHostAddress(QHostAddress::AnyIPv6))
-        relay = control->peerAddress();
-
-    if (relayPortNumber == 0) {
-        fail(QStringLiteral("proxy returned an invalid relay port"));
-        return false;
+        fail(QStringLiteral("Proxy returned unsupported relay address type %1").arg(int(atyp)));
+        return;
     }
 
-    stage = Stage::Established;
-    timeout.stop();
+    std::vector<char> addrAndPort(addrLen + 2);
+    if (recvExact(sock, addrAndPort.data(), addrLen + 2) != addrLen + 2) {
+        fail(QStringLiteral("Incomplete UDP ASSOCIATE relay address received"));
+        return;
+    }
 
-    qCInfo(LogVoice) << "SOCKS5 UDP relay established at" << relay.toString() << ":" << relayPortNumber;
+    char ipBuf[INET6_ADDRSTRLEN]{};
+    if (atyp == ATYP_IPV4) {
+        inet_ntop(AF_INET, addrAndPort.data(), ipBuf, sizeof(ipBuf));
+    } else {
+        inet_ntop(AF_INET6, addrAndPort.data(), ipBuf, sizeof(ipBuf));
+    }
+    quint16 port = qFromBigEndian<quint16>(reinterpret_cast<const uchar *>(addrAndPort.data() + addrLen));
 
-    emit established();
-    return false;
+    m_relayAddress = QString::fromLatin1(ipBuf);
+    m_relayPort = port;
+
+    if (m_relayAddress.isEmpty() || m_relayAddress == QStringLiteral("0.0.0.0") || m_relayAddress == QStringLiteral("::")) {
+        sockaddr_storage peerStorage{};
+        socklen_t peerLen = sizeof(peerStorage);
+        if (::getpeername(sock, reinterpret_cast<sockaddr *>(&peerStorage), &peerLen) == 0) {
+            char peerBuf[INET6_ADDRSTRLEN]{};
+            if (peerStorage.ss_family == AF_INET) {
+                inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in *>(&peerStorage)->sin_addr, peerBuf, sizeof(peerBuf));
+            } else if (peerStorage.ss_family == AF_INET6) {
+                inet_ntop(AF_INET6, &reinterpret_cast<sockaddr_in6 *>(&peerStorage)->sin6_addr, peerBuf, sizeof(peerBuf));
+            }
+            m_relayAddress = QString::fromLatin1(peerBuf);
+        }
+    }
+
+    if (m_relayPort == 0) {
+        fail(QStringLiteral("Proxy returned an invalid relay port"));
+        return;
+    }
+
+    m_established = true;
+    qCInfo(LogVoice) << "SOCKS5 UDP relay established at" << m_relayAddress << ":" << m_relayPort;
+
+    QMetaObject::invokeMethod(this, &Socks5UdpAssociation::established, Qt::QueuedConnection);
+
+    // Keep association alive until closed
+#ifdef _WIN32
+    DWORD zeroTimeout = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&zeroTimeout), sizeof(zeroTimeout));
+#else
+    timeval tvZero{0, 0};
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tvZero, sizeof(tvZero));
+#endif
+
+    char dummy[16];
+    ::recv(sock, dummy, sizeof(dummy), 0);
+
+    if (!m_closing) {
+        fail(QStringLiteral("Proxy closed the UDP association"));
+    }
 }
 
 void Socks5UdpAssociation::fail(const QString &error)
 {
-    if (stage == Stage::Failed)
+    m_established = false;
+    if (m_closing)
         return;
 
-    stage = Stage::Failed;
-    timeout.stop();
-
     qCWarning(LogVoice) << "SOCKS5 UDP association failed:" << error;
-
-    releaseControlSocket();
-
-    // listeners destroy this object on failure, and we may be inside the socket's own signal
-    QMetaObject::invokeMethod(this, [this, error] { emit failed(error); }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, [this, error]() {
+        emit failed(error);
+    }, Qt::QueuedConnection);
 }
 
-QByteArray Socks5UdpAssociation::encapsulate(const QByteArray &payload, const QHostAddress &destination,
+QByteArray Socks5UdpAssociation::encapsulate(const QByteArray &payload, const QString &destination,
                                              quint16 destinationPort)
 {
-    QByteArray datagram(3, '\0');
-    appendAddress(datagram, destination, destinationPort);
-    datagram.append(payload);
+    if (destination.isEmpty())
+        return QByteArray();
 
+    QByteArray datagram(3, '\0');
+    int before = datagram.size();
+    appendAddress(datagram, destination, destinationPort);
+    if (datagram.size() == before) {
+        return QByteArray();
+    }
+    datagram.append(payload);
     return datagram;
 }
 
 QByteArray Socks5UdpAssociation::decapsulate(const QByteArray &datagram)
 {
-    // fragmented relays (FRAG != 0) are not supported; Discord never fragments
     if (datagram.size() < 4 || datagram.at(2) != 0)
         return QByteArray();
 

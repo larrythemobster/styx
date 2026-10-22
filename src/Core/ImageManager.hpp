@@ -17,7 +17,7 @@
 #include "ProxyConfig.hpp"
 #include "Snowflake.hpp"
 
-class QNetworkAccessManager;
+
 
 namespace Styx {
 namespace Core {
@@ -54,13 +54,16 @@ class ImageManager : public QObject
     Q_OBJECT
 public:
     explicit ImageManager(QObject *parent = nullptr);
+    ~ImageManager() override;
 
     static constexpr int MaxDisplayWidth = 400;
     static constexpr int MaxDisplayHeight = 300;
     static constexpr qint64 FailedFetchRetryMs = 60 * 1000;
 
     void setAccountProxy(Snowflake accountId, const ProxyConfig &proxy);
-    [[nodiscard]] QNetworkAccessManager *networkManagerFor(Snowflake accountId) const;
+    [[nodiscard]] bool hasRouteFor(Snowflake accountId) const;
+    [[nodiscard]] ProxyConfig accountProxy(Snowflake accountId) const;
+    [[nodiscard]] QString curlProxyFor(Snowflake accountId) const;
 
     [[nodiscard]] bool isCached(const QUrl &url, const QSize &size);
     [[nodiscard]] bool isUnavailable(const ImageRequestKey &key) const;
@@ -95,13 +98,14 @@ private:
     void request(const QUrl &url, const QSize &size, PinGroup pin, Snowflake accountId, FetchPurpose purpose = FetchPurpose::Pixmap);
     [[nodiscard]] QString getCachePath(const QUrl &url, const QSize &size) const;
     [[nodiscard]] bool recentlyFailed(const ImageRequestKey &key) const;
-    void fetchFromNetwork(const QUrl &url, const QSize &size, QNetworkAccessManager *nam, FetchPurpose purpose, int attempt = 1);
+    void fetchFromNetwork(const QUrl &url, const QSize &size, const QString &proxyStr, FetchPurpose purpose, int attempt = 1);
     void giveUpOn(const ImageRequestKey &key, int httpStatus);
     static bool isDiscordProxyUrl(const QUrl &url);
     static bool scalesToDevicePixels(const QUrl &url);
     static QUrl buildOptimizedUrl(const QUrl &proxyUrl, const QSize &displaySize, qreal dpr);
 
-    QHash<Snowflake, QNetworkAccessManager *> networkManagers;
+    QHash<Snowflake, ProxyConfig> accountProxies;
+    QHash<ImageRequestKey, uint64_t> activeHttpRequests;
     QTemporaryDir tempDir;
     QElapsedTimer uptime;
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QNetworkProxy>
+
 #include <QString>
 
 #include <optional>
@@ -27,7 +27,7 @@ struct ProxyConfig
     [[nodiscard]] bool canRelayUdp() const noexcept { return !enabled() || type == Type::Socks5; }
 
     [[nodiscard]] QString toCurlUrl() const;
-    [[nodiscard]] QNetworkProxy toQtProxy() const;
+    [[nodiscard]] QString toCurlProxyString() const;
     [[nodiscard]] QString toString() const;
     [[nodiscard]] QString toDisplayString() const;
 

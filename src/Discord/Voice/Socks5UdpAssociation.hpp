@@ -1,9 +1,12 @@
 #pragma once
 
-#include <QHostAddress>
+#include <QByteArray>
 #include <QObject>
-#include <QTcpSocket>
-#include <QTimer>
+#include <QString>
+
+#include <atomic>
+#include <cstdint>
+#include <thread>
 
 #include "Core/ProxyConfig.hpp"
 
@@ -17,15 +20,16 @@ class Socks5UdpAssociation : public QObject
     Q_OBJECT
 public:
     explicit Socks5UdpAssociation(QObject *parent = nullptr);
+    ~Socks5UdpAssociation() override;
 
     void open(const Core::ProxyConfig &proxy);
     void close();
 
-    [[nodiscard]] bool isEstablished() const { return stage == Stage::Established; }
-    [[nodiscard]] QHostAddress relayAddress() const { return relay; }
-    [[nodiscard]] quint16 relayPort() const { return relayPortNumber; }
+    [[nodiscard]] bool isEstablished() const { return m_established.load(); }
+    [[nodiscard]] QString relayAddress() const { return m_relayAddress; }
+    [[nodiscard]] quint16 relayPort() const { return m_relayPort; }
 
-    static QByteArray encapsulate(const QByteArray &payload, const QHostAddress &destination, quint16 destinationPort);
+    static QByteArray encapsulate(const QByteArray &payload, const QString &destination, quint16 destinationPort);
     static QByteArray decapsulate(const QByteArray &datagram);
 
 signals:
@@ -33,35 +37,16 @@ signals:
     void failed(const QString &error);
 
 private:
-    enum class Stage {
-        Idle,
-        AwaitingMethod,
-        AwaitingAuthReply,
-        AwaitingAssociateReply,
-        Established,
-        Failed,
-    };
-
-    void sendGreeting();
-    void sendCredentials();
-    void sendAssociateRequest();
-    void onReadyRead();
-    bool consumeMethodReply();
-    bool consumeAuthReply();
-    bool consumeAssociateReply();
+    void runHandshake(Core::ProxyConfig config);
     void fail(const QString &error);
-    void releaseControlSocket();
 
-    Core::ProxyConfig proxy;
-    QTcpSocket *control = nullptr;
-    QTimer timeout;
-    QByteArray buffer;
-    Stage stage = Stage::Idle;
+    std::atomic<bool> m_established{false};
+    std::atomic<bool> m_closing{false};
+    QString m_relayAddress;
+    quint16 m_relayPort{0};
 
-    QHostAddress relay;
-    quint16 relayPortNumber = 0;
-
-    static constexpr int HANDSHAKE_TIMEOUT_MS = 10000;
+    intptr_t m_controlSocket{-1};
+    std::thread m_workerThread;
 };
 
 } // namespace Voice

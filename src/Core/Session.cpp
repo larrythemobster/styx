@@ -75,7 +75,7 @@ void Session::connectAccount(Snowflake accountId)
 
     connectingAccounts.insert(accountId);
     Discord::CurlUtils::ensureBuildNumber(
-            imageManager->networkManagerFor(acc.id),
+            acc.proxy,
             [self = QPointer<Session>(this), acc]() {
                 if (self && self->connectingAccounts.remove(acc.id))
                     self->startInstance(acc);

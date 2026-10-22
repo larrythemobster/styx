@@ -12,8 +12,7 @@
 class QDialog;
 class QLabel;
 class QPushButton;
-class QTcpServer;
-class QTcpSocket;
+
 class QTimer;
 class QWidget;
 
@@ -50,8 +49,8 @@ private:
     void beginChallenge(bool isRetry);
     void deliverSolution(const Discord::CaptchaSolution &solution);
     void cancelCurrent();
-    void onNewConnection();
-    void handleSocket(QTcpSocket *socket);
+    void pollSockets();
+    void handleClient(intptr_t clientSock);
 
     void teardownServer();
     void stopTtl();
@@ -66,7 +65,8 @@ private:
     std::deque<PendingJob> queue;
     State state = State::Idle;
 
-    QTcpServer *server = nullptr;
+    intptr_t serverSocket{-1};
+    uint64_t timerId{0};
     quint16 port = 0;
     QString nonce;
     Discord::CaptchaChallenge current;
@@ -78,7 +78,7 @@ private:
     QPushButton *openButton = nullptr;
     QTimer *ttlTimer = nullptr;
 
-    QHash<QTcpSocket *, QByteArray> buffers;
+    QHash<intptr_t, QByteArray> buffers;
 };
 
 } // namespace UI

@@ -504,7 +504,7 @@ void GifPlayback::play(const GifKey &key)
 void GifPlayback::download(const GifKey &key, const QUrl &url)
 {
     const Core::Snowflake account = playingAccount();
-    const bool accountHasNoRoute = !imageManager->networkManagerFor(account);
+    const bool accountHasNoRoute = !imageManager->hasRouteFor(account);
     if (accountHasNoRoute || imageManager->willNeverLoad({ url, AsDownloaded })) {
         unplayable.insert(key);
         return;

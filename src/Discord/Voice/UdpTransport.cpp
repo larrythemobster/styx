@@ -1,9 +1,36 @@
 #include "UdpTransport.hpp"
-
 #include "Core/Logging.hpp"
 
-#include <QDataStream>
 #include <QtEndian>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using native_socket_t = SOCKET;
+constexpr native_socket_t kInvalidNativeSocket = INVALID_SOCKET;
+inline int closeNativeSocket(native_socket_t s) { return ::closesocket(s); }
+inline bool setNonBlocking(native_socket_t s) {
+    u_long mode = 1;
+    return ioctlsocket(s, FIONBIO, &mode) == 0;
+}
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <fcntl.h>
+using native_socket_t = int;
+constexpr native_socket_t kInvalidNativeSocket = -1;
+inline int closeNativeSocket(native_socket_t s) { return ::close(s); }
+inline bool setNonBlocking(native_socket_t s) {
+    int flags = fcntl(s, F_GETFL, 0);
+    return fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
+}
+#endif
 
 namespace Styx {
 namespace Discord {
@@ -14,6 +41,41 @@ static constexpr quint16 IP_DISCOVERY_REQUEST_TYPE = 0x0001;
 static constexpr quint16 IP_DISCOVERY_RESPONSE_TYPE = 0x0002;
 static constexpr quint16 IP_DISCOVERY_LENGTH = 70;
 
+namespace {
+
+bool resolveSockAddr(const QString &ip, quint16 port, sockaddr_storage &storage, socklen_t &len)
+{
+    std::string ipStr = ip.toStdString();
+    sockaddr_in *sin = reinterpret_cast<sockaddr_in *>(&storage);
+    if (inet_pton(AF_INET, ipStr.c_str(), &sin->sin_addr) == 1) {
+        sin->sin_family = AF_INET;
+        sin->sin_port = htons(port);
+        len = sizeof(sockaddr_in);
+        return true;
+    }
+    sockaddr_in6 *sin6 = reinterpret_cast<sockaddr_in6 *>(&storage);
+    if (inet_pton(AF_INET6, ipStr.c_str(), &sin6->sin6_addr) == 1) {
+        sin6->sin6_family = AF_INET6;
+        sin6->sin6_port = htons(port);
+        len = sizeof(sockaddr_in6);
+        return true;
+    }
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    addrinfo *res = nullptr;
+    std::string portStr = std::to_string(port);
+    if (getaddrinfo(ipStr.c_str(), portStr.c_str(), &hints, &res) == 0 && res) {
+        memcpy(&storage, res->ai_addr, res->ai_addrlen);
+        len = static_cast<socklen_t>(res->ai_addrlen);
+        freeaddrinfo(res);
+        return true;
+    }
+    return false;
+}
+
+} // namespace
+
 UdpTransport::UdpTransport(const Core::ProxyConfig &proxy, QObject *parent)
     : QObject(parent), proxy(proxy)
 {
@@ -21,15 +83,17 @@ UdpTransport::UdpTransport(const Core::ProxyConfig &proxy, QObject *parent)
 
 UdpTransport::~UdpTransport()
 {
-    if (socket) {
-        socket->close();
-        delete socket;
+    if (m_socket != -1) {
+        delete m_notifier;
+        m_notifier = nullptr;
+        closeNativeSocket(static_cast<native_socket_t>(m_socket));
+        m_socket = -1;
     }
 }
 
 void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
 {
-    serverAddress = QHostAddress(ip);
+    serverAddress = ip;
     serverPort = static_cast<quint16>(port);
     discoveryPending = true;
     this->ssrc = ssrc;
@@ -37,7 +101,7 @@ void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
     if (!openSocket())
         return;
 
-    qCInfo(LogVoice) << "UDP socket bound to port" << socket->localPort()
+    qCInfo(LogVoice) << "UDP socket bound to port" << localPort()
                      << "- starting IP discovery to" << ip << ":" << serverPort;
 
     startDiscoveryTimeout();
@@ -47,8 +111,10 @@ void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
         return;
     }
 
-    if (association)
+    if (association) {
         association->deleteLater();
+        association = nullptr;
+    }
 
     association = new Socks5UdpAssociation(this);
     connect(association, &Socks5UdpAssociation::established, this, &UdpTransport::sendDiscoveryPacket);
@@ -56,7 +122,8 @@ void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
         if (!discoveryPending)
             return;
         discoveryPending = false;
-        discoveryTimer->stop();
+        if (discoveryTimer)
+            discoveryTimer->stop();
         emit ipDiscoveryFailed("SOCKS5 proxy: " + error);
     });
     association->open(proxy);
@@ -64,19 +131,37 @@ void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
 
 bool UdpTransport::openSocket()
 {
-    if (socket) {
-        socket->close();
-        delete socket;
+    if (m_socket != -1) {
+        delete m_notifier;
+        m_notifier = nullptr;
+        closeNativeSocket(static_cast<native_socket_t>(m_socket));
+        m_socket = -1;
     }
 
-    socket = new QUdpSocket(this);
-    connect(socket, &QUdpSocket::readyRead, this, &UdpTransport::onReadyRead);
-
-    if (!socket->bind(QHostAddress(QHostAddress::AnyIPv4), 0)) {
-        qCWarning(LogVoice) << "Failed to bind UDP socket:" << socket->errorString();
-        emit ipDiscoveryFailed("Failed to bind UDP socket: " + socket->errorString());
+    native_socket_t sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == kInvalidNativeSocket) {
+        qCWarning(LogVoice) << "Failed to create UDP socket";
+        emit ipDiscoveryFailed(QStringLiteral("Failed to create UDP socket"));
         return false;
     }
+
+    sockaddr_in bindAddr{};
+    bindAddr.sin_family = AF_INET;
+    bindAddr.sin_addr.s_addr = INADDR_ANY;
+    bindAddr.sin_port = 0;
+
+    if (::bind(sock, reinterpret_cast<sockaddr *>(&bindAddr), sizeof(bindAddr)) != 0) {
+        qCWarning(LogVoice) << "Failed to bind UDP socket";
+        closeNativeSocket(sock);
+        emit ipDiscoveryFailed(QStringLiteral("Failed to bind UDP socket"));
+        return false;
+    }
+
+    setNonBlocking(sock);
+
+    m_socket = static_cast<intptr_t>(sock);
+    m_notifier = new QSocketNotifier(sock, QSocketNotifier::Read, this);
+    connect(m_notifier, &QSocketNotifier::activated, this, &UdpTransport::onReadyRead);
 
     return true;
 }
@@ -112,48 +197,90 @@ void UdpTransport::startDiscoveryTimeout()
 
 void UdpTransport::send(const QByteArray &data)
 {
-    if (!socket)
+    if (m_socket == -1)
         return;
 
-    if (!association) {
-        socket->writeDatagram(data, serverAddress, serverPort);
-        return;
+    QString targetIp = serverAddress;
+    quint16 targetPort = serverPort;
+
+    QByteArray packet = data;
+    if (association) {
+        if (!association->isEstablished())
+            return;
+        packet = Socks5UdpAssociation::encapsulate(data, serverAddress, serverPort);
+        targetIp = association->relayAddress();
+        targetPort = association->relayPort();
     }
 
-    if (!association->isEstablished())
-        return;
-
-    const QByteArray wrapped = Socks5UdpAssociation::encapsulate(data, serverAddress, serverPort);
-    socket->writeDatagram(wrapped, association->relayAddress(), association->relayPort());
+    sockaddr_storage destAddr{};
+    socklen_t destLen = 0;
+    if (resolveSockAddr(targetIp, targetPort, destAddr, destLen)) {
+        ::sendto(static_cast<native_socket_t>(m_socket), packet.constData(), static_cast<int>(packet.size()), 0,
+                 reinterpret_cast<const sockaddr *>(&destAddr), destLen);
+    }
 }
 
 bool UdpTransport::isBound() const
 {
-    return socket && socket->state() == QAbstractSocket::BoundState;
+    return m_socket != -1;
 }
 
 quint16 UdpTransport::localPort() const
 {
-    return socket ? socket->localPort() : 0;
+    if (m_socket == -1)
+        return 0;
+
+    sockaddr_storage localAddr{};
+    socklen_t len = sizeof(localAddr);
+    if (::getsockname(static_cast<native_socket_t>(m_socket), reinterpret_cast<sockaddr *>(&localAddr), &len) == 0) {
+        if (localAddr.ss_family == AF_INET) {
+            return ntohs(reinterpret_cast<sockaddr_in *>(&localAddr)->sin_port);
+        } else if (localAddr.ss_family == AF_INET6) {
+            return ntohs(reinterpret_cast<sockaddr_in6 *>(&localAddr)->sin6_port);
+        }
+    }
+    return 0;
 }
 
 void UdpTransport::onReadyRead()
 {
-    const QHostAddress expectedSender = association ? association->relayAddress() : serverAddress;
+    if (m_socket == -1)
+        return;
+
+    const QString expectedSender = association ? association->relayAddress() : serverAddress;
     const quint16 expectedPort = association ? association->relayPort() : serverPort;
 
-    while (socket && socket->hasPendingDatagrams()) {
-        QByteArray datagram;
-        datagram.resize(socket->pendingDatagramSize());
-        QHostAddress sender;
-        quint16 senderPort = 0;
-        socket->readDatagram(datagram.data(), datagram.size(), &sender, &senderPort);
+    native_socket_t sock = static_cast<native_socket_t>(m_socket);
 
-        if (!sender.isEqual(expectedSender, QHostAddress::TolerantConversion) || senderPort != expectedPort) {
-            qCDebug(LogVoice) << "Dropping UDP datagram from unexpected sender" << sender << senderPort;
+    while (true) {
+        char buffer[4096];
+        sockaddr_storage senderAddr{};
+        socklen_t senderLen = sizeof(senderAddr);
+
+        int bytesRead = ::recvfrom(sock, buffer, sizeof(buffer), 0,
+                                   reinterpret_cast<sockaddr *>(&senderAddr), &senderLen);
+        if (bytesRead <= 0)
+            break;
+
+        char ipBuf[INET6_ADDRSTRLEN]{};
+        quint16 senderPort = 0;
+        if (senderAddr.ss_family == AF_INET) {
+            auto *sin = reinterpret_cast<sockaddr_in *>(&senderAddr);
+            inet_ntop(AF_INET, &sin->sin_addr, ipBuf, sizeof(ipBuf));
+            senderPort = ntohs(sin->sin_port);
+        } else if (senderAddr.ss_family == AF_INET6) {
+            auto *sin6 = reinterpret_cast<sockaddr_in6 *>(&senderAddr);
+            inet_ntop(AF_INET6, &sin6->sin6_addr, ipBuf, sizeof(ipBuf));
+            senderPort = ntohs(sin6->sin6_port);
+        }
+
+        QString senderIp = QString::fromLatin1(ipBuf);
+        if (senderPort != expectedPort || (!expectedSender.isEmpty() && senderIp != expectedSender)) {
+            qCDebug(LogVoice) << "Dropping UDP datagram from unexpected sender" << senderIp << senderPort;
             continue;
         }
 
+        QByteArray datagram(buffer, bytesRead);
         if (association) {
             datagram = Socks5UdpAssociation::decapsulate(datagram);
             if (datagram.isEmpty())
@@ -170,12 +297,12 @@ void UdpTransport::onReadyRead()
 
 void UdpTransport::parseIpDiscoveryResponse(const QByteArray &data)
 {
-    quint16 type;
+    quint16 type = 0;
     memcpy(&type, data.constData(), 2);
-    type = qFromBigEndian(type);
+    type = qToBigEndian(type);
 
     if (type != IP_DISCOVERY_RESPONSE_TYPE) {
-        qCDebug(LogVoice) << "Received non-discovery UDP packet during discovery, type:" << type;
+        qCDebug(LogVoice) << "Dropping non-discovery packet while discovery pending";
         return;
     }
 
@@ -183,17 +310,19 @@ void UdpTransport::parseIpDiscoveryResponse(const QByteArray &data)
     if (discoveryTimer)
         discoveryTimer->stop();
 
-    // null terminated
     const char *ipStart = data.constData() + 8;
-    QString discoveredIp = QString::fromUtf8(ipStart);
+    int ipLen = 0;
+    while (ipLen < 64 && ipStart[ipLen] != '\0') {
+        ipLen++;
+    }
+    QString externalIp = QString::fromUtf8(ipStart, ipLen);
 
-    quint16 discoveredPort;
-    memcpy(&discoveredPort, data.constData() + 72, 2);
-    discoveredPort = qFromBigEndian(discoveredPort);
+    quint16 externalPort = 0;
+    memcpy(&externalPort, data.constData() + data.size() - 2, 2);
+    externalPort = qFromBigEndian(externalPort);
 
-    qCInfo(LogVoice) << "IP Discovery result:" << discoveredIp << ":" << discoveredPort;
-
-    emit ipDiscovered(discoveredIp, static_cast<int>(discoveredPort));
+    qCInfo(LogVoice) << "Discovered external IP:" << externalIp << ":" << externalPort;
+    emit ipDiscovered(externalIp, externalPort);
 }
 
 } // namespace Voice

@@ -43,6 +43,11 @@ struct HttpClient::Impl {
 
     Impl()
     {
+        static std::once_flag initFlag;
+        std::call_once(initFlag, []() {
+            curl_global_init(CURL_GLOBAL_ALL);
+        });
+
         multi = curl_multi_init();
         if (multi) {
             curl_multi_setopt(multi, CURLMOPT_PIPELINING, static_cast<long>(CURLPIPE_MULTIPLEX));
@@ -115,12 +120,14 @@ struct HttpClient::Impl {
                 int msgsLeft = 0;
                 CURLMsg *msg = nullptr;
                 while ((msg = curl_multi_info_read(multi, &msgsLeft))) {
+
                     if (msg->msg == CURLMSG_DONE) {
                         CURL *easy = msg->easy_handle;
                         CURLcode res = msg->data.result;
 
                         TransferContext *ctx = nullptr;
                         curl_easy_getinfo(easy, CURLINFO_PRIVATE, &ctx);
+
                         if (ctx) {
                             completeTransfer(ctx, res);
                         }
@@ -155,15 +162,20 @@ struct HttpClient::Impl {
                 continue;
             }
 
+
             CURL *easy = curl_easy_init();
             if (!easy) {
                 dispatchResult(ctx.get(), "Failed to initialize CURL easy handle", 0, false);
                 continue;
             }
 
+
             ctx->easy = easy;
+
             curl_easy_setopt(easy, CURLOPT_PRIVATE, ctx.get());
+
             curl_easy_setopt(easy, CURLOPT_URL, ctx->request.url.c_str());
+
 
             if (ctx->request.method == "POST") {
                 curl_easy_setopt(easy, CURLOPT_POST, 1L);
@@ -177,6 +189,7 @@ struct HttpClient::Impl {
                 }
             }
 
+
             // Headers
             for (const auto &[k, v] : ctx->request.headers) {
                 std::string headerStr = k + ": " + v;
@@ -186,16 +199,20 @@ struct HttpClient::Impl {
                 curl_easy_setopt(easy, CURLOPT_HTTPHEADER, ctx->headerList);
             }
 
+
             // Proxy
             if (!ctx->request.proxy.empty()) {
                 curl_easy_setopt(easy, CURLOPT_PROXY, ctx->request.proxy.c_str());
+                curl_easy_setopt(easy, CURLOPT_NOPROXY, "");
             }
+
 
             // Timeout & redirects
             if (ctx->request.timeout.count() > 0) {
                 curl_easy_setopt(easy, CURLOPT_TIMEOUT_MS, static_cast<long>(ctx->request.timeout.count()));
             }
             curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, ctx->request.followRedirects ? 1L : 0L);
+
 
             // Callbacks
             curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, writeCallback);
@@ -206,7 +223,9 @@ struct HttpClient::Impl {
             curl_easy_setopt(easy, CURLOPT_XFERINFODATA, ctx.get());
             curl_easy_setopt(easy, CURLOPT_NOPROGRESS, 0L);
 
+
             CURLMcode mc = curl_multi_add_handle(multi, easy);
+
             if (mc != CURLM_OK) {
                 curl_easy_cleanup(easy);
                 ctx->easy = nullptr;
@@ -216,8 +235,10 @@ struct HttpClient::Impl {
 
             {
                 std::lock_guard<std::mutex> lock(mutex);
-                active[ctx->id] = ctx.release(); // Ownership transferred to active map
+                uint64_t id = ctx->id;
+                active[id] = ctx.release(); // Ownership transferred to active map
             }
+
         }
     }
 

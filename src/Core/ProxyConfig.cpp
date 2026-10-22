@@ -35,16 +35,6 @@ QString authority(const QString &host, quint16 port)
     const bool ipv6 = host.contains(QLatin1Char(':'));
     return (ipv6 ? QStringLiteral("[%1]:%2") : QStringLiteral("%1:%2")).arg(host, QString::number(port));
 }
-
-QNetworkProxy::ProxyType qtProxyType(ProxyConfig::Type type)
-{
-    // https proxy degrades to plain CONNECT in qt because it doesnt support it
-    if (type == ProxyConfig::Type::Socks5)
-        return QNetworkProxy::Socks5Proxy;
-
-    return QNetworkProxy::HttpProxy;
-}
-
 } // namespace
 
 QString ProxyConfig::toCurlUrl() const
@@ -55,22 +45,22 @@ QString ProxyConfig::toCurlUrl() const
     return QStringLiteral("%1://%2").arg(curlScheme(type), authority(host, port));
 }
 
-QNetworkProxy ProxyConfig::toQtProxy() const
+QString ProxyConfig::toCurlProxyString() const
 {
     if (!enabled())
-        return QNetworkProxy(QNetworkProxy::NoProxy);
+        return QString();
 
-    QNetworkProxy proxy(qtProxyType(type), host, port);
+    QString credentials;
     if (!username.isEmpty()) {
-        proxy.setUser(username);
-        proxy.setPassword(password);
+        credentials = QString::fromUtf8(QUrl::toPercentEncoding(username));
+        if (!password.isEmpty())
+            credentials += QStringLiteral(":") + QString::fromUtf8(QUrl::toPercentEncoding(password));
+        credentials += QStringLiteral("@");
     }
 
-    proxy.setCapabilities(proxy.capabilities() | QNetworkProxy::HostNameLookupCapability);
-
-    return proxy;
+    return QStringLiteral("%1://%2%3")
+            .arg(curlScheme(type), credentials, authority(host, port));
 }
-
 QString ProxyConfig::toString() const
 {
     if (!enabled())

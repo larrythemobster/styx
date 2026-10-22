@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QObject>
-#include <QNetworkReply>
+
 #include <QHash>
 #include <QJsonDocument>
 #include <QJsonArray>

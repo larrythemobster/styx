@@ -1,9 +1,10 @@
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
+#include <QSocketNotifier>
+#include <QString>
 #include <QTimer>
-#include <QUdpSocket>
-#include <QHostAddress>
 
 #include "Core/ProxyConfig.hpp"
 #include "Socks5UdpAssociation.hpp"
@@ -39,9 +40,10 @@ private:
     void sendDiscoveryPacket();
     void startDiscoveryTimeout();
 
-    QUdpSocket *socket = nullptr;
+    intptr_t m_socket{-1};
+    QSocketNotifier *m_notifier = nullptr;
     QTimer *discoveryTimer = nullptr;
-    QHostAddress serverAddress;
+    QString serverAddress;
     quint16 serverPort = 0;
     quint32 ssrc = 0;
     bool discoveryPending = false;

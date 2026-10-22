@@ -1,8 +1,6 @@
 #include "ImageManager.hpp"
 
-#include <QNetworkAccessManager>
-#include <QNetworkRequest>
-#include <QNetworkReply>
+#include "Platform/Http.hpp"
 #include <QCryptographicHash>
 #include <QFile>
 #include <QPointer>
@@ -13,7 +11,7 @@
 #include <memory>
 
 #include "Logging.hpp"
-#include "NetworkRequest.hpp"
+
 #include "Discord/CdnUrls.hpp"
 
 namespace Styx {
@@ -54,6 +52,13 @@ ImageManager::ImageManager(QObject *parent) : QObject(parent)
         qCWarning(LogCore) << "Failed to create temp directory for image cache";
 }
 
+ImageManager::~ImageManager()
+{
+    for (uint64_t reqId : activeHttpRequests) {
+        Platform::HttpClient::instance().cancel(reqId);
+    }
+}
+
 bool ImageManager::isCached(const QUrl &url, const QSize &size)
 {
     ImageRequestKey k{ url, size };
@@ -81,17 +86,25 @@ QString ImageManager::rawDownloadPath(const QUrl &url, const QSize &size) const
 
 void ImageManager::setAccountProxy(Snowflake accountId, const ProxyConfig &proxy)
 {
-    auto it = networkManagers.find(accountId);
-    if (it == networkManagers.end())
-        it = networkManagers.insert(accountId, new QNetworkAccessManager(this));
-
-    it.value()->setProxy(proxy.toQtProxy());
+    accountProxies.insert(accountId, proxy);
 }
 
-QNetworkAccessManager *ImageManager::networkManagerFor(Snowflake accountId) const
+bool ImageManager::hasRouteFor(Snowflake accountId) const
 {
-    auto it = networkManagers.constFind(accountId);
-    return it != networkManagers.constEnd() ? it.value() : nullptr;
+    return accountProxies.contains(accountId);
+}
+
+ProxyConfig ImageManager::accountProxy(Snowflake accountId) const
+{
+    return accountProxies.value(accountId);
+}
+
+QString ImageManager::curlProxyFor(Snowflake accountId) const
+{
+    auto it = accountProxies.constFind(accountId);
+    if (it == accountProxies.constEnd())
+        return {};
+    return it.value().toCurlProxyString();
 }
 
 void ImageManager::assign(QLabel *label, const QUrl &url, const QSize &size, Snowflake accountId)
@@ -225,8 +238,7 @@ void ImageManager::downloadToCache(const QUrl &url, const QSize &size, Snowflake
 
 void ImageManager::request(const QUrl &url, const QSize &size, PinGroup pin, Snowflake accountId, FetchPurpose purpose)
 {
-    QNetworkAccessManager *nam = networkManagerFor(accountId);
-    if (!nam) {
+    if (!hasRouteFor(accountId)) {
         qCWarning(LogCore) << "Refusing to fetch image with no proxied route for the account:" << url;
         return;
     }
@@ -254,7 +266,8 @@ void ImageManager::request(const QUrl &url, const QSize &size, PinGroup pin, Sno
     if (pin != PinGroup::None)
         pendingPins.insert(k, pin);
 
-    fetchFromNetwork(url, size, nam, purpose);
+    const QString proxyStr = curlProxyFor(accountId);
+    fetchFromNetwork(url, size, proxyStr, purpose);
 }
 
 void ImageManager::giveUpOn(const ImageRequestKey &key, int httpStatus)
@@ -269,7 +282,7 @@ void ImageManager::giveUpOn(const ImageRequestKey &key, int httpStatus)
     emit imageUnavailable(key.url, key.size);
 }
 
-void ImageManager::fetchFromNetwork(const QUrl &url, const QSize &size, QNetworkAccessManager *nam, FetchPurpose purpose, int attempt)
+void ImageManager::fetchFromNetwork(const QUrl &url, const QSize &size, const QString &proxyStr, FetchPurpose purpose, int attempt)
 {
     qreal dpr = qApp->devicePixelRatio();
     const bool deviceScaled = scalesToDevicePixels(url);
@@ -277,50 +290,54 @@ void ImageManager::fetchFromNetwork(const QUrl &url, const QSize &size, QNetwork
     // the format override in the optimized query would break an animated sticker
     const bool optimizable = purpose == FetchPurpose::Pixmap && isDiscordProxyUrl(url) && !Discord::Cdn::isStickerUrl(url);
     QUrl fetchUrl = optimizable ? buildOptimizedUrl(url, size, dpr) : url;
-    QNetworkReply *reply = nam->get(networkRequest(fetchUrl));
+
+    Platform::HttpRequest req;
+    req.url = fetchUrl.toString().toStdString();
+    if (!proxyStr.isEmpty()) {
+        req.proxy = proxyStr.toStdString();
+    }
+    req.timeout = std::chrono::milliseconds(30000);
 
     const QString path = getCachePath(url, size);
-    std::shared_ptr<QFile> streamedToDisk;
-    if (purpose == FetchPurpose::DownloadOnly) {
-        streamedToDisk = std::make_shared<QFile>(path + PartialDownloadSuffix);
-        if (streamedToDisk->open(QIODevice::WriteOnly))
-            connect(reply, &QNetworkReply::readyRead, this, [reply, streamedToDisk]() { streamedToDisk->write(reply->readAll()); });
-        else
-            streamedToDisk.reset();
-    }
+    ImageRequestKey k{ url, size };
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, url, size, deviceScaled, dpr, path, streamedToDisk, purpose, attempt, nam = QPointer<QNetworkAccessManager>(nam)]() {
+    uint64_t reqId = Platform::HttpClient::instance().request(std::move(req), [this, url, size, deviceScaled, dpr, path, purpose, attempt, proxyStr](const Platform::HttpResponse &resp) {
         ImageRequestKey k{ url, size };
+        activeHttpRequests.remove(k);
 
-        bool fetched = reply->error() == QNetworkReply::NoError;
-        if (fetched && streamedToDisk) {
-            streamedToDisk->write(reply->readAll());
-            streamedToDisk->close();
-            QFile::remove(path);
-            fetched = streamedToDisk->rename(path);
+        bool fetched = resp.ok();
+        if (fetched && purpose == FetchPurpose::DownloadOnly) {
+            const QString partPath = path + PartialDownloadSuffix;
+            QFile partFile(partPath);
+            if (partFile.open(QIODevice::WriteOnly)) {
+                partFile.write(resp.body.data(), static_cast<qint64>(resp.body.size()));
+                partFile.close();
+                QFile::remove(path);
+                fetched = partFile.rename(path);
+            } else {
+                fetched = false;
+            }
         }
 
         if (!fetched) {
-            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            qCWarning(LogCore) << "Failed to fetch image:" << url << reply->errorString();
-            if (streamedToDisk)
-                streamedToDisk->remove();
-            reply->deleteLater();
+            const int httpStatus = resp.statusCode;
+            qCWarning(LogCore) << "Failed to fetch image:" << url << QString::fromStdString(resp.error);
+            if (purpose == FetchPurpose::DownloadOnly) {
+                QFile::remove(path + PartialDownloadSuffix);
+            }
 
-            const bool transferBroke = reply->error() != QNetworkReply::NoError && !isErrorAnswer(httpStatus);
+            const bool transferBroke = !resp.ok() && !isErrorAnswer(httpStatus);
             if (!transferBroke || attempt >= MaxFetchAttempts) {
                 giveUpOn(k, httpStatus);
                 return;
             }
 
-            QTimer::singleShot(RetryBrokenTransferAfterMs, this, [this, k, nam, purpose, attempt]() {
-                if (nam)
-                    fetchFromNetwork(k.url, k.size, nam, purpose, attempt + 1);
-                else
-                    giveUpOn(k, 0);
+            QTimer::singleShot(RetryBrokenTransferAfterMs, this, [this, k, proxyStr, purpose, attempt]() {
+                fetchFromNetwork(k.url, k.size, proxyStr, purpose, attempt + 1);
             });
             return;
         }
+
         PinGroup pin = pendingPins.value(k, PinGroup::None);
         pendingPins.remove(k);
         failedAtMs.remove(k);
@@ -328,18 +345,17 @@ void ImageManager::fetchFromNetwork(const QUrl &url, const QSize &size, QNetwork
         const bool pixmapWanted = !downloadOnlyRequests.remove(k);
 
         QByteArray data;
-        if (streamedToDisk) {
+        if (purpose == FetchPurpose::DownloadOnly) {
             if (pixmapWanted)
                 data = fileContents(path);
         } else {
-            data = reply->readAll();
+            data = QByteArray(resp.body.data(), static_cast<int>(resp.body.size()));
             QFile file(path);
             if (file.open(QIODevice::WriteOnly)) {
                 file.write(data);
                 file.close();
             }
         }
-        reply->deleteLater();
 
         QPixmap pixmap;
         if (pixmapWanted && pixmap.loadFromData(data)) {
@@ -372,6 +388,8 @@ void ImageManager::fetchFromNetwork(const QUrl &url, const QSize &size, QNetwork
         }
         emit rawDownloadReady(url, size);
     });
+
+    activeHttpRequests.insert(k, reqId);
 }
 
 void ImageManager::unpinGroup(PinGroup group)
@@ -460,47 +478,55 @@ QUrl ImageManager::fullQualityUrl(const QUrl &proxyUrl)
 
 void ImageManager::fetch(const QUrl &url, Snowflake accountId, QObject *context, std::function<void(const QByteArray &)> done)
 {
-    QNetworkAccessManager *nam = networkManagerFor(accountId);
-    if (!nam) {
+    if (!hasRouteFor(accountId)) {
         qCWarning(LogCore) << "Refusing to fetch with no proxied route for the account:" << url;
         done({});
         return;
     }
 
-    QNetworkReply *reply = nam->get(networkRequest(url));
-    connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
-    connect(reply, &QNetworkReply::finished, context, [reply, done = std::move(done)]() {
-        done(reply->error() == QNetworkReply::NoError ? reply->readAll() : QByteArray());
+    Platform::HttpRequest req;
+    req.url = url.toString().toStdString();
+    QString proxyStr = curlProxyFor(accountId);
+    if (!proxyStr.isEmpty()) {
+        req.proxy = proxyStr.toStdString();
+    }
+    req.timeout = std::chrono::milliseconds(30000);
+
+    QPointer<QObject> ctx(context);
+    Platform::HttpClient::instance().request(std::move(req), [ctx, done = std::move(done)](const Platform::HttpResponse &resp) {
+        if (!ctx && !done)
+            return;
+        done(resp.ok() ? QByteArray(resp.body.data(), static_cast<int>(resp.body.size())) : QByteArray());
     });
 }
 
 void ImageManager::download(const QUrl &url, Snowflake accountId, const QString &path)
 {
-    QNetworkAccessManager *nam = networkManagerFor(accountId);
-    if (!nam) {
+    if (!hasRouteFor(accountId)) {
         qCWarning(LogCore) << "Refusing to download with no proxied route for the account:" << url;
         return;
     }
 
-    QNetworkReply *reply = nam->get(networkRequest(url));
-    auto *file = new QFile(path, reply);
-    if (!file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qCWarning(LogCore) << "Failed to open" << path << "for writing:" << file->errorString();
-        reply->abort();
-        reply->deleteLater();
-        return;
+    Platform::HttpRequest req;
+    req.url = url.toString().toStdString();
+    QString proxyStr = curlProxyFor(accountId);
+    if (!proxyStr.isEmpty()) {
+        req.proxy = proxyStr.toStdString();
     }
+    req.timeout = std::chrono::milliseconds(30000);
 
-    connect(reply, &QNetworkReply::readyRead, file, [reply, file]() {
-        file->write(reply->readAll());
-    });
-    connect(reply, &QNetworkReply::finished, reply, [reply, file, url]() {
-        file->close();
-        if (reply->error() != QNetworkReply::NoError) {
-            qCWarning(LogCore) << "Download failed:" << url << reply->errorString();
-            file->remove();
+    Platform::HttpClient::instance().request(std::move(req), [path, url](const Platform::HttpResponse &resp) {
+        if (!resp.ok()) {
+            qCWarning(LogCore) << "Download failed:" << url << QString::fromStdString(resp.error);
+            return;
         }
-        reply->deleteLater();
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            qCWarning(LogCore) << "Failed to open" << path << "for writing:" << file.errorString();
+            return;
+        }
+        file.write(resp.body.data(), static_cast<qint64>(resp.body.size()));
+        file.close();
     });
 }
 
