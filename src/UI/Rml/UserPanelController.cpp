@@ -16,8 +16,6 @@
 
 #ifdef STYX_HAVE_SCREENSHARE
 #include "Core/Stream/StreamManager.hpp"
-#include "UI/Stream/SourcePickerDialog.hpp"
-#include <QMessageBox>
 #endif
 
 #include <RmlUi/Core/Element.h>
@@ -358,19 +356,7 @@ void UserPanelController::onShareClicked()
         return;
     }
 
-    QString reason;
-    if (!streamMgr->canStream(&reason)) {
-        QMessageBox::information(&shell, tr("Go Live"), reason);
-        return;
-    }
-
-    SourcePickerDialog picker(&shell);
-    if (picker.exec() != QDialog::Accepted)
-        return;
-
-    if (streamMgr && streamMgr->canStream(&reason)) {
-        streamMgr->startStreaming(picker.selectedSource(), picker.selectedQuality(), picker.includeAudio());
-    }
+    shell.openGoLivePicker();
 }
 #endif
 

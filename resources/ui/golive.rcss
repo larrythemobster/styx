@@ -1,0 +1,347 @@
+/*
+ * Discord-style Screen Share / Go Live Modal styling for Styx.
+ */
+
+body#golive-modal-body
+{
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-color: transparent;
+	display: block;
+	z-index: 2000;
+	overflow: hidden;
+}
+
+.golive-backdrop
+{
+	width: 100%;
+	height: 100%;
+	background-color: #000000b2;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.golive-dialog
+{
+	width: 660dp;
+	background-color: #313338;
+	border-radius: 8dp;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.golive-header
+{
+	padding: 16dp 20dp;
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.golive-title
+{
+	font-size: 20dp;
+	font-weight: bold;
+	color: #f2f3f5;
+}
+
+.golive-close-btn
+{
+	width: 24dp;
+	height: 24dp;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	opacity: 0.7;
+}
+
+.golive-close-btn:hover
+{
+	opacity: 1.0;
+}
+
+.golive-close-icon
+{
+	width: 18dp;
+	height: 18dp;
+	image-color: #dbdee1;
+}
+
+.golive-tabs
+{
+	padding: 0 20dp;
+	border-bottom: 1dp #202024;
+	display: flex;
+	flex-direction: row;
+	gap: 16dp;
+}
+
+.golive-tab-btn
+{
+	padding: 10dp 4dp;
+	font-size: 15dp;
+	font-weight: 600;
+	color: #949ba4;
+	cursor: pointer;
+	border-bottom: 2dp transparent;
+}
+
+.golive-tab-btn:hover
+{
+	color: #dbdee1;
+}
+
+.golive-tab-btn.active
+{
+	color: #f2f3f5;
+	border-bottom: 2dp #5865f2;
+}
+
+.golive-sources
+{
+	padding: 16dp 20dp;
+	height: 220dp;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	gap: 12dp;
+	align-content: flex-start;
+}
+
+.golive-card
+{
+	width: 196dp;
+	height: 142dp;
+	background-color: #2b2d31;
+	border-radius: 6dp;
+	cursor: pointer;
+	display: flex;
+	flex-direction: column;
+	border: 2dp solid transparent;
+	box-sizing: border-box;
+	overflow: hidden;
+}
+
+.golive-card:hover
+{
+	background-color: #35373c;
+}
+
+.golive-card.selected
+{
+	border: 2dp solid #5865f2;
+	background-color: #35373c;
+}
+
+.golive-thumb-wrap
+{
+	width: 100%;
+	height: 106dp;
+	background-color: #1e1f22;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+}
+
+.golive-thumb-img
+{
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+.golive-card-title
+{
+	font-size: 12dp;
+	font-weight: 500;
+	color: #dbdee1;
+	padding: 4dp 6dp;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	text-align: center;
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.golive-empty
+{
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 14dp;
+	color: #949ba4;
+}
+
+.golive-options
+{
+	padding: 12dp 20dp;
+	background-color: #2b2d31;
+	border-top: 1dp solid #202024;
+}
+
+.golive-options-grid
+{
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: center;
+	gap: 20dp;
+}
+
+.golive-option-col
+{
+	display: flex;
+	flex-direction: column;
+	gap: 6dp;
+}
+
+.golive-option-title
+{
+	font-size: 11dp;
+	font-weight: bold;
+	color: #b5bac1;
+	text-transform: uppercase;
+}
+
+.golive-select
+{
+	background-color: #1e1f22;
+	color: #dbdee1;
+	border: 1dp solid #202024;
+	border-radius: 4dp;
+	padding: 6dp 10dp;
+	font-size: 13dp;
+	min-width: 180dp;
+}
+
+.golive-switch-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 8dp;
+	cursor: pointer;
+}
+
+.golive-switch
+{
+	width: 40dp;
+	height: 22dp;
+	border-radius: 11dp;
+	background-color: #80848e;
+	padding: 2dp;
+	box-sizing: border-box;
+	cursor: pointer;
+}
+
+.golive-switch.checked
+{
+	background-color: #23a55a;
+}
+
+.golive-switch.disabled
+{
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.golive-switch-thumb
+{
+	width: 18dp;
+	height: 18dp;
+	border-radius: 9dp;
+	background-color: #ffffff;
+}
+
+.golive-switch.checked .golive-switch-thumb
+{
+	margin-left: 18dp;
+}
+
+.golive-switch-label
+{
+	font-size: 14dp;
+	color: #dbdee1;
+}
+
+.golive-subtitle
+{
+	font-size: 12dp;
+	color: #949ba4;
+	margin-top: 6dp;
+}
+
+.golive-status
+{
+	font-size: 12dp;
+	color: #f23f43;
+	margin-top: 4dp;
+}
+
+.golive-footer
+{
+	padding: 14dp 20dp;
+	background-color: #2b2d31;
+	display: flex;
+	flex-direction: row;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 12dp;
+}
+
+.golive-btn-cancel
+{
+	background-color: transparent;
+	color: #ffffff;
+	border-width: 0;
+	padding: 8dp 16dp;
+	border-radius: 4dp;
+	font-size: 14dp;
+	cursor: pointer;
+}
+
+.golive-btn-cancel:hover
+{
+	text-decoration: underline;
+}
+
+.golive-btn-go
+{
+	background-color: #5865f2;
+	color: #ffffff;
+	border-width: 0;
+	padding: 8dp 24dp;
+	border-radius: 4dp;
+	font-size: 14dp;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.golive-btn-go:hover
+{
+	background-color: #4752c4;
+}
+
+.golive-btn-go:active
+{
+	background-color: #3c45a5;
+}
+
+.golive-btn-go.disabled
+{
+	background-color: #5865f280;
+	opacity: 0.5;
+	cursor: not-allowed;
+}

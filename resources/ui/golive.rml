@@ -1,0 +1,56 @@
+<rml>
+<head>
+	<title>Share your screen</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="golive.rcss"/>
+</head>
+<body id="golive-modal-body">
+	<div class="golive-backdrop" id="golive-backdrop">
+		<div class="golive-dialog" id="golive-dialog">
+			<div class="golive-header">
+				<div class="golive-title">Share your screen</div>
+				<div class="golive-close-btn" id="golive-close-btn">
+					<img class="golive-close-icon" src="icon:x"/>
+				</div>
+			</div>
+
+			<div class="golive-tabs">
+				<div class="golive-tab-btn active" id="tab-applications" data-tab="applications">Applications</div>
+				<div class="golive-tab-btn" id="tab-screens" data-tab="screens">Screens</div>
+			</div>
+
+			<div class="golive-sources" id="golive-sources">
+			</div>
+
+			<div class="golive-options">
+				<div class="golive-options-grid">
+					<div class="golive-option-col">
+						<div class="golive-option-title">STREAM QUALITY</div>
+						<select class="golive-select" id="quality-select">
+						</select>
+					</div>
+					<div class="golive-option-col">
+						<div class="golive-option-title">AUDIO</div>
+						<div class="golive-switch-row" id="audio-toggle-row">
+							<div class="golive-switch checked" id="audio-switch" tabindex="0">
+								<div class="golive-switch-thumb"></div>
+							</div>
+							<div class="golive-switch-label">Share system audio</div>
+						</div>
+					</div>
+				</div>
+				<div class="golive-subtitle" id="audio-subtitle">
+					A window shares its app's sound; a screen shares everything except this call.
+				</div>
+				<div class="golive-status" id="golive-status"></div>
+			</div>
+
+			<div class="golive-footer">
+				<button class="golive-btn-cancel" id="btn-cancel">Cancel</button>
+				<button class="golive-btn-go disabled" id="btn-go-live">Go Live</button>
+			</div>
+		</div>
+	</div>
+</body>
+</rml>
