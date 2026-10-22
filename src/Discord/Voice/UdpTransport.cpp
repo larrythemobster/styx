@@ -76,16 +76,21 @@ bool resolveSockAddr(const QString &ip, quint16 port, sockaddr_storage &storage,
 
 } // namespace
 
-UdpTransport::UdpTransport(const Core::ProxyConfig &proxy, QObject *parent)
-    : QObject(parent), proxy(proxy)
+UdpTransport::UdpTransport(const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop, QObject *parent)
+    : QObject(parent), proxy(proxy), m_loop(loop)
 {
 }
 
 UdpTransport::~UdpTransport()
 {
+    if (m_loop && m_discoveryTimerId) {
+        m_loop->cancelTimer(m_discoveryTimerId);
+        m_discoveryTimerId = 0;
+    }
     if (m_socket != -1) {
-        delete m_notifier;
-        m_notifier = nullptr;
+        if (m_loop) {
+            m_loop->unwatchSocket(static_cast<Platform::SocketHandle>(m_socket));
+        }
         closeNativeSocket(static_cast<native_socket_t>(m_socket));
         m_socket = -1;
     }
@@ -122,8 +127,10 @@ void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
         if (!discoveryPending)
             return;
         discoveryPending = false;
-        if (discoveryTimer)
-            discoveryTimer->stop();
+        if (m_loop && m_discoveryTimerId) {
+            m_loop->cancelTimer(m_discoveryTimerId);
+            m_discoveryTimerId = 0;
+        }
         emit ipDiscoveryFailed("SOCKS5 proxy: " + error);
     });
     association->open(proxy);
@@ -132,8 +139,9 @@ void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
 bool UdpTransport::openSocket()
 {
     if (m_socket != -1) {
-        delete m_notifier;
-        m_notifier = nullptr;
+        if (m_loop) {
+            m_loop->unwatchSocket(static_cast<Platform::SocketHandle>(m_socket));
+        }
         closeNativeSocket(static_cast<native_socket_t>(m_socket));
         m_socket = -1;
     }
@@ -160,9 +168,11 @@ bool UdpTransport::openSocket()
     setNonBlocking(sock);
 
     m_socket = static_cast<intptr_t>(sock);
-    m_notifier = new QSocketNotifier(sock, QSocketNotifier::Read, this);
-    connect(m_notifier, &QSocketNotifier::activated, this, &UdpTransport::onReadyRead);
-
+    if (m_loop) {
+        m_loop->watchSocket(static_cast<Platform::SocketHandle>(sock), [this] {
+            onReadyRead();
+        });
+    }
     return true;
 }
 
@@ -182,17 +192,17 @@ void UdpTransport::sendDiscoveryPacket()
 
 void UdpTransport::startDiscoveryTimeout()
 {
-    if (!discoveryTimer) {
-        discoveryTimer = new QTimer(this);
-        discoveryTimer->setSingleShot(true);
-        connect(discoveryTimer, &QTimer::timeout, this, [this] {
+    if (m_loop) {
+        if (m_discoveryTimerId) {
+            m_loop->cancelTimer(m_discoveryTimerId);
+        }
+        m_discoveryTimerId = m_loop->setTimer(std::chrono::milliseconds(DISCOVERY_TIMEOUT_MS), false, [this] {
             if (discoveryPending) {
                 discoveryPending = false;
                 emit ipDiscoveryFailed("IP discovery timed out");
             }
         });
     }
-    discoveryTimer->start(DISCOVERY_TIMEOUT_MS);
 }
 
 void UdpTransport::send(const QByteArray &data)
@@ -307,9 +317,10 @@ void UdpTransport::parseIpDiscoveryResponse(const QByteArray &data)
     }
 
     discoveryPending = false;
-    if (discoveryTimer)
-        discoveryTimer->stop();
-
+    if (m_loop && m_discoveryTimerId) {
+        m_loop->cancelTimer(m_discoveryTimerId);
+        m_discoveryTimerId = 0;
+    }
     const char *ipStart = data.constData() + 8;
     int ipLen = 0;
     while (ipLen < 64 && ipStart[ipLen] != '\0') {

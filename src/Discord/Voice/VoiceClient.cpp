@@ -45,7 +45,7 @@ static QString formatDisplayableCode(const std::vector<uint8_t> &data, int bytes
 VoiceClient::VoiceClient(const QString &endpoint, const QString &token,
                          Core::Snowflake serverId, Core::Snowflake channelId,
                          Core::Snowflake userId, const QString &sessionId,
-                         const Core::ProxyConfig &proxy, QObject *parent)
+                         const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop, QObject *parent)
     : QObject(parent),
       endpoint(endpoint),
       token(token),
@@ -53,7 +53,8 @@ VoiceClient::VoiceClient(const QString &endpoint, const QString &token,
       serverId(serverId),
       channelId(channelId),
       userId(userId),
-      sessionId(sessionId)
+      sessionId(sessionId),
+      m_loop(loop)
 {
 }
 
@@ -145,10 +146,9 @@ void VoiceClient::stop()
 
 void VoiceClient::cleanupTransport()
 {
-    if (keepaliveTimer) {
-        keepaliveTimer->stop();
-        delete keepaliveTimer;
-        keepaliveTimer = nullptr;
+    if (m_loop && m_keepaliveTimerId) {
+        m_loop->cancelTimer(m_keepaliveTimerId);
+        m_keepaliveTimerId = 0;
     }
 
     encryption.reset();
@@ -218,7 +218,7 @@ void VoiceClient::onGatewayReady(const VoiceReady &data)
 
     cleanupTransport();
 
-    udpTransport = new UdpTransport(proxy, this);
+    udpTransport = new UdpTransport(proxy, m_loop, this);
     connect(udpTransport, &UdpTransport::ipDiscovered, this, &VoiceClient::onIpDiscovered);
     connect(udpTransport, &UdpTransport::ipDiscoveryFailed, this, &VoiceClient::onIpDiscoveryFailed);
     connect(udpTransport, &UdpTransport::datagramReceived, this, &VoiceClient::onDatagram);
@@ -251,11 +251,11 @@ void VoiceClient::onSessionDescription(const SessionDescription &desc)
     // send silence so discord sends us audio immediately
     sendSilence();
 
-    if (!keepaliveTimer) {
-        keepaliveTimer = new QTimer(this);
-        connect(keepaliveTimer, &QTimer::timeout, this, &VoiceClient::sendSilence);
+    if (m_loop && !m_keepaliveTimerId) {
+        m_keepaliveTimerId = m_loop->setTimer(std::chrono::milliseconds(KEEPALIVE_INTERVAL_MS), true, [this] {
+            sendSilence();
+        });
     }
-    keepaliveTimer->start(KEEPALIVE_INTERVAL_MS);
 }
 
 void VoiceClient::sendAudio(const QByteArray &opusData)
@@ -558,12 +558,11 @@ void VoiceClient::onGatewayResumed()
     setState(State::Connected);
 
     sendSilence();
-    if (!keepaliveTimer) {
-        keepaliveTimer = new QTimer(this);
-        connect(keepaliveTimer, &QTimer::timeout, this, &VoiceClient::sendSilence);
+    if (m_loop && !m_keepaliveTimerId) {
+        m_keepaliveTimerId = m_loop->setTimer(std::chrono::milliseconds(KEEPALIVE_INTERVAL_MS), true, [this] {
+            sendSilence();
+        });
     }
-    if (!keepaliveTimer->isActive())
-        keepaliveTimer->start(KEEPALIVE_INTERVAL_MS);
 }
 
 void VoiceClient::onIpDiscovered(const QString &ip, int port)

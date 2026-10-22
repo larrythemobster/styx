@@ -7,12 +7,8 @@
 #include "Core/Logging.hpp"
 #include "Discord/Client.hpp"
 #include "Discord/Stream/StreamConnection.hpp"
-
-#include <QThread>
-
-#ifdef Q_OS_WIN
-#include <objbase.h>
-#endif
+#include "Platform/Dispatcher.hpp"
+#include <future>
 
 namespace Styx {
 namespace Core {
@@ -30,16 +26,19 @@ StreamManager::~StreamManager()
 {
     stopAll();
     if (sender) {
-        QMetaObject::invokeMethod(sender, [s = sender] { s->stop(); }, Qt::BlockingQueuedConnection);
-        sender->deleteLater();
+        if (senderLoop) {
+            senderLoop->post([s = sender] { s->stop(); });
+        }
+        delete sender;
         sender = nullptr;
     }
-    for (QThread *thread : { senderThread, streamThread }) {
-        if (!thread)
-            continue;
-        thread->quit();
-        thread->wait(5000);
-        delete thread;
+    if (senderLoop) {
+        senderLoop->stopAndWait();
+        senderLoop.reset();
+    }
+    if (streamLoop) {
+        streamLoop->stopAndWait();
+        streamLoop.reset();
     }
 }
 
@@ -79,64 +78,65 @@ QString StreamManager::streamKeyFor(Snowflake userId) const
     return QStringLiteral("call:%1:%2").arg(QString::number(channel), QString::number(userId));
 }
 
-void StreamManager::ensureStreamThread()
+void StreamManager::ensureStreamLoop()
 {
-    if (streamThread)
+    if (streamLoop)
         return;
-    streamThread = new QThread;
-    streamThread->setObjectName(QStringLiteral("StreamThread"));
-    streamThread->start();
+    Platform::WorkerOptions opts;
+    opts.name = "StreamThread";
+    streamLoop = std::make_unique<Platform::WorkerLoop>(opts);
 }
 
-void StreamManager::ensureSenderThread()
+void StreamManager::ensureSenderLoop()
 {
-    if (senderThread)
+    if (senderLoop)
         return;
-    senderThread = new QThread;
-    senderThread->setObjectName(QStringLiteral("StreamCaptureThread"));
-#ifdef Q_OS_WIN
-    // Windows Graphics Capture and WASAPI activation want a multithreaded apartment
-    connect(senderThread, &QThread::started, senderThread, [] { CoInitializeEx(nullptr, COINIT_MULTITHREADED); }, Qt::DirectConnection);
-    connect(senderThread, &QThread::finished, senderThread, [] { CoUninitialize(); }, Qt::DirectConnection);
-#endif
-    senderThread->start();
+    Platform::WorkerOptions opts;
+    opts.name = "StreamCaptureThread";
+    opts.initComMta = true;
+    senderLoop = std::make_unique<Platform::WorkerLoop>(opts);
 
     sender = new StreamSender;
-    sender->moveToThread(senderThread);
 
     connect(sender, &StreamSender::started, this,
             [this](int width, int height, int framerate, int maxBitrate, bool audio, const QString &encoderName) {
-                if (!outgoing.active)
-                    return;
-                senderStarted = true;
-                outgoing.width = width;
-                outgoing.height = height;
-                outgoing.framerate = framerate;
-                outgoing.maxBitrate = maxBitrate;
-                outgoing.audio = audio;
-                outgoing.description = tr("%1×%2 at %3 fps, %4%5")
-                                               .arg(width)
-                                               .arg(height)
-                                               .arg(framerate)
-                                               .arg(encoderName, audio ? tr(", with audio") : QString());
-                qCInfo(LogStream) << "Capture running:" << outgoing.description << "- creating stream" << outgoing.key;
+                Platform::Dispatcher::main().post([this, width, height, framerate, maxBitrate, audio, encoderName]() {
+                    if (!outgoing.active)
+                        return;
+                    senderStarted = true;
+                    outgoing.width = width;
+                    outgoing.height = height;
+                    outgoing.framerate = framerate;
+                    outgoing.maxBitrate = maxBitrate;
+                    outgoing.audio = audio;
+                    outgoing.description = tr("%1×%2 at %3 fps, %4%5")
+                                                   .arg(width)
+                                                   .arg(height)
+                                                   .arg(framerate)
+                                                   .arg(encoderName, audio ? tr(", with audio") : QString());
+                    qCInfo(LogStream) << "Capture running:" << outgoing.description << "- creating stream" << outgoing.key;
 
-                if (client) {
-                    client->sendStreamCreate(voice->currentGuildId(), voice->currentChannelId());
-                    client->sendStreamSetPaused(outgoing.key, false);
-                }
-                emit streamingStatus(tr("Connecting…"));
-            });
+                    if (client) {
+                        client->sendStreamCreate(voice->currentGuildId(), voice->currentChannelId());
+                        client->sendStreamSetPaused(outgoing.key, false);
+                    }
+                    emit streamingStatus(tr("Connecting…"));
+                });
+            }, Qt::DirectConnection);
     connect(sender, &StreamSender::failed, this, [this](const QString &reason) {
-        qCWarning(LogStream) << "Stream sender failed:" << reason;
-        stopStreaming();
-        emit streamingFailed(reason);
-    });
+        Platform::Dispatcher::main().post([this, reason]() {
+            qCWarning(LogStream) << "Stream sender failed:" << reason;
+            stopStreaming();
+            emit streamingFailed(reason);
+        });
+    }, Qt::DirectConnection);
     connect(sender, &StreamSender::sourceClosed, this, [this] {
-        qCInfo(LogStream) << "Shared window closed, ending stream";
-        stopStreaming();
-        emit streamingFailed(tr("The shared window was closed."));
-    });
+        Platform::Dispatcher::main().post([this]() {
+            qCInfo(LogStream) << "Shared window closed, ending stream";
+            stopStreaming();
+            emit streamingFailed(tr("The shared window was closed."));
+        });
+    }, Qt::DirectConnection);
 }
 
 void StreamManager::startStreaming(const CaptureSource &source, const StreamQuality &quality, bool includeAudio)
@@ -149,8 +149,8 @@ void StreamManager::startStreaming(const CaptureSource &source, const StreamQual
     if (outgoing.active)
         stopStreaming();
 
-    ensureStreamThread();
-    ensureSenderThread();
+    ensureStreamLoop();
+    ensureSenderLoop();
 
     outgoing = Session{};
     outgoing.key = streamKeyFor(accountId);
@@ -161,7 +161,8 @@ void StreamManager::startStreaming(const CaptureSource &source, const StreamQual
     emit streamingChanged(true);
     emit streamingStatus(tr("Starting capture…"));
 
-    QMetaObject::invokeMethod(sender, [s = sender, source, quality, includeAudio] { s->start(source, quality, includeAudio); });
+    if (sender && senderLoop)
+        senderLoop->post([s = sender, source, quality, includeAudio] { s->start(source, quality, includeAudio); });
 }
 
 void StreamManager::stopStreaming()
@@ -174,8 +175,8 @@ void StreamManager::stopStreaming()
         client->sendStreamDelete(outgoing.key);
 
     destroyConnection(outgoing);
-    if (sender)
-        QMetaObject::invokeMethod(sender, [s = sender] { s->stop(); }, Qt::BlockingQueuedConnection);
+    if (sender && senderLoop)
+        senderLoop->post([s = sender] { s->stop(); });
 
     outgoing = Session{};
     senderStarted = false;
@@ -192,7 +193,7 @@ void StreamManager::watchStream(Snowflake userId)
     if (watched.contains(userId) || userId == accountId)
         return;
 
-    ensureStreamThread();
+    ensureStreamLoop();
 
     Session session;
     session.key = streamKeyFor(userId);
@@ -237,7 +238,8 @@ void StreamManager::requestViewerKeyframe(Snowflake userId)
 {
     auto it = watched.find(userId);
     if (it != watched.end() && it->connection)
-        QMetaObject::invokeMethod(it->connection, [c = it->connection] { if (c) c->requestKeyframe(); });
+        if (streamLoop)
+            streamLoop->post([c = it->connection] { if (c) c->requestKeyframe(); });
 }
 
 void StreamManager::stopAll()
@@ -355,7 +357,6 @@ void StreamManager::connectSender(Session &session)
     info.maxBitrate = session.maxBitrate;
 
     auto *connection = new StreamConnection(StreamConnection::Role::Sender, info, proxy);
-    connection->moveToThread(streamThread);
     session.connection = connection;
 
     // encoder output goes straight to the stream thread
@@ -378,11 +379,14 @@ void StreamManager::connectSender(Session &session)
         attributes.maxBitrate = outgoing.maxBitrate;
         // Discord clients always flag the stream's audio SSRC as speaking (soundshare),
         // with or without captured audio
-        QMetaObject::invokeMethod(connection, [connection, attributes] {
-            connection->setVideoAttributes(true, attributes);
-            connection->setSoundshare(true);
-        });
-        QMetaObject::invokeMethod(sender, [s = sender] { s->requestKeyframe(); });
+        if (streamLoop) {
+            streamLoop->post([connection, attributes] {
+                connection->setVideoAttributes(true, attributes);
+                connection->setSoundshare(true);
+            });
+        }
+        if (sender && senderLoop)
+            senderLoop->post([s = sender] { s->requestKeyframe(); });
         qCInfo(LogStream) << "Live:" << outgoing.key;
         emit streamingStatus(tr("Live: %1").arg(outgoing.description));
     });
@@ -394,7 +398,8 @@ void StreamManager::connectSender(Session &session)
         emit streamingFailed(tr("Stream connection lost: %1").arg(reason));
     });
 
-    QMetaObject::invokeMethod(connection, &StreamConnection::start);
+    if (streamLoop)
+        streamLoop->post([connection] { connection->start(); });
 }
 
 void StreamManager::connectViewer(Session &session)
@@ -409,66 +414,87 @@ void StreamManager::connectViewer(Session &session)
     info.voiceSessionId = voice->sessionId();
 
     auto *connection = new StreamConnection(StreamConnection::Role::Viewer, info, proxy);
-    connection->moveToThread(streamThread);
     session.connection = connection;
 
 #ifdef STYX_HAVE_FFMPEG
-    session.decoderThread = new QThread;
-    session.decoderThread->setObjectName(QStringLiteral("StreamDecodeThread"));
-    session.decoderThread->start();
+    Platform::WorkerOptions opts;
+    opts.name = "StreamDecodeThread";
+    session.decoderLoop = std::make_shared<Platform::WorkerLoop>(opts);
     auto *decoder = new StreamDecoder;
-    decoder->moveToThread(session.decoderThread);
     session.decoder = decoder;
 
-    connect(connection, &StreamConnection::videoFrame, decoder, &StreamDecoder::decode);
-    connect(decoder, &StreamDecoder::needKeyframe, connection, [connection] { connection->requestKeyframe(); });
+    auto *decLoop = session.decoderLoop.get();
+    connect(connection, &StreamConnection::videoFrame, decoder, [decoder, decLoop](const QByteArray &annexB, quint32 ssrc, bool keyframe) {
+        decLoop->post([decoder, annexB, ssrc, keyframe] {
+            decoder->decode(annexB, ssrc, keyframe);
+        });
+    }, Qt::DirectConnection);
+    auto *strLoop = streamLoop.get();
+    connect(decoder, &StreamDecoder::needKeyframe, connection, [connection, strLoop] {
+        if (strLoop) {
+            strLoop->post([connection] {
+                connection->requestKeyframe();
+            });
+        }
+    }, Qt::DirectConnection);
     const Snowflake userId = session.userId;
     connect(decoder, &StreamDecoder::frameDecoded, this, [this, userId](const QImage &image, const QSize &sourceSize) {
-        if (watched.contains(userId))
-            emit viewerFrame(userId, image, sourceSize);
-    });
+        Platform::Dispatcher::main().post([this, userId, image, sourceSize]() {
+            if (watched.contains(userId))
+                emit viewerFrame(userId, image, sourceSize);
+        });
+    }, Qt::DirectConnection);
 #endif
 
     connect(connection, &StreamConnection::audioPacket, this,
             [this](quint32 ssrc, quint16 sequence, quint32 timestamp, const QByteArray &opus) {
-                if (voice)
-                    voice->playStreamAudio(ssrc, sequence, timestamp, opus);
-            });
+                Platform::Dispatcher::main().post([this, ssrc, sequence, timestamp, opus]() {
+                    if (voice)
+                        voice->playStreamAudio(ssrc, sequence, timestamp, opus);
+                });
+            }, Qt::DirectConnection);
 
     const Snowflake streamer = session.userId;
     connect(connection, &StreamConnection::readyChanged, this, [this, streamer](bool ready) {
-        if (ready)
-            emit watchConnected(streamer);
-    });
+        Platform::Dispatcher::main().post([this, streamer, ready]() {
+            if (ready)
+                emit watchConnected(streamer);
+        });
+    }, Qt::DirectConnection);
     connect(connection, &StreamConnection::closed, this, [this, streamer, connection](const QString &reason) {
-        auto it = watched.find(streamer);
-        if (it == watched.end() || it->connection != connection)
-            return;
-        endWatch(streamer, tr("Connection lost: %1").arg(reason), true);
-    });
+        Platform::Dispatcher::main().post([this, streamer, connection, reason]() {
+            auto it = watched.find(streamer);
+            if (it == watched.end() || it->connection != connection)
+                return;
+            endWatch(streamer, tr("Connection lost: %1").arg(reason), true);
+        });
+    }, Qt::DirectConnection);
 
-    QMetaObject::invokeMethod(connection, &StreamConnection::start);
+    if (streamLoop)
+        streamLoop->post([connection] { connection->start(); });
 }
 
 void StreamManager::destroyConnection(Session &session)
 {
     if (session.connection) {
         StreamConnection *connection = session.connection;
-        QThread *mainThread = thread();
-        QMetaObject::invokeMethod(connection, [connection, mainThread] {
-            connection->stop();
-            connection->moveToThread(mainThread);
-        }, Qt::BlockingQueuedConnection);
+        if (streamLoop && streamLoop->isRunning()) {
+            std::promise<void> p;
+            auto f = p.get_future();
+            streamLoop->post([connection, &p] {
+                connection->stop();
+                p.set_value();
+            });
+            f.wait_for(std::chrono::seconds(2));
+        }
         delete connection;
         session.connection = nullptr;
     }
-    if (session.decoderThread) {
-        session.decoderThread->quit();
-        session.decoderThread->wait(3000);
+    if (session.decoderLoop) {
+        session.decoderLoop->stopAndWait();
         delete session.decoder.data();
         session.decoder = nullptr;
-        delete session.decoderThread;
-        session.decoderThread = nullptr;
+        session.decoderLoop.reset();
     }
 }
 

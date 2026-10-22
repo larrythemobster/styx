@@ -218,26 +218,12 @@ set(PROJECT_SOURCES
     src/UI/BrowserCaptchaResolver.cpp
     src/UI/StatusIndicator.cpp
     src/UI/TrayIcon.cpp
-    src/UI/ProxyLineEdit.cpp
     src/UI/ImageViewer.cpp
-    src/UI/Accounts/AccountsWindow.cpp
-    src/UI/GuildSettings/AuditLogFormatter.cpp
-    src/UI/GuildSettings/GuildAuditLogPage.cpp
-    src/UI/GuildSettings/GuildBansPage.cpp
-    src/UI/GuildSettings/GuildBoostPerksPage.cpp
-    src/UI/GuildSettings/GuildEmojiPage.cpp
-    src/UI/GuildSettings/GuildEngagementPage.cpp
-    src/UI/GuildSettings/GuildInvitesPage.cpp
-    src/UI/GuildSettings/GuildMembersPage.cpp
-    src/UI/GuildSettings/GuildProfilePage.cpp
-    src/UI/GuildSettings/GuildRolesPage.cpp
-    src/UI/GuildSettings/GuildSettingsPage.cpp
-    src/UI/GuildSettings/GuildSettingsSection.cpp
-    src/UI/GuildSettings/GuildSettingsWindow.cpp
-    src/UI/GuildSettings/GuildStickersPage.cpp
-    src/UI/GuildSettings/ImageUpload.cpp
-    src/UI/GuildSettings/MemberModeration.cpp
-    src/UI/GuildSettings/UnsavedChangesBar.cpp
+    src/UI/Rml/AuditLogFormatter.cpp
+    src/UI/Rml/GuildSettingsController.cpp
+    src/UI/Rml/GuildSettingsSection.cpp
+    src/UI/Rml/ImageUpload.cpp
+    src/UI/Rml/MemberModeration.cpp
     src/UI/Accounts/AccountsModel.cpp
     src/UI/ChannelList/ChannelTreeModel.cpp
     src/UI/ChannelList/ChannelFilterProxyModel.cpp
@@ -248,29 +234,14 @@ set(PROJECT_SOURCES
     src/UI/Chat/EmojiTextObject.cpp
     src/UI/Chat/MessageTextDocument.cpp
     src/UI/Chat/MessageTextBrowser.cpp
-    src/UI/Forum/ForumPostModel.cpp
-    src/UI/Forum/ForumPostDelegate.cpp
-    src/UI/Forum/ForumBrowser.cpp
-    src/UI/ThreadBrowser/ThreadBrowserPopup.cpp
-    src/UI/Dialogs/TokenInputDialog.cpp
-    src/UI/Dialogs/ProxyInputDialog.cpp
-    src/UI/Dialogs/QRLoginDialog.cpp
-    src/UI/Dialogs/DirectLoginDialog.cpp
     src/UI/Dialogs/BasePopup.cpp
     src/UI/Dialogs/ConfirmPopup.cpp
     src/UI/Dialogs/UserProfilePopup.cpp
     src/UI/Dialogs/ActivityCard.cpp
     src/UI/MemberList/MemberListModel.cpp
-    src/UI/Emoji/EmojiGlyphs.cpp
-    src/UI/Emoji/EmojiGridView.cpp
-    src/UI/Emoji/EmojiPainting.cpp
-    src/UI/Emoji/EmojiPicker.cpp
-    src/UI/Emoji/ExpressionPicker.cpp
     src/UI/Gifs/GifMasonryLayout.cpp
-    src/UI/Gifs/FavoriteGifGrid.cpp
-    src/UI/Gifs/FavoriteGifPicker.cpp
-    src/UI/Emoji/EmojiSectionRail.cpp
-    src/UI/Emoji/PaintedImages.cpp
+    src/UI/Rml/EmojiGridModel.cpp
+    src/UI/Rml/ExpressionPickerController.cpp
     src/Storage/DatabaseManager.cpp
     src/Storage/BaseRepository.cpp
     src/Storage/Transaction.cpp
@@ -311,6 +282,12 @@ set(PROJECT_SOURCES
     src/UI/Rml/CallController.cpp
     src/UI/Rml/FriendsController.cpp
     src/UI/Rml/SettingsController.cpp
+    src/UI/Rml/AccountsController.cpp
+    src/UI/Rml/ConfirmModal.cpp
+    src/UI/Rml/UserProfileController.cpp
+    src/UI/Rml/ImageViewerController.cpp
+    src/UI/Rml/ForumController.cpp
+    src/UI/Rml/ThreadBrowserController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )
 if(WIN32)
@@ -353,7 +330,7 @@ if(ENABLE_SCREENSHARE)
         src/Core/Stream/StreamSender.cpp
         src/Core/Stream/StreamDecoder.cpp
         src/Core/Stream/StreamManager.cpp
-        src/UI/Stream/SourcePickerDialog.cpp
+        src/UI/Rml/GoLiveController.cpp
     )
 endif()
 
@@ -389,7 +366,7 @@ if(BUILD_TESTS)
     add_test(NAME MarkdownTests COMMAND TestMarkdown)
 
     qt_add_executable(TestFrecency tests/tst_Frecency.cpp src/Core/Emoji/FrecencyTracker.cpp)
-    target_link_libraries(TestFrecency PRIVATE Qt::Core Qt::Test)
+    target_link_libraries(TestFrecency PRIVATE Qt::Core Catch2::Catch2WithMain)
     target_include_directories(TestFrecency PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME FrecencyTests COMMAND TestFrecency)
 
@@ -405,9 +382,9 @@ if(BUILD_TESTS)
     target_include_directories(TestOrderedJson PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME OrderedJsonTests COMMAND TestOrderedJson)
 
-    qt_add_executable(TestProto tests/tst_Proto.cpp src/Proto/ProtoReader.cpp
-        src/Proto/ProtoWriter.cpp src/Proto/FrecencySettings.cpp src/Core/Logging.cpp)
-    target_link_libraries(TestProto PRIVATE Qt::Core Qt::Test)
+    add_executable(TestProto tests/tst_Proto.cpp src/Proto/ProtoReader.cpp
+        src/Proto/ProtoWriter.cpp src/Proto/FrecencySettings.cpp)
+    target_link_libraries(TestProto PRIVATE styx_platform Catch2::Catch2WithMain)
     target_include_directories(TestProto PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME ProtoTests COMMAND TestProto)
 
@@ -420,13 +397,8 @@ if(BUILD_TESTS)
     add_test(NAME ProxyTests COMMAND TestProxy)
 
     qt_add_executable(TestEmojiGrid tests/tst_EmojiGrid.cpp
-        src/UI/Emoji/EmojiGridView.cpp src/UI/Emoji/EmojiGlyphs.cpp src/UI/Emoji/EmojiPainting.cpp
-        src/UI/Emoji/PaintedImages.cpp
-        src/Core/ImageManager.cpp src/Core/AnimatedImageCache.cpp src/Core/ApngDecoder.cpp
-        src/Core/LottieDecoder.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp
-        src/Core/Theme/Manager.cpp src/Core/Theme/Fonts.cpp src/Core/Theme/Stylesheet.cpp
-        src/Core/Theme/Tokens.cpp src/Core/Theme/Icons.cpp resources/resources.qrc)
-    target_link_libraries(TestEmojiGrid PRIVATE Qt::Core Qt::Gui Qt::Widgets styx_platform Qt::Svg Qt::Test)
+        src/UI/Rml/EmojiGridModel.cpp src/Core/Snowflake.cpp)
+    target_link_libraries(TestEmojiGrid PRIVATE Qt::Core Qt::Gui Qt::Test)
     target_include_directories(TestEmojiGrid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME EmojiGridTests COMMAND TestEmojiGrid)
 
@@ -645,13 +617,16 @@ find_package(Stb REQUIRED)
 find_package(WebP CONFIG QUIET)
 
 set(PLATFORM_SOURCES
+    src/Platform/Base64.cpp
     src/Platform/Dispatcher.cpp
     src/Platform/Http.cpp
     src/Platform/Image.cpp
     src/Platform/Paths.cpp
     src/Platform/Settings.cpp
     src/Platform/Sqlite.cpp
+    src/Platform/ThreadPool.cpp
     src/Platform/Utf8.cpp
+    src/Platform/WorkerLoop.cpp
 )
 
 if(WIN32)
@@ -685,7 +660,7 @@ if(TARGET WebP::webp)
     target_link_libraries(styx_platform PUBLIC WebP::webp)
 endif()
 if(WIN32)
-    target_link_libraries(styx_platform PUBLIC ws2_32 PRIVATE advapi32 crypt32)
+    target_link_libraries(styx_platform PUBLIC ws2_32 PRIVATE advapi32 crypt32 ole32)
 endif()
 target_compile_features(styx_platform PUBLIC cxx_std_20)
 if(MSVC)

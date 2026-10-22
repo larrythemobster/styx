@@ -9,6 +9,8 @@
 #include "Platform/Signal.hpp"
 #include "Platform/Sqlite.hpp"
 #include "Platform/Utf8.hpp"
+#include "Platform/WorkerLoop.hpp"
+#include "Platform/ThreadPool.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -21,6 +23,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <objbase.h>
 using native_sock_t = SOCKET;
 constexpr native_sock_t kInvalidSock = INVALID_SOCKET;
 inline int closeSock(native_sock_t s) { return ::closesocket(s); }
@@ -702,4 +705,221 @@ TEST_CASE("Storage: Message row and schema round trip", "[storage]")
     REQUIRE(select.getText(4) == "2026-10-22T10:00:00.000Z");
     REQUIRE(select.getText(5) == R"([{"title":"Test Embed"}])");
     REQUIRE_FALSE(select.step());
+}
+
+TEST_CASE("WorkerLoop - post execution and order", "[platform]")
+{
+    using namespace Styx::Platform;
+    WorkerLoop loop("TestPost");
+    REQUIRE(loop.isRunning());
+
+    std::atomic<int> counter{0};
+    std::vector<int> executedOrder;
+    std::mutex orderMutex;
+    std::atomic<bool> done{false};
+
+    for (int i = 1; i <= 5; ++i) {
+        loop.post([&counter, &executedOrder, &orderMutex, i] {
+            std::lock_guard lock(orderMutex);
+            executedOrder.push_back(i);
+            counter.fetch_add(1);
+        });
+    }
+
+    loop.post([&done] {
+        done.store(true);
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    while (!done.load() && (std::chrono::steady_clock::now() - start) < std::chrono::seconds(2)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    REQUIRE(done.load());
+    REQUIRE(counter.load() == 5);
+    std::vector<int> expected = {1, 2, 3, 4, 5};
+    REQUIRE(executedOrder == expected);
+}
+
+TEST_CASE("WorkerLoop - timers single-shot and repeating", "[platform]")
+{
+    using namespace Styx::Platform;
+    WorkerLoop loop("TestTimers");
+
+    std::atomic<bool> singleShotFired{false};
+    loop.setTimer(std::chrono::milliseconds(20), false, [&singleShotFired] {
+        singleShotFired.store(true);
+    });
+
+    std::atomic<int> repeatCount{0};
+    TimerId repeatId = loop.setTimer(std::chrono::milliseconds(15), true, [&repeatCount] {
+        repeatCount.fetch_add(1);
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    while ((!singleShotFired.load() || repeatCount.load() < 2) &&
+           (std::chrono::steady_clock::now() - start) < std::chrono::seconds(2)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    REQUIRE(singleShotFired.load());
+    REQUIRE(repeatCount.load() >= 2);
+
+    loop.cancelTimer(repeatId);
+    int countAfterCancel = repeatCount.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    REQUIRE(repeatCount.load() <= countAfterCancel + 1);
+}
+
+TEST_CASE("WorkerLoop - watchSocket readability", "[platform]")
+{
+    using namespace Styx::Platform;
+    WorkerLoop loop("TestSocket");
+
+    native_sock_t rx = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    REQUIRE(rx != kInvalidSock);
+
+    sockaddr_in rxAddr{};
+    rxAddr.sin_family = AF_INET;
+    rxAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    rxAddr.sin_port = 0;
+    REQUIRE(::bind(rx, reinterpret_cast<sockaddr *>(&rxAddr), sizeof(rxAddr)) == 0);
+
+    sockaddr_in bound{};
+    socklen_t len = sizeof(bound);
+    REQUIRE(::getsockname(rx, reinterpret_cast<sockaddr *>(&bound), &len) == 0);
+
+    std::atomic<bool> readableFired{false};
+    std::string receivedData;
+    std::mutex dataMutex;
+
+    loop.watchSocket(static_cast<SocketHandle>(rx), [&readableFired, &receivedData, &dataMutex, rx] {
+        char buf[128];
+        int n = ::recv(rx, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+            buf[n] = '\0';
+            std::lock_guard lock(dataMutex);
+            receivedData = buf;
+            readableFired.store(true);
+        }
+    });
+
+    native_sock_t tx = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    REQUIRE(tx != kInvalidSock);
+
+    const char msg[] = "ping_worker_loop";
+    ::sendto(tx, msg, static_cast<int>(sizeof(msg)), 0, reinterpret_cast<sockaddr *>(&bound), sizeof(bound));
+
+    auto start = std::chrono::steady_clock::now();
+    while (!readableFired.load() && (std::chrono::steady_clock::now() - start) < std::chrono::seconds(2)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    REQUIRE(readableFired.load());
+    {
+        std::lock_guard lock(dataMutex);
+        REQUIRE(receivedData == msg);
+    }
+
+    loop.unwatchSocket(static_cast<SocketHandle>(rx));
+    closeSock(tx);
+    closeSock(rx);
+}
+
+TEST_CASE("WorkerLoop - COM MTA init hook", "[platform]")
+{
+    using namespace Styx::Platform;
+#ifdef _WIN32
+    std::atomic<bool> comInitialized{false};
+    WorkerOptions opts;
+    opts.name = "TestCom";
+    opts.initComMta = true;
+    WorkerLoop loop(opts);
+
+    loop.post([&comInitialized] {
+        APTTYPE aptType;
+        APTTYPEQUALIFIER aptQual;
+        HRESULT hr = CoGetApartmentType(&aptType, &aptQual);
+        if (SUCCEEDED(hr) && (aptType == APTTYPE_MTA || aptType == APTTYPE_NA)) {
+            comInitialized.store(true);
+        }
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    while (!comInitialized.load() && (std::chrono::steady_clock::now() - start) < std::chrono::seconds(2)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    REQUIRE(comInitialized.load());
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("WorkerLoop - shutdown under load", "[platform]")
+{
+    using namespace Styx::Platform;
+    std::atomic<bool> stopClients{false};
+    std::atomic<uint64_t> tasksExecuted{0};
+
+    auto loop = std::make_unique<WorkerLoop>("TestLoad");
+
+    std::vector<std::thread> clients;
+    for (int c = 0; c < 4; ++c) {
+        clients.emplace_back([&loop, &stopClients, &tasksExecuted] {
+            while (!stopClients.load(std::memory_order_relaxed)) {
+                loop->post([&tasksExecuted] {
+                    tasksExecuted.fetch_add(1, std::memory_order_relaxed);
+                });
+                std::this_thread::yield();
+            }
+        });
+    }
+
+    std::thread timerClient([&loop, &stopClients] {
+        while (!stopClients.load(std::memory_order_relaxed)) {
+            TimerId id = loop->setTimer(std::chrono::milliseconds(5), false, [] {});
+            std::this_thread::yield();
+            loop->cancelTimer(id);
+        }
+    });
+
+    // Let it run under load for 100ms
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Shutdown the worker loop while clients are actively hammering it
+    loop->stopAndWait();
+
+    stopClients.store(true, std::memory_order_relaxed);
+    for (auto &t : clients) {
+        t.join();
+    }
+    timerClient.join();
+
+    // Destructor of WorkerLoop
+    loop.reset();
+    REQUIRE(tasksExecuted.load() > 0);
+}
+
+TEST_CASE("ThreadPool - post and stopAndWait", "[platform]")
+{
+    using namespace Styx::Platform;
+    ThreadPool pool(4, "TestPool");
+
+    std::atomic<int> completed{0};
+    constexpr int kTasks = 100;
+    for (int i = 0; i < kTasks; ++i) {
+        pool.post([&completed] {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            completed.fetch_add(1);
+        });
+    }
+
+    auto start = std::chrono::steady_clock::now();
+    while (completed.load() < kTasks && (std::chrono::steady_clock::now() - start) < std::chrono::seconds(3)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    REQUIRE(completed.load() == kTasks);
+    pool.stopAndWait();
 }

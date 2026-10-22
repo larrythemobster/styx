@@ -13,7 +13,7 @@
 #include "ScreenCapture.hpp"
 #include "StreamQuality.hpp"
 
-class QThread;
+#include "Platform/WorkerLoop.hpp"
 
 namespace Styx {
 namespace Discord {
@@ -86,7 +86,7 @@ private:
         bool active = false;
         QPointer<Discord::Stream::StreamConnection> connection;
         QPointer<StreamDecoder> decoder;
-        QThread *decoderThread = nullptr;
+        std::shared_ptr<Platform::WorkerLoop> decoderLoop;
         // outgoing only
         QString description;
         bool audio = false;
@@ -102,16 +102,16 @@ private:
     void connectViewer(Session &session);
     void destroyConnection(Session &session);
     void endWatch(Snowflake userId, const QString &reason, bool notifyServer);
-    void ensureStreamThread();
-    void ensureSenderThread();
+    void ensureStreamLoop();
+    void ensureSenderLoop();
 
     Snowflake accountId;
     ProxyConfig proxy;
     QPointer<Discord::Client> client;
     QPointer<Audio::VoiceManager> voice;
 
-    QThread *streamThread = nullptr;
-    QThread *senderThread = nullptr;
+    std::unique_ptr<Platform::WorkerLoop> streamLoop;
+    std::unique_ptr<Platform::WorkerLoop> senderLoop;
     StreamSender *sender = nullptr;
 
     Session outgoing;

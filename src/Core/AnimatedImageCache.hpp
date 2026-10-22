@@ -7,7 +7,7 @@
 #include <QPixmap>
 #include <QSet>
 #include <QSize>
-#include <QThreadPool>
+#include "Platform/ThreadPool.hpp"
 #include <QUrl>
 
 #include <atomic>
@@ -80,7 +80,8 @@ private:
     static Decoded decodeWithImageReader(const QByteArray &data, const DecodeTarget &target);
 
     ImageManager *imageManager;
-    QThreadPool decodePool;
+    Platform::ThreadPool decodePool{4, "ImageDecode"};
+    std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
     int animationLimitMiB = AnimationLimit.fallback;
     int newestFirstPriority = 0;
     QSet<ImageRequestKey> wanted;

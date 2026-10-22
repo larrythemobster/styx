@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QObject>
-#include <QTimer>
+#include "Platform/WorkerLoop.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -43,7 +43,7 @@ public:
 
     VoiceClient(const QString &endpoint, const QString &token, Core::Snowflake serverId,
                 Core::Snowflake channelId, Core::Snowflake userId, const QString &sessionId,
-                const Core::ProxyConfig &proxy, QObject *parent = nullptr);
+                const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop = nullptr, QObject *parent = nullptr);
     ~VoiceClient() override;
 
     void start();
@@ -121,7 +121,8 @@ private:
     QByteArray sessionKey;
 
     std::unique_ptr<VoiceEncryption> encryption;
-    QTimer *keepaliveTimer = nullptr;
+    Platform::WorkerLoop *m_loop = nullptr;
+    Platform::TimerId m_keepaliveTimerId{0};
     uint16_t rtpSequence = 0;
     uint32_t rtpTimestamp = 0;
 

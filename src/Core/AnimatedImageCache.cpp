@@ -1,5 +1,6 @@
 #include "AnimatedImageCache.hpp"
 
+#include "Platform/Dispatcher.hpp"
 #include <QBuffer>
 #include <QFile>
 #include <QGuiApplication>
@@ -60,7 +61,6 @@ int AnimatedFrames::frameAt(qint64 loopPhaseMs) const
 AnimatedImageCache::AnimatedImageCache(ImageManager *imageManager, QObject *parent)
     : QObject(parent), imageManager(imageManager)
 {
-    decodePool.setMaxThreadCount(1);
     setCacheLimitMiB(CacheLimit.fallback);
     connect(imageManager, &ImageManager::rawDownloadReady, this, &AnimatedImageCache::onRawDownloadReady);
 }
@@ -80,8 +80,9 @@ void AnimatedImageCache::setAnimationLimitMiB(int mib)
 
 AnimatedImageCache::~AnimatedImageCache()
 {
+    *m_alive = false;
     decodePool.clear();
-    decodePool.waitForDone();
+    decodePool.stopAndWait();
 }
 
 AnimatedFramesPtr AnimatedImageCache::get(const QUrl &url, const QSize &logicalSize, Snowflake accountId)
@@ -137,16 +138,22 @@ void AnimatedImageCache::decode(const ImageRequestKey &key, const QString &path)
     const DecodeTarget target{ key.size * dpr, animationLimitMiB * BytesPerMiB };
 
     // newest first
-    // clang-format off
-    decodePool.start([this, key, path, target, dpr, discarded]() {
+    decodePool.post([this, alive = m_alive, key, path, target, dpr, discarded]() {
         if (discarded->load()) {
-            QMetaObject::invokeMethod(this, [this, key]() { onDecodeSkipped(key); }, Qt::QueuedConnection);
+            Platform::Dispatcher::main().post([this, alive, key]() {
+                if (!*alive)
+                    return;
+                onDecodeSkipped(key);
+            });
             return;
         }
         const Decoded decoded = decodeFrames(path, target);
-        QMetaObject::invokeMethod(this, [this, key, decoded, dpr]() { publish(key, decoded, dpr); }, Qt::QueuedConnection);
-    }, ++newestFirstPriority);
-    // clang-format on
+        Platform::Dispatcher::main().post([this, alive, key, decoded, dpr]() {
+            if (!*alive)
+                return;
+            publish(key, decoded, dpr);
+        });
+    });
 }
 
 void AnimatedImageCache::onDecodeSkipped(const ImageRequestKey &key)

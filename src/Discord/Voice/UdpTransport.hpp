@@ -2,9 +2,7 @@
 
 #include <QByteArray>
 #include <QObject>
-#include <QSocketNotifier>
-#include <QString>
-#include <QTimer>
+#include "Platform/WorkerLoop.hpp"
 
 #include "Core/ProxyConfig.hpp"
 #include "Socks5UdpAssociation.hpp"
@@ -17,7 +15,8 @@ class UdpTransport : public QObject
 {
     Q_OBJECT
 public:
-    explicit UdpTransport(const Core::ProxyConfig &proxy, QObject *parent = nullptr);
+    explicit UdpTransport(const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop = nullptr, QObject *parent = nullptr);
+    void setWorkerLoop(Platform::WorkerLoop *loop) { m_loop = loop; }
     ~UdpTransport() override;
 
     void startIpDiscovery(const QString &ip, int port, quint32 ssrc);
@@ -41,8 +40,8 @@ private:
     void startDiscoveryTimeout();
 
     intptr_t m_socket{-1};
-    QSocketNotifier *m_notifier = nullptr;
-    QTimer *discoveryTimer = nullptr;
+    Platform::WorkerLoop *m_loop = nullptr;
+    Platform::TimerId m_discoveryTimerId{0};
     QString serverAddress;
     quint16 serverPort = 0;
     quint32 ssrc = 0;

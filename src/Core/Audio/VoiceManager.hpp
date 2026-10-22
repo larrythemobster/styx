@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QObject>
-#include <QThread>
+#include "Platform/WorkerLoop.hpp"
 #include <QHash>
 #include <QList>
 #include <QSet>
@@ -60,6 +60,8 @@ public:
 
     void setInputGain(float gain);
     void setOutputVolume(float volume);
+    [[nodiscard]] float inputGain() const { return cachedInputGain; }
+    [[nodiscard]] float outputVolume() const { return cachedOutputVolume; }
     void setUserVolume(Snowflake userId, float volume);
     void setVadThreshold(float threshold);
 
@@ -171,13 +173,16 @@ private:
 #endif
     QList<AudioDeviceInfo> cachedInputDevices;
     QList<AudioDeviceInfo> cachedOutputDevices;
+    float cachedInputGain = 1.0f;
+    float cachedOutputVolume = 1.0f;
 
     QHash<Snowflake, VoiceParticipant> participants;
     QSet<Snowflake> mutedUsers;
     QHash<Snowflake, Discord::VoiceState> knownVoiceStates;
     QString cachedPrivacyCode;
 
-    QThread *voiceThread = nullptr;
+    std::unique_ptr<Platform::WorkerLoop> voiceLoop;
+    std::shared_ptr<bool> m_voiceAlive = std::make_shared<bool>(true);
     Discord::Voice::VoiceClient *voiceClient = nullptr;
     AudioPipeline *audioPipeline = nullptr;
     unsigned int voiceGeneration = 0;

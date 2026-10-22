@@ -2,7 +2,13 @@
 
 #include <QDateTime>
 #include <QDir>
-#include <QThread>
+#include <thread>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #include <iostream>
 
@@ -146,7 +152,11 @@ void Logger::messageHandler(QtMsgType type, const QMessageLogContext &context, c
     }
 
     QString time = QDateTime::currentDateTime().toString("HH:mm:ss.zzz");
-    QString threadId = QString::number(reinterpret_cast<quint64>(QThread::currentThreadId()), 16);
+#ifdef _WIN32
+    QString threadId = QString::number(static_cast<quint64>(::GetCurrentThreadId()), 16);
+#else
+    QString threadId = QString::number(static_cast<quint64>(std::hash<std::thread::id>{}(std::this_thread::get_id())), 16);
+#endif
 
     QString formatted =
             QString("[%1] [T:%2] [%3] [%4] %5").arg(time, threadId, level, context.category, msg);
