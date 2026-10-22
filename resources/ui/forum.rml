@@ -1,0 +1,61 @@
+<rml>
+<head>
+	<title>Forum</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="forum.rcss"/>
+</head>
+<body id="forum-body">
+	<div id="forum-header">
+		<div class="forum-header-left">
+			<img class="forum-header-icon" src="icon:messages-square"/>
+			<span id="forum-title" class="forum-header-title">Forum</span>
+			<span id="forum-divider" class="forum-header-divider"></span>
+			<div id="forum-topic" class="forum-header-topic"></div>
+		</div>
+		<div class="forum-header-right">
+		</div>
+	</div>
+	<div id="forum-main">
+		<div id="forum-controls">
+			<div class="forum-controls-row">
+				<div class="forum-sort-group">
+					<div id="forum-sort-recent" class="forum-sort-pill active" data-action="sort-recent">Recently Active</div>
+					<div id="forum-sort-created" class="forum-sort-pill" data-action="sort-created">Creation Date</div>
+				</div>
+				<button id="forum-new-post-btn" class="forum-new-post-btn" data-action="open-composer">+ New Post</button>
+			</div>
+			<div id="forum-tags-bar" class="forum-tags-bar">
+			</div>
+		</div>
+
+		<div id="forum-composer" class="forum-composer" style="display: none;">
+			<div class="composer-header">
+				<span class="composer-title">Create Post</span>
+				<div class="composer-close-btn" data-action="close-composer">
+					<img src="icon:x"/>
+				</div>
+			</div>
+			<div class="composer-form">
+				<input type="text" id="composer-title-input" class="composer-title-input" placeholder="Title"/>
+				<div id="composer-tags" class="composer-tags-list"></div>
+				<textarea id="composer-body-input" class="composer-body-input" placeholder="What's on your mind?"></textarea>
+				<div class="composer-footer">
+					<button class="composer-cancel-btn" data-action="close-composer">Cancel</button>
+					<button class="composer-submit-btn" disabled="true">Post</button>
+				</div>
+			</div>
+		</div>
+
+		<div id="forum-scroll-area">
+			<div id="forum-loading" class="forum-status-msg" style="display: none;">Loading posts…</div>
+			<div id="forum-empty" class="forum-status-msg" style="display: none;">No posts found</div>
+			<div id="forum-posts-list" class="forum-posts-list">
+			</div>
+			<div id="forum-load-more" class="forum-load-more-row" style="display: none;">
+				<button class="forum-load-more-btn" data-action="load-more">Load more posts</button>
+			</div>
+		</div>
+	</div>
+</body>
+</rml>

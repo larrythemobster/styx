@@ -1,0 +1,36 @@
+<rml>
+<head>
+	<title>Threads</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="threads.rcss"/>
+</head>
+<body id="threads-body">
+	<div id="threads-backdrop" class="threads-backdrop" data-action="close"></div>
+	<div class="threads-popover">
+		<div class="threads-popover-header">
+			<div class="threads-header-title-box">
+				<img class="threads-header-icon" src="icon:messages-square"/>
+				<span class="threads-header-title">Threads</span>
+				<span id="threads-channel-name" class="threads-header-channel"></span>
+			</div>
+			<div class="threads-close-btn" data-action="close">
+				<img src="icon:x"/>
+			</div>
+		</div>
+		<div class="threads-tabs">
+			<div id="tab-active" class="threads-tab active" data-action="tab-active">Active</div>
+			<div id="tab-archived" class="threads-tab" data-action="tab-archived">Archived</div>
+		</div>
+		<div id="threads-list-container" class="threads-list-container">
+			<div id="threads-loading" class="threads-status-msg" style="display: none;">Loading threads…</div>
+			<div id="threads-empty" class="threads-status-msg" style="display: none;">No threads</div>
+			<div id="threads-items" class="threads-items-list">
+			</div>
+			<div id="threads-load-more" class="threads-load-more" style="display: none;">
+				<button class="threads-more-btn" data-action="load-more-archived">Load more</button>
+			</div>
+		</div>
+	</div>
+</body>
+</rml>
