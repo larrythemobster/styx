@@ -216,9 +216,7 @@ set(PROJECT_SOURCES
     src/Core/Media/ClipPlayer.cpp
     src/Core/Media/CurlAvio.cpp
     src/UI/BrowserCaptchaResolver.cpp
-    src/UI/StatusIndicator.cpp
     src/UI/TrayIcon.cpp
-    src/UI/ImageViewer.cpp
     src/UI/Rml/AuditLogFormatter.cpp
     src/UI/Rml/GuildSettingsController.cpp
     src/UI/Rml/GuildSettingsSection.cpp
@@ -235,9 +233,6 @@ set(PROJECT_SOURCES
     src/UI/Chat/MessageTextDocument.cpp
     src/UI/Chat/MessageTextBrowser.cpp
     src/UI/Dialogs/BasePopup.cpp
-    src/UI/Dialogs/ConfirmPopup.cpp
-    src/UI/Dialogs/UserProfilePopup.cpp
-    src/UI/Dialogs/ActivityCard.cpp
     src/UI/MemberList/MemberListModel.cpp
     src/UI/Gifs/GifMasonryLayout.cpp
     src/UI/Rml/EmojiGridModel.cpp

@@ -58,7 +58,6 @@ private:
 
     QByteArray buildHarnessHtml() const;
     QString harnessUrl() const;
-    [[nodiscard]] bool confirmBrowserBypassesProxy();
 
     QWidget *parentWindow = nullptr;
 

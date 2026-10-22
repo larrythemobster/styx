@@ -16,7 +16,7 @@
 #include <QVBoxLayout>
 
 #include "Core/Logging.hpp"
-#include "UI/Dialogs/ConfirmPopup.hpp"
+#include "UI/Rml/ConfirmModal.hpp"
 
 namespace Styx {
 namespace UI {
@@ -219,12 +219,27 @@ void BrowserCaptchaResolver::startNext()
     openButton = new QPushButton(tr("Open in browser"), dlg);
     layout->addWidget(openButton);
     connect(openButton, &QPushButton::clicked, this, [this]() {
-        if (!confirmBrowserBypassesProxy())
-            return;
+        auto doOpen = [this]() {
+            QDesktopServices::openUrl(QUrl(harnessUrl()));
+            if (statusLabel)
+                statusLabel->setText(tr("Waiting for you to finish in your browser..."));
+        };
 
-        QDesktopServices::openUrl(QUrl(harnessUrl()));
-        if (statusLabel)
-            statusLabel->setText(tr("Waiting for you to finish in your browser..."));
+        if (currentProxy.enabled()) {
+            Rml::showConfirmModal(
+                tr("Proxy will be bypassed"),
+                tr("This account connects through <b>%1</b>, but the captcha opens in your "
+                   "normal browser, which ignores that proxy.<br><br>"
+                   "The captcha provider will see your real IP address. Continue?")
+                        .arg(currentProxy.toDisplayString().toHtmlEscaped()),
+                tr("Open Anyway"),
+                doOpen,
+                nullptr,
+                true
+            );
+        } else {
+            doOpen();
+        }
     });
 
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, dlg);
@@ -237,21 +252,6 @@ void BrowserCaptchaResolver::startNext()
     beginChallenge(false);
 }
 
-bool BrowserCaptchaResolver::confirmBrowserBypassesProxy()
-{
-    if (!currentProxy.enabled())
-        return true;
-
-    ConfirmPopup dialog(tr("Proxy will be bypassed"),
-                        tr("This account connects through <b>%1</b>, but the captcha opens in your "
-                           "normal browser, which ignores that proxy.<br><br>"
-                           "The captcha provider will see your real IP address. Continue?")
-                                .arg(currentProxy.toDisplayString().toHtmlEscaped()),
-                        tr("Open Anyway"),
-                        modal ? static_cast<QWidget *>(modal.data()) : parentWindow);
-
-    return dialog.exec() == QDialog::Accepted;
-}
 
 void BrowserCaptchaResolver::beginChallenge(bool isRetry)
 {

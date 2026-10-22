@@ -1,0 +1,24 @@
+<rml>
+<head>
+	<title>Confirm</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="confirm_modal.rcss"/>
+</head>
+<body id="confirm-modal-root">
+	<div id="confirm-backdrop" class="modal-backdrop">
+		<div id="confirm-card" class="modal-card">
+			<div class="modal-header">
+				<h2 id="confirm-title" class="modal-title">Confirm</h2>
+			</div>
+			<div class="modal-body">
+				<div id="confirm-message" class="modal-message"></div>
+			</div>
+			<div class="modal-footer">
+				<button id="confirm-cancel-btn" class="btn btn-cancel">Cancel</button>
+				<button id="confirm-action-btn" class="btn btn-confirm">Confirm</button>
+			</div>
+		</div>
+	</div>
+</body>
+</rml>

@@ -1,0 +1,73 @@
+<rml>
+<head>
+	<title>User Profile</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="user_profile.rcss"/>
+</head>
+<body id="user-profile-root">
+	<div id="profile-backdrop" class="profile-backdrop">
+		<div id="profile-card" class="profile-card">
+			<div id="profile-banner" class="profile-banner">
+				<img id="profile-banner-img" class="profile-banner-img" src="" />
+			</div>
+
+			<div class="profile-header">
+				<div class="profile-avatar-wrapper">
+					<img id="profile-avatar-img" class="profile-avatar-img" src="" />
+					<div id="profile-status-dot" class="profile-status-dot"></div>
+				</div>
+				<div id="profile-badges" class="profile-badges"></div>
+			</div>
+
+			<div class="profile-body">
+				<div class="profile-identity">
+					<div class="profile-names-row">
+						<span id="profile-display-name" class="profile-display-name"></span>
+						<span id="profile-bot-badge" class="profile-bot-badge">BOT</span>
+					</div>
+					<div id="profile-handle" class="profile-handle"></div>
+					<div id="profile-pronouns" class="profile-pronouns"></div>
+				</div>
+
+				<div id="profile-custom-status" class="profile-custom-status">
+					<img id="profile-status-emoji" class="profile-status-emoji" src="" />
+					<span id="profile-status-text" class="profile-status-text"></span>
+				</div>
+
+				<div class="profile-divider"></div>
+
+				<div class="profile-scroll">
+					<div id="profile-bio-section" class="profile-section">
+						<div class="profile-section-title">ABOUT ME</div>
+						<div id="profile-bio" class="profile-bio-text"></div>
+					</div>
+
+					<div id="profile-activities-section" class="profile-section">
+						<div id="profile-activities" class="profile-activities"></div>
+					</div>
+
+					<div id="profile-dates-section" class="profile-section">
+						<div class="profile-section-title">MEMBER SINCE</div>
+						<div id="profile-dates" class="profile-dates-list"></div>
+					</div>
+
+					<div id="profile-roles-section" class="profile-section">
+						<div class="profile-section-title">ROLES</div>
+						<div id="profile-roles" class="profile-roles-list"></div>
+					</div>
+
+					<div id="profile-note-section" class="profile-section">
+						<div class="profile-section-title">NOTE</div>
+						<input type="text" id="profile-note-input" class="profile-note-input" placeholder="Click to add a note" />
+					</div>
+				</div>
+
+				<div class="profile-footer">
+					<button id="profile-message-btn" class="profile-message-btn">Message</button>
+				</div>
+			</div>
+		</div>
+	</div>
+</body>
+</rml>

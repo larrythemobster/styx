@@ -47,7 +47,8 @@ MemberListController::MemberListController(Shell &shell, ::Rml::Element *root, Q
             return;
         Snowflake userId(idStr.toULongLong());
         if (userId.isValid()) {
-            this->shell.showUserProfile(userId, activeGuildId);
+            QRectF anchorRect(item->GetAbsoluteLeft(), item->GetAbsoluteTop(), item->GetClientWidth(), item->GetClientHeight());
+            this->shell.showUserProfile(userId, activeGuildId, anchorRect);
         }
     });
 

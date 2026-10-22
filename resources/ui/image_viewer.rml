@@ -1,0 +1,31 @@
+<rml>
+<head>
+	<title>Image Viewer</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="image_viewer.rcss"/>
+</head>
+<body id="image-viewer-root">
+	<div id="viewer-backdrop" class="viewer-backdrop">
+		<div class="viewer-toolbar">
+			<span id="viewer-counter" class="viewer-counter">1 of 1</span>
+			<div class="viewer-actions">
+				<button id="viewer-btn-browser" class="viewer-btn" title="Open in Browser">Open in Browser</button>
+				<button id="viewer-btn-copy" class="viewer-btn" title="Copy Link">Copy Link</button>
+				<button id="viewer-btn-close" class="viewer-btn viewer-btn-close" title="Close (Esc)">X</button>
+			</div>
+		</div>
+
+		<button id="viewer-nav-prev" class="viewer-nav-btn viewer-nav-prev">&lt;</button>
+		<button id="viewer-nav-next" class="viewer-nav-btn viewer-nav-next">&gt;</button>
+
+		<div id="viewer-viewport" class="viewer-viewport">
+			<img id="viewer-image" class="viewer-image" src="" />
+		</div>
+
+		<div class="viewer-hint">
+			Scroll to zoom &middot; Drag to pan &middot; R to reset &middot; Esc to close
+		</div>
+	</div>
+</body>
+</rml>
