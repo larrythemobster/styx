@@ -37,7 +37,6 @@ class ChannelFilterProxyModel;
 class ServerRailModel;
 class ChatModel;
 class MemberListModel;
-class SettingsWindow;
 class TrayIcon;
 class GuildSettingsWindow;
 class ForumBrowser;
@@ -122,6 +121,9 @@ public:
     // --- Qt windows that stay Qt (settings, profiles, server settings, pickers) -----------
     void showUserProfile(Core::Snowflake userId, Core::Snowflake guildId);
     void openSettings();
+    void closeSettings();
+    void setSettingsOpen(bool open);
+    [[nodiscard]] bool isSettingsOpen() const { return settingsOpen; }
     void openAccounts();
     void openGuildSettings(Core::Snowflake accountId, Core::Snowflake guildId);
     void openImage(const QUrl &url);
@@ -130,6 +132,7 @@ public:
     void showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId);
     void openForum(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake forumId);
     void openThreadBrowser(Core::Snowflake channelId);
+    void applyCloseToTray();
 signals:
     void locationChanged(const Styx::UI::Location &location);
     void instanceChanged(Core::ClientInstance *instance);
@@ -139,6 +142,7 @@ signals:
     void accountReady(Core::Snowflake accountId);
     void selfMuteChanged(bool muted);
     void selfDeafChanged(bool deafened);
+    void settingsOpenChanged(bool open);
 protected:
     void closeEvent(QCloseEvent *event) override;
 
@@ -152,7 +156,6 @@ private:
     void restoreLastLocation(Core::Snowflake accountId);
     [[nodiscard]] bool channelReadable(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId) const;
     [[nodiscard]] Core::Snowflake firstReadableChannel(Core::Snowflake accountId, Core::Snowflake guildId) const;
-    void applyCloseToTray();
     void showFromTray();
     void quitFromTray();
     Core::Session *coreSession;
@@ -179,7 +182,7 @@ private:
     Core::Snowflake roleColorGuild;
 
     QPointer<AccountsWindow> accountsWindow;
-    QPointer<SettingsWindow> settingsWindow;
+    bool settingsOpen = false;
     TrayIcon *trayIcon = nullptr;
     QHash<QPair<Core::Snowflake, Core::Snowflake>, QPointer<GuildSettingsWindow>> guildSettingsWindows;
     QPointer<ThreadBrowserPopup> threadBrowser;

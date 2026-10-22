@@ -40,7 +40,7 @@
 #include "UI/GuildSettings/MemberModeration.hpp"
 #include "UI/ImageViewer.hpp"
 #include "UI/MemberList/MemberListModel.hpp"
-#include "UI/Settings/SettingsWindow.hpp"
+#include "SettingsController.hpp"
 #include "UI/ThreadBrowser/ThreadBrowserPopup.hpp"
 #include "UI/TrayIcon.hpp"
 
@@ -270,6 +270,7 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     controllers.push_back(std::make_unique<Rml::MemberListController>(*this, region("members")));
     controllers.push_back(std::make_unique<Rml::CallController>(*this, region("call")));
     controllers.push_back(std::make_unique<Rml::FriendsController>(*this, region("friends")));
+    controllers.push_back(std::make_unique<Rml::SettingsController>(*this, region("settings-overlay")));
     applyBodyClasses();
 }
 
@@ -279,6 +280,7 @@ void Shell::applyBodyClasses()
         doc->SetClass("call-open", callOpen);
         doc->SetClass("members-hidden", !memberListVisible);
         doc->SetClass("friends-open", isFriendsOpen());
+        doc->SetClass("settings-open", settingsOpen);
     }
     if (rmlView)
         rmlView->requestRender(200);
@@ -1018,13 +1020,21 @@ void Shell::showUserProfile(Core::Snowflake userId, Core::Snowflake guildId)
 
 void Shell::openSettings()
 {
-    if (!settingsWindow) {
-        settingsWindow = new SettingsWindow(this);
-        connect(settingsWindow, &SettingsWindow::closeToTrayChanged, this, &Shell::applyCloseToTray);
-    }
-    settingsWindow->show();
-    settingsWindow->raise();
-    settingsWindow->activateWindow();
+    setSettingsOpen(true);
+}
+
+void Shell::closeSettings()
+{
+    setSettingsOpen(false);
+}
+
+void Shell::setSettingsOpen(bool open)
+{
+    if (settingsOpen == open)
+        return;
+    settingsOpen = open;
+    applyBodyClasses();
+    emit settingsOpenChanged(open);
 }
 
 void Shell::openAccounts()

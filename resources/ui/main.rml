@@ -10,6 +10,7 @@
 	<link type="text/rcss" href="members.rcss"/>
 	<link type="text/rcss" href="call.rcss"/>
 	<link type="text/rcss" href="friends.rcss"/>
+	<link type="text/rcss" href="settings.rcss"/>
 </head>
 <body>
 	<!-- Each region is filled by one controller (src/UI/Rml/*Controller.cpp). -->
@@ -33,6 +34,7 @@
 			<div id="friends"></div>
 		</div>
 	</div>
+	<div id="settings-overlay"></div>
 	<div id="overlay"></div>
 </body>
 </rml>

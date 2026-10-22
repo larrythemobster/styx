@@ -108,22 +108,6 @@ if(NOT TARGET Qt::ZlibPrivate)
     target_link_libraries(QtZlibCompat INTERFACE ZLIB::ZLIB)
 endif()
 
-find_package(Qt${QT_VERSION_MAJOR}Keychain QUIET)
-if(Qt${QT_VERSION_MAJOR}Keychain_FOUND)
-    message(STATUS "Using system-installed QtKeychain")
-else()
-    message(STATUS "System QtKeychain not found, using vendored submodule")
-    if(QT_VERSION_MAJOR EQUAL 6)
-        set(BUILD_WITH_QT6 ON CACHE BOOL "" FORCE)
-    else()
-        set(BUILD_WITH_QT6 OFF CACHE BOOL "" FORCE)
-    endif()
-    set(BUILD_TEST_APPLICATION OFF CACHE BOOL "" FORCE)
-    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-    set(BUILD_TRANSLATIONS OFF CACHE BOOL "" FORCE)
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-    add_subdirectory(vendor/qtkeychain EXCLUDE_FROM_ALL)
-endif()
 
 if(ENABLE_VOICE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -544,7 +528,7 @@ target_link_libraries(${PROJECT_NAME}
         Qt::OpenGLWidgets
         CURL::libcurl
     PRIVATE
-        qt${QT_VERSION_MAJOR}keychain
+        styx_platform
         RmlUi::RmlUi
         OpenSSL::Crypto
 )
