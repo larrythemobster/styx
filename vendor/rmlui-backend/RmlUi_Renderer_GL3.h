@@ -188,7 +188,7 @@ private:
 	RenderLayerStack render_layers;
 
 	struct GLStateBackup {
-		// Acheron: the framebuffer bound when the frame began (QOpenGLWidget renders into an FBO, not 0)
+		// Styx: the framebuffer bound when the frame began (the host may render into an FBO, not 0)
 		int draw_framebuffer;
 		bool enable_cull_face;
 		bool enable_blend;

@@ -931,7 +931,7 @@ void RenderInterface_GL3::EndFrame()
 
 	glBlitFramebuffer(0, 0, fb_active.width, fb_active.height, 0, 0, fb_postprocess.width, fb_postprocess.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-	// Draw to the target framebuffer (Acheron: the host's, which need not be 0)
+	// Draw to the target framebuffer (Styx: the host's, which need not be 0)
 	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)glstate_backup.draw_framebuffer);
 	glViewport(viewport_offset_x, viewport_offset_y, viewport_width, viewport_height);
 
