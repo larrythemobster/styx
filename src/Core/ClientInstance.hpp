@@ -7,9 +7,9 @@
 
 #include <functional>
 #include <memory>
-
-class QSqlDatabase;
-
+namespace Platform {
+class Database;
+}
 #include "AccountInfo.hpp"
 #include "Discord/Client.hpp"
 #include "Emoji/EmojiManager.hpp"
@@ -171,10 +171,10 @@ private slots:
     bool isMessageMentioningMe(const Discord::Message &msg) const;
 
 private:
-    bool runInCacheTransaction(const char *what, const std::function<void(QSqlDatabase &)> &op);
+    bool runInCacheTransaction(const char *what, const std::function<void(Platform::Database &)> &op);
     QList<Markdown::ChannelLinkPart> channelLinkParts(const Markdown::ChannelLinkRef &ref);
 
-    void saveGuild(const Discord::GatewayGuild &guild, const QList<Discord::Member> *members, Snowflake myId, QSqlDatabase &db);
+    void saveGuild(const Discord::GatewayGuild &guild, const QList<Discord::Member> *members, Snowflake myId, Platform::Database &db);
     void initGuildReadState(const Discord::GatewayGuild &guild);
 
     [[nodiscard]] bool isForumParent(Snowflake parentId);

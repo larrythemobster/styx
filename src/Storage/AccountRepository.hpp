@@ -1,10 +1,7 @@
 #pragma once
 
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-
 #include <optional>
+#include <QVector>
 
 #include "DatabaseManager.hpp"
 #include "Core/AccountInfo.hpp"

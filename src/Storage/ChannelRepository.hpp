@@ -1,11 +1,13 @@
 #pragma once
 
 #include <optional>
+#include <QList>
+#include <QHash>
 
 #include "BaseRepository.hpp"
-
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
+#include "Platform/Sqlite.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -15,14 +17,16 @@ class ChannelRepository : public BaseRepository
 public:
     ChannelRepository(Core::Snowflake accountId);
 
-    void saveChannel(const Discord::Channel &channel, QSqlDatabase &db);
-    void deleteChannel(Core::Snowflake channelId, QSqlDatabase &db);
+    void saveChannel(const Discord::Channel &channel, Platform::Database &db);
+    void saveChannel(const Discord::Channel &channel);
+    void deleteChannel(Core::Snowflake channelId, Platform::Database &db);
+    void deleteChannel(Core::Snowflake channelId);
     void savePermissionOverwrites(Core::Snowflake channelId,
                                   const QList<Discord::PermissionOverwrite> &overwrites,
-                                  QSqlDatabase &db);
+                                  Platform::Database &db);
     void saveChannelRecipients(Core::Snowflake channelId,
                                const QList<Core::Snowflake> &recipientIds,
-                               QSqlDatabase &db);
+                               Platform::Database &db);
     QList<Discord::PermissionOverwrite> getPermissionOverwrites(Core::Snowflake channelId);
     QList<Core::Snowflake> getChannelRecipientIds(Core::Snowflake channelId);
 

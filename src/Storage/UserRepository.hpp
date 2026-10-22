@@ -1,11 +1,12 @@
 #pragma once
 
-#include <QSqlDatabase>
 #include <optional>
+#include <QList>
 
 #include "BaseRepository.hpp"
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
+#include "Platform/Sqlite.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -16,9 +17,9 @@ public:
     UserRepository(Core::Snowflake accountId);
 
     void saveUser(const Discord::User &user);
-    void saveUser(const Discord::User &user, QSqlDatabase &db);
+    void saveUser(const Discord::User &user, Platform::Database &db);
     void saveUsers(const QList<Discord::User> &users);
-    void saveUsers(const QList<Discord::User> &users, QSqlDatabase &db);
+    void saveUsers(const QList<Discord::User> &users, Platform::Database &db);
 
     std::optional<Discord::User> getUser(Core::Snowflake userId);
 };

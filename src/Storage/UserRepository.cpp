@@ -14,35 +14,38 @@ UserRepository::UserRepository(Core::Snowflake accountId)
 
 void UserRepository::saveUser(const Discord::User &user)
 {
-    auto db = getDb();
+    auto &db = getDb();
     saveUser(user, db);
 }
 
-void UserRepository::saveUser(const Discord::User &user, QSqlDatabase &db)
+void UserRepository::saveUser(const Discord::User &user, Platform::Database &db)
 {
-    QSqlQuery q(db);
-    q.prepare(R"(
-        INSERT OR REPLACE INTO users
-        (id, username, global_name, avatar, bot)
-        VALUES (:id, :username, :global_name, :avatar, :bot)
-    )");
+    try {
+        auto q = db.prepare(R"(
+            INSERT OR REPLACE INTO users
+            (id, username, global_name, avatar, bot)
+            VALUES (:id, :username, :global_name, :avatar, :bot)
+        )");
 
-    q.bindValue(":id", static_cast<qint64>(user.id.get()));
-    q.bindValue(":username", user.username);
-    bindOptional(q, ":global_name", user.globalName);
-    bindOptional(q, ":avatar", user.avatar);
-    bindOptional(q, ":bot", user.bot);
+        q.bind(":id", static_cast<int64_t>(user.id.get()));
+        bindOptional(q, ":username", user.username);
+        bindOptional(q, ":global_name", user.globalName);
+        bindOptional(q, ":avatar", user.avatar);
+        bindOptional(q, ":bot", user.bot);
 
-    execLogged(q, "UserRepository: Save user");
+        execLogged(q, "UserRepository: Save user");
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "UserRepository: Save user failed:" << e.what();
+    }
 }
 
 void UserRepository::saveUsers(const QList<Discord::User> &users)
 {
-    auto db = getDb();
+    auto &db = getDb();
     saveUsers(users, db);
 }
 
-void UserRepository::saveUsers(const QList<Discord::User> &users, QSqlDatabase &db)
+void UserRepository::saveUsers(const QList<Discord::User> &users, Platform::Database &db)
 {
     if (users.isEmpty())
         return;
@@ -56,28 +59,32 @@ void UserRepository::saveUsers(const QList<Discord::User> &users, QSqlDatabase &
 
 std::optional<Discord::User> UserRepository::getUser(Core::Snowflake userId)
 {
-    auto db = getDb();
-    QSqlQuery q(db);
-    q.prepare(R"(
-        SELECT id, username, global_name, avatar, bot
-        FROM users WHERE id = :id
-    )");
-    q.bindValue(":id", static_cast<qint64>(userId));
+    auto &db = getDb();
+    try {
+        auto q = db.prepare(R"(
+            SELECT id, username, global_name, avatar, bot
+            FROM users WHERE id = :id
+        )");
+        q.bind(":id", static_cast<int64_t>(userId));
 
-    if (!q.exec() || !q.next())
+        if (!q.step())
+            return std::nullopt;
+
+        Discord::User user;
+        user.id = static_cast<Core::Snowflake>(q.getInt64(0));
+        user.username = QString::fromStdString(q.getText(1));
+        if (!q.isNull(2))
+            user.globalName = QString::fromStdString(q.getText(2));
+        if (!q.isNull(3))
+            user.avatar = QString::fromStdString(q.getText(3));
+        if (!q.isNull(4))
+            user.bot = q.getInt(4) != 0;
+
+        return user;
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "UserRepository: getUser failed:" << e.what();
         return std::nullopt;
-
-    Discord::User user;
-    user.id = static_cast<Core::Snowflake>(q.value(0).toLongLong());
-    user.username = q.value(1).toString();
-    if (!q.value(2).isNull())
-        user.globalName = q.value(2).toString();
-    if (!q.value(3).isNull())
-        user.avatar = q.value(3).toString();
-    if (!q.value(4).isNull())
-        user.bot = q.value(4).toBool();
-
-    return user;
+    }
 }
 
 } // namespace Storage

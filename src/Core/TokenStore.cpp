@@ -1,13 +1,6 @@
 #include "TokenStore.hpp"
 
-#include <QEventLoop>
-
-#if __has_include(<qtkeychain/keychain.h>)
-#include <qtkeychain/keychain.h>
-#else
-#include <qt6keychain/keychain.h>
-#endif
-
+#include "Platform/SecureStore.hpp"
 #include "Logging.hpp"
 
 namespace Styx {
@@ -29,20 +22,13 @@ QString TokenStore::describeKeychainFailure(const QString &keychainError)
 
 Result<void> TokenStore::saveToken(Snowflake accountId, const QString &token)
 {
-    QKeychain::WritePasswordJob job(SERVICE_NAME);
-    job.setAutoDelete(false);
-    job.setKey(keyForAccount(accountId));
-    job.setTextData(token);
+    std::string key = keyForAccount(accountId).toStdString();
+    std::string pass = token.toStdString();
 
-    QEventLoop loop;
-    QObject::connect(&job, &QKeychain::Job::finished, &loop, &QEventLoop::quit);
-    job.start();
-    loop.exec();
-
-    if (job.error() != QKeychain::NoError) {
+    if (!Platform::SecureStore::writePassword(SERVICE_NAME, key, pass)) {
         qCWarning(LogCore) << "TokenStore: Failed to save token for account"
-                           << accountId << ":" << job.errorString();
-        return Result<void>::makeError(describeKeychainFailure(job.errorString()));
+                           << accountId;
+        return Result<void>::makeError(describeKeychainFailure(tr("Failed to write credential to secure store")));
     }
 
     return Result<void>::makeOk();
@@ -50,46 +36,20 @@ Result<void> TokenStore::saveToken(Snowflake accountId, const QString &token)
 
 Result<QString> TokenStore::loadToken(Snowflake accountId)
 {
-    QKeychain::ReadPasswordJob job(SERVICE_NAME);
-    job.setAutoDelete(false);
-    job.setKey(keyForAccount(accountId));
+    std::string key = keyForAccount(accountId).toStdString();
+    auto opt = Platform::SecureStore::readPassword(SERVICE_NAME, key);
 
-    QEventLoop loop;
-    QObject::connect(&job, &QKeychain::Job::finished, &loop, &QEventLoop::quit);
-    job.start();
-    loop.exec();
-
-    if (job.error() != QKeychain::NoError && job.error() != QKeychain::EntryNotFound) {
-        qCWarning(LogCore) << "TokenStore: Failed to load token for account"
-                           << accountId << ":" << job.errorString();
-        return Result<QString>::makeError(describeKeychainFailure(job.errorString()));
+    if (!opt.has_value() || opt->empty()) {
+        return Result<QString>::makeError(tr("No token is stored for this account. Use \"Set Token\" to enter it again."));
     }
 
-    QString token = job.textData();
-    if (token.isEmpty())
-        return Result<QString>::makeError(tr("No token is stored for this account. Use \"Set Token\" to enter it again."));
-
-    return Result<QString>::makeOk(token);
+    return Result<QString>::makeOk(QString::fromStdString(*opt));
 }
 
 bool TokenStore::deleteToken(Snowflake accountId)
 {
-    QKeychain::DeletePasswordJob job(SERVICE_NAME);
-    job.setAutoDelete(false);
-    job.setKey(keyForAccount(accountId));
-
-    QEventLoop loop;
-    QObject::connect(&job, &QKeychain::Job::finished, &loop, &QEventLoop::quit);
-    job.start();
-    loop.exec();
-
-    if (job.error() != QKeychain::NoError && job.error() != QKeychain::EntryNotFound) {
-        qCWarning(LogCore) << "TokenStore: Failed to delete token for account"
-                           << accountId << ":" << job.errorString();
-        return false;
-    }
-
-    return true;
+    std::string key = keyForAccount(accountId).toStdString();
+    return Platform::SecureStore::deletePassword(SERVICE_NAME, key);
 }
 
 } // namespace Core

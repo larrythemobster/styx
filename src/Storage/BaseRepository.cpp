@@ -1,25 +1,24 @@
 #include "BaseRepository.hpp"
 
-#include "Core/Logging.hpp"
-
-#include <QSqlError>
-
 namespace Styx {
 namespace Storage {
+
 BaseRepository::BaseRepository(const QString &connName) : connName(connName) {}
 
-QSqlDatabase BaseRepository::getDb() const
+Platform::Database &BaseRepository::getDb() const
 {
-    return QSqlDatabase::database(connName);
+    return DatabaseManager::instance().getDatabase(connName);
 }
 
-bool BaseRepository::execLogged(QSqlQuery &q, const char *context)
+bool BaseRepository::execLogged(Platform::Statement &stmt, const char *context)
 {
-    if (q.exec())
+    try {
+        stmt.execute();
         return true;
-
-    qCWarning(LogDB) << context << "failed:" << q.lastError().text();
-    return false;
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << context << "failed:" << e.what();
+        return false;
+    }
 }
 
 } // namespace Storage

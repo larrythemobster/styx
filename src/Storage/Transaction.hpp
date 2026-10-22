@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QSqlDatabase>
 #include <QString>
+#include "Platform/Sqlite.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -9,7 +9,7 @@ namespace Storage {
 class Transaction
 {
 public:
-    explicit Transaction(QSqlDatabase &db);
+    explicit Transaction(Platform::Database &db);
     ~Transaction();
 
     Transaction(const Transaction &) = delete;
@@ -20,8 +20,8 @@ public:
     bool ownsTransaction() const { return owns; }
 
 private:
-    QSqlDatabase db;
-    QString connName;
+    Platform::Database &db;
+    void *dbHandle = nullptr;
     bool owns = false;
     bool finished = false;
 };

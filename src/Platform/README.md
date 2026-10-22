@@ -31,7 +31,7 @@ Typed persistent configuration store backed by JSON (nlohmann-json).
 ### 4. SecureStore (`SecureStore.hpp`)
 Hardware-backed credential management.
 - Windows implementation uses Windows Credential Manager (`CredWriteW`, `CredReadW`, `CredDeleteW`) under `CRED_TYPE_GENERIC`.
-- Uses identical target-name formatting and attribute layout as QtKeychain on Windows so existing Styx account tokens are seamlessly readable.
+- Uses identical target-name formatting and attribute layout as legacy keychain storage on Windows so existing Styx account tokens are seamlessly readable.
 - Portable seam for other platforms.
 
 ### 5. Sqlite (`Sqlite.hpp`)

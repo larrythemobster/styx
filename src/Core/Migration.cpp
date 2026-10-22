@@ -5,21 +5,14 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
-#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
-#include <QSqlDatabase>
-#include <QSqlQuery>
 #include <QStandardPaths>
 #include <QTextStream>
 
-#if __has_include(<qtkeychain/keychain.h>)
-#include <qtkeychain/keychain.h>
-#else
-#include <qt6keychain/keychain.h>
-#endif
-
+#include "Platform/SecureStore.hpp"
+#include "Platform/Sqlite.hpp"
 namespace Styx {
 namespace Core {
 
@@ -215,53 +208,25 @@ void Migration::migrateKeychain()
     const QString dbPath = QDir(newRoamPath).filePath("styx.sqlite");
 
     if (QFile::exists(dbPath)) {
-        const QString migrationConn = "Styx_Migration_DB";
-        {
-            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", migrationConn);
-            db.setDatabaseName(dbPath);
-            if (db.open()) {
-                QSqlQuery query(db);
-                if (query.exec("SELECT id FROM accounts")) {
-                    while (query.next()) {
-                        quint64 accountId = query.value(0).toULongLong();
-                        QString key = QString("account_%1_token").arg(accountId);
+        try {
+            Platform::Database db(std::filesystem::u8path(dbPath.toStdString()));
+            auto query = db.prepare("SELECT id FROM accounts");
+            while (query.step()) {
+                quint64 accountId = static_cast<quint64>(query.getInt64(0));
+                std::string key = QString("account_%1_token").arg(accountId).toStdString();
 
-                        QKeychain::ReadPasswordJob readJob("Acheron");
-                        readJob.setAutoDelete(false);
-                        readJob.setKey(key);
-
-                        QEventLoop loop;
-                        QObject::connect(&readJob, &QKeychain::Job::finished, &loop, &QEventLoop::quit);
-                        readJob.start();
-                        loop.exec();
-
-                        if (readJob.error() == QKeychain::NoError) {
-                            QString token = readJob.textData();
-                            if (!token.isEmpty()) {
-                                QKeychain::WritePasswordJob writeJob("Styx");
-                                writeJob.setAutoDelete(false);
-                                writeJob.setKey(key);
-                                writeJob.setTextData(token);
-
-                                QEventLoop writeLoop;
-                                QObject::connect(&writeJob, &QKeychain::Job::finished, &writeLoop, &QEventLoop::quit);
-                                writeJob.start();
-                                writeLoop.exec();
-
-                                if (writeJob.error() == QKeychain::NoError) {
-                                    qCInfo(LogCore) << "Migrated keychain token for account" << accountId;
-                                } else {
-                                    qCWarning(LogCore) << "Failed to store migrated keychain token for account"
-                                                       << accountId << ":" << writeJob.errorString();
-                                }
-                            }
-                        }
+                auto oldToken = Platform::SecureStore::readPassword("Acheron", key);
+                if (oldToken.has_value() && !oldToken->empty()) {
+                    if (Platform::SecureStore::writePassword("Styx", key, *oldToken)) {
+                        qCInfo(LogCore) << "Migrated keychain token for account" << accountId;
+                    } else {
+                        qCWarning(LogCore) << "Failed to store migrated keychain token for account" << accountId;
                     }
                 }
-                db.close();
             }
+        } catch (const Platform::SqliteError &e) {
+            qCWarning(LogCore) << "Migration DB query failed:" << e.what();
         }
-        QSqlDatabase::removeDatabase(migrationConn);
     }
 
     writeMigrationMarker();

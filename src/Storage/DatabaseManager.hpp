@@ -1,16 +1,17 @@
 #pragma once
 
-#include <QSqlDatabase>
-#include <QSqlError>
-#include <QSqlQuery>
-#include <QStandardPaths>
-#include <QDir>
-#include <QDebug>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <QString>
 
 #include "Core/Snowflake.hpp"
+#include "Platform/Sqlite.hpp"
 
 namespace Styx {
 namespace Storage {
+
 class DatabaseManager
 {
 public:
@@ -26,12 +27,24 @@ public:
     void closeCacheDatabase(Core::Snowflake accountId);
     static QString getCacheConnectionName(Core::Snowflake accountId);
 
-private:
-    void setupPersistentTables();
-    void setupCacheTables(const QString &connName);
+    // Get Database reference by connection name
+    Platform::Database &getDatabase(const QString &connName);
+    Platform::Database &getPersistentDatabase();
 
-    QSqlDatabase persistentDb;
-    QString persistentPath;
+private:
+    DatabaseManager() = default;
+    ~DatabaseManager() = default;
+
+    DatabaseManager(const DatabaseManager &) = delete;
+    DatabaseManager &operator=(const DatabaseManager &) = delete;
+
+    void setupPersistentTables();
+    void setupCacheTables(Platform::Database &db);
+
+    std::mutex m_mutex;
+    Platform::Database m_persistentDb;
+    std::unordered_map<std::string, std::unique_ptr<Platform::Database>> m_cacheDbs;
 };
+
 } // namespace Storage
 } // namespace Styx

@@ -73,15 +73,13 @@ if(ENABLE_VOICE)
     endif()
 endif()
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets Svg Network Sql Test LinguistTools)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets Svg Test LinguistTools)
 find_package(Qt${QT_VERSION_MAJOR}
     COMPONENTS
         Core
         Gui
         Widgets
         Svg
-        Network
-        Sql
         Concurrent
         OpenGL
         OpenGLWidgets
@@ -417,7 +415,7 @@ if(BUILD_TESTS)
         src/Core/Logging.cpp src/Core/ImageManager.cpp src/Core/Snowflake.cpp
         src/Discord/Voice/Socks5UdpAssociation.cpp)
 
-    target_link_libraries(TestProxy PRIVATE Qt::Core Qt::Gui Qt::Widgets Qt::Network Qt::Test)
+    target_link_libraries(TestProxy PRIVATE Qt::Core Qt::Gui Qt::Widgets styx_platform Qt::Test)
     target_include_directories(TestProxy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME ProxyTests COMMAND TestProxy)
 
@@ -428,7 +426,7 @@ if(BUILD_TESTS)
         src/Core/LottieDecoder.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp
         src/Core/Theme/Manager.cpp src/Core/Theme/Fonts.cpp src/Core/Theme/Stylesheet.cpp
         src/Core/Theme/Tokens.cpp src/Core/Theme/Icons.cpp resources/resources.qrc)
-    target_link_libraries(TestEmojiGrid PRIVATE Qt::Core Qt::Gui Qt::Widgets Qt::Network Qt::Svg Qt::Test)
+    target_link_libraries(TestEmojiGrid PRIVATE Qt::Core Qt::Gui Qt::Widgets styx_platform Qt::Svg Qt::Test)
     target_include_directories(TestEmojiGrid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME EmojiGridTests COMMAND TestEmojiGrid)
 
@@ -442,7 +440,7 @@ if(BUILD_TESTS)
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)
-    target_link_libraries(TestRmlRender PRIVATE Qt::Core Qt::Gui Qt::Widgets Qt::Network
+    target_link_libraries(TestRmlRender PRIVATE Qt::Core Qt::Gui Qt::Widgets styx_platform
         Qt::Svg Qt::OpenGL Qt::OpenGLWidgets Qt::Test RmlUi::RmlUi)
     target_include_directories(TestRmlRender PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/emoji-segmenter ${CMAKE_CURRENT_SOURCE_DIR}/vendor/rmlui-backend)
@@ -521,8 +519,6 @@ target_link_libraries(${PROJECT_NAME}
         Qt::Gui
         Qt::Widgets
         Qt::Svg
-        Qt::Network
-        Qt::Sql
         Qt::Concurrent
         Qt::OpenGL
         Qt::OpenGLWidgets
@@ -689,7 +685,7 @@ if(TARGET WebP::webp)
     target_link_libraries(styx_platform PUBLIC WebP::webp)
 endif()
 if(WIN32)
-    target_link_libraries(styx_platform PRIVATE advapi32 crypt32)
+    target_link_libraries(styx_platform PUBLIC ws2_32 PRIVATE advapi32 crypt32)
 endif()
 target_compile_features(styx_platform PUBLIC cxx_std_20)
 if(MSVC)

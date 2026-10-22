@@ -2,30 +2,29 @@
 
 #include "Core/Logging.hpp"
 
-#include <QSet>
-#include <QSqlError>
+#include <unordered_set>
 
 namespace Styx {
 namespace Storage {
 
 namespace {
-thread_local QSet<QString> activeTransactions;
+thread_local std::unordered_set<void *> activeTransactions;
 } // namespace
 
-Transaction::Transaction(QSqlDatabase &db)
+Transaction::Transaction(Platform::Database &db)
     : db(db),
-      connName(db.connectionName())
+      dbHandle(db.rawHandle())
 {
-    if (activeTransactions.contains(connName))
+    if (activeTransactions.contains(dbHandle))
         return;
 
-    if (!db.transaction()) {
-        qCWarning(LogDB) << "Failed to begin transaction on" << connName << ":" << db.lastError().text();
-        return;
+    try {
+        db.execute("BEGIN IMMEDIATE");
+        activeTransactions.insert(dbHandle);
+        owns = true;
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "Failed to begin transaction:" << e.what();
     }
-
-    activeTransactions.insert(connName);
-    owns = true;
 }
 
 Transaction::~Transaction()
@@ -33,8 +32,12 @@ Transaction::~Transaction()
     if (!owns || finished)
         return;
 
-    db.rollback();
-    activeTransactions.remove(connName);
+    try {
+        db.execute("ROLLBACK");
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "Failed to rollback transaction:" << e.what();
+    }
+    activeTransactions.erase(dbHandle);
 }
 
 bool Transaction::commit()
@@ -43,14 +46,19 @@ bool Transaction::commit()
         return true;
 
     finished = true;
-    activeTransactions.remove(connName);
+    activeTransactions.erase(dbHandle);
 
-    if (!db.commit()) {
-        qCWarning(LogDB) << "Failed to commit transaction on" << connName << ":" << db.lastError().text();
-        db.rollback();
+    try {
+        db.execute("COMMIT");
+        return true;
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "Failed to commit transaction:" << e.what();
+        try {
+            db.execute("ROLLBACK");
+        } catch (...) {
+        }
         return false;
     }
-    return true;
 }
 
 } // namespace Storage

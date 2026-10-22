@@ -1,13 +1,12 @@
 #pragma once
 
-#include <QSqlDatabase>
 #include <optional>
-
-class QSqlQuery;
+#include <QList>
 
 #include "BaseRepository.hpp"
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
+#include "Platform/Sqlite.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -19,9 +18,9 @@ public:
 
     void saveMember(Core::Snowflake guildId, Core::Snowflake userId, const Discord::Member &member);
     void saveMember(Core::Snowflake guildId, Core::Snowflake userId, const Discord::Member &member,
-                    QSqlDatabase &db);
+                    Platform::Database &db);
     void saveMembers(Core::Snowflake guildId, const QList<Discord::Member> &members);
-    void deleteMembersForGuild(Core::Snowflake guildId, QSqlDatabase &db);
+    void deleteMembersForGuild(Core::Snowflake guildId, Platform::Database &db);
     void deleteMember(Core::Snowflake guildId, Core::Snowflake userId);
 
     std::optional<Discord::Member> getMember(Core::Snowflake guildId, Core::Snowflake userId);
@@ -30,7 +29,7 @@ public:
 private:
     static QString rolesToJson(const QList<Core::Snowflake> &roles);
     static QList<Core::Snowflake> rolesFromJson(const QString &json);
-    static Discord::Member readMember(const QSqlQuery &q, int firstColumn);
+    static Discord::Member readMember(const Platform::Statement &q, int firstColumn);
 };
 
 } // namespace Storage

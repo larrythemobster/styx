@@ -2,49 +2,48 @@
 #include "DatabaseManager.hpp"
 #include "Core/Logging.hpp"
 
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QVariant>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace Styx {
 namespace Storage {
 
-static Discord::Role readRoleFromQuery(const QSqlQuery &q)
+static Discord::Role readRoleFromQuery(const Platform::Statement &q)
 {
     Discord::Role role;
-    role.id = static_cast<Core::Snowflake>(q.value(0).toLongLong());
-    role.name = q.value(1).toString();
-    role.permissions = Discord::Permissions::fromInt(q.value(2).toLongLong());
-    role.position = q.value(3).toInt();
-    if (!q.value(4).isNull())
-        role.color = q.value(4).toInt();
-    if (!q.value(5).isNull())
-        role.hoist = q.value(5).toBool();
-    if (!q.value(6).isNull())
-        role.icon = q.value(6).toString();
-    if (!q.value(7).isNull())
-        role.unicodeEmoji = q.value(7).toString();
-    if (!q.value(8).isNull())
-        role.managed = q.value(8).toBool();
-    if (!q.value(9).isNull())
-        role.mentionable = q.value(9).toBool();
-    if (!q.value(10).isNull()) {
+    role.id = static_cast<Core::Snowflake>(q.getInt64(0));
+    role.name = QString::fromStdString(q.getText(1));
+    role.permissions = Discord::Permissions::fromInt(q.getInt64(2));
+    role.position = q.getInt(3);
+    if (!q.isNull(4))
+        role.color = q.getInt(4);
+    if (!q.isNull(5))
+        role.hoist = q.getInt(5) != 0;
+    if (!q.isNull(6))
+        role.icon = QString::fromStdString(q.getText(6));
+    if (!q.isNull(7))
+        role.unicodeEmoji = QString::fromStdString(q.getText(7));
+    if (!q.isNull(8))
+        role.managed = q.getInt(8) != 0;
+    if (!q.isNull(9))
+        role.mentionable = q.getInt(9) != 0;
+    if (!q.isNull(10)) {
         Discord::RoleColors colors;
-        colors.primaryColor = q.value(10).toInt();
-        if (q.value(11).isNull())
+        colors.primaryColor = q.getInt(10);
+        if (q.isNull(11))
             colors.secondaryColor = nullptr;
         else
-            colors.secondaryColor = q.value(11).toInt();
-        if (q.value(12).isNull())
+            colors.secondaryColor = q.getInt(11);
+        if (q.isNull(12))
             colors.tertiaryColor = nullptr;
         else
-            colors.tertiaryColor = q.value(12).toInt();
+            colors.tertiaryColor = q.getInt(12);
         role.colors = colors;
     }
-    if (!q.value(13).isNull())
-        role.flags = q.value(13).toInt();
-    if (!q.value(14).isNull()) {
-        role.tagsJson = q.value(14).toString();
+    if (!q.isNull(13))
+        role.flags = q.getInt(13);
+    if (!q.isNull(14)) {
+        role.tagsJson = QString::fromStdString(q.getText(14));
         role.tags = Discord::RoleTags::fromJson(QJsonDocument::fromJson(role.tagsJson.toUtf8()).object());
     }
     return role;
@@ -65,18 +64,18 @@ static const char *ROLE_UPSERT_SQL = R"(
             :colors_secondary, :colors_tertiary, :flags, :tags)
 )";
 
-static const char *ROLE_COLUMNS = R"(
-    id, name, permissions, position, color, hoist, icon, unicode_emoji, managed, mentionable,
-    colors_primary, colors_secondary, colors_tertiary, flags, tags
-)";
+static const char *ROLE_COLUMNS =
+    "id, name, permissions, position, color, hoist, icon, unicode_emoji, managed, mentionable, "
+    "colors_primary, colors_secondary, colors_tertiary, flags, tags";
 
-void RoleRepository::bindRole(QSqlQuery &q, Core::Snowflake guildId, const Discord::Role &role)
+void RoleRepository::bindRole(Platform::Statement &q, Core::Snowflake guildId, const Discord::Role &role)
 {
-    q.bindValue(":id", static_cast<qint64>(role.id.get()));
-    q.bindValue(":guild_id", static_cast<qint64>(guildId));
-    q.bindValue(":name", role.name.get());
-    q.bindValue(":permissions", static_cast<qint64>(role.permissions.get()));
-    q.bindValue(":position", role.position.get());
+    q.bind(":id", static_cast<int64_t>(role.id.get()));
+    q.bind(":guild_id", static_cast<int64_t>(guildId));
+    std::string name = role.name.get().toStdString();
+    q.bind(":name", std::string_view(name));
+    q.bind(":permissions", static_cast<int64_t>(role.permissions.get()));
+    q.bind(":position", static_cast<int>(role.position.get()));
     bindOptional(q, ":color", role.color);
     bindOptional(q, ":hoist", role.hoist);
     bindOptional(q, ":icon", role.icon);
@@ -85,85 +84,143 @@ void RoleRepository::bindRole(QSqlQuery &q, Core::Snowflake guildId, const Disco
     bindOptional(q, ":mentionable", role.mentionable);
 
     const bool hasColors = role.colors.hasValue();
-    q.bindValue(":colors_primary", hasColors ? QVariant(role.colors->primaryColor.get()) : QVariant());
-    q.bindValue(":colors_secondary", hasColors && role.colors->secondaryColor.hasValue() ? QVariant(role.colors->secondaryColor.get()) : QVariant());
-    q.bindValue(":colors_tertiary", hasColors && role.colors->tertiaryColor.hasValue() ? QVariant(role.colors->tertiaryColor.get()) : QVariant());
+    if (hasColors)
+        q.bind(":colors_primary", static_cast<int>(role.colors->primaryColor.get()));
+    else
+        q.bindNull(":colors_primary");
+
+    if (hasColors && role.colors->secondaryColor.hasValue())
+        q.bind(":colors_secondary", static_cast<int>(role.colors->secondaryColor.get()));
+    else
+        q.bindNull(":colors_secondary");
+
+    if (hasColors && role.colors->tertiaryColor.hasValue())
+        q.bind(":colors_tertiary", static_cast<int>(role.colors->tertiaryColor.get()));
+    else
+        q.bindNull(":colors_tertiary");
+
     bindOptional(q, ":flags", role.flags);
-    q.bindValue(":tags", role.tagsJson.isEmpty() ? QVariant() : QVariant(role.tagsJson));
+
+    if (!role.tagsJson.isEmpty()) {
+        std::string t = role.tagsJson.toStdString();
+        q.bind(":tags", std::string_view(t));
+    } else {
+        q.bindNull(":tags");
+    }
 }
 
-void RoleRepository::saveRole(Core::Snowflake guildId, const Discord::Role &role, QSqlDatabase &db)
+void RoleRepository::saveRole(Core::Snowflake guildId, const Discord::Role &role)
 {
-    QSqlQuery q(db);
-    q.prepare(ROLE_UPSERT_SQL);
-    bindRole(q, guildId, role);
-    execLogged(q, "RoleRepository: Save role");
+    auto &db = getDb();
+    saveRole(guildId, role, db);
+}
+
+void RoleRepository::saveRole(Core::Snowflake guildId, const Discord::Role &role, Platform::Database &db)
+{
+    try {
+        auto q = db.prepare(ROLE_UPSERT_SQL);
+        bindRole(q, guildId, role);
+        execLogged(q, "RoleRepository: Save role");
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "RoleRepository: Save role failed:" << e.what();
+    }
+}
+
+void RoleRepository::saveRoles(Core::Snowflake guildId, const QList<Discord::Role> &roles)
+{
+    auto &db = getDb();
+    saveRoles(guildId, roles, db);
 }
 
 void RoleRepository::saveRoles(Core::Snowflake guildId, const QList<Discord::Role> &roles,
-                               QSqlDatabase &db)
+                               Platform::Database &db)
 {
     if (roles.isEmpty())
         return;
 
-    QSqlQuery q(db);
-    q.prepare(ROLE_UPSERT_SQL);
-
-    for (const auto &role : roles) {
-        bindRole(q, guildId, role);
-        execLogged(q, "RoleRepository: Save role");
+    try {
+        auto q = db.prepare(ROLE_UPSERT_SQL);
+        for (const auto &role : roles) {
+            bindRole(q, guildId, role);
+            execLogged(q, "RoleRepository: Save role");
+            q.reset();
+        }
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "RoleRepository: Save roles failed:" << e.what();
     }
 }
 
 std::optional<Discord::Role> RoleRepository::getRole(Core::Snowflake guildId,
                                                      Core::Snowflake roleId)
 {
-    auto db = getDb();
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT %1 FROM roles WHERE guild_id = :guild_id AND id = :id").arg(QLatin1String(ROLE_COLUMNS)));
-    q.bindValue(":guild_id", static_cast<qint64>(guildId));
-    q.bindValue(":id", static_cast<qint64>(roleId));
+    auto &db = getDb();
+    try {
+        std::string sql = std::string("SELECT ") + ROLE_COLUMNS + " FROM roles WHERE guild_id = :guild_id AND id = :id";
+        auto q = db.prepare(sql);
+        q.bind(":guild_id", static_cast<int64_t>(guildId));
+        q.bind(":id", static_cast<int64_t>(roleId));
 
-    if (!q.exec() || !q.next())
+        if (!q.step())
+            return std::nullopt;
+
+        return readRoleFromQuery(q);
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "RoleRepository: getRole failed:" << e.what();
         return std::nullopt;
-
-    return readRoleFromQuery(q);
+    }
 }
 
 QList<Discord::Role> RoleRepository::getRolesForGuild(Core::Snowflake guildId)
 {
     QList<Discord::Role> roles;
-    auto db = getDb();
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT %1 FROM roles WHERE guild_id = :guild_id ORDER BY position ASC").arg(QLatin1String(ROLE_COLUMNS)));
-    q.bindValue(":guild_id", static_cast<qint64>(guildId));
+    auto &db = getDb();
+    try {
+        std::string sql = std::string("SELECT ") + ROLE_COLUMNS + " FROM roles WHERE guild_id = :guild_id ORDER BY position ASC";
+        auto q = db.prepare(sql);
+        q.bind(":guild_id", static_cast<int64_t>(guildId));
 
-    if (!execLogged(q, "RoleRepository: Get roles"))
-        return roles;
-
-    while (q.next())
-        roles.append(readRoleFromQuery(q));
+        while (q.step())
+            roles.append(readRoleFromQuery(q));
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "RoleRepository: Get roles failed:" << e.what();
+    }
 
     return roles;
 }
 
-void RoleRepository::deleteRole(Core::Snowflake guildId, Core::Snowflake roleId, QSqlDatabase &db)
+void RoleRepository::deleteRole(Core::Snowflake guildId, Core::Snowflake roleId)
 {
-    QSqlQuery q(db);
-    q.prepare("DELETE FROM roles WHERE guild_id = :guild_id AND id = :id");
-    q.bindValue(":guild_id", static_cast<qint64>(guildId));
-    q.bindValue(":id", static_cast<qint64>(roleId));
-
-    execLogged(q, "RoleRepository: Delete role");
+    auto &db = getDb();
+    deleteRole(guildId, roleId, db);
 }
 
-void RoleRepository::deleteRolesForGuild(Core::Snowflake guildId, QSqlDatabase &db)
+void RoleRepository::deleteRole(Core::Snowflake guildId, Core::Snowflake roleId, Platform::Database &db)
 {
-    QSqlQuery q(db);
-    q.prepare("DELETE FROM roles WHERE guild_id = :guild_id");
-    q.bindValue(":guild_id", static_cast<qint64>(guildId));
+    try {
+        auto q = db.prepare("DELETE FROM roles WHERE guild_id = :guild_id AND id = :id");
+        q.bind(":guild_id", static_cast<int64_t>(guildId));
+        q.bind(":id", static_cast<int64_t>(roleId));
+        execLogged(q, "RoleRepository: Delete role");
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "RoleRepository: Delete role failed:" << e.what();
+    }
+}
 
-    execLogged(q, "RoleRepository: Delete roles for guild");
+void RoleRepository::deleteRolesForGuild(Core::Snowflake guildId)
+{
+    auto &db = getDb();
+    deleteRolesForGuild(guildId, db);
+}
+
+void RoleRepository::deleteRolesForGuild(Core::Snowflake guildId, Platform::Database &db)
+{
+    try {
+        auto q = db.prepare("DELETE FROM roles WHERE guild_id = :guild_id");
+        q.bind(":guild_id", static_cast<int64_t>(guildId));
+        execLogged(q, "RoleRepository: Delete roles for guild");
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "RoleRepository: Delete roles for guild failed:" << e.what();
+    }
 }
 
 } // namespace Storage

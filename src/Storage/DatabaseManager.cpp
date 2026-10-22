@@ -3,20 +3,22 @@
 #include <QSettings>
 
 #include "Core/Logging.hpp"
+#include "Platform/Paths.hpp"
 
 namespace Styx {
 namespace Storage {
 
 namespace {
-bool columnExists(QSqlDatabase &db, const QString &table, const QString &column)
+bool columnExists(Platform::Database &db, const std::string &table, const std::string &column)
 {
-    QSqlQuery query(db);
-    if (!query.exec(QString("PRAGMA table_info(%1)").arg(table)))
-        return false;
-
-    while (query.next()) {
-        if (query.value(1).toString() == column)
-            return true;
+    try {
+        auto query = db.prepare("PRAGMA table_info(" + table + ")");
+        while (query.step()) {
+            if (query.getText(1) == column)
+                return true;
+        }
+    } catch (const Platform::SqliteError &e) {
+        qCWarning(LogDB) << "columnExists check failed for" << table.c_str() << ":" << e.what();
     }
     return false;
 }
@@ -30,81 +32,99 @@ DatabaseManager &DatabaseManager::instance()
 
 bool DatabaseManager::init()
 {
-    QString dirPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir dir(dirPath);
-    if (!dir.exists())
-        dir.mkpath(".");
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    persistentPath = dir.filePath("styx.sqlite");
-    persistentDb = QSqlDatabase::addDatabase("QSQLITE", PERSISTENT_CONN_NAME);
-    persistentDb.setDatabaseName(persistentPath);
+    auto configDir = Platform::Paths::configDir();
+    Platform::Paths::ensureDirExists(configDir);
 
-    if (!persistentDb.open()) {
-        qCCritical(LogDB) << "Persistent DB init failed:" << persistentDb.lastError().text();
+    auto persistentPath = configDir / "styx.sqlite";
+
+    try {
+        if (!m_persistentDb.open(persistentPath)) {
+            qCCritical(LogDB) << "Persistent DB init failed to open" << persistentPath.string().c_str();
+            return false;
+        }
+
+        m_persistentDb.execute("PRAGMA journal_mode = WAL");
+        m_persistentDb.execute("PRAGMA synchronous = NORMAL");
+
+        setupPersistentTables();
+        return true;
+    } catch (const Platform::SqliteError &e) {
+        qCCritical(LogDB) << "Persistent DB init exception:" << e.what();
         return false;
     }
-
-    setupPersistentTables();
-    return true;
 }
 
 void DatabaseManager::shutdown()
 {
-    if (persistentDb.isOpen())
-        persistentDb.close();
-    persistentDb = QSqlDatabase();
-    QSqlDatabase::removeDatabase(PERSISTENT_CONN_NAME);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_cacheDbs.clear();
+    m_persistentDb.close();
 }
 
 QString DatabaseManager::openCacheDatabase(Core::Snowflake accountId)
 {
-    QString connName = getCacheConnectionName(accountId);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (QSqlDatabase::contains(connName))
+    QString connName = getCacheConnectionName(accountId);
+    std::string key = connName.toStdString();
+
+    auto it = m_cacheDbs.find(key);
+    if (it != m_cacheDbs.end() && it->second && it->second->isOpen())
         return connName;
 
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
-
+    auto db = std::make_unique<Platform::Database>();
     bool inMemory = QSettings().value("general/in_memory_cache", false).toBool();
-    if (inMemory) {
-        db.setDatabaseName(":memory:");
-    } else {
-        QString dirPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-        QString dbPath = QDir(dirPath).filePath(QString("cache_%1.sqlite").arg(accountId.toString()));
 
-        if (QFile::exists(dbPath))
-            QFile::remove(dbPath);
+    try {
+        if (inMemory) {
+            if (!db->open(":memory:")) {
+                qCCritical(LogDB) << "Cache DB init failed to open in-memory database";
+                return "";
+            }
+        } else {
+            auto dataDir = Platform::Paths::dataDir();
+            Platform::Paths::ensureDirExists(dataDir);
 
-        db.setDatabaseName(dbPath);
-    }
+            std::string fileName = "cache_" + std::to_string(static_cast<quint64>(accountId)) + ".sqlite";
+            auto dbPath = dataDir / fileName;
 
-    if (!db.open()) {
-        qCCritical(LogDB) << "Cache DB init failed:" << db.lastError().text();
+            std::error_code ec;
+            std::filesystem::remove(dbPath, ec);
+            std::filesystem::remove(dataDir / (fileName + "-wal"), ec);
+            std::filesystem::remove(dataDir / (fileName + "-shm"), ec);
+
+            if (!db->open(dbPath)) {
+                qCCritical(LogDB) << "Cache DB init failed to open" << dbPath.string().c_str();
+                return "";
+            }
+
+            db->execute("PRAGMA journal_mode = WAL");
+            db->execute("PRAGMA synchronous = OFF");
+        }
+
+        setupCacheTables(*db);
+        m_cacheDbs[key] = std::move(db);
+        return connName;
+    } catch (const Platform::SqliteError &e) {
+        qCCritical(LogDB) << "Cache DB init exception:" << e.what();
         return "";
     }
-
-    if (!inMemory) {
-        QSqlQuery config(db);
-        config.exec("PRAGMA journal_mode = WAL");
-        config.exec("PRAGMA synchronous = OFF");
-    }
-
-    setupCacheTables(connName);
-
-    return connName;
 }
 
 void DatabaseManager::closeCacheDatabase(Core::Snowflake accountId)
 {
-    QString connName = getCacheConnectionName(accountId);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (QSqlDatabase::contains(connName)) {
-        {
-            QSqlDatabase db = QSqlDatabase::database(connName);
-            if (db.isOpen())
-                db.close();
-        }
-        QSqlDatabase::removeDatabase(connName);
+    QString connName = getCacheConnectionName(accountId);
+    std::string key = connName.toStdString();
+
+    auto it = m_cacheDbs.find(key);
+    if (it != m_cacheDbs.end()) {
+        if (it->second)
+            it->second->close();
+        m_cacheDbs.erase(it);
     }
 }
 
@@ -113,12 +133,29 @@ QString DatabaseManager::getCacheConnectionName(Core::Snowflake accountId)
     return QString("Styx_Cache_%1").arg(accountId.toString());
 }
 
+Platform::Database &DatabaseManager::getPersistentDatabase()
+{
+    return m_persistentDb;
+}
+
+Platform::Database &DatabaseManager::getDatabase(const QString &connName)
+{
+    if (connName == PERSISTENT_CONN_NAME)
+        return m_persistentDb;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string key = connName.toStdString();
+    auto it = m_cacheDbs.find(key);
+    if (it != m_cacheDbs.end() && it->second)
+        return *(it->second);
+
+    // Fallback if not found
+    return m_persistentDb;
+}
+
 void DatabaseManager::setupPersistentTables()
 {
-    QSqlDatabase db = QSqlDatabase::database(PERSISTENT_CONN_NAME);
-    QSqlQuery query(db);
-
-    query.exec(R"(
+    m_persistentDb.execute(R"(
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY,
             username TEXT,
@@ -133,112 +170,109 @@ void DatabaseManager::setupPersistentTables()
         )
     )");
 
-    if (!columnExists(db, "accounts", "auto_connect"))
-        query.exec("ALTER TABLE accounts ADD COLUMN auto_connect INTEGER NOT NULL DEFAULT 0");
+    if (!columnExists(m_persistentDb, "accounts", "auto_connect"))
+        m_persistentDb.execute("ALTER TABLE accounts ADD COLUMN auto_connect INTEGER NOT NULL DEFAULT 0");
 
-    if (!columnExists(db, "accounts", "proxy_url"))
-        query.exec("ALTER TABLE accounts ADD COLUMN proxy_url TEXT");
+    if (!columnExists(m_persistentDb, "accounts", "proxy_url"))
+        m_persistentDb.execute("ALTER TABLE accounts ADD COLUMN proxy_url TEXT");
 
-    if (!columnExists(db, "accounts", "heartbeat_session_id")) {
-        query.exec("ALTER TABLE accounts ADD COLUMN heartbeat_session_id TEXT");
-        query.exec("ALTER TABLE accounts ADD COLUMN heartbeat_session_created_at INTEGER");
-        query.exec("ALTER TABLE accounts ADD COLUMN heartbeat_session_last_used_at INTEGER");
+    if (!columnExists(m_persistentDb, "accounts", "heartbeat_session_id")) {
+        m_persistentDb.execute("ALTER TABLE accounts ADD COLUMN heartbeat_session_id TEXT");
+        m_persistentDb.execute("ALTER TABLE accounts ADD COLUMN heartbeat_session_created_at INTEGER");
+        m_persistentDb.execute("ALTER TABLE accounts ADD COLUMN heartbeat_session_last_used_at INTEGER");
     }
 }
 
-void DatabaseManager::setupCacheTables(const QString &connName)
+void DatabaseManager::setupCacheTables(Platform::Database &db)
 {
-    QSqlDatabase db = QSqlDatabase::database(connName);
-    QSqlQuery query(db);
-
-    query.exec(R"(
-        CREATE TABLE "guilds" (
-	        "id" INTEGER NOT NULL,
-	        "name" TEXT NOT NULL,
-	        "icon" TEXT,
-	        "owner_id" INTEGER NOT NULL,
-	        "features" TEXT,
-	        "premium_tier" INTEGER,
-	        "premium_subscription_count" INTEGER,
-	        "rules_channel_id" INTEGER,
-	        "default_message_notifications" INTEGER,
-	        "description" TEXT,
-	        "banner" TEXT,
-	        "splash" TEXT,
-	        "afk_channel_id" INTEGER,
-	        "afk_timeout" INTEGER,
-	        "system_channel_id" INTEGER,
-	        "system_channel_flags" INTEGER,
-	        "verification_level" INTEGER,
-	        "explicit_content_filter" INTEGER,
-	        "mfa_level" INTEGER,
-	        "premium_progress_bar_enabled" INTEGER,
-	        "additional_emoji_slots" INTEGER,
-	        "additional_sticker_slots" INTEGER,
-	        "invites_disabled_until" TEXT,
-	        "dms_disabled_until" TEXT,
-	        "lockdown_duration_hours" INTEGER,
-	        PRIMARY KEY("id")
-        )
-    )");
-
-    query.exec(R"(
-        CREATE TABLE "channels" (
-	        "id" INTEGER NOT NULL,
-	        "type" INTEGER NOT NULL,
-	        "position" INTEGER,
-	        "name" INTEGER,
-	        "guild_id" INTEGER,
-	        "parent_id" INTEGER,
-	        "last_message_id" INTEGER,
-	        "icon" TEXT,
-	        "owner_id" INTEGER,
-	        "rate_limit_per_user" INTEGER,
-	        "available_tags" TEXT,
-	        "default_sort_order" INTEGER,
-	        "flags" INTEGER,
-	        "topic" TEXT,
-	        PRIMARY KEY("id")
-        );
-    )");
-
-    query.exec(R"(
-        CREATE TABLE "messages" (
-	        "id" INTEGER NOT NULL,
-	        "author_id" INTEGER NOT NULL,
-	        "channel_id" INTEGER NOT NULL,
-	        "content" TEXT NOT NULL,
-	        "timestamp" TEXT NOT NULL,
-	        "edited_timestamp" TEXT,
-	        "type" INTEGER NOT NULL,
-	        "flags" INTEGER NOT NULL,
-	        "embeds" TEXT,
-	        "reactions" TEXT,
-	        "stickers" TEXT,
-	        "deleted" INTEGER NOT NULL,
-	        "referenced_message_id" INTEGER,
-	        "reference_type" INTEGER,
-	        "reference_channel_id" INTEGER,
-	        "reference_guild_id" INTEGER,
-	        "snapshot" TEXT,
-	        "context_only" INTEGER NOT NULL DEFAULT 0,
-	        PRIMARY KEY("id")
-        );
-    )");
-
-    query.exec(R"(
-        CREATE TABLE "users" (
-	        "id" INTEGER NOT NULL,
-	        "username" TEXT NOT NULL,
-	        "global_name" TEXT,
-	        "avatar" TEXT,
-	        "bot" INTEGER,
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "guilds" (
+            "id" INTEGER NOT NULL,
+            "name" TEXT NOT NULL,
+            "icon" TEXT,
+            "owner_id" INTEGER NOT NULL,
+            "features" TEXT,
+            "premium_tier" INTEGER,
+            "premium_subscription_count" INTEGER,
+            "rules_channel_id" INTEGER,
+            "default_message_notifications" INTEGER,
+            "description" TEXT,
+            "banner" TEXT,
+            "splash" TEXT,
+            "afk_channel_id" INTEGER,
+            "afk_timeout" INTEGER,
+            "system_channel_id" INTEGER,
+            "system_channel_flags" INTEGER,
+            "verification_level" INTEGER,
+            "explicit_content_filter" INTEGER,
+            "mfa_level" INTEGER,
+            "premium_progress_bar_enabled" INTEGER,
+            "additional_emoji_slots" INTEGER,
+            "additional_sticker_slots" INTEGER,
+            "invites_disabled_until" TEXT,
+            "dms_disabled_until" TEXT,
+            "lockdown_duration_hours" INTEGER,
             PRIMARY KEY("id")
         );
     )");
 
-    query.exec(R"(
-        CREATE TABLE "members" (
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "channels" (
+            "id" INTEGER NOT NULL,
+            "type" INTEGER NOT NULL,
+            "position" INTEGER,
+            "name" TEXT,
+            "guild_id" INTEGER,
+            "parent_id" INTEGER,
+            "last_message_id" INTEGER,
+            "icon" TEXT,
+            "owner_id" INTEGER,
+            "rate_limit_per_user" INTEGER,
+            "available_tags" TEXT,
+            "default_sort_order" INTEGER,
+            "flags" INTEGER,
+            "topic" TEXT,
+            PRIMARY KEY("id")
+        );
+    )");
+
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "messages" (
+            "id" INTEGER NOT NULL,
+            "author_id" INTEGER NOT NULL,
+            "channel_id" INTEGER NOT NULL,
+            "content" TEXT NOT NULL,
+            "timestamp" TEXT NOT NULL,
+            "edited_timestamp" TEXT,
+            "type" INTEGER NOT NULL,
+            "flags" INTEGER NOT NULL,
+            "embeds" TEXT,
+            "reactions" TEXT,
+            "stickers" TEXT,
+            "deleted" INTEGER NOT NULL,
+            "referenced_message_id" INTEGER,
+            "reference_type" INTEGER,
+            "reference_channel_id" INTEGER,
+            "reference_guild_id" INTEGER,
+            "snapshot" TEXT,
+            "context_only" INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY("id")
+        );
+    )");
+
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "users" (
+            "id" INTEGER NOT NULL,
+            "username" TEXT NOT NULL,
+            "global_name" TEXT,
+            "avatar" TEXT,
+            "bot" INTEGER,
+            PRIMARY KEY("id")
+        );
+    )");
+
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "members" (
             "user_id" INTEGER NOT NULL,
             "guild_id" INTEGER NOT NULL,
             "nick" TEXT,
@@ -255,8 +289,8 @@ void DatabaseManager::setupCacheTables(const QString &connName)
         );
     )");
 
-    query.exec(R"(
-        CREATE TABLE "attachments" (
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "attachments" (
             "id" INTEGER NOT NULL,
             "message_id" INTEGER NOT NULL,
             "filename" TEXT NOT NULL,
@@ -272,10 +306,10 @@ void DatabaseManager::setupCacheTables(const QString &connName)
         );
     )");
 
-    query.exec("CREATE INDEX idx_attachments_message_id ON attachments(message_id);");
+    db.execute("CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments(message_id);");
 
-    query.exec(R"(
-        CREATE TABLE "roles" (
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "roles" (
             "id" INTEGER NOT NULL,
             "guild_id" INTEGER NOT NULL,
             "name" TEXT NOT NULL,
@@ -297,12 +331,12 @@ void DatabaseManager::setupCacheTables(const QString &connName)
         );
     )");
 
-    query.exec("CREATE INDEX idx_roles_guild_id ON roles(guild_id);");
-    query.exec("CREATE INDEX idx_roles_position ON roles(guild_id, position);");
-    query.exec("CREATE INDEX idx_roles_lookup ON roles(guild_id, id);");
+    db.execute("CREATE INDEX IF NOT EXISTS idx_roles_guild_id ON roles(guild_id);");
+    db.execute("CREATE INDEX IF NOT EXISTS idx_roles_position ON roles(guild_id, position);");
+    db.execute("CREATE INDEX IF NOT EXISTS idx_roles_lookup ON roles(guild_id, id);");
 
-    query.exec(R"(
-        CREATE TABLE "permission_overwrites" (
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "permission_overwrites" (
             "channel_id" INTEGER NOT NULL,
             "target_id" INTEGER NOT NULL,
             "type" INTEGER NOT NULL,
@@ -313,12 +347,12 @@ void DatabaseManager::setupCacheTables(const QString &connName)
         );
     )");
 
-    query.exec("CREATE INDEX idx_overwrites_channel_id ON permission_overwrites(channel_id);");
-    query.exec("CREATE INDEX idx_members_lookup ON members(guild_id, user_id);");
-    query.exec("CREATE INDEX idx_channels_guild ON channels(guild_id);");
+    db.execute("CREATE INDEX IF NOT EXISTS idx_overwrites_channel_id ON permission_overwrites(channel_id);");
+    db.execute("CREATE INDEX IF NOT EXISTS idx_members_lookup ON members(guild_id, user_id);");
+    db.execute("CREATE INDEX IF NOT EXISTS idx_channels_guild ON channels(guild_id);");
 
-    query.exec(R"(
-        CREATE TABLE "channel_recipients" (
+    db.execute(R"(
+        CREATE TABLE IF NOT EXISTS "channel_recipients" (
             "channel_id" INTEGER NOT NULL,
             "user_id" INTEGER NOT NULL,
             PRIMARY KEY("channel_id", "user_id"),
@@ -327,7 +361,8 @@ void DatabaseManager::setupCacheTables(const QString &connName)
         );
     )");
 
-    query.exec("CREATE INDEX idx_channel_recipients_channel ON channel_recipients(channel_id);");
+    db.execute("CREATE INDEX IF NOT EXISTS idx_channel_recipients_channel ON channel_recipients(channel_id);");
 }
+
 } // namespace Storage
 } // namespace Styx

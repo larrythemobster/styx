@@ -101,8 +101,7 @@ ClientInstance::ClientInstance(const AccountInfo &info,
             [this]() { emit authenticationFailed(account); });
 
     connect(client, &Discord::Client::ready, this, [this](const Discord::Ready &ready) {
-        QString connName = Storage::DatabaseManager::instance().getCacheConnectionName(account.id);
-        QSqlDatabase db = QSqlDatabase::database(connName);
+        auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
         account.username = ready.user->username;
         account.displayName = ready.user->globalName;
@@ -182,9 +181,7 @@ ClientInstance::ClientInstance(const AccountInfo &info,
 
     connect(client, &Discord::Client::readySupplemental, this,
             [this](const Discord::ReadySupplemental &data) {
-                QString connName =
-                        Storage::DatabaseManager::instance().getCacheConnectionName(account.id);
-                QSqlDatabase db = QSqlDatabase::database(connName);
+                auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
                 Storage::Transaction txn(db);
 
@@ -358,7 +355,7 @@ void ClientInstance::onHeartbeatSessionChanged(const Discord::HeartbeatSession &
     accountRepo.updateHeartbeatSession(account.id, session);
 }
 
-void ClientInstance::saveGuild(const Discord::GatewayGuild &guild, const QList<Discord::Member> *members, Snowflake myId, QSqlDatabase &db)
+void ClientInstance::saveGuild(const Discord::GatewayGuild &guild, const QList<Discord::Member> *members, Snowflake myId, Platform::Database &db)
 {
     Snowflake guildId = guild.properties->id.get();
 
@@ -439,8 +436,7 @@ void ClientInstance::onGuildCreated(const Discord::GatewayGuild &guild)
     if (!guild.properties.hasValue())
         return;
 
-    QString connName = Storage::DatabaseManager::instance().getCacheConnectionName(account.id);
-    QSqlDatabase db = QSqlDatabase::database(connName);
+    auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
     Storage::Transaction txn(db);
     saveGuild(
@@ -462,7 +458,7 @@ void ClientInstance::onGuildUpdated(const Discord::Guild &guild)
     if (!previous)
         return;
 
-    if (!runInCacheTransaction("guild update", [&](QSqlDatabase &db) { guildRepo.saveGuild(guild, db); }))
+    if (!runInCacheTransaction("guild update", [&](Platform::Database &db) { guildRepo.saveGuild(guild, db); }))
         return;
 
     if (previous->ownerId.get() != guild.ownerId.get() ||
@@ -490,7 +486,7 @@ void ClientInstance::onGuildDeleted(const Discord::GuildDelete &event)
 
     QList<Discord::Channel> channels = channelRepo.getChannelsForGuild(guildId);
 
-    if (!runInCacheTransaction("guild deletion", [&](QSqlDatabase &db) {
+    if (!runInCacheTransaction("guild deletion", [&](Platform::Database &db) {
             for (const auto &channel : channels)
                 channelRepo.deleteChannel(channel.id.get(), db);
             roleRepo.deleteRolesForGuild(guildId, db);
@@ -525,8 +521,7 @@ void ClientInstance::onChannelCreated(const Discord::ChannelCreate &event)
     const Discord::Channel &channel = event.channel.get();
     Core::Snowflake channelId = channel.id.get();
 
-    QString connName = Storage::DatabaseManager::instance().getCacheConnectionName(account.id);
-    QSqlDatabase db = QSqlDatabase::database(connName);
+    auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
     Storage::Transaction txn(db);
 
@@ -576,8 +571,7 @@ void ClientInstance::onChannelUpdated(const Discord::ChannelUpdate &event)
 
     qCDebug(LogCore) << "Channel updated:" << channelId;
 
-    QString connName = Storage::DatabaseManager::instance().getCacheConnectionName(account.id);
-    QSqlDatabase db = QSqlDatabase::database(connName);
+    auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
     Storage::Transaction txn(db);
 
@@ -611,8 +605,7 @@ void ClientInstance::onChannelDeleted(const Discord::ChannelDelete &event)
 
     qCDebug(LogCore) << "Channel deleted:" << channelId;
 
-    QString connName = Storage::DatabaseManager::instance().getCacheConnectionName(account.id);
-    QSqlDatabase db = QSqlDatabase::database(connName);
+    auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
     Storage::Transaction txn(db);
 
@@ -850,10 +843,9 @@ void ClientInstance::fetchThreadListAttempt(Snowflake channelId, bool archived, 
 }
 
 bool ClientInstance::runInCacheTransaction(const char *what,
-                                           const std::function<void(QSqlDatabase &)> &op)
+                                           const std::function<void(Platform::Database &)> &op)
 {
-    QString connName = Storage::DatabaseManager::instance().getCacheConnectionName(account.id);
-    QSqlDatabase db = QSqlDatabase::database(connName);
+    auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
     Storage::Transaction txn(db);
 
@@ -884,7 +876,7 @@ void ClientInstance::onGuildRoleCreated(const Discord::GuildRoleCreate &event)
     qCDebug(LogCore) << "Role created:" << role.id.get() << "in guild:" << guildId;
 
     if (!runInCacheTransaction("role creation",
-                               [&](QSqlDatabase &db) { roleRepo.saveRole(guildId, role, db); }))
+                               [&](Platform::Database &db) { roleRepo.saveRole(guildId, role, db); }))
         return;
 
     rolesCacheByGuild.remove(guildId);
@@ -911,7 +903,7 @@ void ClientInstance::onGuildRoleUpdated(const Discord::GuildRoleUpdate &event)
     qCDebug(LogCore) << "Role updated:" << role.id.get() << "in guild:" << guildId;
 
     if (!runInCacheTransaction("role update",
-                               [&](QSqlDatabase &db) { roleRepo.saveRole(guildId, role, db); }))
+                               [&](Platform::Database &db) { roleRepo.saveRole(guildId, role, db); }))
         return;
 
     rolesCacheByGuild.remove(guildId);
@@ -933,7 +925,7 @@ void ClientInstance::onGuildRoleDeleted(const Discord::GuildRoleDelete &event)
     qCDebug(LogCore) << "Role deleted:" << roleId << "in guild:" << guildId;
 
     if (!runInCacheTransaction("role deletion",
-                               [&](QSqlDatabase &db) { roleRepo.deleteRole(guildId, roleId, db); }))
+                               [&](Platform::Database &db) { roleRepo.deleteRole(guildId, roleId, db); }))
         return;
 
     rolesCacheByGuild.remove(guildId);

@@ -1,14 +1,14 @@
 #pragma once
 
 #include <optional>
-
-#include <QSqlDatabase>
-#include <QSqlQuery>
+#include <QList>
+#include <QObject>
 
 #include "BaseRepository.hpp"
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
 #include "UserRepository.hpp"
+#include "Platform/Sqlite.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -20,7 +20,7 @@ public:
     MessageRepository(Core::Snowflake accountId);
 
     void saveMessages(const QList<Discord::Message> &messages);
-    void saveMessages(const QList<Discord::Message> &messages, QSqlDatabase &db);
+    void saveMessages(const QList<Discord::Message> &messages, Platform::Database &db);
     void markMessageDeleted(Core::Snowflake messageId);
     void updateMessageContent(const Discord::Message &message);
     void updateReactionsJson(Core::Snowflake messageId, const QString &reactionsJson);
@@ -30,8 +30,8 @@ public:
     QList<Discord::Message> getMessagesInRange(Core::Snowflake channelId, Core::Snowflake fromId, Core::Snowflake toId);
 
 private:
-    void loadAttachmentsForMessages(QList<Discord::Message> &messages, QSqlDatabase &db);
-    Discord::Message readMessageFromQuery(const QSqlQuery &q);
+    void loadAttachmentsForMessages(QList<Discord::Message> &messages, Platform::Database &db);
+    Discord::Message readMessageFromQuery(const Platform::Statement &q);
 
     UserRepository userRepository;
 };

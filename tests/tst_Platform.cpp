@@ -14,7 +14,123 @@
 #include <filesystem>
 #include <thread>
 #include <vector>
+#include <atomic>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using native_sock_t = SOCKET;
+constexpr native_sock_t kInvalidSock = INVALID_SOCKET;
+inline int closeSock(native_sock_t s) { return ::closesocket(s); }
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+using native_sock_t = int;
+constexpr native_sock_t kInvalidSock = -1;
+inline int closeSock(native_sock_t s) { return ::close(s); }
+#endif
 
+namespace {
+
+class LoopbackHttpServer {
+public:
+    LoopbackHttpServer()
+    {
+#ifdef _WIN32
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
+        m_server = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (m_server == kInvalidSock)
+            return;
+
+        sockaddr_in bindAddr{};
+        bindAddr.sin_family = AF_INET;
+        bindAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bindAddr.sin_port = 0;
+
+        if (::bind(m_server, reinterpret_cast<sockaddr *>(&bindAddr), sizeof(bindAddr)) != 0 ||
+            ::listen(m_server, 5) != 0) {
+            closeSock(m_server);
+            m_server = kInvalidSock;
+            return;
+        }
+
+        sockaddr_in bound{};
+        socklen_t len = sizeof(bound);
+        if (::getsockname(m_server, reinterpret_cast<sockaddr *>(&bound), &len) == 0) {
+            m_port = ntohs(bound.sin_port);
+        }
+
+        m_thread = std::thread(&LoopbackHttpServer::run, this);
+    }
+
+    ~LoopbackHttpServer()
+    {
+        m_running = false;
+        if (m_server != kInvalidSock) {
+#ifdef _WIN32
+            ::shutdown(m_server, SD_BOTH);
+#else
+            ::shutdown(m_server, SHUT_RDWR);
+#endif
+            closeSock(m_server);
+            m_server = kInvalidSock;
+        }
+        if (m_thread.joinable()) {
+            m_thread.join();
+        }
+    }
+
+    uint16_t port() const { return m_port; }
+    bool valid() const { return m_port != 0 && m_server != kInvalidSock; }
+
+private:
+    void run()
+    {
+        while (m_running.load()) {
+            sockaddr_in clientAddr{};
+            socklen_t clientLen = sizeof(clientAddr);
+            native_sock_t client = ::accept(m_server, reinterpret_cast<sockaddr *>(&clientAddr), &clientLen);
+            if (client == kInvalidSock) {
+                break;
+            }
+
+            char buffer[4096]{};
+            int n = ::recv(client, buffer, sizeof(buffer) - 1, 0);
+            if (n > 0) {
+                std::string req(buffer, n);
+                if (req.rfind("GET /test", 0) == 0) {
+                    std::string body = "Hello Platform!";
+                    std::string resp = "HTTP/1.1 200 OK\r\nContent-Length: " + std::to_string(body.size()) +
+                                       "\r\nX-Custom-Header: StyxPlatform\r\nConnection: close\r\n\r\n" + body;
+                    ::send(client, resp.data(), static_cast<int>(resp.size()), 0);
+                } else if (req.rfind("POST /echo", 0) == 0) {
+                    size_t bodyPos = req.find("\r\n\r\n");
+                    std::string body = (bodyPos != std::string::npos) ? req.substr(bodyPos + 4) : "";
+                    std::string resp = "HTTP/1.1 200 OK\r\nContent-Length: " + std::to_string(body.size()) +
+                                       "\r\nConnection: close\r\n\r\n" + body;
+                    ::send(client, resp.data(), static_cast<int>(resp.size()), 0);
+                } else {
+                    std::string resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                    ::send(client, resp.data(), static_cast<int>(resp.size()), 0);
+                }
+            }
+            closeSock(client);
+        }
+    }
+
+    native_sock_t m_server{kInvalidSock};
+    uint16_t m_port{0};
+    std::atomic<bool> m_running{true};
+    std::thread m_thread;
+};
+
+} // namespace
 using namespace Styx::Platform;
 using namespace std::chrono_literals;
 
@@ -377,15 +493,72 @@ TEST_CASE("Image: decode resource PNG and scale", "[image]")
     }
 }
 
-TEST_CASE("Http: GET request and cancellation", "[http][!mayfail]")
+TEST_CASE("Http: GET, POST and cancellation", "[http]")
 {
+    SECTION("Loopback GET request")
+    {
+        LoopbackHttpServer server;
+        REQUIRE(server.valid());
+
+        bool callbackFired = false;
+        HttpResponse result;
+
+        HttpRequest req;
+        req.url = "http://127.0.0.1:" + std::to_string(server.port()) + "/test";
+        req.timeout = 5000ms;
+
+
+        HttpClient::instance().request(req, [&](const HttpResponse &resp) {
+
+            callbackFired = true;
+            result = resp;
+        });
+
+
+        for (int i = 0; i < 100 && !callbackFired; ++i) {
+            std::this_thread::sleep_for(10ms);
+            Dispatcher::main().runPending();
+        }
+
+        REQUIRE(callbackFired);
+        REQUIRE(result.ok());
+        REQUIRE(result.statusCode == 200);
+        REQUIRE(result.body == "Hello Platform!");
+        REQUIRE(result.getHeader("x-custom-header") == "StyxPlatform");
+    }
+
+    SECTION("Loopback POST request")
+    {
+        LoopbackHttpServer server;
+        REQUIRE(server.valid());
+
+        bool callbackFired = false;
+        HttpResponse result;
+
+        std::string postUrl = "http://127.0.0.1:" + std::to_string(server.port()) + "/echo";
+        HttpClient::instance().post(postUrl, "EchoThisContent", "text/plain", [&](const HttpResponse &resp) {
+            callbackFired = true;
+            result = resp;
+        });
+
+        for (int i = 0; i < 100 && !callbackFired; ++i) {
+            std::this_thread::sleep_for(10ms);
+            Dispatcher::main().runPending();
+        }
+
+        REQUIRE(callbackFired);
+        REQUIRE(result.ok());
+        REQUIRE(result.statusCode == 200);
+        REQUIRE(result.body == "EchoThisContent");
+    }
+
     SECTION("Cancellation")
     {
         bool callbackFired = false;
         bool wasCancelled = false;
 
         HttpRequest req;
-        req.url = "https://example.com";
+        req.url = "http://127.0.0.1:65432/will-not-respond";
         req.timeout = 5000ms;
 
         uint64_t reqId = HttpClient::instance().request(req, [&](const HttpResponse &resp) {
@@ -396,7 +569,6 @@ TEST_CASE("Http: GET request and cancellation", "[http][!mayfail]")
         // Cancel immediately
         HttpClient::instance().cancel(reqId);
 
-        // Wait a short moment and pump dispatcher
         for (int i = 0; i < 50 && !callbackFired; ++i) {
             std::this_thread::sleep_for(10ms);
             Dispatcher::main().runPending();
@@ -461,4 +633,73 @@ TEST_CASE("Utf8: helpers and string conversions", "[utf8]")
         std::string roundTrip = fromUtf16(wstr);
         REQUIRE(roundTrip == original);
     }
+}
+
+TEST_CASE("Storage: Message row and schema round trip", "[storage]")
+{
+    Database db;
+    REQUIRE(db.open(":memory:"));
+
+    db.execute(R"(
+        CREATE TABLE "messages" (
+            "id" INTEGER NOT NULL,
+            "author_id" INTEGER NOT NULL,
+            "channel_id" INTEGER NOT NULL,
+            "content" TEXT NOT NULL,
+            "timestamp" TEXT NOT NULL,
+            "edited_timestamp" TEXT,
+            "type" INTEGER NOT NULL,
+            "flags" INTEGER NOT NULL,
+            "embeds" TEXT,
+            "reactions" TEXT,
+            "stickers" TEXT,
+            "deleted" INTEGER NOT NULL,
+            "referenced_message_id" INTEGER,
+            "reference_type" INTEGER,
+            "reference_channel_id" INTEGER,
+            "reference_guild_id" INTEGER,
+            "snapshot" TEXT,
+            "context_only" INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY("id")
+        );
+    )");
+
+    auto insert = db.prepare(R"(
+        INSERT INTO messages
+        (id, author_id, channel_id, content, timestamp, edited_timestamp, type, flags, embeds, reactions, stickers, deleted,
+         referenced_message_id, reference_type, reference_channel_id, reference_guild_id, snapshot, context_only)
+        VALUES (:id, :author_id, :channel_id, :content, :timestamp, :edited_timestamp, :type, :flags, :embeds, :reactions, :stickers, :deleted,
+                :referenced_message_id, :reference_type, :reference_channel_id, :reference_guild_id, :snapshot, :context_only)
+    )");
+
+    insert.bind(":id", int64_t(123456789012345LL));
+    insert.bind(":author_id", int64_t(98765432109876LL));
+    insert.bind(":channel_id", int64_t(11223344556677LL));
+    insert.bind(":content", "Hello Styx Platform!");
+    insert.bind(":timestamp", "2026-10-22T10:00:00.000Z");
+    insert.bindNull(":edited_timestamp");
+    insert.bind(":type", 0);
+    insert.bind(":flags", 0);
+    insert.bind(":embeds", R"([{"title":"Test Embed"}])");
+    insert.bindNull(":reactions");
+    insert.bindNull(":stickers");
+    insert.bind(":deleted", 0);
+    insert.bindNull(":referenced_message_id");
+    insert.bindNull(":reference_type");
+    insert.bindNull(":reference_channel_id");
+    insert.bindNull(":reference_guild_id");
+    insert.bindNull(":snapshot");
+    insert.bind(":context_only", 0);
+    insert.execute();
+
+    auto select = db.prepare("SELECT id, author_id, channel_id, content, timestamp, embeds FROM messages WHERE id = :id");
+    select.bind(":id", int64_t(123456789012345LL));
+    REQUIRE(select.step());
+    REQUIRE(select.getInt64(0) == 123456789012345LL);
+    REQUIRE(select.getInt64(1) == 98765432109876LL);
+    REQUIRE(select.getInt64(2) == 11223344556677LL);
+    REQUIRE(select.getText(3) == "Hello Styx Platform!");
+    REQUIRE(select.getText(4) == "2026-10-22T10:00:00.000Z");
+    REQUIRE(select.getText(5) == R"([{"title":"Test Embed"}])");
+    REQUIRE_FALSE(select.step());
 }

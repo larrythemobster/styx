@@ -8,7 +8,7 @@ namespace Styx::Platform {
 class SecureStore {
 public:
     // Write credentials with service and key.
-    // On Windows, the target name matches QtKeychain format: key (or service if key is empty).
+    // On Windows, the target name matches legacy keychain format: key (or service if key is empty).
     static bool writePassword(const std::string &service, const std::string &key, const std::string &password);
     static std::optional<std::string> readPassword(const std::string &service, const std::string &key);
     static bool deletePassword(const std::string &service, const std::string &key);
