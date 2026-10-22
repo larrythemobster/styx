@@ -8,9 +8,9 @@ endif()
 
 set(FFMPEG_RUNTIME_DLLS "" CACHE INTERNAL "ffmpeg shared libraries to stage next to the exe, if any")
 
-# The libraries MediaDecoder calls into. A shared build ships avfilter and avdevice
-# beside them; staging those too costs 33 MB of DLLs nothing here ever loads.
-set(FFMPEG_COMPONENTS avcodec avformat avutil swscale swresample)
+# The libraries the media players and the video engine call into: avfilter scales,
+# converts and captures pictures (gfxcapture, ddagrab), avdevice opens cameras.
+set(FFMPEG_COMPONENTS avcodec avformat avutil swscale swresample avfilter avdevice)
 
 # ffmpeg 5.1, where AVChannelLayout replaced the channel-layout fields MediaDecoder
 # needs. Both routes below check it, or a distro on an older ffmpeg (Ubuntu 22.04 is
@@ -59,7 +59,7 @@ endif()
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND AND NOT MSVC)
     pkg_check_modules(FFMPEG_PC QUIET IMPORTED_TARGET
-        libavcodec libavformat libavutil>=${FFMPEG_MIN_AVUTIL_VERSION} libswscale libswresample)
+        libavcodec libavformat libavutil>=${FFMPEG_MIN_AVUTIL_VERSION} libswscale libswresample libavfilter libavdevice)
     if(TARGET PkgConfig::FFMPEG_PC)
         add_library(ffmpeg INTERFACE)
         target_link_libraries(ffmpeg INTERFACE PkgConfig::FFMPEG_PC)
