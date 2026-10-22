@@ -11,7 +11,6 @@
 
 #include "Core/ImageManager.hpp"
 #include "Core/Theme/Manager.hpp"
-#include "UI/Chat/ChatLayout.hpp"
 #include "UI/Chat/GifPainting.hpp"
 #include "UI/Chat/GifPlayback.hpp"
 #include "UI/Emoji/PaintedImages.hpp"
@@ -266,7 +265,7 @@ void FavoriteGifGrid::paintTile(QPainter &painter, int row, const QRect &rect)
     if (!shown.frame.isNull())
         GifPainting::drawClipFrame(&painter, rect, shown.frame, ClipFit::Crop);
     else if (!still.isNull())
-        ChatLayout::drawCroppedPixmap(&painter, rect, still);
+        GifPainting::drawCroppedPixmap(&painter, rect, still);
     else
         painter.fillRect(rect, Core::Theme::Manager::instance().color(Core::Theme::Token::AlternateBaseBg));
 

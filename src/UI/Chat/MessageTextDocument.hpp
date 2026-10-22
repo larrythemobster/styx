@@ -15,10 +15,12 @@ class MessageTextDocument : public QTextDocument
 {
     Q_OBJECT
 public:
-    MessageTextDocument(Core::ImageManager *images, Core::Snowflake accountId, QObject *parent = nullptr);
+    explicit MessageTextDocument(Core::ImageManager *images, Core::Snowflake accountId, QObject *parent = nullptr);
+
+    static QString richTextStyleSheet();
+    static void setupDocument(QTextDocument &doc, const QString &htmlContent, const QFont &font, int textWidth);
 
     void setMessageHtml(const QString &html, const QFont &font, int textWidth);
-
 signals:
     void imageLoaded();
 

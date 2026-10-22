@@ -5,7 +5,6 @@
 #include <QPainter>
 
 #include "Core/Theme/Icons.hpp"
-#include "UI/Chat/ChatLayout.hpp"
 
 namespace Styx {
 namespace UI {
@@ -31,6 +30,27 @@ void drawBackdrop(QPainter *painter, const QRect &rect)
     painter->setBrush(QColor(0, 0, 0, AccessoryBackdropAlpha));
     painter->drawRoundedRect(rect, AccessoryRadius, AccessoryRadius);
 }
+QRect centredCrop(const QSize &content, const QSize &target)
+{
+    if (content.isEmpty() || target.isEmpty())
+        return QRect();
+
+    const qreal targetAspect = static_cast<qreal>(target.width()) / target.height();
+    const qreal contentAspect = static_cast<qreal>(content.width()) / content.height();
+
+    int cropWidth = content.width();
+    int cropHeight = content.height();
+
+    if (contentAspect > targetAspect)
+        cropWidth = qRound(content.height() * targetAspect);
+    else
+        cropHeight = qRound(content.width() / targetAspect);
+
+    const int x = (content.width() - cropWidth) / 2;
+    const int y = (content.height() - cropHeight) / 2;
+    return QRect(x, y, cropWidth, cropHeight);
+}
+
 
 } // namespace
 
@@ -60,7 +80,7 @@ void drawClipFrame(QPainter *painter, const QRect &rect, const QImage &frame, Cl
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
 
     if (fit == ClipFit::Crop) {
-        painter->drawImage(rect, frame, ChatLayout::centredCrop(frame.size(), rect.size()));
+        painter->drawImage(rect, frame, centredCrop(frame.size(), rect.size()));
     } else {
         const QSize fitted = frame.size().scaled(rect.size(), Qt::KeepAspectRatio);
         const bool fillsRect = rect.width() - fitted.width() <= SeamlessFitTolerancePx && rect.height() - fitted.height() <= SeamlessFitTolerancePx;
@@ -69,6 +89,20 @@ void drawClipFrame(QPainter *painter, const QRect &rect, const QImage &frame, Cl
 
     painter->restore();
 }
+void drawCroppedPixmap(QPainter *painter, const QRect &targetRect, const QPixmap &pixmap)
+{
+    if (pixmap.isNull())
+        return;
+
+    const QRect sourceRect = centredCrop(pixmap.size() / pixmap.devicePixelRatio(), targetRect.size());
+
+    qreal dpr = pixmap.devicePixelRatio();
+    QRect physicalSourceRect(qRound(sourceRect.x() * dpr), qRound(sourceRect.y() * dpr),
+                             qRound(sourceRect.width() * dpr), qRound(sourceRect.height() * dpr));
+
+    painter->drawPixmap(targetRect, pixmap, physicalSourceRect);
+}
+
 
 QRect starRect(const QRect &mediaRect)
 {

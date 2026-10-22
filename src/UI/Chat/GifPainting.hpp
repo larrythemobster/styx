@@ -14,6 +14,7 @@ namespace GifPainting {
 
 void drawBadge(QPainter *painter, const QRect &mediaRect, const QFont &baseFont);
 void drawClipFrame(QPainter *painter, const QRect &rect, const QImage &frame, ClipFit fit);
+void drawCroppedPixmap(QPainter *painter, const QRect &targetRect, const QPixmap &pixmap);
 
 [[nodiscard]] QRect starRect(const QRect &mediaRect);
 void drawStar(QPainter *painter, const QRect &mediaRect, GifStar star);

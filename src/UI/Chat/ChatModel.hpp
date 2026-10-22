@@ -368,7 +368,6 @@ private:
     mutable QHash<Snowflake, MediaFlags> mediaFlagsCache;
     mutable bool suppressImageFetch = false;
 
-    friend class ChatDelegate;
 };
 } // namespace UI
 } // namespace Styx

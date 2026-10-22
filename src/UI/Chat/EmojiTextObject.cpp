@@ -6,7 +6,6 @@
 
 #include "Core/ImageManager.hpp"
 #include "Discord/CdnUrls.hpp"
-#include "UI/Chat/FrameAnimator.hpp"
 
 namespace Styx {
 namespace UI {
@@ -25,8 +24,8 @@ QPixmap resourcePixmap(QTextDocument *doc, const QUrl &url)
 
 } // namespace
 
-EmojiTextObject::EmojiTextObject(Core::ImageManager *imageManager, FrameAnimator *animator, QObject *parent)
-    : QObject(parent), imageManager(imageManager), animator(animator)
+EmojiTextObject::EmojiTextObject(Core::ImageManager *imageManager, QObject *parent)
+    : QObject(parent), imageManager(imageManager)
 {
 }
 
@@ -70,11 +69,7 @@ void EmojiTextObject::drawObject(QPainter *painter, const QRectF &rect, QTextDoc
     QPixmap pixmap;
     if (src.isEmoji) {
         const QSize declaredSize(qRound(imageFormat.width()), qRound(imageFormat.height()));
-        const bool animate = animator && src.isAnimatedEmoji && animator->emojiEnabled();
-        if (animate)
-            pixmap = animator->frame(src.url, declaredSize, accountId, painter->transform().mapRect(target));
-        if (pixmap.isNull())
-            pixmap = imageManager->get(animate ? src.url : src.still, declaredSize, accountId);
+        pixmap = imageManager->get(src.still.isEmpty() ? src.url : src.still, declaredSize, accountId);
     } else {
         pixmap = resourcePixmap(doc, src.url);
     }

@@ -10,7 +10,7 @@
 #include "Core/Theme/Manager.hpp"
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Entities.hpp"
-#include "UI/Chat/ChatLayout.hpp"
+#include "UI/Chat/MessageTextDocument.hpp"
 
 namespace Styx {
 namespace UI {
@@ -366,7 +366,7 @@ QTextDocument *ForumPostModel::previewDocument(Snowflake threadId, const QFont &
 
     doc = new QTextDocument;
     doc->setDefaultFont(font);
-    doc->setDefaultStyleSheet(ChatLayout::richTextStyleSheet());
+    doc->setDefaultStyleSheet(MessageTextDocument::richTextStyleSheet());
     doc->setDocumentMargin(0);
     QTextOption noWrap;
     noWrap.setWrapMode(QTextOption::NoWrap);

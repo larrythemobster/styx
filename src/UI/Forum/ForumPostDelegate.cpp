@@ -9,7 +9,6 @@
 
 #include "Core/TimeUtils.hpp"
 #include "ForumPostModel.hpp"
-#include "UI/Chat/ChatLayout.hpp"
 
 namespace Styx {
 namespace UI {
@@ -18,6 +17,41 @@ static constexpr int kPadX = 12;
 static constexpr int kPadTop = 8;
 static constexpr int kPadBottom = 8;
 static constexpr int kGap = 4;
+static QRect centredCrop(const QSize &content, const QSize &target)
+{
+    if (content.isEmpty() || target.isEmpty())
+        return QRect();
+
+    const qreal targetAspect = static_cast<qreal>(target.width()) / target.height();
+    const qreal contentAspect = static_cast<qreal>(content.width()) / content.height();
+
+    int cropWidth = content.width();
+    int cropHeight = content.height();
+
+    if (contentAspect > targetAspect)
+        cropWidth = qRound(content.height() * targetAspect);
+    else
+        cropHeight = qRound(content.width() / targetAspect);
+
+    const int x = (content.width() - cropWidth) / 2;
+    const int y = (content.height() - cropHeight) / 2;
+    return QRect(x, y, cropWidth, cropHeight);
+}
+
+static void drawCroppedPixmap(QPainter *painter, const QRect &targetRect, const QPixmap &pixmap)
+{
+    if (pixmap.isNull())
+        return;
+
+    const QRect sourceRect = centredCrop(pixmap.size() / pixmap.devicePixelRatio(), targetRect.size());
+
+    qreal dpr = pixmap.devicePixelRatio();
+    QRect physicalSourceRect(qRound(sourceRect.x() * dpr), qRound(sourceRect.y() * dpr),
+                             qRound(sourceRect.width() * dpr), qRound(sourceRect.height() * dpr));
+
+    painter->drawPixmap(targetRect, pixmap, physicalSourceRect);
+}
+
 
 static qreal drawReplyGlyph(QPainter *p, qreal x, qreal centerY, const QColor &color)
 {
@@ -262,7 +296,7 @@ void ForumPostDelegate::paint(QPainter *p, const QStyleOptionViewItem &option,
         p->save();
         p->setClipPath(clip);
         if (!thumb.isNull()) {
-            ChatLayout::drawCroppedPixmap(p, thumbRect, thumb);
+            drawCroppedPixmap(p, thumbRect, thumb);
         } else {
             QColor ph = textColor;
             ph.setAlpha(20);
