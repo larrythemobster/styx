@@ -26,30 +26,39 @@
 #include "Discord/Client.hpp"
 #include "Discord/Entities.hpp"
 #include "UI/Accounts/AccountsModel.hpp"
-#include "UI/Accounts/AccountsWindow.hpp"
+#include "AccountsController.hpp"
 #include "UI/ChannelList/ChannelFilterProxyModel.hpp"
 #include "UI/ChannelList/ChannelTreeModel.hpp"
 #include "UI/ChannelList/ServerRailModel.hpp"
 #include "UI/Chat/ChatModel.hpp"
 #include "UI/BrowserCaptchaResolver.hpp"
-#include "UI/Dialogs/UserProfilePopup.hpp"
-#include "UI/Forum/ForumBrowser.hpp"
-#include "UI/Forum/ForumPostModel.hpp"
-#include "UI/GuildSettings/GuildSettingsSection.hpp"
-#include "UI/GuildSettings/GuildSettingsWindow.hpp"
-#include "UI/GuildSettings/MemberModeration.hpp"
-#include "UI/ImageViewer.hpp"
+#include "ConfirmModal.hpp"
+#include "UserProfileController.hpp"
+#include "ForumController.hpp"
+#include "GuildSettingsSection.hpp"
+#include "GuildSettingsController.hpp"
+#include "MemberModeration.hpp"
+#include "ImageViewerController.hpp"
 #include "UI/MemberList/MemberListModel.hpp"
 #include "SettingsController.hpp"
-#include "UI/ThreadBrowser/ThreadBrowserPopup.hpp"
+#include "ThreadBrowserController.hpp"
+#include "ExpressionPickerController.hpp"
 #include "UI/TrayIcon.hpp"
+#ifdef STYX_HAVE_SCREENSHARE
+#include "GoLiveController.hpp"
+#endif
 
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QCursor>
 #include <QDesktopServices>
-#include <QHBoxLayout>
+#include <QFile>
+#include <QPainter>
+#include <QSvgRenderer>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -65,6 +74,41 @@ namespace UI {
 using Core::Snowflake;
 
 namespace {
+
+QIcon createStyxIcon()
+{
+    const QStringList candidates = {
+        QStringLiteral("resources/app/styx.ico"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/resources/app/styx.ico"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/../resources/app/styx.ico"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/../../resources/app/styx.ico"),
+    };
+    for (const QString &path : candidates) {
+        if (QFile::exists(path)) {
+            QIcon ico(path);
+            if (!ico.isNull() && !ico.pixmap(32, 32).isNull())
+                return ico;
+        }
+    }
+
+    QSvgRenderer renderer(QStringLiteral(":/styx.svg"));
+    QIcon rendered;
+    if (renderer.isValid()) {
+        for (int side : { 16, 20, 24, 32, 48, 64, 128, 256 }) {
+            QPixmap pixmap(side, side);
+            pixmap.fill(Qt::transparent);
+
+            QPainter painter(&pixmap);
+            painter.setRenderHint(QPainter::Antialiasing, true);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            renderer.render(&painter, QRectF(0, 0, side, side));
+            painter.end();
+
+            rendered.addPixmap(pixmap);
+        }
+    }
+    return rendered;
+}
 
 QString guildChannelKey(Core::Snowflake accountId, Core::Snowflake guildId)
 {
@@ -121,9 +165,17 @@ QWidget *buildRoleChip(const Discord::Role &role, QWidget *parent)
 }
 
 } // namespace
+static Shell *s_primaryShell = nullptr;
+
+Shell *Shell::primaryShell()
+{
+    return s_primaryShell;
+}
+
 
 Shell::Shell(Core::Session *session, QWidget *parent) : QMainWindow(parent), coreSession(session)
 {
+    s_primaryShell = this;
     Rml::Runtime::instance().setImageManager(session->getImageManager());
 
     auto *captchaResolver = new BrowserCaptchaResolver(this, this);
@@ -225,19 +277,37 @@ Shell::Shell(Core::Session *session, QWidget *parent) : QMainWindow(parent), cor
     setCentralWidget(rmlView);
     connect(rmlView, &Rml::View::documentLoaded, this, &Shell::onDocumentLoaded);
     rmlView->loadDocument(QStringLiteral("main.rml"));
-
     setWindowTitle(QStringLiteral("Styx"));
+    const QIcon appIcon = createStyxIcon();
+    QApplication::setWindowIcon(appIcon);
+    setWindowIcon(appIcon);
+#ifdef Q_OS_WIN
+    const QString icoPath = QStringLiteral("resources/app/styx.ico");
+    QString resolvedIco;
+    if (QFile::exists(icoPath)) {
+        resolvedIco = QDir::current().absoluteFilePath(icoPath);
+    } else if (QFile::exists(QCoreApplication::applicationDirPath() + QStringLiteral("/resources/app/styx.ico"))) {
+        resolvedIco = QCoreApplication::applicationDirPath() + QStringLiteral("/resources/app/styx.ico");
+    } else if (QFile::exists(QCoreApplication::applicationDirPath() + QStringLiteral("/../resources/app/styx.ico"))) {
+        resolvedIco = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("resources/app/styx.ico"));
+    }
+    if (!resolvedIco.isEmpty()) {
+        std::wstring wPath = QDir::toNativeSeparators(resolvedIco).toStdWString();
+        HICON hBig = (HICON)LoadImageW(NULL, wPath.c_str(), IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+        HICON hSmall = (HICON)LoadImageW(NULL, wPath.c_str(), IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+        if (hBig)
+            SendMessageW((HWND)winId(), WM_SETICON, ICON_BIG, (LPARAM)hBig);
+        if (hSmall)
+            SendMessageW((HWND)winId(), WM_SETICON, ICON_SMALL, (LPARAM)hSmall);
+    }
+#endif
     resize(1280, 800);
 }
 
 Shell::~Shell()
 {
-    for (const QPointer<GuildSettingsWindow> &window : std::as_const(guildSettingsWindows))
-        delete window.data();
-    if (forumWindow)
-        delete forumWindow.data();
-    if (threadBrowser)
-        delete threadBrowser.data();
+    if (s_primaryShell == this)
+        s_primaryShell = nullptr;
 }
 
 Core::ImageManager *Shell::images() const
@@ -271,7 +341,39 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     controllers.push_back(std::make_unique<Rml::CallController>(*this, region("call")));
     controllers.push_back(std::make_unique<Rml::FriendsController>(*this, region("friends")));
     controllers.push_back(std::make_unique<Rml::SettingsController>(*this, region("settings-overlay")));
+    auto confirmCtrl = std::make_unique<Rml::ConfirmModalController>(*this);
+    confirmModalController = confirmCtrl.get();
+    controllers.push_back(std::move(confirmCtrl));
+
+    auto profileCtrl = std::make_unique<Rml::UserProfileController>(*this);
+    userProfileController = profileCtrl.get();
+    controllers.push_back(std::move(profileCtrl));
+
+    auto viewerCtrl = std::make_unique<Rml::ImageViewerController>(*this);
+    imageViewerController = viewerCtrl.get();
+    controllers.push_back(std::move(viewerCtrl));
+    auto expCtrl = std::make_unique<Rml::ExpressionPickerController>(*this);
+    expressionPickerController = expCtrl.get();
+    controllers.push_back(std::move(expCtrl));
+
+
+    accountsController = std::make_unique<Rml::AccountsController>(*this, this);
+    if (accountsModel && accountsModel->rowCount() == 0) {
+        accountsController->showLogin();
+    }
     applyBodyClasses();
+    if (qEnvironmentVariableIsSet("STYX_OPEN_VOICE_SETTINGS")) {
+        openSettings();
+        for (auto &ctrl : controllers) {
+            if (auto *s = dynamic_cast<Rml::SettingsController *>(ctrl.get()))
+                s->setSection(Rml::SettingsController::Section::VoiceVideo);
+        }
+        QTimer::singleShot(1500, this, [this]() {
+            QPixmap pix = grab();
+            pix.save(QStringLiteral("C:/Users/DehKu/AppData/Local/Temp/styx_settings_voice_video2.png"));
+            windowIcon().pixmap(32, 32).save(QStringLiteral("C:/Users/DehKu/AppData/Local/Temp/styx_titlebar_crop.png"));
+        });
+    }
 }
 
 void Shell::applyBodyClasses()
@@ -282,6 +384,8 @@ void Shell::applyBodyClasses()
         doc->SetClass("friends-open", isFriendsOpen());
         doc->SetClass("settings-open", settingsOpen);
     }
+    if (forumController && forumController->isOpen())
+        forumController->syncFolderState();
     if (rmlView)
         rmlView->requestRender(200);
 }
@@ -313,6 +417,36 @@ void Shell::closeEvent(QCloseEvent *event)
     hide();
 
     event->accept();
+}
+
+void Shell::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+    const QIcon appIcon = createStyxIcon();
+    setWindowIcon(appIcon);
+    QApplication::setWindowIcon(appIcon);
+    if (windowHandle())
+        windowHandle()->setIcon(appIcon);
+#ifdef Q_OS_WIN
+    const QString icoPath = QStringLiteral("resources/app/styx.ico");
+    QString resolvedIco;
+    if (QFile::exists(icoPath)) {
+        resolvedIco = QDir::current().absoluteFilePath(icoPath);
+    } else if (QFile::exists(QCoreApplication::applicationDirPath() + QStringLiteral("/resources/app/styx.ico"))) {
+        resolvedIco = QCoreApplication::applicationDirPath() + QStringLiteral("/resources/app/styx.ico");
+    } else if (QFile::exists(QCoreApplication::applicationDirPath() + QStringLiteral("/../resources/app/styx.ico"))) {
+        resolvedIco = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("resources/app/styx.ico"));
+    }
+    if (!resolvedIco.isEmpty()) {
+        std::wstring wPath = QDir::toNativeSeparators(resolvedIco).toStdWString();
+        HICON hBig = (HICON)LoadImageW(NULL, wPath.c_str(), IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+        HICON hSmall = (HICON)LoadImageW(NULL, wPath.c_str(), IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+        if (hBig)
+            SendMessageW((HWND)winId(), WM_SETICON, ICON_BIG, (LPARAM)hBig);
+        if (hSmall)
+            SendMessageW((HWND)winId(), WM_SETICON, ICON_SMALL, (LPARAM)hSmall);
+    }
+#endif
 }
 
 void Shell::showFromTray()
@@ -722,6 +856,8 @@ void Shell::openFriends(Core::Snowflake accountId)
     chatModel->setActiveChannel(Snowflake::Invalid, Snowflake::Invalid);
     if (inst->memberList())
         inst->memberList()->clear();
+    if (forumController)
+        forumController->close();
     applyBodyClasses();
     emit locationChanged(current);
 
@@ -805,12 +941,16 @@ void Shell::openChannel(Core::Snowflake accountId, Core::Snowflake guildId, Core
 
     ChannelNode *forumNode = (node && node->type == ChannelNode::Type::Thread) ? node->parent : node;
     if (forumNode && forumNode->type == ChannelNode::Type::Forum) {
-        openForum(accountId, guildId, forumNode->id);
         if (node && node->type == ChannelNode::Type::Thread) {
-            // thread inside forum also opens in chat below
+            if (forumController)
+                forumController->close();
         } else {
+            openForum(accountId, guildId, forumNode->id);
             return;
         }
+    } else {
+        if (forumController)
+            forumController->close();
     }
 
     bool isVoice = (node && node->type == ChannelNode::Type::VoiceChannel);
@@ -1007,15 +1147,13 @@ void Shell::markGuildRead(Core::Snowflake accountId, Core::Snowflake guildId)
     inst->markGuildsAsRead({ guildId });
 }
 
-void Shell::showUserProfile(Core::Snowflake userId, Core::Snowflake guildId)
+void Shell::showUserProfile(Core::Snowflake userId, Core::Snowflake guildId, const QRectF &anchorRect)
 {
     if (!instance)
         return;
-    auto *popup = new UserProfilePopup(images(), instance, userId, guildId, this);
-    connect(popup, &UserProfilePopup::linkActivated, this, [](const QString &url) {
-        QDesktopServices::openUrl(QUrl(url));
-    });
-    popup->show();
+    if (userProfileController) {
+        userProfileController->showProfile(userId, guildId, anchorRect);
+    }
 }
 
 void Shell::openSettings()
@@ -1027,6 +1165,50 @@ void Shell::closeSettings()
 {
     setSettingsOpen(false);
 }
+void Shell::openGoLivePicker(bool screensTab)
+{
+#ifdef STYX_HAVE_SCREENSHARE
+    if (!goLiveController)
+        goLiveController = std::make_unique<Rml::GoLiveController>(*this, this);
+    goLiveController->open(screensTab);
+#endif
+}
+
+void Shell::closeGoLivePicker()
+{
+#ifdef STYX_HAVE_SCREENSHARE
+    if (goLiveController)
+        goLiveController->close();
+#endif
+}
+
+bool Shell::isGoLivePickerOpen() const
+{
+#ifdef STYX_HAVE_SCREENSHARE
+    return goLiveController && goLiveController->isOpen();
+#else
+    return false;
+#endif
+}
+
+void Shell::openExpressionPickerForChat(Core::Snowflake accountId, Core::Snowflake channelId, const QRect &anchor)
+{
+    if (expressionPickerController && instance)
+        expressionPickerController->openForChat(instance->emojis(), instance->favoriteGifs(), accountId, channelId, Rml::ExpressionPickerController::Tab::Emoji, anchor);
+}
+
+void Shell::openExpressionPickerForReaction(Core::Snowflake accountId, Core::Snowflake channelId, Core::Snowflake messageId, const QRect &anchor)
+{
+    if (expressionPickerController && instance)
+        expressionPickerController->openForReaction(instance->emojis(), accountId, channelId, messageId, anchor);
+}
+
+void Shell::closeExpressionPicker()
+{
+    if (expressionPickerController)
+        expressionPickerController->close();
+}
+
 
 void Shell::setSettingsOpen(bool open)
 {
@@ -1039,37 +1221,54 @@ void Shell::setSettingsOpen(bool open)
 
 void Shell::openAccounts()
 {
-    if (!accountsWindow)
-        accountsWindow = new AccountsWindow(coreSession, accountsModel, this);
-    accountsWindow->show();
-    accountsWindow->raise();
-    accountsWindow->activateWindow();
+    if (!accountsController)
+        accountsController = std::make_unique<Rml::AccountsController>(*this, this);
+
+    if (accountsModel && accountsModel->rowCount() == 0)
+        accountsController->showLogin();
+    else
+        accountsController->showAccounts();
 }
 
-void Shell::openGuildSettings(Core::Snowflake accountId, Core::Snowflake guildId)
+void Shell::openLogin()
+{
+    if (!accountsController)
+        accountsController = std::make_unique<Rml::AccountsController>(*this, this);
+    accountsController->showLogin();
+}
+
+void Shell::openGuildSettings(Core::Snowflake accountId, Core::Snowflake guildId, GuildSettingsSection section)
 {
     ClientInstance *inst = instanceFor(accountId);
     if (!inst || !GuildSettingsAccess::canOpen(inst, guildId))
         return;
 
-    QPointer<GuildSettingsWindow> &window = guildSettingsWindows[qMakePair(accountId, guildId)];
-    if (!window) {
-        window = new GuildSettingsWindow(images(), inst, guildId);
-        connect(window, &GuildSettingsWindow::linkActivated, this, [](const QString &url) {
-            QDesktopServices::openUrl(QUrl(url));
-        });
-    }
-    window->openSection(GuildSettingsSection::Profile);
-    window->setWindowState(window->windowState() & ~Qt::WindowMinimized);
-    window->show();
-    window->raise();
-    window->activateWindow();
+    if (!guildSettingsController)
+        guildSettingsController = std::make_unique<Rml::GuildSettingsController>(*this, this);
+    guildSettingsController->open(accountId, guildId, section);
 }
 
-void Shell::openImage(const QUrl &url)
+void Shell::openGuildSettings(Core::Snowflake accountId, Core::Snowflake guildId)
 {
-    auto *viewer = new ImageViewer(images(), current.accountId, this);
-    viewer->showImage(url, QPixmap());
+    openGuildSettings(accountId, guildId, GuildSettingsSection::Profile);
+}
+
+void Shell::closeGuildSettings()
+{
+    if (guildSettingsController)
+        guildSettingsController->close();
+}
+
+bool Shell::isGuildSettingsOpen() const
+{
+    return guildSettingsController && guildSettingsController->isOpen();
+}
+
+void Shell::openImage(const QUrl &url, const QList<QUrl> &gallery)
+{
+    if (imageViewerController) {
+        imageViewerController->openImage(url, gallery);
+    }
 }
 
 void Shell::openForum(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake forumId)
@@ -1078,47 +1277,21 @@ void Shell::openForum(Core::Snowflake accountId, Core::Snowflake guildId, Core::
     if (!inst)
         return;
 
-    if (!forumModel) {
-        forumModel = new ForumPostModel(images(), this);
-        forumModel->setRoleColorResolver([this](Snowflake userId, Snowflake gId) { return roleColor(userId, gId); });
-    }
-    forumModel->setAccount(accountId);
-    forumModel->setManager(inst->forums());
-    forumModel->setForum(forumId, guildId);
+    if (!forumController)
+        forumController = std::make_unique<Rml::ForumController>(*this, this);
 
-    if (!forumWindow) {
-        forumWindow = new QWidget(nullptr, Qt::Window);
-        forumWindow->setWindowTitle(tr("Forum"));
-        forumWindow->resize(800, 600);
-        auto *layout = new QVBoxLayout(forumWindow);
-        layout->setContentsMargins(0, 0, 0, 0);
-        forumBrowser = new ForumBrowser(forumWindow);
-        forumBrowser->setModel(forumModel);
-        layout->addWidget(forumBrowser);
-
-        connect(forumBrowser, &ForumBrowser::postActivated, this, [this, accountId](Snowflake threadId, Snowflake gId) {
-            openChannel(accountId, gId, threadId);
-        });
-        connect(forumBrowser, &ForumBrowser::sortModeChanged, this, [this, inst, forumId](int mode) {
-            inst->forums()->setSortMode(forumId, static_cast<Core::ForumSortMode>(mode));
-        });
-    }
-
-    QString name;
-    if (auto ch = inst->getChannel(forumId); ch && ch->name.hasValue())
-        name = ch->name.get();
-    forumWindow->setWindowTitle(name.isEmpty() ? tr("Forum") : tr("#%1").arg(name));
+    current = { accountId, guildId, forumId };
+    channelFilterProxy->setSelectedChannel(forumId, accountId);
 
     Snowflake newestPost = inst->readState()->getChannelLastMessageId(forumId);
     if (newestPost.isValid())
         inst->readState()->markChannelAsRead(forumId, newestPost);
     inst->readState()->setActiveChannel(forumId);
 
-    forumBrowser->setSortMode(static_cast<int>(inst->forums()->sortMode(forumId)));
-    forumBrowser->setLoading(inst->forums()->isLoading(forumId));
-    forumWindow->show();
-    forumWindow->raise();
-    forumWindow->activateWindow();
+    applyBodyClasses();
+    emit locationChanged(current);
+
+    forumController->open(accountId, guildId, forumId);
 }
 
 void Shell::openThreadBrowser(Core::Snowflake channelId)
@@ -1126,9 +1299,9 @@ void Shell::openThreadBrowser(Core::Snowflake channelId)
     if (!instance || !channelId.isValid())
         return;
 
-    if (!threadBrowser) {
-        threadBrowser = new ThreadBrowserPopup(this);
-        connect(threadBrowser, &ThreadBrowserPopup::threadActivated, this, [this](Core::Snowflake threadId) {
+    if (!threadBrowserController) {
+        threadBrowserController = std::make_unique<Rml::ThreadBrowserController>(*this, this);
+        connect(threadBrowserController.get(), &Rml::ThreadBrowserController::threadActivated, this, [this](Core::Snowflake threadId) {
             if (instance)
                 openChannel(instance->accountId(), current.guildId, threadId);
         });
@@ -1138,10 +1311,7 @@ void Shell::openThreadBrowser(Core::Snowflake channelId)
     if (auto ch = instance->getChannel(channelId); ch && ch->name.hasValue())
         name = ch->name.get();
 
-    threadBrowser->configure(instance, channelId, name);
-    threadBrowser->show();
-    threadBrowser->raise();
-    threadBrowser->activateWindow();
+    threadBrowserController->open(instance, channelId, name);
 }
 
 void Shell::showContextMenuForUser(Core::Snowflake userId, Core::Snowflake guildId)
@@ -1228,8 +1398,8 @@ void Shell::showContextMenuForGuild(Core::Snowflake accountId, Core::Snowflake g
 
     GuildSettingsAccess::addMenu(&menu, [this](Core::Snowflake accId, Core::Snowflake gId) {
         return GuildSettingsAccess::visibleSections(instanceFor(accId), gId);
-    }, accountId, guildId, [this, accountId, guildId](GuildSettingsSection) {
-        openGuildSettings(accountId, guildId);
+    }, accountId, guildId, [this, accountId, guildId](GuildSettingsSection section) {
+        openGuildSettings(accountId, guildId, section);
     });
 
     menu.addSeparator();

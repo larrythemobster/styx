@@ -20,8 +20,8 @@
 
 #include "Discord/CdnUrls.hpp"
 #include "UI/Chat/ChatModel.hpp"
-#include "UI/Dialogs/ConfirmPopup.hpp"
-#include "UI/Emoji/ExpressionPicker.hpp"
+#include "ConfirmModal.hpp"
+#include "ExpressionPickerController.hpp"
 #include "UI/ChannelList/ChannelNode.hpp"
 #include "UI/ChannelList/ChannelTreeModel.hpp"
 
@@ -205,16 +205,14 @@ void ChatController::setupEventListeners()
                         shell.openChannel(currentAccountId, link->guildId, link->channelId);
                     return;
                 }
-                auto *confirm = new ConfirmPopup(
+                Rml::showConfirmModal(
+                    shell,
                     tr("External Link"),
                     QString(tr("Are you sure you want to open <b>%1</b>?")).arg(url.toHtmlEscaped()),
                     tr("Open Link"),
-                    &shell);
-                confirm->setAttribute(Qt::WA_DeleteOnClose);
-                connect(confirm, &QDialog::accepted, this, [url]() {
-                    QDesktopServices::openUrl(QUrl(url));
-                });
-                confirm->open();
+                    [url]() { QDesktopServices::openUrl(QUrl(url)); },
+                    nullptr,
+                    false);
                 return;
             }
             return;
@@ -228,8 +226,10 @@ void ChatController::setupEventListeners()
             shell.openThreadBrowser(currentChannelId);
         } else if (action == QStringLiteral("user-profile")) {
             quint64 uid = attribute(actionEl, "data-user-id").toULongLong();
-            if (uid != 0)
-                shell.showUserProfile(Core::Snowflake(uid), currentGuildId);
+            if (uid != 0) {
+                QRectF anchorRect(actionEl->GetAbsoluteLeft(), actionEl->GetAbsoluteTop(), actionEl->GetClientWidth(), actionEl->GetClientHeight());
+                shell.showUserProfile(Core::Snowflake(uid), currentGuildId, anchorRect);
+            }
         } else if (action == QStringLiteral("jump-to-message")) {
             quint64 mid = attribute(actionEl, "data-message-id").toULongLong();
             if (mid != 0)
@@ -240,8 +240,19 @@ void ChatController::setupEventListeners()
                 instance->messages()->requestLoadChannel(currentChannelId);
         } else if (action == QStringLiteral("open-image")) {
             QString url = attribute(actionEl, "data-url");
-            if (!url.isEmpty())
-                shell.openImage(QUrl(url));
+            if (!url.isEmpty()) {
+                QList<QUrl> gallery;
+                if (auto *msgEl = closest(actionEl, "data-message-id")) {
+                    ::Rml::ElementList imgs;
+                    msgEl->GetElementsByTagName(imgs, "img");
+                    for (auto *img : imgs) {
+                        QString iUrl = attribute(img, "data-url");
+                        if (!iUrl.isEmpty() && !gallery.contains(QUrl(iUrl)))
+                            gallery.append(QUrl(iUrl));
+                    }
+                }
+                shell.openImage(QUrl(url), gallery);
+            }
         } else if (action == QStringLiteral("open-attachment")) {
             QString url = attribute(actionEl, "data-url");
             if (!url.isEmpty())
@@ -326,16 +337,14 @@ void ChatController::setupEventListeners()
             }
         } else if (action == QStringLiteral("link")) {
             QString url = attribute(actionEl, "data-href");
-            auto *confirm = new ConfirmPopup(
+            Rml::showConfirmModal(
+                shell,
                 tr("External Link"),
                 QString(tr("Are you sure you want to open <b>%1</b>?")).arg(url.toHtmlEscaped()),
                 tr("Open Link"),
-                &shell);
-            confirm->setAttribute(Qt::WA_DeleteOnClose);
-            connect(confirm, &QDialog::accepted, this, [url]() {
-                QDesktopServices::openUrl(QUrl(url));
-            });
-            confirm->open();
+                [url]() { QDesktopServices::openUrl(QUrl(url)); },
+                nullptr,
+                false);
         }
     });
 
@@ -1368,16 +1377,16 @@ void ChatController::showMessageContextMenu(Core::Snowflake messageId)
         QAction *deleteAction = menu.addAction(tr("Delete Message"));
         connect(deleteAction, &QAction::triggered, this, [this, messageId, instance]() {
             if (instance && instance->discord()) {
-                auto *confirm = new ConfirmPopup(
+                Rml::showConfirmModal(
+                    shell,
                     tr("Delete Message"),
                     tr("Are you sure you want to delete this message?"),
                     tr("Delete"),
-                    &shell);
-                confirm->setAttribute(Qt::WA_DeleteOnClose);
-                connect(confirm, &QDialog::accepted, this, [this, instance, messageId]() {
-                    instance->discord()->deleteMessage(currentChannelId, messageId);
-                });
-                confirm->open();
+                    [this, instance, messageId]() {
+                        instance->discord()->deleteMessage(currentChannelId, messageId);
+                    },
+                    nullptr,
+                    true);
             }
         });
     }
@@ -1407,30 +1416,16 @@ void ChatController::showMessageContextMenu(Core::Snowflake messageId)
 
 void ChatController::openReactionPickerForMessage(Core::Snowflake messageId)
 {
-    Core::ClientInstance *instance = shell.currentInstance();
-    if (!instance || !instance->emojis())
-        return;
-
-    auto *picker = new ExpressionPicker(shell.session()->getImageManager(), shell.session()->getAnimatedImageCache(), &shell);
-    picker->setAttribute(Qt::WA_DeleteOnClose);
-    connect(picker, &ExpressionPicker::emojiPicked, this, [this, instance, messageId](const Core::PickerEmoji &emoji, bool) {
-        if (instance && instance->messages()) {
-            Discord::Emoji de = emoji.isCustom() ? Discord::Emoji::custom(emoji.customId, emoji.name, emoji.animated) : Discord::Emoji::unicode(emoji.surrogates);
-            instance->messages()->addReaction(currentChannelId, messageId, de, false, Discord::Client::ReactionLocation::HoverBar);
-        }
-    });
-    picker->openForReaction(instance->emojis(), currentAccountId, currentChannelId, QRect(QCursor::pos(), QSize(1, 1)));
+    shell.openExpressionPickerForReaction(currentAccountId, currentChannelId, messageId, QRect(QCursor::pos(), QSize(1, 1)));
 }
 
 void ChatController::openEmojiPickerForComposer()
 {
-    Core::ClientInstance *instance = shell.currentInstance();
-    if (!instance || !instance->emojis())
-        return;
+    if (auto *picker = shell.expressionPicker()) {
+        disconnect(picker, &ExpressionPickerController::emojiPicked, this, nullptr);
+        disconnect(picker, &ExpressionPickerController::gifPicked, this, nullptr);
 
-    if (!expressionPicker) {
-        expressionPicker = new ExpressionPicker(shell.session()->getImageManager(), shell.session()->getAnimatedImageCache(), &shell);
-        connect(expressionPicker, &ExpressionPicker::emojiPicked, this, [this](const Core::PickerEmoji &emoji, bool) {
+        connect(picker, &ExpressionPickerController::emojiPicked, this, [this](const Core::PickerEmoji &emoji, bool) {
             if (textareaEl) {
                 QString current = QString::fromStdString(textareaEl->GetValue());
                 QString toInsert = emoji.messageText();
@@ -1439,9 +1434,13 @@ void ChatController::openEmojiPickerForComposer()
                 textareaEl->Focus();
             }
         });
+
+        connect(picker, &ExpressionPickerController::gifPicked, this, [this](const QString &url) {
+            shell.sendMessage(url);
+        });
     }
 
-    expressionPicker->openForChat(instance->emojis(), instance->favoriteGifs(), currentAccountId, currentChannelId, ExpressionPicker::Tab::Emoji, QRect(QCursor::pos(), QSize(1, 1)));
+    shell.openExpressionPickerForChat(currentAccountId, currentChannelId, QRect(QCursor::pos(), QSize(1, 1)));
 }
 
 } // namespace Rml

@@ -31,20 +31,25 @@ struct TypingStart;
 namespace UI {
 
 class AccountsModel;
-class AccountsWindow;
 class ChannelTreeModel;
 class ChannelFilterProxyModel;
 class ServerRailModel;
 class ChatModel;
 class MemberListModel;
 class TrayIcon;
-class GuildSettingsWindow;
-class ForumBrowser;
-class ForumPostModel;
-class ThreadBrowserPopup;
+enum class GuildSettingsSection;
 namespace Rml {
+class GuildSettingsController;
 class View;
 class Controller;
+class AccountsController;
+class ConfirmModalController;
+class UserProfileController;
+class ImageViewerController;
+class GoLiveController;
+class ForumController;
+class ThreadBrowserController;
+class ExpressionPickerController;
 } // namespace Rml
 
 // Where the user is: an account, a guild (Invalid = Direct Messages home) and a channel.
@@ -70,6 +75,8 @@ public:
     explicit Shell(Core::Session *session, QWidget *parent = nullptr);
     ~Shell() override;
 
+    [[nodiscard]] static Shell *primaryShell();
+
     // --- shared state for controllers ---------------------------------------------------
     [[nodiscard]] Core::Session *session() const { return coreSession; }
     [[nodiscard]] Core::ImageManager *images() const;
@@ -85,6 +92,8 @@ public:
     [[nodiscard]] ChatModel *chat() const { return chatModel; }
     [[nodiscard]] MemberListModel *members() const { return memberListModel; }
     [[nodiscard]] Core::TypingTracker *typing() const { return typingTracker; }
+    [[nodiscard]] AccountsModel *accounts() const { return accountsModel; }
+    [[nodiscard]] Rml::AccountsController *accountsUi() const { return accountsController.get(); }
 
     // Remote image as an RmlUi texture source (see Rml::Runtime::imageSource).
     QString imageSource(const QUrl &url, const QSize &logicalSize) const;
@@ -119,14 +128,25 @@ public:
     void markGuildRead(Core::Snowflake accountId, Core::Snowflake guildId);
 
     // --- Qt windows that stay Qt (settings, profiles, server settings, pickers) -----------
-    void showUserProfile(Core::Snowflake userId, Core::Snowflake guildId);
+    void showUserProfile(Core::Snowflake userId, Core::Snowflake guildId, const QRectF &anchorRect = QRectF());
     void openSettings();
     void closeSettings();
     void setSettingsOpen(bool open);
     [[nodiscard]] bool isSettingsOpen() const { return settingsOpen; }
     void openAccounts();
+    void openLogin();
+    void openGuildSettings(Core::Snowflake accountId, Core::Snowflake guildId, GuildSettingsSection section);
     void openGuildSettings(Core::Snowflake accountId, Core::Snowflake guildId);
-    void openImage(const QUrl &url);
+    void closeGuildSettings();
+    [[nodiscard]] bool isGuildSettingsOpen() const;
+    void openImage(const QUrl &url, const QList<QUrl> &gallery = {});
+    [[nodiscard]] Rml::ExpressionPickerController *expressionPicker() const { return expressionPickerController; }
+    void openExpressionPickerForChat(Core::Snowflake accountId, Core::Snowflake channelId, const QRect &anchor);
+    void openExpressionPickerForReaction(Core::Snowflake accountId, Core::Snowflake channelId, Core::Snowflake messageId, const QRect &anchor);
+    void closeExpressionPicker();
+    void openGoLivePicker(bool screensTab = false);
+    void closeGoLivePicker();
+    [[nodiscard]] bool isGoLivePickerOpen() const;
     void showContextMenuForUser(Core::Snowflake userId, Core::Snowflake guildId);
     void showContextMenuForGuild(Core::Snowflake accountId, Core::Snowflake guildId);
     void showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId);
@@ -145,6 +165,7 @@ signals:
     void settingsOpenChanged(bool open);
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
     void onDocumentLoaded(::Rml::ElementDocument *document);
@@ -167,7 +188,11 @@ private:
     bool selfDeaf = false;
     Rml::View *rmlView = nullptr;
     std::vector<std::unique_ptr<Rml::Controller>> controllers;
+    Rml::ConfirmModalController *confirmModalController = nullptr;
+    Rml::UserProfileController *userProfileController = nullptr;
+    Rml::ImageViewerController *imageViewerController = nullptr;
 
+    Rml::ExpressionPickerController *expressionPickerController = nullptr;
     ChannelTreeModel *channelTreeModel = nullptr;
     ChannelFilterProxyModel *channelFilterProxy = nullptr;
     ServerRailModel *serverRailModel = nullptr;
@@ -181,14 +206,13 @@ private:
     QHash<Core::Snowflake, QColor> roleColorCache;
     Core::Snowflake roleColorGuild;
 
-    QPointer<AccountsWindow> accountsWindow;
+    std::unique_ptr<Rml::AccountsController> accountsController;
+    std::unique_ptr<Rml::GoLiveController> goLiveController;
     bool settingsOpen = false;
     TrayIcon *trayIcon = nullptr;
-    QHash<QPair<Core::Snowflake, Core::Snowflake>, QPointer<GuildSettingsWindow>> guildSettingsWindows;
-    QPointer<ThreadBrowserPopup> threadBrowser;
-    QPointer<QWidget> forumWindow;
-    ForumBrowser *forumBrowser = nullptr;
-    ForumPostModel *forumModel = nullptr;
+    std::unique_ptr<Rml::GuildSettingsController> guildSettingsController;
+    std::unique_ptr<Rml::ForumController> forumController;
+    std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;
 };
 
 } // namespace UI

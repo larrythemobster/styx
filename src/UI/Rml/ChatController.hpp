@@ -23,7 +23,6 @@ struct Emoji;
 
 namespace UI {
 
-class ExpressionPicker;
 
 namespace Rml {
 
@@ -96,7 +95,6 @@ private:
     QList<Core::PendingAttachment> pendingAttachments;
 
     QList<QMetaObject::Connection> instanceConnections;
-    QPointer<ExpressionPicker> expressionPicker;
 };
 
 } // namespace Rml

@@ -87,5 +87,23 @@
         <file alias="call.rcss">ui/call.rcss</file>
         <file alias="friends.rcss">ui/friends.rcss</file>
         <file alias="settings.rcss">ui/settings.rcss</file>
+        <file alias="golive.rml">ui/golive.rml</file>
+        <file alias="golive.rcss">ui/golive.rcss</file>
+        <file alias="confirm_modal.rml">ui/confirm_modal.rml</file>
+        <file alias="confirm_modal.rcss">ui/confirm_modal.rcss</file>
+        <file alias="user_profile.rml">ui/user_profile.rml</file>
+        <file alias="user_profile.rcss">ui/user_profile.rcss</file>
+        <file alias="image_viewer.rml">ui/image_viewer.rml</file>
+        <file alias="image_viewer.rcss">ui/image_viewer.rcss</file>
+        <file alias="accounts.rml">ui/accounts.rml</file>
+        <file alias="accounts.rcss">ui/accounts.rcss</file>
+        <file alias="guild_settings.rml">ui/guild_settings.rml</file>
+        <file alias="guild_settings.rcss">ui/guild_settings.rcss</file>
+        <file alias="forum.rml">ui/forum.rml</file>
+        <file alias="forum.rcss">ui/forum.rcss</file>
+        <file alias="threads.rml">ui/threads.rml</file>
+        <file alias="threads.rcss">ui/threads.rcss</file>
+        <file alias="expression_picker.rml">ui/expression_picker.rml</file>
+        <file alias="expression_picker.rcss">ui/expression_picker.rcss</file>
     </qresource>
 </RCC>
