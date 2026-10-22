@@ -680,3 +680,4 @@ endif()
 
 # Video engine ported from ouwou/acheron upstream/video-streams.
 include(cmake/video-protocol.cmake)
+include(cmake/video-adaptation.cmake)
