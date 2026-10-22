@@ -1,0 +1,200 @@
+#pragma once
+
+#include "Controller.hpp"
+#include "GuildSettingsSection.hpp"
+#include "AuditLogFormatter.hpp"
+#include "MemberModeration.hpp"
+
+#include <QDateTime>
+#include <QHash>
+#include <QList>
+#include <QPointer>
+#include <QString>
+#include <QUrl>
+
+#include "Core/Snowflake.hpp"
+#include "Discord/Entities.hpp"
+#include "Discord/GuildRequests.hpp"
+
+namespace Rml {
+class ElementDocument;
+}
+
+namespace Styx {
+namespace Core {
+class ClientInstance;
+}
+namespace UI {
+namespace Rml {
+
+class GuildSettingsController final : public Controller
+{
+    Q_OBJECT
+public:
+    explicit GuildSettingsController(Shell &shell, QObject *parent = nullptr);
+    ~GuildSettingsController() override;
+
+    void open(Core::Snowflake accountId, Core::Snowflake guildId, GuildSettingsSection section = GuildSettingsSection::Profile);
+    void close();
+    [[nodiscard]] bool isOpen() const { return visible; }
+
+    void setSection(GuildSettingsSection section);
+    [[nodiscard]] GuildSettingsSection section() const { return currentSection; }
+
+private:
+    void ensureDocument();
+    void render();
+    void renderSidebar();
+    void renderContent();
+
+    // Render individual pages
+    void renderProfile(QString &rml);
+    void renderEngagement(QString &rml);
+    void renderBoostPerks(QString &rml);
+    void renderEmoji(QString &rml);
+    void renderStickers(QString &rml);
+    void renderMembers(QString &rml);
+    void renderRoles(QString &rml);
+    void renderInvites(QString &rml);
+    void renderAuditLog(QString &rml);
+    void renderBans(QString &rml);
+    void renderDeleteServer(QString &rml);
+
+    // Data loaders
+    void loadCurrentSectionData();
+    void loadProfile();
+    void loadEngagement();
+    void loadBoostPerks();
+    void loadEmoji();
+    void loadStickers();
+    void loadMembers();
+    void loadRoles();
+    void loadInvites();
+    void loadAuditLog();
+    void loadBans();
+
+    void saveChanges();
+    void reportError(const QString &message);
+    [[nodiscard]] bool canEditCurrentSection() const;
+    [[nodiscard]] bool isCurrentRequest(Core::Snowflake guildId, quint64 generation) const;
+    // Unsaved changes bar
+    void updateUnsavedChangesBar();
+    [[nodiscard]] bool hasUnsavedChanges() const;
+    void discardChanges();
+
+    // Event handling
+    void setupEventListeners();
+    void handleClick(::Rml::Element *target, ::Rml::Event &event);
+    void handleInput(::Rml::Element *target, ::Rml::Event &event);
+    void handleChange(::Rml::Element *target, ::Rml::Event &event);
+    void handleKeyDown(::Rml::Event &event);
+
+    void resetGuildState();
+    // Helpers
+    [[nodiscard]] Core::ClientInstance *instance() const;
+    [[nodiscard]] std::optional<Discord::Guild> guild() const;
+    [[nodiscard]] QString getGuildIconUrl() const;
+
+    ::Rml::ElementDocument *document = nullptr;
+    bool visible = false;
+    Core::Snowflake currentAccountId;
+    Core::Snowflake currentGuildId;
+    quint64 requestGeneration = 0;
+    QString errorMessage;
+    GuildSettingsSection currentSection = GuildSettingsSection::Profile;
+    // --- Page State & Drafts ---
+
+    // 1. Profile
+    struct ProfileDraft {
+        QString name;
+        QString description;
+        QString iconDataUri;
+        bool iconRemoved = false;
+        QString brandColor;
+        QString traits[6];
+        bool isPrivate = false;
+    };
+    ProfileDraft savedProfile;
+    ProfileDraft draftProfile;
+    Discord::GuildProfileEdit savedGuildProfile;
+    bool profileLoaded = false;
+
+    // 2. Engagement
+    struct EngagementDraft {
+        Core::Snowflake systemChannelId;
+        Discord::SystemChannelFlags systemChannelFlags = Discord::SystemChannelFlags{};
+        bool suppressJoin = false;
+        bool suppressBoost = false;
+        bool suppressTips = false;
+        bool suppressPrompt = false;
+        Discord::MessageNotificationLevel defaultNotifications = Discord::MessageNotificationLevel::ALL_MESSAGES;
+        Core::Snowflake afkChannelId;
+        int afkTimeout = 300;
+    };
+    EngagementDraft savedEngagement;
+    EngagementDraft draftEngagement;
+    bool engagementLoaded = false;
+
+    // 3. Boost Perks
+    struct BoostDraft {
+        bool progressBar = false;
+        QString bannerUri;
+        bool bannerRemoved = false;
+        QString splashUri;
+        bool splashRemoved = false;
+    };
+    BoostDraft savedBoost;
+    BoostDraft draftBoost;
+    bool boostLoaded = false;
+
+    // 4. Emoji
+    QList<Discord::Emoji> emojis;
+    bool emojisLoaded = false;
+
+    // 5. Stickers
+    QList<Discord::Sticker> stickers;
+    bool stickersLoaded = false;
+
+    // 6. Members
+    QList<Discord::Member> members;
+    QString memberSearchQuery;
+    bool membersLoaded = false;
+
+    // 7. Roles
+    enum class RoleTab { Display, Permissions, Members };
+    RoleTab currentRoleTab = RoleTab::Display;
+    QList<Discord::Role> roles;
+    Core::Snowflake selectedRoleId;
+    struct RoleDraft {
+        QString name;
+        int color = 0;
+        bool hoist = false;
+        bool mentionable = false;
+        Discord::Permissions permissions;
+    };
+    QHash<Core::Snowflake, RoleDraft> savedRoleDrafts;
+    QHash<Core::Snowflake, RoleDraft> dirtyRoleDrafts;
+    QString permissionSearchQuery;
+    bool rolesLoaded = false;
+
+    // 8. Invites
+    QList<Discord::Invite> invites;
+    bool invitesLoaded = false;
+
+    // 9. Audit Log
+    std::unique_ptr<AuditLogFormatter> auditFormatter;
+    QList<AuditLogFormatter::Row> auditRows;
+    QSet<int> expandedAuditRows;
+    Core::Snowflake auditFilterUserId;
+    int auditFilterAction = -1;
+    bool auditLogLoaded = false;
+
+    // 10. Bans
+    QList<Discord::Ban> bans;
+    QString banSearchQuery;
+    bool bansLoaded = false;
+};
+
+} // namespace Rml
+} // namespace UI
+} // namespace Styx

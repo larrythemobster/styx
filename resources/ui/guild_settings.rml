@@ -1,0 +1,33 @@
+<rml>
+<head>
+	<title>Server Settings</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="settings.rcss"/>
+	<link type="text/rcss" href="guild_settings.rcss"/>
+</head>
+<body id="guild-settings-overlay">
+	<div class="settings-sidebar" id="guild-settings-sidebar">
+		<!-- Rendered dynamically by GuildSettingsController -->
+	</div>
+	<div class="settings-content-pane" id="guild-settings-content-pane">
+		<div class="settings-close-container">
+			<div class="settings-close-btn" id="guild-settings-close-btn" data-action="close">
+				<img src="icons/lucide/x.svg"/>
+			</div>
+			<div class="settings-esc-label">ESC</div>
+		</div>
+		<div class="settings-content-wrapper" id="guild-settings-content-wrapper">
+			<!-- Page contents rendered dynamically by GuildSettingsController -->
+		</div>
+		<!-- Floating Unsaved Changes Bar -->
+		<div class="unsaved-changes-bar" id="guild-unsaved-changes-bar">
+			<div class="unsaved-changes-text" id="guild-unsaved-changes-text">Careful — you have unsaved changes!</div>
+			<div class="unsaved-changes-actions">
+				<div class="unsaved-btn-reset" id="guild-unsaved-reset" data-action="reset-changes">Reset</div>
+				<div class="unsaved-btn-save" id="guild-unsaved-save" data-action="save-changes">Save Changes</div>
+			</div>
+		</div>
+	</div>
+</body>
+</rml>

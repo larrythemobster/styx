@@ -28,8 +28,7 @@
 #include "Core/Theme/Manager.hpp"
 #include "UI/Dialogs/BasePopup.hpp"
 
-#include "GuildSettingsPage.hpp"
-
+#include <QMessageBox>
 namespace Styx {
 namespace UI {
 namespace MemberModeration {
@@ -46,6 +45,17 @@ constexpr int RolesFilterThreshold = 10;
 QString tr(const char *text)
 {
     return QCoreApplication::translate("MemberModeration", text);
+}
+QIcon colorDot(const QColor &color)
+{
+    QPixmap pixmap(12, 12);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawEllipse(0, 0, 12, 12);
+    return QIcon(pixmap);
 }
 
 bool canManageUser(Core::ClientInstance *instance, const MemberModerationTarget &target, Discord::Permissions permission)
@@ -71,7 +81,7 @@ bool isAdministrator(Core::ClientInstance *instance, const MemberModerationTarge
 void reportFailure(const QPointer<QWidget> &parent, const Core::Result<void> &result)
 {
     if (!result.success() && parent)
-        GuildSettingsPage::showError(parent, result.error);
+        QMessageBox::warning(parent, tr("Error"), result.error);
 }
 
 class ModerationPopup : public BasePopup
@@ -480,7 +490,7 @@ void addRolesMenu(QMenu *menu, QWidget *dialogParent, Core::ClientInstance *inst
         check->setChecked(target.roleIds.contains(roleId));
         check->setEnabled(assignable);
         if (role.hasColor())
-            check->setIcon(GuildSettingsPage::colorDot(role.getColor()));
+            check->setIcon(colorDot(role.getColor()));
         rows->addWidget(check);
         checks.append({ check, name });
         QObject::connect(check, &QCheckBox::toggled, check, [instanceGuard, parentGuard, target, roleIds, roleId, check, content](bool checked) {

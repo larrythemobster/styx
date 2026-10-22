@@ -1,0 +1,537 @@
+/*
+ * Discord-style Server Settings Overlay styling for Styx.
+ */
+
+body#guild-settings-overlay
+{
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 1000;
+	background-color: #000000;
+	display: flex;
+	flex-direction: row;
+	overflow: hidden;
+	color: #dbdee1;
+	font-family: ui;
+}
+
+/* --- Floating Unsaved Changes Bar --- */
+
+.unsaved-changes-bar
+{
+	position: absolute;
+	bottom: 24dp;
+	left: 280dp;
+	right: 48dp;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 8dp;
+	padding: 10dp 18dp;
+	display: none;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	z-index: 500;
+	box-sizing: border-box;
+}
+
+.unsaved-changes-bar.visible
+{
+	display: flex;
+}
+
+.unsaved-changes-bar.flash
+{
+	background-color: #3b1219;
+	border-color: #f23f43;
+}
+
+.unsaved-changes-text
+{
+	font-size: 14dp;
+	font-weight: 500;
+	color: #ffffff;
+}
+
+.unsaved-changes-actions
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.unsaved-btn-reset
+{
+	background-color: transparent;
+	color: #ffffff;
+	font-size: 14dp;
+	font-weight: 500;
+	margin-right: 16dp;
+	cursor: pointer;
+	text-decoration: underline;
+}
+
+.unsaved-btn-reset:hover
+{
+	color: #dbdee1;
+}
+
+.unsaved-btn-save
+{
+	background-color: #23a55a;
+	color: #ffffff;
+	font-size: 14dp;
+	font-weight: 600;
+	padding: 8dp 18dp;
+	border-radius: 4dp;
+	cursor: pointer;
+}
+
+.unsaved-btn-save:hover
+{
+	background-color: #1f9450;
+}
+
+/* --- Icon & Banner Upload --- */
+
+.guild-icon-upload-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 20dp;
+}
+
+.guild-icon-preview
+{
+	width: 96dp;
+	height: 96dp;
+	border-radius: 48dp;
+	background-color: #242428;
+	margin-right: 20dp;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+}
+
+.guild-icon-preview img
+{
+	width: 100%;
+	height: 100%;
+}
+
+.guild-icon-initials
+{
+	font-size: 28dp;
+	font-weight: bold;
+	color: #ffffff;
+	text-align: center;
+}
+
+.guild-icon-actions
+{
+	display: flex;
+	flex-direction: column;
+}
+
+.guild-icon-actions .settings-btn
+{
+	margin-bottom: 8dp;
+}
+
+/* --- Brand Colors Row --- */
+
+.brand-colors-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 20dp;
+}
+
+.brand-color-swatch
+{
+	width: 32dp;
+	height: 32dp;
+	border-radius: 4dp;
+	margin-right: 8dp;
+	cursor: pointer;
+	border: 2dp transparent;
+	box-sizing: border-box;
+}
+
+.brand-color-swatch:hover
+{
+	transform: scale(1.08);
+}
+
+.brand-color-swatch.active
+{
+	border: 2dp #ffffff;
+}
+
+/* --- Traits Grid --- */
+
+.traits-grid
+{
+	display: flex;
+	flex-wrap: wrap;
+	flex-direction: row;
+	margin-bottom: 20dp;
+}
+
+.trait-input-col
+{
+	width: 31%;
+	margin-right: 2%;
+	margin-bottom: 10dp;
+}
+
+/* --- Textarea --- */
+
+textarea.settings-textarea
+{
+	width: 100%;
+	height: 88dp;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	color: #dbdee1;
+	padding: 10dp;
+	font-size: 14dp;
+	box-sizing: border-box;
+	line-height: 18dp;
+}
+
+/* --- Slots Counter Badge --- */
+
+.slots-counter
+{
+	font-size: 13dp;
+	color: #949ba4;
+	margin-bottom: 12dp;
+}
+
+/* --- Tables & Lists --- */
+
+.guild-table
+{
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	margin-bottom: 20dp;
+}
+
+.guild-table-header
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding: 8dp 12dp;
+	border-bottom: 1dp #202024;
+	font-size: 12dp;
+	font-weight: bold;
+	color: #949ba4;
+	text-transform: uppercase;
+}
+
+.guild-table-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding: 10dp 12dp;
+	border-bottom: 1dp #19191c;
+	transition: background-color 0.1s;
+}
+
+.guild-table-row:hover
+{
+	background-color: #111214;
+}
+
+.emoji-preview-img
+{
+	width: 32dp;
+	height: 32dp;
+	margin-right: 12dp;
+}
+
+.sticker-preview-img
+{
+	width: 48dp;
+	height: 48dp;
+	margin-right: 12dp;
+}
+
+.col-image { width: 64dp; flex-shrink: 0; }
+.col-name { flex: 2; min-width: 0; }
+.col-uploader { flex: 2; min-width: 0; color: #949ba4; font-size: 13dp; }
+.col-actions { width: 90dp; flex-shrink: 0; text-align: right; }
+.col-channel { flex: 2; min-width: 0; color: #949ba4; font-size: 13dp; }
+.col-uses { width: 90dp; flex-shrink: 0; color: #949ba4; font-size: 13dp; }
+.col-expires { width: 120dp; flex-shrink: 0; color: #949ba4; font-size: 13dp; }
+
+/* --- Members List --- */
+
+.member-avatar-img
+{
+	width: 36dp;
+	height: 36dp;
+	border-radius: 18dp;
+	margin-right: 12dp;
+	background-color: #242428;
+}
+
+.member-info
+{
+	flex: 2;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.member-name
+{
+	font-size: 14dp;
+	font-weight: 600;
+	color: #f2f3f5;
+}
+
+.member-subtext
+{
+	font-size: 12dp;
+	color: #949ba4;
+}
+
+.member-roles
+{
+	flex: 3;
+	min-width: 0;
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+.role-badge
+{
+	display: inline-flex;
+	flex-direction: row;
+	align-items: center;
+	background-color: #242428;
+	padding: 2dp 8dp;
+	border-radius: 12dp;
+	margin: 2dp 4dp 2dp 0;
+	font-size: 12dp;
+	color: #dbdee1;
+}
+
+.role-badge-dot
+{
+	width: 8dp;
+	height: 8dp;
+	border-radius: 4dp;
+	margin-right: 6dp;
+}
+
+/* --- Roles 2-Column Layout --- */
+
+.roles-container
+{
+	display: flex;
+	flex-direction: row;
+	width: 100%;
+	height: 520dp;
+}
+
+.roles-list-pane
+{
+	width: 210dp;
+	flex-shrink: 0;
+	border-right: 1dp #202024;
+	display: flex;
+	flex-direction: column;
+	padding-right: 16dp;
+	box-sizing: border-box;
+}
+
+.role-list-item
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding: 8dp 10dp;
+	border-radius: 4dp;
+	cursor: pointer;
+	margin-bottom: 2dp;
+	font-size: 14dp;
+	color: #949ba4;
+	box-sizing: border-box;
+}
+
+.role-list-item:hover
+{
+	background-color: #19191c;
+	color: #dbdee1;
+}
+
+.role-list-item.active
+{
+	background-color: #242428;
+	color: #ffffff;
+	font-weight: 600;
+}
+
+.role-item-dot
+{
+	width: 10dp;
+	height: 10dp;
+	border-radius: 5dp;
+	margin-right: 8dp;
+	flex-shrink: 0;
+}
+
+.role-editor-pane
+{
+	flex: 1;
+	min-width: 0;
+	padding-left: 24dp;
+	overflow-y: auto;
+	box-sizing: border-box;
+}
+
+.tabs-bar
+{
+	display: flex;
+	flex-direction: row;
+	border-bottom: 1dp #202024;
+	margin-bottom: 20dp;
+}
+
+.tab-btn
+{
+	padding: 10dp 16dp;
+	font-size: 14dp;
+	font-weight: 600;
+	color: #949ba4;
+	cursor: pointer;
+	border-bottom: 2dp transparent;
+}
+
+.tab-btn:hover
+{
+	color: #dbdee1;
+}
+
+.tab-btn.active
+{
+	color: #ffffff;
+	border-bottom-color: #5865f2;
+}
+
+/* --- Audit Log --- */
+
+.audit-log-card
+{
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 6dp;
+	padding: 12dp 16dp;
+	margin-bottom: 10dp;
+	display: flex;
+	flex-direction: column;
+}
+
+.audit-log-header
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.audit-log-title
+{
+	flex: 1;
+	min-width: 0;
+	font-size: 14dp;
+	color: #dbdee1;
+}
+
+.audit-log-title strong
+{
+	color: #ffffff;
+}
+
+.audit-log-time
+{
+	font-size: 12dp;
+	color: #949ba4;
+}
+
+.audit-log-details
+{
+	margin-top: 10dp;
+	padding-top: 10dp;
+	border-top: 1dp #202024;
+	font-size: 13dp;
+	color: #b5bac1;
+}
+
+.audit-change-line
+{
+	margin-bottom: 4dp;
+	line-height: 16dp;
+}
+
+/* --- Empty States --- */
+
+.empty-state
+{
+	padding: 40dp 20dp;
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+
+.empty-state-title
+{
+	font-size: 18dp;
+	font-weight: bold;
+	color: #f2f3f5;
+	margin-bottom: 8dp;
+}
+
+.empty-state-desc
+{
+	font-size: 14dp;
+	color: #949ba4;
+	max-width: 400dp;
+}
+
+/* --- Header Info Badge --- */
+
+.boost-badge
+{
+	display: inline-block;
+	background-color: #f47fff26;
+	color: #f47fff;
+	padding: 4dp 10dp;
+	border-radius: 12dp;
+	font-size: 12dp;
+	font-weight: bold;
+	margin-bottom: 12dp;
+}
+
+/* --- Danger Zone --- */
+
+.danger-card
+{
+	border-color: #f23f4340;
+	background-color: #1a0f12;
+}
