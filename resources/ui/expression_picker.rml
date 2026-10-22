@@ -1,0 +1,55 @@
+<rml>
+<head>
+	<title>Expression Picker</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="expression_picker.rcss"/>
+</head>
+<body id="picker-backdrop">
+	<div id="picker-card">
+		<!-- Header: Tabs and Search -->
+		<div id="picker-header">
+			<div id="picker-tabs">
+				<button class="picker-tab" id="tab-gifs" data-tab="gifs">GIFs</button>
+				<button class="picker-tab active" id="tab-emoji" data-tab="emoji">Emoji</button>
+			</div>
+			<div id="picker-search-bar">
+				<img class="search-icon" src="icon:search"/>
+				<input type="text" id="picker-search-input" placeholder="Find the perfect emoji"/>
+				<button id="picker-search-clear" style="display: none;">
+					<img class="clear-icon" src="icon:x"/>
+				</button>
+			</div>
+		</div>
+
+		<!-- Body: Emoji View vs GIF View -->
+		<div id="picker-content">
+			<!-- Emoji View -->
+			<div id="emoji-view">
+				<div id="emoji-rail"></div>
+				<div id="emoji-grid-viewport">
+					<div id="emoji-grid-scroll"></div>
+				</div>
+			</div>
+
+			<!-- GIF View -->
+			<div id="gif-view" style="display: none;">
+				<div id="gif-grid-viewport">
+					<div id="gif-grid-scroll"></div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Footer: Emoji Inspector Preview -->
+		<div id="picker-footer">
+			<div id="inspector-preview-box">
+				<img id="inspector-img" class="inspector-emoji" src=""/>
+			</div>
+			<div id="inspector-info">
+				<div id="inspector-name"></div>
+				<div id="inspector-guild"></div>
+			</div>
+		</div>
+	</div>
+</body>
+</rml>

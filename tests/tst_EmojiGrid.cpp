@@ -1,12 +1,10 @@
-#include "UI/Emoji/EmojiGridView.hpp"
+#include "UI/Rml/EmojiGridModel.hpp"
 
-#include <QApplication>
-#include <QScrollBar>
 #include <QSignalSpy>
 #include <QTest>
 
 using namespace Styx;
-using UI::EmojiGridView;
+using UI::Rml::EmojiGridModel;
 
 class TestEmojiGrid : public QObject
 {
@@ -28,7 +26,7 @@ private slots:
 private:
     [[nodiscard]] QString activeName() const;
 
-    EmojiGridView *grid = nullptr;
+    EmojiGridModel *grid = nullptr;
 };
 
 static Core::PickerSection makeSection(const QString &id, const QString &title, int count)
@@ -47,16 +45,14 @@ static Core::PickerSection makeSection(const QString &id, const QString &title, 
 
 void TestEmojiGrid::initTestCase()
 {
-    QCOMPARE(EmojiGridView::Columns, 9);
+    QCOMPARE(EmojiGridModel::Columns, 9);
 }
 
 void TestEmojiGrid::init()
 {
-    grid = new EmojiGridView;
-    grid->resize(grid->sizeHint());
+    grid = new EmojiGridModel;
+    grid->setViewportHeight(360);
     grid->setSections({ makeSection("a", "First", 11), makeSection("b", "Second", 3), makeSection("c", "Third", 200) });
-    grid->show();
-    QVERIFY(QTest::qWaitForWindowExposed(grid));
 }
 
 void TestEmojiGrid::cleanup()
@@ -75,7 +71,7 @@ void TestEmojiGrid::firstCellBecomesActive()
 {
     QVERIFY(grid->activeEmoji() == nullptr);
 
-    QSignalSpy activeChanged(grid, &EmojiGridView::activeEmojiChanged);
+    QSignalSpy activeChanged(grid, &EmojiGridModel::activeEmojiChanged);
     grid->activateFirst();
     QCOMPARE(activeName(), QStringLiteral("a0"));
     QVERIFY(grid->activeIsFirst());
@@ -144,14 +140,14 @@ void TestEmojiGrid::movesStopAtTheGridEdges()
 void TestEmojiGrid::keyboardSelectionScrollsIntoView()
 {
     grid->activateFirst();
-    QCOMPARE(grid->verticalScrollBar()->value(), 0);
+    QCOMPARE(grid->scrollY(), 0);
 
     constexpr int RowsDown = 20;
     for (int i = 0; i < RowsDown; i++)
         grid->moveActive(0, 1);
 
-    QCOMPARE(activeName(), QStringLiteral("c%1").arg((RowsDown - 3) * EmojiGridView::Columns));
-    QVERIFY(grid->verticalScrollBar()->value() > 0);
+    QCOMPARE(activeName(), QStringLiteral("c%1").arg((RowsDown - 3) * EmojiGridModel::Columns));
+    QVERIFY(grid->scrollY() > 0);
     QCOMPARE(grid->topSection(), 2);
 }
 
@@ -161,13 +157,13 @@ void TestEmojiGrid::clickReportsEmojiAndModifiers()
 
     QStringList clickedNames;
     Qt::KeyboardModifiers clickedWith;
-    connect(grid, &EmojiGridView::emojiClicked, this, [&](const Core::PickerEmoji &emoji, Qt::KeyboardModifiers modifiers) {
+    connect(grid, &EmojiGridModel::emojiClicked, this, [&](const Core::PickerEmoji &emoji, Qt::KeyboardModifiers modifiers) {
         clickedNames.append(emoji.name);
         clickedWith = modifiers;
     });
 
-    const QPoint secondRowFirstCell(EmojiGridView::CellPx - 1, EmojiGridView::CellPx + EmojiGridView::CellPx / 2);
-    QTest::mouseClick(grid->viewport(), Qt::LeftButton, Qt::ShiftModifier, secondRowFirstCell);
+    const QPoint secondRowFirstCell(EmojiGridModel::CellPx - 1, EmojiGridModel::CellPx + EmojiGridModel::CellPx / 2);
+    grid->mouseClick(secondRowFirstCell, Qt::ShiftModifier);
 
     QCOMPARE(clickedNames, QStringList({ QStringLiteral("a9") }));
     QVERIFY(clickedWith.testFlag(Qt::ShiftModifier));
@@ -175,9 +171,9 @@ void TestEmojiGrid::clickReportsEmojiAndModifiers()
 
 void TestEmojiGrid::headerClickCollapsesSection()
 {
-    QSignalSpy collapsedChanged(grid, &EmojiGridView::collapsedSectionsChanged);
-    const QPoint firstHeader(EmojiGridView::CellPx, 4);
-    QTest::mouseClick(grid->viewport(), Qt::LeftButton, Qt::NoModifier, firstHeader);
+    QSignalSpy collapsedChanged(grid, &EmojiGridModel::collapsedSectionsChanged);
+    const QPoint firstHeader(EmojiGridModel::CellPx, 4);
+    grid->mouseClick(firstHeader, Qt::NoModifier);
 
     QCOMPARE(collapsedChanged.count(), 1);
     QVERIFY(grid->collapsedSections().contains(QStringLiteral("a")));
@@ -187,7 +183,7 @@ void TestEmojiGrid::headerClickCollapsesSection()
     grid->moveActive(-1, 0);
     QCOMPARE(activeName(), QStringLiteral("b0"));
 
-    QTest::mouseClick(grid->viewport(), Qt::LeftButton, Qt::NoModifier, firstHeader);
+    grid->mouseClick(firstHeader, Qt::NoModifier);
     QVERIFY(grid->collapsedSections().isEmpty());
     grid->activateFirst();
     QCOMPARE(activeName(), QStringLiteral("a0"));
@@ -195,7 +191,7 @@ void TestEmojiGrid::headerClickCollapsesSection()
 
 void TestEmojiGrid::topSectionFollowsScroll()
 {
-    QSignalSpy topChanged(grid, &EmojiGridView::topSectionChanged);
+    QSignalSpy topChanged(grid, &EmojiGridModel::topSectionChanged);
     QCOMPARE(grid->topSection(), 0);
 
     grid->scrollToSection(2);
@@ -206,14 +202,6 @@ void TestEmojiGrid::topSectionFollowsScroll()
     QCOMPARE(grid->topSection(), 1);
 }
 
-int main(int argc, char **argv)
-{
-    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
-        qputenv("QT_QPA_PLATFORM", "offscreen");
-
-    QApplication app(argc, argv);
-    TestEmojiGrid test;
-    return QTest::qExec(&test, argc, argv);
-}
+QTEST_GUILESS_MAIN(TestEmojiGrid)
 
 #include "tst_EmojiGrid.moc"
