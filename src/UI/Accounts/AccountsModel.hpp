@@ -42,6 +42,23 @@ public:
     void setConnectionState(int row, Core::ConnectionState state);
     void setAutoConnect(int row, bool enabled);
     void setProxy(int row, const Core::ProxyConfig &proxy);
+    [[nodiscard]] const QVector<Core::AccountInfo> &allAccounts() const { return accounts; }
+    [[nodiscard]] const Core::AccountInfo *accountAt(int row) const {
+        if (row >= 0 && row < accounts.size()) return &accounts[row];
+        return nullptr;
+    }
+    [[nodiscard]] const Core::AccountInfo *accountById(Core::Snowflake id) const {
+        for (const auto &acc : accounts) {
+            if (acc.id == id) return &acc;
+        }
+        return nullptr;
+    }
+    int rowForId(Core::Snowflake id) const {
+        for (int i = 0; i < accounts.size(); ++i) {
+            if (accounts[i].id == id) return i;
+        }
+        return -1;
+    }
 
 private:
     Core::Session *session;

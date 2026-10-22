@@ -133,6 +133,7 @@ void AccountsModel::removeAccount(int row)
         return;
 
     quint64 idToRemove = accounts[row].id;
+    session->disconnectAccount(idToRemove);
     AccountRepository repo;
     repo.removeAccount(idToRemove);
 

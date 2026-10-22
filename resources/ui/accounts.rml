@@ -1,0 +1,222 @@
+<rml>
+<head>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="accounts.rcss"/>
+</head>
+<body id="accounts-root">
+	<div id="accounts-backdrop">
+
+		<!-- SWITCH ACCOUNTS MODAL -->
+		<div id="modal-switch-accounts" class="accounts-modal-card">
+			<div class="accounts-modal-header">
+				<div class="accounts-header-text">
+					<h2 class="accounts-title">Switch Accounts</h2>
+					<div class="accounts-subtitle">Switch between your accounts or add a new one.</div>
+				</div>
+				<button class="accounts-close-btn" data-action="close">
+					<img src="icon:x" class="accounts-close-icon"/>
+				</button>
+			</div>
+
+			<div id="accounts-status-banner" class="accounts-status-banner" style="display: none;"></div>
+
+			<div id="accounts-list-container" class="accounts-list-container">
+				<!-- Dynamically generated accounts list -->
+			</div>
+
+			<div class="accounts-modal-footer">
+				<button class="accounts-btn accounts-btn-secondary full-width" data-action="open-login">
+					<img src="icon:user-plus" class="btn-icon"/> Add an Account
+				</button>
+			</div>
+		</div>
+
+		<!-- LOGIN MODAL / OVERLAY -->
+		<div id="modal-login" class="accounts-modal-card login-modal-card" style="display: none;">
+			<div class="accounts-modal-header">
+				<div class="accounts-header-text">
+					<h2 class="accounts-title">Welcome Back!</h2>
+					<div class="accounts-subtitle">Log in to Styx with your Discord account</div>
+				</div>
+				<button id="login-close-btn" class="accounts-close-btn" data-action="close-login">
+					<img src="icon:x" class="accounts-close-icon"/>
+				</button>
+			</div>
+
+			<!-- TAB SELECTOR -->
+			<div id="login-tabs" class="login-tabs">
+				<div class="login-tab active" data-tab="password">Password</div>
+				<div class="login-tab" data-tab="qr">QR Code</div>
+				<div class="login-tab" data-tab="token">Token</div>
+			</div>
+
+			<!-- TAB 1: PASSWORD / DIRECT LOGIN -->
+			<div id="tab-password" class="login-tab-content">
+				<div id="password-form-view">
+					<div class="form-item">
+						<div class="form-label">Email or Phone Number <span class="required">*</span></div>
+						<input type="text" id="login-email" class="form-input" placeholder="user@example.com or phone"/>
+					</div>
+					<div class="form-item">
+						<div class="form-label">Password <span class="required">*</span></div>
+						<input type="password" id="login-password" class="form-input" placeholder="Password"/>
+					</div>
+					<div class="form-item">
+						<div class="form-label">Proxy <span class="optional">(Optional)</span></div>
+						<input type="text" id="login-proxy" class="form-input" placeholder="socks5://user:pass@host:1080"/>
+						<div class="form-help">Supports http, https, or socks5. Voice requires socks5.</div>
+					</div>
+					<div id="login-status-error" class="login-error-text" style="display: none;"></div>
+					<div class="form-buttons">
+						<button id="btn-login-submit" class="accounts-btn accounts-btn-primary full-width" data-action="submit-login">Log In</button>
+					</div>
+				</div>
+
+				<!-- 2FA / MFA VIEW -->
+				<div id="password-mfa-view" style="display: none;">
+					<div class="mfa-header">
+						<div class="mfa-title" id="mfa-title-text">Two-Factor Authentication</div>
+						<div class="mfa-subtitle" id="mfa-desc-text">Enter the verification code from your authenticator app or phone.</div>
+					</div>
+					<div class="form-item" id="mfa-method-wrapper" style="display: none;">
+						<div class="form-label">Verification Method</div>
+						<select id="mfa-method-select" class="form-select">
+							<option value="0">Authenticator App</option>
+						</select>
+					</div>
+					<div class="form-item">
+						<div class="form-label">Authentication Code <span class="required">*</span></div>
+						<div class="code-input-row">
+							<input type="text" id="mfa-code-input" class="form-input" placeholder="6-digit code or backup code"/>
+							<button id="btn-mfa-sms" class="accounts-btn accounts-btn-secondary" data-action="mfa-send-sms" style="display: none;">Send SMS</button>
+						</div>
+					</div>
+					<div id="mfa-status-error" class="login-error-text" style="display: none;"></div>
+					<div class="form-buttons mfa-buttons">
+						<button class="accounts-btn accounts-btn-secondary" data-action="mfa-back">Back</button>
+						<button id="btn-mfa-verify" class="accounts-btn accounts-btn-primary" data-action="mfa-verify">Verify</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- TAB 2: QR CODE LOGIN -->
+			<div id="tab-qr" class="login-tab-content" style="display: none;">
+				<div class="qr-container">
+					<div class="qr-box">
+						<img id="qr-img" class="qr-code-img" src="frame:ra-qr"/>
+					</div>
+					<div class="qr-info">
+						<div class="qr-heading">Scan with Mobile App</div>
+						<div id="qr-instructions" class="qr-desc">
+							Scan this code with the <b>Discord mobile app</b> under User Settings &gt; Scan QR Code to log in instantly.
+						</div>
+						<div id="qr-status-text" class="qr-status-text">Connecting to remote auth...</div>
+					</div>
+				</div>
+				<div class="form-item qr-proxy-item">
+					<div class="form-label">Proxy <span class="optional">(Optional)</span></div>
+					<input type="text" id="qr-proxy" class="form-input" placeholder="socks5://user:pass@host:1080"/>
+				</div>
+				<div class="form-buttons qr-buttons">
+					<button class="accounts-btn accounts-btn-secondary" data-action="qr-refresh">Refresh QR Code</button>
+				</div>
+			</div>
+
+			<!-- TAB 3: TOKEN LOGIN -->
+			<div id="tab-token" class="login-tab-content" style="display: none;">
+				<div class="form-item">
+					<div class="form-label">User Token <span class="required">*</span></div>
+					<input type="password" id="token-input" class="form-input" placeholder="Paste your Discord token"/>
+					<div class="form-help">Enter your Discord user token to log in directly.</div>
+				</div>
+				<div class="form-item">
+					<div class="form-label">Proxy <span class="optional">(Optional)</span></div>
+					<input type="text" id="token-proxy" class="form-input" placeholder="socks5://user:pass@host:1080"/>
+				</div>
+				<div id="token-status-error" class="login-error-text" style="display: none;"></div>
+				<div class="form-buttons">
+					<button id="btn-token-submit" class="accounts-btn accounts-btn-primary full-width" data-action="submit-token">Log In</button>
+				</div>
+			</div>
+
+			<!-- FOOTER FOR RETURNING TO ACCOUNTS LIST -->
+			<div id="login-modal-footer" class="accounts-modal-footer login-footer">
+				<button id="btn-login-back-to-accounts" class="accounts-btn accounts-btn-link" data-action="back-to-accounts">
+					&lt; Back to Accounts
+				</button>
+			</div>
+		</div>
+
+		<!-- EDIT PROXY MODAL -->
+		<div id="modal-edit-proxy" class="accounts-modal-card edit-proxy-card" style="display: none;">
+			<div class="accounts-modal-header">
+				<div class="accounts-header-text">
+					<h2 class="accounts-title">Edit Account Proxy</h2>
+					<div id="edit-proxy-account-name" class="accounts-subtitle">Configure proxy settings</div>
+				</div>
+				<button class="accounts-close-btn" data-action="close-proxy-edit">
+					<img src="icon:x" class="accounts-close-icon"/>
+				</button>
+			</div>
+			<div class="edit-proxy-content">
+				<div class="form-item">
+					<div class="form-label">Proxy URL</div>
+					<input type="text" id="edit-proxy-input" class="form-input" placeholder="socks5://user:pass@host:1080"/>
+					<div class="form-help">Leave empty to connect directly without a proxy. Scheme must be http, https, or socks5. Voice requires socks5. Can only be changed while disconnected.</div>
+				</div>
+				<div id="edit-proxy-error" class="login-error-text" style="display: none;"></div>
+				<div class="form-buttons edit-proxy-buttons">
+					<button class="accounts-btn accounts-btn-secondary" data-action="close-proxy-edit">Cancel</button>
+					<button class="accounts-btn accounts-btn-primary" data-action="save-proxy">Save Proxy</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- UPDATE TOKEN MODAL -->
+		<div id="modal-set-token" class="accounts-modal-card edit-proxy-card" style="display: none;">
+			<div class="accounts-modal-header">
+				<div class="accounts-header-text">
+					<h2 class="accounts-title">Update Token</h2>
+					<div id="set-token-account-name" class="accounts-subtitle">Set new token for account</div>
+				</div>
+				<button class="accounts-close-btn" data-action="close-token-edit">
+					<img src="icon:x" class="accounts-close-icon"/>
+				</button>
+			</div>
+			<div class="edit-proxy-content">
+				<div class="form-item">
+					<div class="form-label">New Token <span class="required">*</span></div>
+					<input type="password" id="set-token-input" class="form-input" placeholder="Paste new token"/>
+					<div class="form-help">Tokens are bound to a specific user ID. If this token belongs to a different account, use Add Account instead.</div>
+				</div>
+				<div id="set-token-error" class="login-error-text" style="display: none;"></div>
+				<div class="form-buttons edit-proxy-buttons">
+					<button class="accounts-btn accounts-btn-secondary" data-action="close-token-edit">Cancel</button>
+					<button class="accounts-btn accounts-btn-primary" data-action="save-token">Save Token</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- CONFIRM LOGOUT MODAL -->
+		<div id="modal-confirm-logout" class="accounts-modal-card edit-proxy-card" style="display: none;">
+			<div class="accounts-modal-header">
+				<div class="accounts-header-text">
+					<h2 class="accounts-title">Log Out</h2>
+					<div id="confirm-logout-desc" class="accounts-subtitle">Are you sure you want to log out of this account?</div>
+				</div>
+				<button class="accounts-close-btn" data-action="close-confirm-logout">
+					<img src="icon:x" class="accounts-close-icon"/>
+				</button>
+			</div>
+			<div class="edit-proxy-content">
+				<div class="form-buttons edit-proxy-buttons">
+					<button class="accounts-btn accounts-btn-secondary" data-action="close-confirm-logout">Cancel</button>
+					<button class="accounts-btn accounts-btn-danger" data-action="do-logout">Log Out</button>
+				</div>
+			</div>
+		</div>
+
+	</div>
+</body>
+</rml>

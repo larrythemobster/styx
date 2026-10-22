@@ -1,0 +1,683 @@
+/*
+ * Styx Account Manager & Login Screen styling
+ * Follows Discord dark theme tokens (theme.rcss)
+ */
+
+body#accounts-root
+{
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+}
+
+#accounts-backdrop
+{
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-color: rgba(0, 0, 0, 0.75);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+}
+
+/* --- Cards --- */
+
+.accounts-modal-card
+{
+	width: 500dp;
+	max-width: 90%;
+	background-color: #1e1f22;
+	border: 1dp #202024;
+	border-radius: 8dp;
+	padding: 24dp;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+}
+
+.login-modal-card
+{
+	width: 480dp;
+}
+
+.edit-proxy-card
+{
+	width: 420dp;
+}
+
+/* --- Header --- */
+
+.accounts-modal-header
+{
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: flex-start;
+	margin-bottom: 16dp;
+}
+
+.accounts-header-text
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.accounts-title
+{
+	font-size: 20dp;
+	font-weight: bold;
+	color: #f2f3f5;
+	margin: 0;
+	margin-bottom: 4dp;
+}
+
+.accounts-subtitle
+{
+	font-size: 13dp;
+	color: #949ba4;
+	line-height: 16dp;
+}
+
+.accounts-close-btn
+{
+	width: 28dp;
+	height: 28dp;
+	border-radius: 14dp;
+	background-color: transparent;
+	border-width: 0;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	margin-left: 12dp;
+}
+
+.accounts-close-btn:hover
+{
+	background-color: #2b2d31;
+}
+
+.accounts-close-icon
+{
+	width: 16dp;
+	height: 16dp;
+	image-color: #b5bac1;
+}
+
+.accounts-close-btn:hover .accounts-close-icon
+{
+	image-color: #f2f3f5;
+}
+
+/* --- Status Banner --- */
+
+.accounts-status-banner
+{
+	background-color: #f23f431f;
+	border-left: 3dp #f23f43;
+	color: #f23f43;
+	font-size: 13dp;
+	padding: 8dp 12dp;
+	border-radius: 4dp;
+	margin-bottom: 14dp;
+}
+
+/* --- Accounts List --- */
+
+.accounts-list-container
+{
+	display: flex;
+	flex-direction: column;
+	max-height: 380dp;
+	overflow-y: auto;
+	margin-bottom: 16dp;
+}
+
+.account-card
+{
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 6dp;
+	padding: 12dp;
+	margin-bottom: 8dp;
+	display: flex;
+	flex-direction: column;
+}
+
+.account-card:hover
+{
+	border-color: #35373c;
+}
+
+.account-card.active-account
+{
+	border-color: #23a55a55;
+	background-color: #111613;
+}
+
+.account-card-main
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.account-avatar
+{
+	width: 44dp;
+	height: 44dp;
+	border-radius: 22dp;
+	margin-right: 12dp;
+	flex-shrink: 0;
+	background-color: #2b2d31;
+}
+
+.account-info
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.account-header-line
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.account-display-name
+{
+	font-size: 15dp;
+	font-weight: bold;
+	color: #f2f3f5;
+	margin-right: 8dp;
+}
+
+.account-badge
+{
+	font-size: 10dp;
+	font-weight: bold;
+	text-transform: uppercase;
+	padding: 2dp 6dp;
+	border-radius: 10dp;
+}
+
+.account-badge.badge-active
+{
+	background-color: #23a55a;
+	color: #ffffff;
+}
+
+.account-badge.badge-connecting
+{
+	background-color: #f0b232;
+	color: #000000;
+}
+
+.account-badge.badge-offline
+{
+	background-color: #35373c;
+	color: #949ba4;
+}
+
+.account-username
+{
+	font-size: 12dp;
+	color: #949ba4;
+	margin-top: 2dp;
+}
+
+.account-proxy-tag
+{
+	font-size: 11dp;
+	color: #b5bac1;
+	margin-top: 2dp;
+}
+
+.account-card-bottom
+{
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: center;
+	margin-top: 10dp;
+	padding-top: 8dp;
+	border-top: 1dp #202024;
+}
+
+.account-toggle-label
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	cursor: pointer;
+}
+
+.autoconnect-text
+{
+	font-size: 12dp;
+	color: #949ba4;
+	margin-right: 8dp;
+}
+
+.account-actions
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.account-actions .accounts-btn
+{
+	margin-left: 6dp;
+}
+
+/* --- Toggle Switch --- */
+
+.accounts-switch
+{
+	width: 34dp;
+	height: 18dp;
+	border-radius: 9dp;
+	background-color: #4e5058;
+	position: relative;
+	cursor: pointer;
+	box-sizing: border-box;
+}
+
+.accounts-switch.checked
+{
+	background-color: #23a55a;
+}
+
+.accounts-switch-thumb
+{
+	width: 14dp;
+	height: 14dp;
+	border-radius: 7dp;
+	background-color: #ffffff;
+	position: absolute;
+	top: 2dp;
+	left: 2dp;
+	transition: left 0.15s;
+}
+
+.accounts-switch.checked .accounts-switch-thumb
+{
+	left: 18dp;
+}
+
+/* --- Buttons --- */
+
+.accounts-btn
+{
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8dp 16dp;
+	border-radius: 4dp;
+	font-size: 13dp;
+	font-weight: 600;
+	cursor: pointer;
+	border-width: 0;
+	box-sizing: border-box;
+	transition: background-color 0.15s;
+}
+
+.accounts-btn.full-width
+{
+	width: 100%;
+}
+
+.accounts-btn-sm
+{
+	padding: 4dp 10dp;
+	font-size: 12dp;
+}
+
+.accounts-btn-primary
+{
+	background-color: #5865f2;
+	color: #ffffff;
+}
+
+.accounts-btn-primary:hover
+{
+	background-color: #4752c4;
+}
+
+.accounts-btn-secondary
+{
+	background-color: #35373c;
+	color: #dbdee1;
+}
+
+.accounts-btn-secondary:hover
+{
+	background-color: #4e5058;
+	color: #ffffff;
+}
+
+.accounts-btn-danger
+{
+	background-color: #f23f431f;
+	color: #f23f43;
+	border: 1dp #f23f4340;
+}
+
+.accounts-btn-danger:hover
+{
+	background-color: #f23f43;
+	color: #ffffff;
+}
+
+.accounts-btn-link
+{
+	background-color: transparent;
+	color: #00a8fc;
+	padding: 6dp 0;
+}
+
+.accounts-btn-link:hover
+{
+	text-decoration: underline;
+}
+
+.btn-icon
+{
+	width: 16dp;
+	height: 16dp;
+	margin-right: 6dp;
+	image-color: #ffffff;
+}
+
+/* --- Tabs --- */
+
+.login-tabs
+{
+	display: flex;
+	flex-direction: row;
+	border-bottom: 1dp #202024;
+	margin-bottom: 16dp;
+}
+
+.login-tab
+{
+	padding: 8dp 16dp;
+	font-size: 14dp;
+	font-weight: 600;
+	color: #949ba4;
+	cursor: pointer;
+	border-bottom: 2dp transparent;
+}
+
+.login-tab:hover
+{
+	color: #dbdee1;
+}
+
+.login-tab.active
+{
+	color: #ffffff;
+	border-bottom: 2dp #5865f2;
+}
+
+/* --- Forms & Inputs --- */
+
+.form-item
+{
+	margin-bottom: 14dp;
+	display: flex;
+	flex-direction: column;
+}
+
+.form-label
+{
+	font-size: 11dp;
+	font-weight: bold;
+	text-transform: uppercase;
+	color: #b5bac1;
+	margin-bottom: 6dp;
+}
+
+.form-label .required
+{
+	color: #f23f43;
+}
+
+.form-label .optional
+{
+	color: #949ba4;
+	font-weight: normal;
+	text-transform: none;
+}
+
+.form-input
+{
+	height: 38dp;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	color: #dbdee1;
+	padding: 0 10dp;
+	font-size: 14dp;
+	box-sizing: border-box;
+}
+
+.form-input:focus
+{
+	border-color: #5865f2;
+}
+
+.form-help
+{
+	font-size: 11dp;
+	color: #949ba4;
+	margin-top: 4dp;
+	line-height: 14dp;
+}
+
+.login-error-text
+{
+	font-size: 12dp;
+	color: #f23f43;
+	margin-top: 4dp;
+	margin-bottom: 10dp;
+	line-height: 16dp;
+}
+
+.form-buttons
+{
+	display: flex;
+	flex-direction: row;
+	margin-top: 8dp;
+}
+
+/* --- QR Code Login --- */
+
+.qr-container
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 6dp;
+	padding: 16dp;
+	margin-bottom: 14dp;
+}
+
+.qr-box
+{
+	width: 160dp;
+	height: 160dp;
+	background-color: #ffffff;
+	border-radius: 6dp;
+	padding: 8dp;
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin-right: 16dp;
+	flex-shrink: 0;
+}
+
+.qr-code-img
+{
+	width: 144dp;
+	height: 144dp;
+}
+
+.qr-info
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.qr-heading
+{
+	font-size: 16dp;
+	font-weight: bold;
+	color: #f2f3f5;
+	margin-bottom: 6dp;
+}
+
+.qr-desc
+{
+	font-size: 13dp;
+	color: #949ba4;
+	line-height: 18dp;
+	margin-bottom: 8dp;
+}
+
+.qr-status-text
+{
+	font-size: 12dp;
+	color: #23a55a;
+	font-weight: 500;
+}
+
+.qr-buttons
+{
+	justify-content: flex-end;
+}
+
+/* --- MFA / 2FA View --- */
+
+.mfa-header
+{
+	margin-bottom: 14dp;
+}
+
+.mfa-title
+{
+	font-size: 16dp;
+	font-weight: bold;
+	color: #f2f3f5;
+	margin-bottom: 4dp;
+}
+
+.mfa-subtitle
+{
+	font-size: 13dp;
+	color: #949ba4;
+	line-height: 16dp;
+}
+
+.code-input-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+.code-input-row .form-input
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.code-input-row .accounts-btn
+{
+	margin-left: 8dp;
+	height: 38dp;
+	flex-shrink: 0;
+}
+
+.mfa-buttons
+{
+	justify-content: space-between;
+}
+
+/* --- Select --- */
+
+select.form-select
+{
+	width: 100%;
+	height: 38dp;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	color: #dbdee1;
+	font-size: 13dp;
+	box-sizing: border-box;
+}
+
+select.form-select selectvalue
+{
+	padding: 8dp 10dp;
+	color: #dbdee1;
+}
+
+select.form-select selectarrow
+{
+	width: 24dp;
+	height: 38dp;
+}
+
+select.form-select selectbox
+{
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	padding: 4dp;
+}
+
+select.form-select selectbox option
+{
+	padding: 6dp 8dp;
+	border-radius: 3dp;
+	color: #dbdee1;
+}
+
+select.form-select selectbox option:hover
+{
+	background-color: #242428;
+	color: #ffffff;
+}
+
+/* --- Edit Proxy / Set Token --- */
+
+.edit-proxy-buttons
+{
+	justify-content: flex-end;
+}
+
+.edit-proxy-buttons .accounts-btn
+{
+	margin-left: 8dp;
+}
+
+.login-footer
+{
+	margin-top: 12dp;
+	border-top: 1dp #202024;
+	padding-top: 10dp;
+}
