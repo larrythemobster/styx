@@ -235,7 +235,7 @@ TEST_CASE("Signal: connections, disconnect during emit, queued delivery", "[sign
         });
 
         REQUIRE(sig.connectionCount() == 2);
-        sig.emit(5, "hello");
+        sig.publish(5, "hello");
 
         REQUIRE(sum == 15);
         REQUIRE(lastStr == "hello");
@@ -252,12 +252,12 @@ TEST_CASE("Signal: connections, disconnect during emit, queued delivery", "[sign
         sig.connect(&ownerA, [&](int) { countA++; });
         sig.connect(&ownerB, [&](int) { countB++; });
 
-        sig.emit(1);
+        sig.publish(1);
         REQUIRE(countA == 1);
         REQUIRE(countB == 1);
 
         sig.disconnect(&ownerA);
-        sig.emit(1);
+        sig.publish(1);
         REQUIRE(countA == 1);
         REQUIRE(countB == 2);
     }
@@ -269,11 +269,11 @@ TEST_CASE("Signal: connections, disconnect during emit, queued delivery", "[sign
         {
             Connection c = sig.connect([&](int) { count++; });
             REQUIRE(c.isConnected());
-            sig.emit(1);
+            sig.publish(1);
             REQUIRE(count == 1);
         } // c destructs here
 
-        sig.emit(1);
+        sig.publish(1);
         REQUIRE(count == 1);
     }
 
@@ -296,7 +296,7 @@ TEST_CASE("Signal: connections, disconnect during emit, queued delivery", "[sign
             received.push_back(val * 1000);
         });
 
-        sig.emit(1);
+        sig.publish(1);
 
         // c1 should have run (10), c2 disconnected before its turn so not run, c3 should have run (1000)
         std::vector<int> expected = { 10, 1000 };
@@ -310,7 +310,7 @@ TEST_CASE("Signal: connections, disconnect during emit, queued delivery", "[sign
 
         Connection c = sig.connect([&](int val) { result = val; }, ConnectionType::Queued);
 
-        sig.emit(42);
+        sig.publish(42);
         REQUIRE(result == 0); // Not executed directly
 
         Dispatcher::main().runPending();

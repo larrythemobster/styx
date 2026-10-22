@@ -173,7 +173,7 @@ public:
         }
     }
 
-    void emit(Args... args)
+    void publish(Args... args)
     {
         std::vector<std::shared_ptr<SlotEntry>> snapshot;
         {
@@ -218,7 +218,7 @@ public:
         Dispatcher::main().post([this, weakLife, tupleArgs = std::move(tupleArgs)]() mutable {
             if (auto life = weakLife.lock()) {
                 std::apply([this](auto &&... unpacked) {
-                    emit(std::forward<decltype(unpacked)>(unpacked)...);
+                    publish(std::forward<decltype(unpacked)>(unpacked)...);
                 }, tupleArgs);
             }
         });
@@ -226,7 +226,7 @@ public:
 
     void operator()(Args... args)
     {
-        emit(std::forward<Args>(args)...);
+        publish(std::forward<Args>(args)...);
     }
 
     size_t connectionCount() const

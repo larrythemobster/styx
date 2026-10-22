@@ -281,7 +281,7 @@ void Settings::setJson(std::string_view key, const nlohmann::json &value)
     }
 
     if (isChanged) {
-        changed.emit(k, value);
+        changed.publish(k, value);
     }
 }
 
@@ -303,7 +303,7 @@ void Settings::remove(std::string_view key)
         }
     }
     if (removed) {
-        changed.emit(k, nlohmann::json());
+        changed.publish(k, nlohmann::json());
     }
 }
 
