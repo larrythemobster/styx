@@ -52,17 +52,56 @@ bool copyDirectoryRecursively(const QString &sourcePath, const QString &targetPa
     return true;
 }
 
+static QString getOldRoamingDir()
+{
+#ifdef Q_OS_WIN
+    QString appdata = qEnvironmentVariable("APPDATA");
+    if (!appdata.isEmpty())
+        return QDir(appdata).filePath("ouwou/Acheron");
+#endif
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/ouwou/Acheron";
+}
+
+static QString getNewRoamingDir()
+{
+#ifdef Q_OS_WIN
+    QString appdata = qEnvironmentVariable("APPDATA");
+    if (!appdata.isEmpty())
+        return QDir(appdata).filePath("larrythemobster/Styx");
+#endif
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/larrythemobster/Styx";
+}
+
+static QString getOldLocalDir()
+{
+#ifdef Q_OS_WIN
+    QString local = qEnvironmentVariable("LOCALAPPDATA");
+    if (!local.isEmpty())
+        return QDir(local).filePath("ouwou/Acheron");
+#endif
+    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/ouwou/Acheron";
+}
+
+static QString getNewLocalDir()
+{
+#ifdef Q_OS_WIN
+    QString local = qEnvironmentVariable("LOCALAPPDATA");
+    if (!local.isEmpty())
+        return QDir(local).filePath("larrythemobster/Styx");
+#endif
+    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/larrythemobster/Styx";
+}
 } // namespace
 
 bool Migration::isMigrationDone()
 {
-    const QString markerPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(".migration_done");
+    const QString markerPath = QDir(getNewRoamingDir()).filePath(".migration_done");
     return QFile::exists(markerPath);
 }
 
 void Migration::writeMigrationMarker()
 {
-    const QString newRoamPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString newRoamPath = getNewRoamingDir();
     QDir(newRoamPath).mkpath(".");
     const QString markerPath = QDir(newRoamPath).filePath(".migration_done");
     QFile markerFile(markerPath);
@@ -78,11 +117,11 @@ void Migration::migrateSettingsAndData()
     if (isMigrationDone())
         return;
 
-    const QString oldRoamPath = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/ouwou/Acheron";
-    const QString newRoamPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString oldRoamPath = getOldRoamingDir();
+    const QString newRoamPath = getNewRoamingDir();
 
-    const QString oldLocalPath = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/ouwou/Acheron";
-    const QString newLocalPath = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/larrythemobster/Styx";
+    const QString oldLocalPath = getOldLocalDir();
+    const QString newLocalPath = getNewLocalDir();
 
     QSettings oldSettings("ouwou", "Acheron");
     const QStringList oldKeys = oldSettings.allKeys();
@@ -172,7 +211,7 @@ void Migration::migrateKeychain()
     if (isMigrationDone())
         return;
 
-    const QString newRoamPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString newRoamPath = getNewRoamingDir();
     const QString dbPath = QDir(newRoamPath).filePath("styx.sqlite");
 
     if (QFile::exists(dbPath)) {

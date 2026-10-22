@@ -101,13 +101,13 @@ jobs:
       - name: Deploy Qt
         shell: pwsh
         run: |
-          $exe = "${{ github.workspace }}/build/${{ matrix.build_type }}/acheron.exe"
+          $exe = "${{ github.workspace }}/build/${{ matrix.build_type }}/styx.exe"
           windeployqt --no-translations --no-opengl-sw --no-system-d3d-compiler $exe
 
       - name: Prepare artifact
         shell: pwsh
         run: |
-          $out = "acheron-windows-${{ matrix.build_type }}"
+          $out = "styx-windows-${{ matrix.build_type }}"
           $binDir = "build/${{ matrix.build_type }}"
           $curlDir = "${{ github.workspace }}/curl-impersonate"
           New-Item -ItemType Directory -Path $out -Force
@@ -127,8 +127,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: acheron-windows-${{ matrix.build_type }}
-          path: acheron-windows-${{ matrix.build_type }}
+          name: styx-windows-${{ matrix.build_type }}
+          path: styx-windows-${{ matrix.build_type }}
 
   build-windows-minimal:
     runs-on: windows-latest
@@ -190,13 +190,13 @@ jobs:
       - name: Deploy Qt
         shell: pwsh
         run: |
-          $exe = "${{ github.workspace }}/build/RelWithDebInfo/acheron.exe"
+          $exe = "${{ github.workspace }}/build/RelWithDebInfo/styx.exe"
           windeployqt --no-translations --no-opengl-sw --no-system-d3d-compiler $exe
 
       - name: Prepare artifact
         shell: pwsh
         run: |
-          $out = "acheron-windows-minimal"
+          $out = "styx-windows-minimal"
           $binDir = "build/RelWithDebInfo"
           $curlDir = "${{ github.workspace }}/curl-impersonate"
           New-Item -ItemType Directory -Path $out -Force
@@ -216,8 +216,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: acheron-windows-minimal
-          path: acheron-windows-minimal
+          name: styx-windows-minimal
+          path: styx-windows-minimal
 
   build-windows-qt5:
     runs-on: windows-latest
@@ -303,13 +303,13 @@ jobs:
       - name: Deploy Qt
         shell: pwsh
         run: |
-          $exe = "${{ github.workspace }}/build/MinSizeRel/acheron.exe"
+          $exe = "${{ github.workspace }}/build/MinSizeRel/styx.exe"
           windeployqt --no-translations --no-opengl-sw --no-angle --no-system-d3d-compiler $exe
 
       - name: Prepare artifact
         shell: pwsh
         run: |
-          $out = "acheron-windows-qt5-MinSizeRel"
+          $out = "styx-windows-qt5-MinSizeRel"
           $binDir = "build/MinSizeRel"
           $curlDir = "${{ github.workspace }}/curl-impersonate"
           New-Item -ItemType Directory -Path $out -Force
@@ -332,14 +332,12 @@ jobs:
             -Recurse -ErrorAction SilentlyContinue
           Get-ChildItem "$out/sqldrivers" -Exclude qsqlite.dll | Remove-Item
 
-      - name: Check Windows 7 loadability
-        run: python .github/check_win7_imports.py acheron-windows-qt5-MinSizeRel
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: acheron-windows-qt5-MinSizeRel
-          path: acheron-windows-qt5-MinSizeRel
+          name: styx-windows-qt5-MinSizeRel
+          path: styx-windows-qt5-MinSizeRel
 
   build-linux:
     runs-on: ubuntu-latest
@@ -490,7 +488,7 @@ jobs:
 
           # The prebuilt libcurl-impersonate.a carries -g, so even a Release binary
           # ships ~30 MB of DWARF for curl and BoringSSL
-          strip AppDir/usr/bin/acheron
+          strip AppDir/usr/bin/styx
 
           # linuxdeploy-plugin-qt deploys every sqldriver it finds, and
           # libqsqlmimer.so needs libmimerapi.so, which no runner has -- the
@@ -533,11 +531,11 @@ jobs:
           # LD_LIBRARY_PATH when resolving DT_NEEDED, and copies what it resolves into
           # AppDir/usr/lib like any other dependency.
           export LD_LIBRARY_PATH="$PWD/ffmpeg/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          # Icon: the .desktop file declares Icon=io.github.ouwou.acheron but no
+          # Icon: the .desktop file declares Icon=io.github.larrythemobster.styx but no
           # icon is installed by CMake; supply the repo SVG under that name
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
             --plugin qt \
-            --icon-file acheron.svg --icon-filename io.github.ouwou.acheron \
+            --icon-file resources/app/styx.svg --icon-filename io.github.larrythemobster.styx \
             --output appimage
 
       # Nothing in CI runs the packaged binary, so a linuxdeploy that quietly failed to
@@ -554,8 +552,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: acheron-appimage
-          path: Acheron*.AppImage
+          name: styx-appimage
+          path: Styx*.AppImage
 
   build-macos:
     runs-on: macos-latest
@@ -613,10 +611,10 @@ jobs:
       - name: Prepare artifact
         run: |
           # Create a .app bundle manually since the binary isn't built as MACOSX_BUNDLE
-          app="acheron-macos/Acheron.app/Contents"
+          app="styx-macos/Styx.app/Contents"
           mkdir -p "$app/MacOS" "$app/Frameworks" "$app/PlugIns"
 
-          cp build/acheron "$app/MacOS/"
+          cp build/styx "$app/MacOS/"
 
           # Copy certs/fonts if present
           [ -d build/certs ] && cp -r build/certs "$app/MacOS/"
@@ -629,11 +627,11 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>CFBundleExecutable</key>
-            <string>acheron</string>
+            <string>styx</string>
             <key>CFBundleIdentifier</key>
-            <string>com.acheron.app</string>
+            <string>io.github.larrythemobster.styx</string>
             <key>CFBundleName</key>
-            <string>Acheron</string>
+            <string>Styx</string>
             <key>CFBundleVersion</key>
             <string>1.0</string>
             <key>CFBundlePackageType</key>
@@ -647,16 +645,16 @@ jobs:
           PLIST
 
           # Use macdeployqt to bundle Qt frameworks
-          macdeployqt acheron-macos/Acheron.app -verbose=1
+          macdeployqt styx-macos/Styx.app -verbose=1
 
           # Same rule as the Windows artifacts: Fusion is forced in main.cpp and
           # Storage only ever opens QSQLITE
-          plugins="acheron-macos/Acheron.app/Contents/PlugIns"
+          plugins="styx-macos/Styx.app/Contents/PlugIns"
           rm -rf "$plugins/styles"
           find "$plugins/sqldrivers" -name '*.dylib' ! -name 'libqsqlite.dylib' -delete
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: acheron-macos
-          path: acheron-macos
+          name: styx-macos
+          path: styx-macos

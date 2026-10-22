@@ -4,7 +4,7 @@ rem Usage: build-windows.bat [configure]
 rem Dependencies are read from %DEPS% (default: ..\deps next to this checkout):
 rem   %DEPS%\Qt\6.12.0\msvc2022_64   %DEPS%\ffmpeg   %DEPS%\curl-impersonate
 setlocal
-set REPO=%~dp0
+set REPO=%~dp0..\
 if "%DEPS%"=="" set DEPS=%REPO%..\deps
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%REPO%" || exit /b 1

@@ -30,7 +30,7 @@ endif()
 
 project(styx LANGUAGES CXX)
 
-include(qt.cmake)
+include(cmake/qt.cmake)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -164,9 +164,9 @@ if(ENABLE_VOICE)
 endif()
 
 # find or build rnnoise
-include(rnnoise.cmake)
+include(cmake/rnnoise.cmake)
 
-include(ffmpeg.cmake)
+include(cmake/ffmpeg.cmake)
 
 if(ENABLE_SCREENSHARE AND NOT (WIN32 AND ENABLE_VOICE AND TARGET ffmpeg))
     message(STATUS "Screen sharing needs Windows, ENABLE_VOICE and ffmpeg; building without it")
@@ -182,10 +182,10 @@ if(ENABLE_SCREENSHARE)
     find_package(LibDataChannel CONFIG REQUIRED)
 endif()
 
-include(lottie.cmake)
+include(cmake/lottie.cmake)
 
 set(PROJECT_SOURCES
-    resources.qrc
+    resources/resources.qrc
     src/main.cpp
     src/Core/Migration.cpp
     src/Core/Snowflake.cpp
@@ -365,6 +365,10 @@ set(PROJECT_SOURCES
     src/UI/Rml/FriendsController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )
+if(WIN32)
+    list(APPEND PROJECT_SOURCES resources/app/styx.rc)
+endif()
+
 
 if(ENABLE_VOICE)
     list(APPEND PROJECT_SOURCES
@@ -446,7 +450,7 @@ if(BUILD_TESTS)
     add_test(NAME FrecencyTests COMMAND TestFrecency)
 
     qt_add_executable(TestUnicodeEmoji tests/tst_UnicodeEmoji.cpp
-        src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp resources.qrc)
+        src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp resources/resources.qrc)
     target_link_libraries(TestUnicodeEmoji PRIVATE Qt::Core Qt::Test)
     target_include_directories(TestUnicodeEmoji PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME UnicodeEmojiTests COMMAND TestUnicodeEmoji)
@@ -477,7 +481,7 @@ if(BUILD_TESTS)
         src/Core/ImageManager.cpp src/Core/AnimatedImageCache.cpp src/Core/ApngDecoder.cpp
         src/Core/LottieDecoder.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp
         src/Core/Theme/Manager.cpp src/Core/Theme/Fonts.cpp src/Core/Theme/Stylesheet.cpp
-        src/Core/Theme/Tokens.cpp src/Core/Theme/Icons.cpp resources.qrc)
+        src/Core/Theme/Tokens.cpp src/Core/Theme/Icons.cpp resources/resources.qrc)
     target_link_libraries(TestEmojiGrid PRIVATE Qt::Core Qt::Gui Qt::Widgets Qt::Network Qt::Svg Qt::Test)
     target_include_directories(TestEmojiGrid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME EmojiGridTests COMMAND TestEmojiGrid)
@@ -524,7 +528,7 @@ if(BUILD_TESTS)
     endif()
 endif()
 
-qt_add_translations(${PROJECT_NAME} SOURCE_TARGETS ${PROJECT_NAME})
+qt_add_translations(${PROJECT_NAME} TS_FILES translations/styx_en.ts SOURCE_TARGETS ${PROJECT_NAME})
 
 if (MSVC)
     target_link_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Debug>:/INCREMENTAL>)
@@ -642,12 +646,12 @@ else()
         "-DALLOW_PLAIN_CURL=ON to build against plain libcurl anyway.")
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/certs/cacert.pem")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/certs/cacert.pem")
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/certs"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/certs/cacert.pem"
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/certs/cacert.pem"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/certs/cacert.pem"
         COMMENT "Copying cacert.pem to build directory"
     )
@@ -682,7 +686,7 @@ if(UNIX AND NOT APPLE)
     install(FILES resources/desktop/io.github.larrythemobster.styx.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
     )
-    install(FILES styx.svg
+    install(FILES resources/app/styx.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
         RENAME io.github.larrythemobster.styx.svg
     )

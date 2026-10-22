@@ -74,8 +74,6 @@ int main(int argc, char *argv[])
 
     QApplication::setOrganizationName("larrythemobster");
     QApplication::setApplicationName("Styx");
-    Core::Migration::migrateSettingsAndData();
-    applyFontEngineSetting();
 
     App app(argc, argv);
     app.setDesktopFileName("io.github.larrythemobster.styx");
@@ -89,7 +87,9 @@ int main(int argc, char *argv[])
     registerMetatypes();
 
     Styx::Core::Logger::init();
+    Core::Migration::migrateSettingsAndData();
     Core::Migration::migrateKeychain();
+    applyFontEngineSetting();
 
 #ifndef STYX_NO_VOICE
     discord::dave::SetLogSink(DaveLogSink);

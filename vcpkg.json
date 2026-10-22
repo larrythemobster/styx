@@ -62,10 +62,10 @@
   "builtin-baseline": "16c71a39e5a0fc0bdb3fad03beef8f38ee00ee3b",
   "vcpkg-configuration": {
     "overlay-ports": [
-      "./vcpkg-overlay-ports"
+      "./cmake/vcpkg/ports"
     ],
     "overlay-triplets": [
-      "./vcpkg-triplets"
+      "./cmake/vcpkg/triplets"
     ]
   },
   "overrides": [

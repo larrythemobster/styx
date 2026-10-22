@@ -70,12 +70,12 @@ including RmlUi, libdatachannel, libsodium, opus and OpenSSL.
 git clone --recursive https://github.com/larrythemobster/styx.git
 cd styx
 set DEPS=C:\path\to\deps
-build-windows.bat configure
+scripts\build-windows.bat configure
 ```
 
 `DEPS` should contain `Qt\6.12.0\msvc2022_64`, `ffmpeg` and `curl-impersonate`.
 If it isn't set, the script looks for `..\deps`. Later builds only need
-`build-windows.bat`. The script builds `build\styx.exe` and runs
+`scripts\build-windows.bat`. The script builds `build\styx.exe` and runs
 `windeployqt`. FFmpeg and curl-impersonate DLLs must be beside the executable
 or on `PATH`.
 
