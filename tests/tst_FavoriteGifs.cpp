@@ -56,7 +56,7 @@ void TestFavoriteGifs::testGifvEmbedIsStoredAsItsProxiedVideo()
     QCOMPARE(gif.width, 498u);
     QCOMPARE(gif.height, 280u);
     QCOMPARE(gif.order, 7u);
-    QVERIFY(gif.messageAsReceived.isEmpty());
+    QVERIFY(gif.messageAsReceived.empty());
 }
 
 void TestFavoriteGifs::testGifAttachmentIsStoredAsAnimatedWebp()
