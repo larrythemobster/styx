@@ -1,0 +1,68 @@
+#ifndef _WIN32
+#include "Paths.hpp"
+
+#include <cstdlib>
+
+namespace Styx::Platform::Paths {
+
+static std::filesystem::path getHomeDir()
+{
+    const char *home = std::getenv("HOME");
+    if (home && *home) {
+        return home;
+    }
+    return "/tmp";
+}
+
+#ifdef __APPLE__
+std::filesystem::path configDir()
+{
+    return getHomeDir() / "Library" / "Application Support" / "larrythemobster" / "Styx";
+}
+
+std::filesystem::path dataDir()
+{
+    return configDir();
+}
+
+std::filesystem::path cacheDir()
+{
+    return getHomeDir() / "Library" / "Caches" / "larrythemobster" / "Styx";
+}
+#else // Linux / BSD / XDG
+std::filesystem::path configDir()
+{
+    const char *xdgConfig = std::getenv("XDG_CONFIG_HOME");
+    if (xdgConfig && *xdgConfig) {
+        return std::filesystem::path(xdgConfig) / "larrythemobster" / "Styx";
+    }
+    return getHomeDir() / ".config" / "larrythemobster" / "Styx";
+}
+
+std::filesystem::path dataDir()
+{
+    const char *xdgData = std::getenv("XDG_DATA_HOME");
+    if (xdgData && *xdgData) {
+        return std::filesystem::path(xdgData) / "larrythemobster" / "Styx";
+    }
+    return getHomeDir() / ".local" / "share" / "larrythemobster" / "Styx";
+}
+
+std::filesystem::path cacheDir()
+{
+    const char *xdgCache = std::getenv("XDG_CACHE_HOME");
+    if (xdgCache && *xdgCache) {
+        return std::filesystem::path(xdgCache) / "larrythemobster" / "Styx";
+    }
+    return getHomeDir() / ".cache" / "larrythemobster" / "Styx";
+}
+#endif
+
+std::filesystem::path executablePath()
+{
+    std::error_code ec;
+    return std::filesystem::canonical("/proc/self/exe", ec);
+}
+
+} // namespace Styx::Platform::Paths
+#endif

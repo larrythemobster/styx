@@ -20,7 +20,12 @@
         "freetype",
         "svg"
       ]
-    }
+    },
+    "catch2",
+    "nlohmann-json",
+    "sqlite3",
+    "stb",
+    "libwebp"
   ],
   "features": {
     "ffmpeg": {

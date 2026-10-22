@@ -233,22 +233,12 @@ set(PROJECT_SOURCES
     src/Core/Media/ClipDecoder.cpp
     src/Core/Media/ClipPlayer.cpp
     src/Core/Media/CurlAvio.cpp
-    src/UI/MainWindow.cpp
     src/UI/BrowserCaptchaResolver.cpp
-    src/UI/TypingIndicator.cpp
-    src/UI/SlowModeIndicator.cpp
-    src/UI/ConnectionBanner.cpp
-    src/UI/ChannelTopicLine.cpp
-    src/UI/ElidedLabel.cpp
     src/UI/StatusIndicator.cpp
     src/UI/TrayIcon.cpp
     src/UI/ProxyLineEdit.cpp
     src/UI/ImageViewer.cpp
-    src/UI/VideoFullscreenWindow.cpp
     src/UI/Accounts/AccountsWindow.cpp
-    src/UI/Settings/SettingsWindow.cpp
-    src/UI/Settings/GeneralPage.cpp
-    src/UI/Settings/AppearancePage.cpp
     src/UI/GuildSettings/AuditLogFormatter.cpp
     src/UI/GuildSettings/GuildAuditLogPage.cpp
     src/UI/GuildSettings/GuildBansPage.cpp
@@ -267,52 +257,28 @@ set(PROJECT_SOURCES
     src/UI/GuildSettings/MemberModeration.cpp
     src/UI/GuildSettings/UnsavedChangesBar.cpp
     src/UI/Accounts/AccountsModel.cpp
-    src/UI/ChannelList/ChannelDelegate.cpp
     src/UI/ChannelList/ChannelTreeModel.cpp
     src/UI/ChannelList/ChannelFilterProxyModel.cpp
-    src/UI/ChannelList/ChannelTreeView.cpp
     src/UI/ChannelList/ServerRailModel.cpp
-    src/UI/ChannelList/ServerRailDelegate.cpp
-    src/UI/ChannelList/ServerRailView.cpp
-    src/UI/ChannelList/MentionJumpIndicator.cpp
-    src/UI/TabBar/TabBar.cpp
     src/UI/Chat/ChatModel.cpp
-    src/UI/Chat/ChatDelegate.cpp
-    src/UI/Chat/ChatView.cpp
-    src/UI/Chat/ChatLayout.cpp
-    src/UI/Chat/InlineVideoController.cpp
     src/UI/Chat/GifPlayback.cpp
     src/UI/Chat/GifPainting.cpp
-    src/UI/Chat/FrameAnimator.cpp
     src/UI/Chat/EmojiTextObject.cpp
     src/UI/Chat/MessageTextDocument.cpp
     src/UI/Chat/MessageTextBrowser.cpp
-    src/UI/Chat/MediaTarget.cpp
-    src/UI/Chat/VideoControls.cpp
-    src/UI/Chat/MessageActionBar.cpp
-    src/UI/Chat/ReactionTooltip.cpp
     src/UI/Forum/ForumPostModel.cpp
     src/UI/Forum/ForumPostDelegate.cpp
     src/UI/Forum/ForumBrowser.cpp
-    src/UI/Forum/NewPostDialog.cpp
     src/UI/ThreadBrowser/ThreadBrowserPopup.cpp
     src/UI/Dialogs/TokenInputDialog.cpp
     src/UI/Dialogs/ProxyInputDialog.cpp
     src/UI/Dialogs/QRLoginDialog.cpp
     src/UI/Dialogs/DirectLoginDialog.cpp
     src/UI/Dialogs/BasePopup.cpp
-    src/UI/Dialogs/ChannelTopicPopup.cpp
     src/UI/Dialogs/ConfirmPopup.cpp
-    src/UI/Dialogs/ReactionsPopup.cpp
     src/UI/Dialogs/UserProfilePopup.cpp
     src/UI/Dialogs/ActivityCard.cpp
     src/UI/MemberList/MemberListModel.cpp
-    src/UI/MemberList/MemberListDelegate.cpp
-    src/UI/MemberList/MemberListView.cpp
-    src/UI/Input/MessageInput.cpp
-    src/UI/Input/EmojiAutocompletePopup.cpp
-    src/UI/Input/TextEdgeNavigation.cpp
-    src/UI/Emoji/EmojiButton.cpp
     src/UI/Emoji/EmojiGlyphs.cpp
     src/UI/Emoji/EmojiGridView.cpp
     src/UI/Emoji/EmojiPainting.cpp
@@ -323,7 +289,6 @@ set(PROJECT_SOURCES
     src/UI/Gifs/FavoriteGifPicker.cpp
     src/UI/Emoji/EmojiSectionRail.cpp
     src/UI/Emoji/PaintedImages.cpp
-    src/UI/Input/AttachmentPreviewPanel.cpp
     src/Storage/DatabaseManager.cpp
     src/Storage/BaseRepository.cpp
     src/Storage/Transaction.cpp
@@ -363,6 +328,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/MemberListController.cpp
     src/UI/Rml/CallController.cpp
     src/UI/Rml/FriendsController.cpp
+    src/UI/Rml/SettingsController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )
 if(WIN32)
@@ -372,8 +338,6 @@ endif()
 
 if(ENABLE_VOICE)
     list(APPEND PROJECT_SOURCES
-        src/UI/VoiceStatusBar.cpp
-        src/UI/VoiceWindow.cpp
         src/Discord/Voice/VoiceGateway.cpp
         src/Discord/Voice/UdpTransport.cpp
         src/Discord/Voice/Socks5UdpAssociation.cpp
@@ -408,7 +372,6 @@ if(ENABLE_SCREENSHARE)
         src/Core/Stream/StreamDecoder.cpp
         src/Core/Stream/StreamManager.cpp
         src/UI/Stream/SourcePickerDialog.cpp
-        src/UI/Stream/StreamViewWindow.cpp
     )
 endif()
 
@@ -416,7 +379,6 @@ if(ENABLE_VOICE OR TARGET ffmpeg)
     list(APPEND PROJECT_SOURCES
         src/Core/Audio/MiniaudioImpl.cpp
         src/Core/Audio/AudioBackends.cpp
-        src/UI/Settings/AudioPage.cpp
     )
 endif()
 
@@ -692,3 +654,75 @@ if(UNIX AND NOT APPLE)
     )
 endif()
 
+
+# ---------------------------------------------------------------------------
+# Qt-free Platform Foundation (styx_platform)
+# ---------------------------------------------------------------------------
+
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(Stb REQUIRED)
+find_package(WebP CONFIG QUIET)
+
+set(PLATFORM_SOURCES
+    src/Platform/Dispatcher.cpp
+    src/Platform/Http.cpp
+    src/Platform/Image.cpp
+    src/Platform/Paths.cpp
+    src/Platform/Settings.cpp
+    src/Platform/Sqlite.cpp
+    src/Platform/Utf8.cpp
+)
+
+if(WIN32)
+    list(APPEND PLATFORM_SOURCES
+        src/Platform/Paths_win.cpp
+        src/Platform/SecureStore_win.cpp
+        src/Platform/Settings_win.cpp
+        src/Platform/Utf8_win.cpp
+    )
+else()
+    list(APPEND PLATFORM_SOURCES
+        src/Platform/Paths_other.cpp
+        src/Platform/SecureStore_other.cpp
+        src/Platform/Utf8_other.cpp
+    )
+endif()
+
+add_library(styx_platform STATIC ${PLATFORM_SOURCES})
+target_include_directories(styx_platform
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${Stb_INCLUDE_DIR}
+)
+target_link_libraries(styx_platform
+    PUBLIC
+        nlohmann_json::nlohmann_json
+        unofficial::sqlite3::sqlite3
+        CURL::libcurl
+)
+if(TARGET WebP::webp)
+    target_link_libraries(styx_platform PUBLIC WebP::webp)
+endif()
+if(WIN32)
+    target_link_libraries(styx_platform PRIVATE advapi32 crypt32)
+endif()
+target_compile_features(styx_platform PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(styx_platform PRIVATE /utf-8)
+endif()
+
+# ---------------------------------------------------------------------------
+# Platform Foundation Unit Tests (TestPlatform)
+# ---------------------------------------------------------------------------
+
+find_package(Catch2 3 CONFIG QUIET)
+if(Catch2_FOUND)
+    add_executable(TestPlatform tests/tst_Platform.cpp)
+    target_link_libraries(TestPlatform PRIVATE styx_platform Catch2::Catch2WithMain)
+    target_include_directories(TestPlatform PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(TestPlatform PRIVATE /utf-8)
+    endif()
+    add_test(NAME PlatformTests COMMAND TestPlatform)
+endif()
