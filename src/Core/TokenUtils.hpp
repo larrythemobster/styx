@@ -2,6 +2,8 @@
 
 #include <QString>
 #include <QByteArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "Snowflake.hpp"
 
