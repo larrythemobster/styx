@@ -1,8 +1,10 @@
 #pragma once
 
-#include <QList>
-#include <QString>
+#include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "Core/Snowflake.hpp"
 
@@ -13,9 +15,9 @@ class ProtoReader;
 
 struct GuildFolder
 {
-    QList<Core::Snowflake> guildIds;
+    std::vector<Core::Snowflake> guildIds;
     std::optional<int64_t> id;
-    std::optional<QString> name;
+    std::optional<std::string> name;
     std::optional<uint64_t> color;
 
     static GuildFolder fromProto(ProtoReader &reader);
@@ -23,17 +25,17 @@ struct GuildFolder
 
 struct GuildFolders
 {
-    QList<GuildFolder> folders;
-    QList<Core::Snowflake> guildPositions;
+    std::vector<GuildFolder> folders;
+    std::vector<Core::Snowflake> guildPositions;
 
     static GuildFolders fromProto(ProtoReader &reader);
 };
 
 struct CustomStatus
 {
-    QString text;
+    std::string text;
     uint64_t emojiId = 0;
-    QString emojiName;
+    std::string emojiName;
     uint64_t expiresAtMs = 0; // 0 never expires
     uint64_t createdAtMs = 0;
 
@@ -42,7 +44,7 @@ struct CustomStatus
 
 struct StatusSettings
 {
-    std::optional<QString> status;
+    std::optional<std::string> status;
     std::optional<CustomStatus> customStatus;
     std::optional<bool> showCurrentGame;
     uint64_t statusExpiresAtMs = 0;
@@ -53,7 +55,7 @@ struct StatusSettings
 
 struct LocalizationSettings
 {
-    std::optional<QString> locale;
+    std::optional<std::string> locale;
 
     static LocalizationSettings fromProto(ProtoReader &reader);
     void mergeFrom(const LocalizationSettings &other);
@@ -66,7 +68,7 @@ struct PreloadedUserSettings
     std::optional<LocalizationSettings> localization;
 
     static PreloadedUserSettings fromProto(ProtoReader &reader);
-    static PreloadedUserSettings fromBase64(const QString &base64);
+    static PreloadedUserSettings fromBase64(std::string_view base64);
 
     void mergeFrom(const PreloadedUserSettings &other);
 };

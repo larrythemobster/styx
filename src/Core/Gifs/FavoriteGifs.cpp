@@ -26,12 +26,13 @@ FavoriteGifs::FavoriteGifs(Discord::Client *client, QObject *parent) : QObject(p
 
 QList<Proto::FavoriteGif> FavoriteGifs::newestFirst() const
 {
-    return FavoriteGifRules::newestFirst(favorites.gifs);
+    return FavoriteGifRules::newestFirst(QList<Proto::FavoriteGif>(favorites.gifs.begin(), favorites.gifs.end()));
 }
 
 int FavoriteGifs::indexOf(const QString &key) const
 {
-    const auto found = std::find_if(favorites.gifs.cbegin(), favorites.gifs.cend(), [&key](const Proto::FavoriteGif &gif) { return gif.url == key; });
+    const std::string stdKey = key.toStdString();
+    const auto found = std::find_if(favorites.gifs.cbegin(), favorites.gifs.cend(), [&stdKey](const Proto::FavoriteGif &gif) { return gif.url == stdKey; });
     return found == favorites.gifs.cend() ? -1 : int(found - favorites.gifs.cbegin());
 }
 
@@ -45,14 +46,14 @@ void FavoriteGifs::add(const FavoriteGifCandidate &candidate)
     if (!loaded || !candidate.isValid())
         return;
 
-    const Proto::FavoriteGif gif = FavoriteGifRules::stored(candidate, FavoriteGifRules::orderAfter(favorites.gifs));
+    const Proto::FavoriteGif gif = FavoriteGifRules::stored(candidate, FavoriteGifRules::orderAfter(QList<Proto::FavoriteGif>(favorites.gifs.begin(), favorites.gifs.end())));
 
     Proto::FavoriteGifs edited = favorites;
-    const int existing = indexOf(gif.url);
+    const int existing = indexOf(QString::fromStdString(gif.url));
     if (existing >= 0)
         edited.gifs[existing] = gif;
     else
-        edited.gifs.append(gif);
+        edited.gifs.push_back(gif);
     if (edited.gifs.size() > FavoriteGifRules::CountThatHidesTheTooltip)
         edited.hideTooltip = true;
 
@@ -76,7 +77,7 @@ void FavoriteGifs::remove(const QString &url)
     if (index < 0)
         return;
 
-    favorites.gifs.removeAt(index);
+    favorites.gifs.erase(favorites.gifs.begin() + index);
     emit changed();
     saveSoon();
 }
@@ -105,8 +106,7 @@ void FavoriteGifs::onUserSettingsProtoUpdated(const Discord::UserSettingsProtoUp
     const QByteArray decoded = QByteArray::fromBase64(event.proto.get().toUtf8());
     if (decoded.isEmpty() || unsavedEdits)
         return;
-
-    Proto::ProtoReader reader(decoded);
+    Proto::ProtoReader reader(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(decoded.constData()), decoded.size()));
     const Proto::FrecencyUserSettings settings = Proto::FrecencyUserSettings::fromProto(reader);
 
     const bool partial = event.partial.hasValue() && event.partial.get();
@@ -138,10 +138,10 @@ void FavoriteGifs::save()
     saveInFlight = true;
 
     QPointer<FavoriteGifs> self(this);
-    client->patchFrecencySettings(onlyFavorites.toProtoPartial(), std::nullopt, [this, self](const Discord::Client::FrecencyPatchResult &result) {
+    const auto partialBytes = onlyFavorites.toProtoPartial();
+    client->patchFrecencySettings(QByteArray(reinterpret_cast<const char *>(partialBytes.data()), partialBytes.size()), std::nullopt, [this, self](const Discord::Client::FrecencyPatchResult &result) {
         if (!self)
             return;
-
         saveInFlight = false;
 
         if (result.rateLimited) {

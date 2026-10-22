@@ -351,7 +351,7 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
     // folders and unfolder'd guilds
     std::vector<std::unique_ptr<ChannelNode>> topLevelNodes;
 
-    if (settings.guildFolders.has_value() && !settings.guildFolders->folders.isEmpty()) {
+    if (settings.guildFolders.has_value() && !settings.guildFolders->folders.empty()) {
         const auto &folders = settings.guildFolders->folders;
 
         QSet<Core::Snowflake> guildIdsInFolders;
@@ -382,7 +382,7 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
             }
         }
     } else if (settings.guildFolders.has_value() &&
-               !settings.guildFolders->guildPositions.isEmpty()) {
+               !settings.guildFolders->guildPositions.empty()) {
         const auto &positions = settings.guildFolders->guildPositions;
         QSet<Core::Snowflake> positioned;
         for (const auto &id : positions)
@@ -858,8 +858,8 @@ std::unique_ptr<ChannelNode> ChannelTreeModel::createFolderNode(const Proto::Gui
 {
     auto folderNode = std::make_unique<ChannelNode>();
     folderNode->type = ChannelNode::Type::Folder;
-    folderNode->name = folder.name.value_or("Unnamed Folder");
-    folderNode->folderName = folder.name;
+    folderNode->name = folder.name ? QString::fromStdString(*folder.name) : QStringLiteral("Unnamed Folder");
+    folderNode->folderName = folder.name ? std::optional(QString::fromStdString(*folder.name)) : std::nullopt;
     if (folder.color != Discord::BLURPLE)
         folderNode->folderColor = folder.color;
     folderNode->id = Core::Snowflake(folder.id.value());
@@ -1118,7 +1118,7 @@ void ChannelTreeModel::placeGuildNode(ChannelNode *accNode, Snowflake guildId,
         const auto &settings = instance->discord()->getSettings();
         if (settings.guildFolders.has_value())
             for (const auto &f : settings.guildFolders->folders)
-                if (f.id.has_value() && f.guildIds.contains(guildId)) {
+                if (f.id.has_value() && std::find(f.guildIds.begin(), f.guildIds.end(), guildId) != f.guildIds.end()) {
                     folder = &f;
                     break;
                 }

@@ -10,7 +10,7 @@ void ProtoWriter::writeRawVarint(uint64_t value)
         value >>= 7;
         if (value)
             byte |= 0x80;
-        buffer.append(static_cast<char>(byte));
+        buffer.push_back(byte);
     } while (value);
 }
 
@@ -31,21 +31,21 @@ void ProtoWriter::writeInt32(uint32_t fieldNumber, int32_t value)
     writeVarint(fieldNumber, static_cast<uint64_t>(static_cast<int64_t>(value)));
 }
 
-void ProtoWriter::writeString(uint32_t fieldNumber, const QString &value)
+void ProtoWriter::writeString(uint32_t fieldNumber, std::string_view value)
 {
-    writeBytes(fieldNumber, value.toUtf8());
+    writeBytes(fieldNumber, std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(value.data()), value.size()));
 }
 
-void ProtoWriter::writeBytes(uint32_t fieldNumber, const QByteArray &value)
+void ProtoWriter::writeBytes(uint32_t fieldNumber, std::span<const uint8_t> value)
 {
     writeTag(fieldNumber, WireType::LENGTH_DELIMITED);
     writeRawVarint(static_cast<uint64_t>(value.size()));
-    buffer.append(value);
+    buffer.insert(buffer.end(), value.begin(), value.end());
 }
 
-void ProtoWriter::writePackedVarints(uint32_t fieldNumber, const QList<uint64_t> &values)
+void ProtoWriter::writePackedVarints(uint32_t fieldNumber, std::span<const uint64_t> values)
 {
-    if (values.isEmpty())
+    if (values.empty())
         return;
 
     ProtoWriter packed;

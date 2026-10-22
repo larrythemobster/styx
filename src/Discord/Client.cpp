@@ -23,14 +23,15 @@ Proto::GuildFolders guildFoldersFromLegacy(const QList<GuildFolderEntry> &entrie
     result.folders.reserve(entries.size());
     for (const auto &entry : entries) {
         Proto::GuildFolder folder;
-        folder.guildIds = entry.guildIds.get();
+        const auto &gids = entry.guildIds.get();
+        folder.guildIds.assign(gids.begin(), gids.end());
         if (entry.id.hasValue())
             folder.id = entry.id.get();
         if (entry.name.hasValue())
-            folder.name = entry.name.get();
+            folder.name = entry.name.get().toStdString();
         if (entry.color.hasValue())
             folder.color = static_cast<uint64_t>(entry.color.get());
-        result.folders.append(folder);
+        result.folders.push_back(std::move(folder));
     }
     return result;
 }
@@ -46,7 +47,7 @@ std::optional<Proto::FrecencyUserSettings> decodeFrecencySettings(const QJsonObj
     if (proto.isEmpty())
         return std::nullopt;
 
-    Proto::ProtoReader reader(proto);
+    Proto::ProtoReader reader(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(proto.constData()), proto.size()));
     return Proto::FrecencyUserSettings::fromProto(reader);
 }
 
@@ -651,9 +652,10 @@ void Client::onGatewayReady(const Ready &data)
     for (const auto &guild : data.guilds.get())
         indexGuildMappings(guild);
 
-    settings = Proto::PreloadedUserSettings::fromBase64(data.userSettingsProto.get());
+    const std::string protoStr = data.userSettingsProto.get().toStdString();
+    settings = Proto::PreloadedUserSettings::fromBase64(protoStr);
 
-    if ((!settings.guildFolders.has_value() || settings.guildFolders->folders.isEmpty()) && data.userSettings.hasValue() && !data.userSettings->guildFolders->isEmpty())
+    if ((!settings.guildFolders.has_value() || settings.guildFolders->folders.empty()) && data.userSettings.hasValue() && !data.userSettings->guildFolders->isEmpty())
         settings.guildFolders = guildFoldersFromLegacy(data.userSettings->guildFolders.get());
 
     applyDiscordLocale();
@@ -671,12 +673,13 @@ void Client::onGatewayReadySupplemental(const ReadySupplemental &data)
 void Client::onGatewayUserSettingsProtoUpdate(const UserSettingsProtoUpdate &event)
 {
     if (event.type.get() == UserSettingsProtoType::PRELOADED) {
-        auto updated = Proto::PreloadedUserSettings::fromBase64(event.proto.get());
+        const std::string protoStr = event.proto.get().toStdString();
+        auto updated = Proto::PreloadedUserSettings::fromBase64(protoStr);
 
         if (event.partial.hasValue() && event.partial.get()) {
             settings.mergeFrom(updated);
         } else {
-            if (!updated.guildFolders.has_value() || updated.guildFolders->folders.isEmpty())
+            if (!updated.guildFolders.has_value() || updated.guildFolders->folders.empty())
                 updated.guildFolders = settings.guildFolders;
             settings = updated;
         }
@@ -691,7 +694,7 @@ void Client::onGatewayUserSettingsProtoUpdate(const UserSettingsProtoUpdate &eve
 void Client::applyDiscordLocale()
 {
     if (settings.localization.has_value() && settings.localization->locale.has_value())
-        identity.setDiscordLocale(settings.localization->locale.value());
+        identity.setDiscordLocale(QString::fromStdString(settings.localization->locale.value()));
 }
 
 void Client::onGatewayMessageCreate(const Message &msg)

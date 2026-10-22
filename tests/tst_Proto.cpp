@@ -1,31 +1,45 @@
-// Tests for the FrecencyUserSettings wire format (settings-proto type 2). The
-// encoding is hand-rolled on both sides, so the risks are: a map entry written
-// in a shape the official client cannot read, a negative int32 mangled by the
-// varint path, and an unknown field derailing the parse of the fields we do
-// want.
+#include <catch2/catch_test_macros.hpp>
 
 #include "Proto/FrecencySettings.hpp"
 #include "Proto/ProtoReader.hpp"
 #include "Proto/ProtoWriter.hpp"
+#include "Platform/Base64.hpp"
 
-#include <QTest>
+#include <algorithm>
+#include <iomanip>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using namespace Styx::Proto;
 
-class TestProto : public QObject
-{
-    Q_OBJECT
-private slots:
-    void testFrecencyRoundTrip();
-    void testMapEncoding();
-    void testSkipsUnknownFields();
-    void testNegativeInt32();
-    void testFavoriteGifEncoding();
-    void testFavoriteGifsKeepWhatTheyDoNotUnderstand();
-    void testFavoriteGifsTravelAloneInAPatch();
-};
+namespace {
 
-void TestProto::testFrecencyRoundTrip()
+std::string toHex(std::span<const uint8_t> data)
+{
+    std::ostringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (uint8_t byte : data) {
+        ss << std::setw(2) << static_cast<int>(byte);
+    }
+    return ss.str();
+}
+
+std::vector<uint8_t> fromHex(std::string_view hex)
+{
+    std::vector<uint8_t> bytes;
+    bytes.reserve(hex.size() / 2);
+    for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+        std::string byteString(hex.substr(i, 2));
+        uint8_t byte = static_cast<uint8_t>(std::stoul(byteString, nullptr, 16));
+        bytes.push_back(byte);
+    }
+    return bytes;
+}
+
+} // namespace
+
+TEST_CASE("Proto: Frecency round trip", "[proto]")
 {
     FrecencyItem thumbsup;
     thumbsup.totalUses = 7;
@@ -41,44 +55,46 @@ void TestProto::testFrecencyRoundTrip()
 
     FrecencyUserSettings settings;
     EmojiFrecency chat;
-    chat.emojis.insert("thumbsup", thumbsup);
-    chat.emojis.insert("123456789012345678", custom);
+    chat.emojis.insert_or_assign("thumbsup", thumbsup);
+    chat.emojis.insert_or_assign("123456789012345678", custom);
     settings.emojiFrecency = chat;
 
     EmojiFrecency reactions;
-    reactions.emojis.insert("eyes", thumbsup);
+    reactions.emojis.insert_or_assign("eyes", thumbsup);
     settings.emojiReactionFrecency = reactions;
 
     settings.dataVersion = 9;
 
-    QByteArray encoded = settings.toProtoPartial();
+    std::vector<uint8_t> encoded = settings.toProtoPartial();
     ProtoReader reader(encoded);
     FrecencyUserSettings decoded = FrecencyUserSettings::fromProto(reader);
 
     // toProtoPartial only carries the two frecency maps
-    QVERIFY(!decoded.dataVersion.has_value());
+    REQUIRE(!decoded.dataVersion.has_value());
 
-    QVERIFY(decoded.emojiFrecency.has_value());
-    QCOMPARE(decoded.emojiFrecency->emojis.size(), 2);
+    REQUIRE(decoded.emojiFrecency.has_value());
+    REQUIRE(decoded.emojiFrecency->emojis.size() == 2);
 
-    const FrecencyItem &decodedThumbsup = decoded.emojiFrecency->emojis.value("thumbsup");
-    QCOMPARE(decodedThumbsup.totalUses, 7u);
-    QCOMPARE(decodedThumbsup.recentUses, thumbsup.recentUses);
-    QCOMPARE(decodedThumbsup.frecency, -1);
-    QCOMPARE(decodedThumbsup.score, 270);
+    REQUIRE(decoded.emojiFrecency->emojis.contains("thumbsup"));
+    const FrecencyItem &decodedThumbsup = decoded.emojiFrecency->emojis.at("thumbsup");
+    REQUIRE(decodedThumbsup.totalUses == 7u);
+    REQUIRE(decodedThumbsup.recentUses == thumbsup.recentUses);
+    REQUIRE(decodedThumbsup.frecency == -1);
+    REQUIRE(decodedThumbsup.score == 270);
 
-    const FrecencyItem &decodedCustom = decoded.emojiFrecency->emojis.value("123456789012345678");
-    QCOMPARE(decodedCustom.totalUses, 1u);
-    QCOMPARE(decodedCustom.recentUses, custom.recentUses);
-    QCOMPARE(decodedCustom.frecency, 42);
-    QCOMPARE(decodedCustom.score, 100);
+    REQUIRE(decoded.emojiFrecency->emojis.contains("123456789012345678"));
+    const FrecencyItem &decodedCustom = decoded.emojiFrecency->emojis.at("123456789012345678");
+    REQUIRE(decodedCustom.totalUses == 1u);
+    REQUIRE(decodedCustom.recentUses == custom.recentUses);
+    REQUIRE(decodedCustom.frecency == 42);
+    REQUIRE(decodedCustom.score == 100);
 
-    QVERIFY(decoded.emojiReactionFrecency.has_value());
-    QCOMPARE(decoded.emojiReactionFrecency->emojis.size(), 1);
-    QCOMPARE(decoded.emojiReactionFrecency->emojis.value("eyes").totalUses, 7u);
+    REQUIRE(decoded.emojiReactionFrecency.has_value());
+    REQUIRE(decoded.emojiReactionFrecency->emojis.size() == 1);
+    REQUIRE(decoded.emojiReactionFrecency->emojis.at("eyes").totalUses == 7u);
 }
 
-void TestProto::testMapEncoding()
+TEST_CASE("Proto: Map encoding", "[proto]")
 {
     FrecencyItem item;
     item.totalUses = 1;
@@ -86,7 +102,7 @@ void TestProto::testMapEncoding()
 
     FrecencyUserSettings settings;
     EmojiFrecency chat;
-    chat.emojis.insert("a", item);
+    chat.emojis.insert_or_assign("a", item);
     settings.emojiFrecency = chat;
 
     // 32 0c            field 6 (emoji_frecency), 12 bytes
@@ -95,44 +111,44 @@ void TestProto::testMapEncoding()
     //     12 05        value, 5 bytes
     //       08 01      total_uses = 1
     //       12 01 02   recent_uses = [2], packed
-    QCOMPARE(settings.toProtoPartial().toHex(), QByteArray("320c0a0a0a016112050801120102"));
+    REQUIRE(toHex(settings.toProtoPartial()) == "320c0a0a0a016112050801120102");
 }
 
-void TestProto::testSkipsUnknownFields()
+TEST_CASE("Proto: Skips unknown fields", "[proto]")
 {
     // 0a 06 08 01 10 02 18 2a          versions { client=1, server=2, data=42 }
     // 38 05                            unknown varint field 7
     // 2a 09 0a 03 61 62 63 0a 02 64 65 favorite_emojis { "abc", "de" } (not decoded)
     // 42 02 ff ff                      unknown length-delimited field 8
-    QByteArray fixture = QByteArray::fromHex("0a0608011002182a"
-                                             "3805"
-                                             "2a090a036162630a026465"
-                                             "4202ffff");
+    std::vector<uint8_t> fixture = fromHex("0a0608011002182a"
+                                           "3805"
+                                           "2a090a036162630a026465"
+                                           "4202ffff");
 
     ProtoReader reader(fixture);
     FrecencyUserSettings settings = FrecencyUserSettings::fromProto(reader);
 
-    QVERIFY(settings.dataVersion.has_value());
-    QCOMPARE(*settings.dataVersion, 42u);
+    REQUIRE(settings.dataVersion.has_value());
+    REQUIRE(*settings.dataVersion == 42u);
 
-    QVERIFY(!settings.emojiFrecency.has_value());
-    QVERIFY(!settings.emojiReactionFrecency.has_value());
+    REQUIRE(!settings.emojiFrecency.has_value());
+    REQUIRE(!settings.emojiReactionFrecency.has_value());
 }
 
-void TestProto::testNegativeInt32()
+TEST_CASE("Proto: Negative int32", "[proto]")
 {
     ProtoWriter writer;
     writer.writeInt32(3, -1);
 
     // tag 0x18 then the sign-extended 10 byte varint protobuf uses for int32
-    QCOMPARE(writer.bytes().toHex(), QByteArray("18ffffffffffffffffff01"));
+    REQUIRE(toHex(writer.bytes()) == "18ffffffffffffffffff01");
 
     ProtoReader reader(writer.bytes());
     FrecencyItem item = FrecencyItem::fromProto(reader);
-    QCOMPARE(item.frecency, -1);
+    REQUIRE(item.frecency == -1);
 }
 
-void TestProto::testFavoriteGifEncoding()
+TEST_CASE("Proto: Favorite GIF encoding", "[proto]")
 {
     FavoriteGif gif;
     gif.url = "u";
@@ -143,62 +159,75 @@ void TestProto::testFavoriteGifEncoding()
     gif.order = 5;
 
     FavoriteGifs favorites;
-    favorites.gifs.append(gif);
+    favorites.gifs.push_back(gif);
     favorites.hideTooltip = true;
 
-    const QByteArray entryKeyedUThenHideTooltip = "0a100a0175120b0802120173180320042805" + QByteArray("1001");
-    QCOMPARE(favorites.toProto().toHex(), entryKeyedUThenHideTooltip);
+    const std::string entryKeyedUThenHideTooltip = "0a100a0175120b08021201731803200428051001";
+    REQUIRE(toHex(favorites.toProto()) == entryKeyedUThenHideTooltip);
 
     const FavoriteGifs decoded = FavoriteGifs::fromProto(favorites.toProto());
-    QCOMPARE(decoded.gifs.size(), 1);
-    QCOMPARE(decoded.gifs[0].url, QString("u"));
-    QCOMPARE(decoded.gifs[0].format, GifType::Video);
-    QCOMPARE(decoded.gifs[0].src, QString("s"));
-    QCOMPARE(decoded.gifs[0].width, 3u);
-    QCOMPARE(decoded.gifs[0].height, 4u);
-    QCOMPARE(decoded.gifs[0].order, 5u);
-    QVERIFY(decoded.hideTooltip);
+    REQUIRE(decoded.gifs.size() == 1);
+    REQUIRE(decoded.gifs[0].url == "u");
+    REQUIRE(decoded.gifs[0].format == GifType::Video);
+    REQUIRE(decoded.gifs[0].src == "s");
+    REQUIRE(decoded.gifs[0].width == 3u);
+    REQUIRE(decoded.gifs[0].height == 4u);
+    REQUIRE(decoded.gifs[0].order == 5u);
+    REQUIRE(decoded.hideTooltip);
 }
 
-void TestProto::testFavoriteGifsKeepWhatTheyDoNotUnderstand()
+TEST_CASE("Proto: Favorite GIFs keep unknown fields", "[proto]")
 {
-    const QByteArray unknownVarintField9 = "4807";
-    const QByteArray entryFromServer = QByteArray::fromHex("0a120a0175120d0802120173180320042805" + unknownVarintField9);
-    const QByteArray unknownField = QByteArray::fromHex("1a01ff");
-    const QByteArray hideTooltip = QByteArray::fromHex("1001");
+    const std::string unknownVarintField9 = "4807";
+    std::vector<uint8_t> entryFromServer = fromHex("0a120a0175120d0802120173180320042805" + unknownVarintField9);
+    std::vector<uint8_t> unknownField = fromHex("1a01ff");
+    std::vector<uint8_t> hideTooltip = fromHex("1001");
 
-    FavoriteGifs favorites = FavoriteGifs::fromProto(entryFromServer + unknownField + hideTooltip);
-    QCOMPARE(favorites.gifs.size(), 1);
-    QCOMPARE(favorites.gifs[0].order, 5u);
-    QVERIFY(favorites.hideTooltip);
+    std::vector<uint8_t> combined = entryFromServer;
+    combined.insert(combined.end(), unknownField.begin(), unknownField.end());
+    combined.insert(combined.end(), hideTooltip.begin(), hideTooltip.end());
+
+    FavoriteGifs favorites = FavoriteGifs::fromProto(combined);
+    REQUIRE(favorites.gifs.size() == 1);
+    REQUIRE(favorites.gifs[0].order == 5u);
+    REQUIRE(favorites.hideTooltip);
 
     FavoriteGif added;
     added.url = "v";
     added.format = GifType::Image;
     added.src = "t";
     added.order = 6;
-    favorites.gifs.append(added);
+    favorites.gifs.push_back(added);
 
-    const QByteArray entryMadeHere = QByteArray::fromHex("0a0c0a0176120708011201742806");
-    QCOMPARE(favorites.toProto().toHex(), (entryFromServer + entryMadeHere + hideTooltip + unknownField).toHex());
+    std::vector<uint8_t> entryMadeHere = fromHex("0a0c0a0176120708011201742806");
 
-    favorites.gifs.removeFirst();
-    QCOMPARE(favorites.toProto().toHex(), (entryMadeHere + hideTooltip + unknownField).toHex());
+    std::vector<uint8_t> expected1 = entryFromServer;
+    expected1.insert(expected1.end(), entryMadeHere.begin(), entryMadeHere.end());
+    expected1.insert(expected1.end(), hideTooltip.begin(), hideTooltip.end());
+    expected1.insert(expected1.end(), unknownField.begin(), unknownField.end());
+
+    REQUIRE(toHex(favorites.toProto()) == toHex(expected1));
+
+    favorites.gifs.erase(favorites.gifs.begin());
+
+    std::vector<uint8_t> expected2 = entryMadeHere;
+    expected2.insert(expected2.end(), hideTooltip.begin(), hideTooltip.end());
+    expected2.insert(expected2.end(), unknownField.begin(), unknownField.end());
+
+    REQUIRE(toHex(favorites.toProto()) == toHex(expected2));
 }
 
-void TestProto::testFavoriteGifsTravelAloneInAPatch()
+TEST_CASE("Proto: Favorite GIFs travel alone in a patch", "[proto]")
 {
     FrecencyUserSettings settings;
     settings.dataVersion = 9;
     settings.favoriteGifs = FavoriteGifs();
-    QCOMPARE(settings.toProtoPartial().toHex(), QByteArray("1200"));
+    REQUIRE(toHex(settings.toProtoPartial()) == "1200");
 
-    ProtoReader reader(QByteArray::fromHex("12140a100a0175120b08021201731803200428051001"));
+    std::vector<uint8_t> input = fromHex("12140a100a0175120b08021201731803200428051001");
+    ProtoReader reader(input);
     const FrecencyUserSettings decoded = FrecencyUserSettings::fromProto(reader);
-    QVERIFY(decoded.favoriteGifs.has_value());
-    QCOMPARE(decoded.favoriteGifs->gifs.size(), 1);
-    QVERIFY(!decoded.emojiFrecency.has_value());
+    REQUIRE(decoded.favoriteGifs.has_value());
+    REQUIRE(decoded.favoriteGifs->gifs.size() == 1);
+    REQUIRE(!decoded.emojiFrecency.has_value());
 }
-
-QTEST_GUILESS_MAIN(TestProto)
-#include "tst_Proto.moc"

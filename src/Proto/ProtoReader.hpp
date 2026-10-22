@@ -1,9 +1,10 @@
 #pragma once
 
-#include <QByteArray>
-#include <QString>
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace Styx {
 namespace Proto {
@@ -26,14 +27,17 @@ struct Tag
 class ProtoReader
 {
 public:
-    explicit ProtoReader(const QByteArray &data);
+    explicit ProtoReader(std::span<const uint8_t> data);
+    explicit ProtoReader(const std::vector<uint8_t> &data) : ProtoReader(std::span<const uint8_t>(data.data(), data.size())) {}
+    explicit ProtoReader(std::string_view data) : ProtoReader(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(data.data()), data.size())) {}
 
     bool readTag(Tag &tag);
     bool atEnd() const;
 
     bool readVarint(uint64_t &value);
     bool readFixed64(uint64_t &value);
-    bool readLengthDelimited(QByteArray &value);
+    bool readLengthDelimited(std::vector<uint8_t> &value);
+    bool readLengthDelimited(std::span<const uint8_t> &value);
     bool readFixed32(uint32_t &value);
 
     bool skipField(WireType wireType);
@@ -42,16 +46,16 @@ public:
     size_t remaining() const { return data.size() - pos; }
 
 private:
-    const QByteArray data;
+    const std::span<const uint8_t> data;
     size_t pos = 0;
 
     bool readByte(uint8_t &byte);
     bool readBytes(void *dest, size_t count);
 };
 
-QString readString(ProtoReader &reader);
+std::string readString(ProtoReader &reader);
 std::optional<int64_t> readInt64Value(ProtoReader &reader);
-std::optional<QString> readStringValue(ProtoReader &reader);
+std::optional<std::string> readStringValue(ProtoReader &reader);
 std::optional<uint64_t> readUInt64Value(ProtoReader &reader);
 bool readBoolValue(ProtoReader &reader);
 

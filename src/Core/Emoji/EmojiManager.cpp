@@ -92,12 +92,12 @@ struct QueryMatcher
 QHash<QString, FrecencyTracker::Entry> toHistory(const Proto::EmojiFrecency &frecency)
 {
     QHash<QString, FrecencyTracker::Entry> history;
-    for (auto it = frecency.emojis.constBegin(); it != frecency.emojis.constEnd(); ++it) {
+    for (const auto &[key, val] : frecency.emojis) {
         FrecencyTracker::Entry entry;
-        entry.totalUses = it->totalUses;
-        entry.recentUses = it->recentUses;
-        entry.score = it->score;
-        history.insert(it.key(), entry);
+        entry.totalUses = val.totalUses;
+        entry.recentUses = QList<uint64_t>(val.recentUses.begin(), val.recentUses.end());
+        entry.score = val.score;
+        history.insert(QString::fromStdString(key), entry);
     }
     return history;
 }
@@ -108,10 +108,10 @@ Proto::EmojiFrecency toFrecency(const QHash<QString, FrecencyTracker::Entry> &hi
     for (auto it = history.constBegin(); it != history.constEnd(); ++it) {
         Proto::FrecencyItem item;
         item.totalUses = it->totalUses;
-        item.recentUses = it->recentUses;
+        item.recentUses = std::vector<uint64_t>(it->recentUses.begin(), it->recentUses.end());
         item.frecency = it->frecency;
         item.score = static_cast<int32_t>(it->score);
-        frecency.emojis.insert(it.key(), item);
+        frecency.emojis.insert_or_assign(it.key().toStdString(), std::move(item));
     }
     return frecency;
 }
@@ -463,11 +463,14 @@ QList<Snowflake> EmojiManager::guildsInSidebarOrder() const
 {
     QList<Snowflake> placedBySettings;
     const std::optional<Proto::GuildFolders> &folders = client->getSettings().guildFolders;
-    if (folders && !folders->folders.isEmpty()) {
-        for (const Proto::GuildFolder &folder : folders->folders)
-            placedBySettings.append(folder.guildIds);
+    if (folders && !folders->folders.empty()) {
+        for (const Proto::GuildFolder &folder : folders->folders) {
+            for (Core::Snowflake gid : folder.guildIds)
+                placedBySettings.append(gid);
+        }
     } else if (folders) {
-        placedBySettings = folders->guildPositions;
+        for (Core::Snowflake gid : folders->guildPositions)
+            placedBySettings.append(gid);
     }
 
     const QSet<Snowflake> placed(placedBySettings.cbegin(), placedBySettings.cend());
@@ -686,7 +689,7 @@ void EmojiManager::onUserSettingsProtoUpdated(const Discord::UserSettingsProtoUp
     if (decoded.isEmpty())
         return;
 
-    Proto::ProtoReader reader(decoded);
+    Proto::ProtoReader reader(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(decoded.constData()), decoded.size()));
     const Proto::FrecencyUserSettings settings = Proto::FrecencyUserSettings::fromProto(reader);
 
     const bool partial = event.partial.hasValue() && event.partial.get();
@@ -734,8 +737,9 @@ void EmojiManager::savePendingUsage()
     saveInFlight = true;
 
     QPointer<EmojiManager> self(this);
+    const auto partialBytes = partial.toProtoPartial();
     client->patchFrecencySettings(
-            partial.toProtoPartial(), dataVersion,
+            QByteArray(reinterpret_cast<const char *>(partialBytes.data()), partialBytes.size()), dataVersion,
             [this, self, inFlight](const Discord::Client::FrecencyPatchResult &result) {
                 if (!self)
                     return;

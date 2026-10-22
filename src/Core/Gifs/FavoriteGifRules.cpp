@@ -134,8 +134,8 @@ Proto::FavoriteGif stored(const FavoriteGifCandidate &candidate, uint32_t order)
         src.prepend(QLatin1String("https:"));
 
     Proto::FavoriteGif gif;
-    gif.url = keyFor(candidate.url);
-    gif.src = src;
+    gif.url = keyFor(candidate.url).toStdString();
+    gif.src = src.toStdString();
     gif.format = isAnimatedImageFile(src) ? Proto::GifType::Image : candidate.format;
     gif.width = uint32_t(qMax(0, candidate.size.width()));
     gif.height = uint32_t(qMax(0, candidate.size.height()));
@@ -167,13 +167,13 @@ bool matchesSearch(const QString &url, const QString &query)
 
 QUrl clipServedByDiscord(const Proto::FavoriteGif &gif)
 {
-    const QUrl url(gif.src);
+    const QUrl url(QString::fromStdString(gif.src));
     return Discord::Cdn::isDiscordAssetUrl(url) ? asAnimatedWebp(url) : QUrl();
 }
 
 QUrl stillServedByDiscord(const Proto::FavoriteGif &gif)
 {
-    const QUrl url(gif.src);
+    const QUrl url(QString::fromStdString(gif.src));
     if (!Discord::Cdn::isDiscordAssetUrl(url))
         return {};
     return withoutQueryItems(url, { QLatin1String("animated"), QLatin1String("format") });

@@ -1,9 +1,10 @@
 #pragma once
 
-#include <QByteArray>
-#include <QList>
-#include <QString>
 #include <cstdint>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "ProtoReader.hpp"
 
@@ -15,17 +16,26 @@ class ProtoWriter
 public:
     void writeVarint(uint32_t fieldNumber, uint64_t value);
     void writeInt32(uint32_t fieldNumber, int32_t value);
-    void writeString(uint32_t fieldNumber, const QString &value);
-    void writeBytes(uint32_t fieldNumber, const QByteArray &value);
-    void writePackedVarints(uint32_t fieldNumber, const QList<uint64_t> &values);
+    void writeString(uint32_t fieldNumber, std::string_view value);
+    void writeBytes(uint32_t fieldNumber, std::span<const uint8_t> value);
+    void writeBytes(uint32_t fieldNumber, const std::vector<uint8_t> &value)
+    {
+        writeBytes(fieldNumber, std::span<const uint8_t>(value.data(), value.size()));
+    }
+    void writePackedVarints(uint32_t fieldNumber, std::span<const uint64_t> values);
+    void writePackedVarints(uint32_t fieldNumber, const std::vector<uint64_t> &values)
+    {
+        writePackedVarints(fieldNumber, std::span<const uint64_t>(values.data(), values.size()));
+    }
 
-    const QByteArray &bytes() const { return buffer; }
+    const std::vector<uint8_t> &bytes() const { return buffer; }
+    std::vector<uint8_t> takeBytes() { return std::move(buffer); }
 
 private:
     void writeTag(uint32_t fieldNumber, WireType wireType);
     void writeRawVarint(uint64_t value);
 
-    QByteArray buffer;
+    std::vector<uint8_t> buffer;
 };
 
 } // namespace Proto

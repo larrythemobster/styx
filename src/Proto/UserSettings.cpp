@@ -1,7 +1,7 @@
 #include "UserSettings.hpp"
 
 #include "ProtoReader.hpp"
-#include "Core/Logging.hpp"
+#include "Platform/Base64.hpp"
 
 namespace Styx {
 namespace Proto {
@@ -18,14 +18,14 @@ GuildFolder GuildFolder::fromProto(ProtoReader &reader)
             if (tag.wireType == WireType::FIXED64) {
                 uint64_t id;
                 if (reader.readFixed64(id))
-                    folder.guildIds.append(Core::Snowflake(id));
+                    folder.guildIds.push_back(Core::Snowflake(id));
             } else if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray packed;
+                std::span<const uint8_t> packed;
                 if (reader.readLengthDelimited(packed)) {
                     ProtoReader packedReader(packed);
                     uint64_t id;
                     while (!packedReader.atEnd() && packedReader.readFixed64(id))
-                        folder.guildIds.append(Core::Snowflake(id));
+                        folder.guildIds.push_back(Core::Snowflake(id));
                 }
             } else {
                 reader.skipField(tag.wireType);
@@ -35,7 +35,7 @@ GuildFolder GuildFolder::fromProto(ProtoReader &reader)
         // optional google.protobuf.Int64Value id
         case 2: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     folder.id = readInt64Value(nestedReader);
@@ -48,7 +48,7 @@ GuildFolder GuildFolder::fromProto(ProtoReader &reader)
         // optional google.protobuf.StringValue name
         case 3: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     folder.name = readStringValue(nestedReader);
@@ -61,7 +61,7 @@ GuildFolder GuildFolder::fromProto(ProtoReader &reader)
         // optional google.protobuf.UInt64Value color
         case 4: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     folder.color = readUInt64Value(nestedReader);
@@ -90,10 +90,10 @@ GuildFolders GuildFolders::fromProto(ProtoReader &reader)
         // repeated GuildFolder folders
         case 1: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
-                    guildFolders.folders.append(GuildFolder::fromProto(nestedReader));
+                    guildFolders.folders.push_back(GuildFolder::fromProto(nestedReader));
                 }
             } else {
                 reader.skipField(tag.wireType);
@@ -105,14 +105,14 @@ GuildFolders GuildFolders::fromProto(ProtoReader &reader)
             if (tag.wireType == WireType::FIXED64) {
                 uint64_t id;
                 if (reader.readFixed64(id))
-                    guildFolders.guildPositions.append(Core::Snowflake(id));
+                    guildFolders.guildPositions.push_back(Core::Snowflake(id));
             } else if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray packed;
+                std::span<const uint8_t> packed;
                 if (reader.readLengthDelimited(packed)) {
                     ProtoReader packedReader(packed);
                     uint64_t id;
                     while (!packedReader.atEnd() && packedReader.readFixed64(id))
-                        guildFolders.guildPositions.append(Core::Snowflake(id));
+                        guildFolders.guildPositions.push_back(Core::Snowflake(id));
                 }
             } else {
                 reader.skipField(tag.wireType);
@@ -197,7 +197,7 @@ StatusSettings StatusSettings::fromProto(ProtoReader &reader)
         // optional google.protobuf.StringValue status
         case 1: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     settings.status = readStringValue(nestedReader);
@@ -210,7 +210,7 @@ StatusSettings StatusSettings::fromProto(ProtoReader &reader)
         // optional CustomStatus custom_status
         case 2: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     settings.customStatus = CustomStatus::fromProto(nestedReader);
@@ -223,7 +223,7 @@ StatusSettings StatusSettings::fromProto(ProtoReader &reader)
         // optional google.protobuf.BoolValue show_current_game
         case 3: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     settings.showCurrentGame = readBoolValue(nestedReader);
@@ -261,7 +261,7 @@ LocalizationSettings LocalizationSettings::fromProto(ProtoReader &reader)
         // optional google.protobuf.StringValue locale
         case 1: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     settings.locale = readStringValue(nestedReader);
@@ -290,7 +290,7 @@ PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
         // optional StatusSettings status
         case 11: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     settings.status = StatusSettings::fromProto(nestedReader);
@@ -303,7 +303,7 @@ PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
         // optional LocalizationSettings localization
         case 12: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     settings.localization = LocalizationSettings::fromProto(nestedReader);
@@ -316,7 +316,7 @@ PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
         // optional GuildFolders guild_folders
         case 14: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                QByteArray nested;
+                std::span<const uint8_t> nested;
                 if (reader.readLengthDelimited(nested)) {
                     ProtoReader nestedReader(nested);
                     settings.guildFolders = GuildFolders::fromProto(nestedReader);
@@ -335,9 +335,13 @@ PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
     return settings;
 }
 
-PreloadedUserSettings PreloadedUserSettings::fromBase64(const QString &base64)
+PreloadedUserSettings PreloadedUserSettings::fromBase64(std::string_view base64)
 {
-    ProtoReader reader(QByteArray::fromBase64(base64.toUtf8()));
+    const auto decoded = Platform::fromBase64(base64);
+    if (!decoded)
+        return PreloadedUserSettings{};
+
+    ProtoReader reader(*decoded);
     return fromProto(reader);
 }
 

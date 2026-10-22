@@ -1,11 +1,11 @@
 #pragma once
 
-#include <QByteArray>
-#include <QHash>
-#include <QList>
-#include <QString>
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Styx {
 namespace Proto {
@@ -15,7 +15,7 @@ class ProtoReader;
 struct FrecencyItem
 {
     uint32_t totalUses = 0;
-    QList<uint64_t> recentUses;
+    std::vector<uint64_t> recentUses;
     int32_t frecency = 0;
     int32_t score = 0;
 
@@ -24,7 +24,7 @@ struct FrecencyItem
 
 struct EmojiFrecency
 {
-    QHash<QString, FrecencyItem> emojis;
+    std::unordered_map<std::string, FrecencyItem> emojis;
 
     static EmojiFrecency fromProto(ProtoReader &reader);
 };
@@ -37,23 +37,27 @@ enum class GifType : uint8_t {
 
 struct FavoriteGif
 {
-    QString url;
+    std::string url;
     GifType format = GifType::None;
-    QString src;
+    std::string src;
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t order = 0;
-    QByteArray messageAsReceived;
+    std::vector<uint8_t> messageAsReceived;
 };
 
 struct FavoriteGifs
 {
-    QList<FavoriteGif> gifs;
+    std::vector<FavoriteGif> gifs;
     bool hideTooltip = false;
-    QByteArray unknownFields;
+    std::vector<uint8_t> unknownFields;
 
-    static FavoriteGifs fromProto(const QByteArray &bytes);
-    [[nodiscard]] QByteArray toProto() const;
+    static FavoriteGifs fromProto(std::span<const uint8_t> bytes);
+    static FavoriteGifs fromProto(const std::vector<uint8_t> &bytes)
+    {
+        return fromProto(std::span<const uint8_t>(bytes.data(), bytes.size()));
+    }
+    [[nodiscard]] std::vector<uint8_t> toProto() const;
 };
 
 // discord_protos.discord_users.v1.FrecencyUserSettings
@@ -67,7 +71,7 @@ struct FrecencyUserSettings
 
     static FrecencyUserSettings fromProto(ProtoReader &reader);
 
-    QByteArray toProtoPartial() const;
+    std::vector<uint8_t> toProtoPartial() const;
 };
 
 } // namespace Proto

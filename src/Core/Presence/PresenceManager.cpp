@@ -180,7 +180,7 @@ void PresenceManager::applyProtoStatus(const Proto::PreloadedUserSettings &setti
     if (!sessionsReplaceSeen) {
         Discord::StatusType resolved = Discord::StatusType::ONLINE;
         if (status.status.has_value()) {
-            resolved = Discord::parseStatus(status.status.value());
+            resolved = Discord::parseStatus(QString::fromStdString(status.status.value()));
             if (resolved == Discord::StatusType::UNKNOWN)
                 resolved = Discord::StatusType::ONLINE;
         }
@@ -198,17 +198,17 @@ void PresenceManager::applyProtoStatus(const Proto::PreloadedUserSettings &setti
         const bool hasEmojiId = source.emojiId != 0;
 
         if (!expired &&
-            (!source.text.isEmpty() || !source.emojiName.isEmpty() || hasEmojiId)) {
+            (!source.text.empty() || !source.emojiName.empty() || hasEmojiId)) {
             Discord::Activity activity;
             activity.name = QStringLiteral("Custom Status");
             activity.type = Discord::ActivityType::CUSTOM;
-            activity.state = source.text;
+            activity.state = QString::fromStdString(source.text);
             activity.createdAt = static_cast<qint64>(source.createdAtMs);
 
-            if (!source.emojiName.isEmpty() || hasEmojiId) {
+            if (!source.emojiName.empty() || hasEmojiId) {
                 Discord::ActivityEmoji emoji;
-                if (!source.emojiName.isEmpty())
-                    emoji.name = source.emojiName;
+                if (!source.emojiName.empty())
+                    emoji.name = QString::fromStdString(source.emojiName);
                 if (hasEmojiId)
                     emoji.id = Core::Snowflake(source.emojiId);
                 activity.emoji = emoji;
