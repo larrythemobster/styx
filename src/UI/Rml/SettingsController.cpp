@@ -23,6 +23,7 @@
 
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/AudioBackends.hpp"
+#include "Core/Audio/IAudioBackend.hpp"
 #include "Core/Audio/VoiceManager.hpp"
 #endif
 
@@ -456,13 +457,103 @@ void SettingsController::renderVoiceVideo(QString &rml)
 {
     rml += QStringLiteral("<div class=\"settings-section-title\">Voice &amp; Video</div>");
 
-    // Audio Devices & Backend card
+    // Voice Settings card
     rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Audio Devices</div>");
+    rml += QStringLiteral("<div class=\"settings-label\">Voice Settings</div>");
 
-    // Backend
+#ifndef STYX_NO_VOICE
+    auto *inst = shell.currentInstance();
+    auto *vm = inst ? inst->voice() : nullptr;
+
+    QList<Core::Audio::AudioDeviceInfo> inputDevices;
+    QList<Core::Audio::AudioDeviceInfo> outputDevices;
+    if (vm) {
+        inputDevices = vm->availableInputDevices();
+        outputDevices = vm->availableOutputDevices();
+    } else {
+        auto tempBackend = Core::Audio::IAudioBackend::create();
+        if (tempBackend) {
+            inputDevices = tempBackend->availableInputDevices();
+            outputDevices = tempBackend->availableOutputDevices();
+        }
+    }
+
+    const QString currentInput = getString(Keys::VoiceInputDevice, Defaults::VoiceInputDevice);
+    const QString currentOutput = getString(Keys::VoiceOutputDevice, Defaults::VoiceOutputDevice);
+
+    // Side-by-side Input Device & Output Device
+    rml += QStringLiteral("<div class=\"settings-grid-2col\">");
+
+    // Input Device Column
+    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-left\">");
+    rml += QStringLiteral("<div class=\"settings-label\">Input Device</div>");
+    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::VoiceInputDevice);
+    rml += QStringLiteral("<option value=\"\"%1>Default Communication Device</option>").arg(currentInput.isEmpty() ? QStringLiteral(" selected") : QString());
+    for (const auto &dev : inputDevices) {
+        QString devId = QString::fromUtf8(dev.id);
+        QString sel = (currentInput == devId || (currentInput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
+        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(Rml::escape(devId), sel, Rml::escape(dev.description));
+    }
+    rml += QStringLiteral("</select>");
+    rml += QStringLiteral("</div>");
+
+    // Output Device Column
+    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-right\">");
+    rml += QStringLiteral("<div class=\"settings-label\">Output Device</div>");
+    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::VoiceOutputDevice);
+    rml += QStringLiteral("<option value=\"\"%1>Default Communication Device</option>").arg(currentOutput.isEmpty() ? QStringLiteral(" selected") : QString());
+    for (const auto &dev : outputDevices) {
+        QString devId = QString::fromUtf8(dev.id);
+        QString sel = (currentOutput == devId || (currentOutput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
+        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(Rml::escape(devId), sel, Rml::escape(dev.description));
+    }
+    rml += QStringLiteral("</select>");
+    rml += QStringLiteral("</div>");
+
+    rml += QStringLiteral("</div>"); // .settings-grid-2col
+
+    // Side-by-side Input Volume & Output Volume
+    const int inputVolume = getInt(Keys::VoiceInputVolume, Defaults::VoiceInputVolume);
+    const int outputVolume = getInt(Keys::VoiceOutputVolume, Defaults::VoiceOutputVolume);
+
+    rml += QStringLiteral("<div class=\"settings-grid-2col\" style=\"margin-bottom: 8dp;\">");
+
+    // Input Volume Column
+    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-left\">");
+    rml += QStringLiteral("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
+    rml += QStringLiteral("<div class=\"settings-slider-header\">");
+    rml += QStringLiteral("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Input Volume</span>");
+    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-voice-input-vol\">%1%</span>").arg(inputVolume);
+    rml += QStringLiteral("</div>");
+    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"100\" step=\"1\" value=\"%1\" data-setting=\"%2\" data-display=\"val-voice-input-vol\" data-unit=\"%\"/>")
+               .arg(inputVolume).arg(Keys::VoiceInputVolume);
+    rml += QStringLiteral("</div>");
+    rml += QStringLiteral("</div>");
+
+    // Output Volume Column
+    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-right\">");
+    rml += QStringLiteral("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
+    rml += QStringLiteral("<div class=\"settings-slider-header\">");
+    rml += QStringLiteral("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Output Volume</span>");
+    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-voice-output-vol\">%1%</span>").arg(outputVolume);
+    rml += QStringLiteral("</div>");
+    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"200\" step=\"1\" value=\"%1\" data-setting=\"%2\" data-display=\"val-voice-output-vol\" data-unit=\"%\"/>")
+               .arg(outputVolume).arg(Keys::VoiceOutputVolume);
+    rml += QStringLiteral("</div>");
+    rml += QStringLiteral("</div>");
+
+    rml += QStringLiteral("</div>"); // .settings-grid-2col
+
+    rml += QStringLiteral("<div class=\"settings-description\" style=\"margin-top: 8dp; margin-bottom: 0;\">Device and volume changes take effect immediately during a call, or on your next voice connection.</div>");
+#endif
+    rml += QStringLiteral("</div>"); // .settings-card (Voice Settings)
+
+    // Advanced Subheading & Audio Backend card
+    rml += QStringLiteral("<div class=\"settings-subheading\">Advanced</div>");
+    rml += QStringLiteral("<div class=\"settings-card\">");
+
     const QString currentBackend = getString(Keys::AudioBackend, Defaults::AudioBackend);
-    rml += QStringLiteral("<div class=\"settings-row\">");
+    rml += QStringLiteral("<div class=\"settings-row\" style=\"margin-bottom: 0;\">");
     rml += QStringLiteral("<div class=\"settings-label\">Audio Backend</div>");
     rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::AudioBackend);
     rml += QStringLiteral("<option value=\"\"%1>Automatic</option>").arg(currentBackend.isEmpty() ? QStringLiteral(" selected") : QString());
@@ -474,47 +565,10 @@ void SettingsController::renderVoiceVideo(QString &rml)
 #endif
     rml += QStringLiteral("</select>");
     rml += QStringLiteral("<div class=\"settings-note\">* Takes effect after restart</div>");
-    rml += QStringLiteral("</div>");
-
-#ifndef STYX_NO_VOICE
-    auto *inst = shell.currentInstance();
-    auto *vm = inst ? inst->voice() : nullptr;
-
-    // Input Device
-    const QString currentInput = getString(Keys::VoiceInputDevice, Defaults::VoiceInputDevice);
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Input Device</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::VoiceInputDevice);
-    rml += QStringLiteral("<option value=\"\"%1>Default Communication Device</option>").arg(currentInput.isEmpty() ? QStringLiteral(" selected") : QString());
-    if (vm) {
-        for (const auto &dev : vm->availableInputDevices()) {
-            QString devId = QString::fromUtf8(dev.id);
-            QString sel = (currentInput == devId || (currentInput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
-            rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(Rml::escape(devId), sel, Rml::escape(dev.description));
-        }
-    }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
-
-    // Output Device
-    const QString currentOutput = getString(Keys::VoiceOutputDevice, Defaults::VoiceOutputDevice);
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Output Device</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::VoiceOutputDevice);
-    rml += QStringLiteral("<option value=\"\"%1>Default Communication Device</option>").arg(currentOutput.isEmpty() ? QStringLiteral(" selected") : QString());
-    if (vm) {
-        for (const auto &dev : vm->availableOutputDevices()) {
-            QString devId = QString::fromUtf8(dev.id);
-            QString sel = (currentOutput == devId || (currentOutput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
-            rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(Rml::escape(devId), sel, Rml::escape(dev.description));
-        }
-    }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
-#endif
+    rml += QStringLiteral("</div>"); // .settings-row
     rml += QStringLiteral("</div>"); // .settings-card
-
 }
+
 
 void SettingsController::renderGoLive(QString &rml)
 {
@@ -756,8 +810,21 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
         shell.session()->getAnimatedImageCache()->setCacheLimitMiB(val);
     } else if (key == QLatin1String(Keys::AnimationMaxMb)) {
         shell.session()->getAnimatedImageCache()->setAnimationLimitMiB(val);
+#ifndef STYX_NO_VOICE
+    } else if (key == QLatin1String(Keys::VoiceInputVolume)) {
+        const float gain = static_cast<float>(val) / 100.0f;
+        for (const auto &client : shell.session()->getClients()) {
+            if (client && client->voice())
+                client->voice()->setInputGain(gain);
+        }
+    } else if (key == QLatin1String(Keys::VoiceOutputVolume)) {
+        const float vol = static_cast<float>(val) / 100.0f;
+        for (const auto &client : shell.session()->getClients()) {
+            if (client && client->voice())
+                client->voice()->setOutputVolume(vol);
+        }
+#endif
     }
-
     requestRender(50);
 }
 
@@ -771,19 +838,23 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
     const QString val = QString::fromStdString(sel->GetValue());
 
     if (!key.isEmpty()) {
-            setString(key, val);
+        setString(key, val);
 #ifndef STYX_NO_VOICE
-            if (key == QLatin1String(Keys::VoiceInputDevice)) {
-                if (auto *inst = shell.currentInstance())
-                    if (auto *vm = inst->voice())
-                        vm->setInputDevice(val.toUtf8());
-            } else if (key == QLatin1String(Keys::VoiceOutputDevice)) {
-                if (auto *inst = shell.currentInstance())
-                    if (auto *vm = inst->voice())
-                        vm->setOutputDevice(val.toUtf8());
+        if (key == QLatin1String(Keys::VoiceInputDevice)) {
+            for (const auto &client : shell.session()->getClients()) {
+                if (client && client->voice())
+                    client->voice()->setInputDevice(val.toUtf8());
             }
-#endif
+        } else if (key == QLatin1String(Keys::VoiceOutputDevice)) {
+            for (const auto &client : shell.session()->getClients()) {
+                if (client && client->voice())
+                    client->voice()->setOutputDevice(val.toUtf8());
+            }
+        } else if (key == QLatin1String(Keys::AudioBackend)) {
+            Core::Audio::setConfiguredAudioBackend(val);
         }
+#endif
+    }
 
     // Local theme generator selects
     if (selectEl->GetId() == "theme-scheme-select") {
