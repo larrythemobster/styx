@@ -256,6 +256,39 @@
 	margin-top: 4dp;
 }
 
+.settings-subheading
+{
+	font-size: 12dp;
+	font-weight: bold;
+	color: #949ba4;
+	text-transform: uppercase;
+	margin-top: 24dp;
+	margin-bottom: 10dp;
+}
+
+.settings-grid-2col
+{
+	display: flex;
+	flex-direction: row;
+	margin-bottom: 20dp;
+}
+
+.settings-grid-col
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.settings-grid-col-left
+{
+	margin-right: 12dp;
+}
+
+.settings-grid-col-right
+{
+	margin-left: 12dp;
+}
+
 /* Toggle Switch Row */
 
 .settings-switch-row
@@ -270,7 +303,7 @@
 
 .settings-switch-row:last-child
 {
-	border-bottom: none;
+	border-bottom-width: 0;
 }
 
 .settings-switch-text
@@ -548,7 +581,7 @@ select.settings-select selectbox option:hover
 	font-size: 14dp;
 	font-weight: 600;
 	cursor: pointer;
-	border: none;
+	border-width: 0;
 	transition: background-color 0.15s, transform 0.1s;
 	box-sizing: border-box;
 }

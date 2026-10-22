@@ -490,9 +490,9 @@ void SettingsController::renderVoiceVideo(QString &rml)
     rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::VoiceInputDevice);
     rml += QStringLiteral("<option value=\"\"%1>Default Communication Device</option>").arg(currentInput.isEmpty() ? QStringLiteral(" selected") : QString());
     for (const auto &dev : inputDevices) {
-        QString devId = QString::fromUtf8(dev.id);
-        QString sel = (currentInput == devId || (currentInput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(Rml::escape(devId), sel, Rml::escape(dev.description));
+        QString devHex = QString::fromLatin1(dev.id.toHex());
+        QString sel = (currentInput == devHex || (currentInput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
+        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(devHex, sel, Rml::escape(dev.description));
     }
     rml += QStringLiteral("</select>");
     rml += QStringLiteral("</div>");
@@ -503,9 +503,9 @@ void SettingsController::renderVoiceVideo(QString &rml)
     rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::VoiceOutputDevice);
     rml += QStringLiteral("<option value=\"\"%1>Default Communication Device</option>").arg(currentOutput.isEmpty() ? QStringLiteral(" selected") : QString());
     for (const auto &dev : outputDevices) {
-        QString devId = QString::fromUtf8(dev.id);
-        QString sel = (currentOutput == devId || (currentOutput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(Rml::escape(devId), sel, Rml::escape(dev.description));
+        QString devHex = QString::fromLatin1(dev.id.toHex());
+        QString sel = (currentOutput == devHex || (currentOutput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
+        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(devHex, sel, Rml::escape(dev.description));
     }
     rml += QStringLiteral("</select>");
     rml += QStringLiteral("</div>");
@@ -523,25 +523,27 @@ void SettingsController::renderVoiceVideo(QString &rml)
     rml += QStringLiteral("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
     rml += QStringLiteral("<div class=\"settings-slider-header\">");
     rml += QStringLiteral("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Input Volume</span>");
-    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-voice-input-vol\">%1%</span>").arg(inputVolume);
+    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-voice-input-vol\">") + QString::number(inputVolume) + QStringLiteral("%</span>");
     rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"100\" step=\"1\" value=\"%1\" data-setting=\"%2\" data-display=\"val-voice-input-vol\" data-unit=\"%\"/>")
-               .arg(inputVolume).arg(Keys::VoiceInputVolume);
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
-
+    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"100\" step=\"1\" value=\"")
+           + QString::number(inputVolume)
+           + QStringLiteral("\" data-setting=\"") + QLatin1String(Keys::VoiceInputVolume)
+           + QStringLiteral("\" data-display=\"val-voice-input-vol\" data-unit=\"%\"/>");
+    rml += QStringLiteral("</div>"); // .settings-slider-wrap
+    rml += QStringLiteral("</div>"); // .settings-grid-col
     // Output Volume Column
     rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-right\">");
     rml += QStringLiteral("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
     rml += QStringLiteral("<div class=\"settings-slider-header\">");
     rml += QStringLiteral("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Output Volume</span>");
-    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-voice-output-vol\">%1%</span>").arg(outputVolume);
+    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-voice-output-vol\">") + QString::number(outputVolume) + QStringLiteral("%</span>");
     rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"200\" step=\"1\" value=\"%1\" data-setting=\"%2\" data-display=\"val-voice-output-vol\" data-unit=\"%\"/>")
-               .arg(outputVolume).arg(Keys::VoiceOutputVolume);
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
-
+    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"200\" step=\"1\" value=\"")
+           + QString::number(outputVolume)
+           + QStringLiteral("\" data-setting=\"") + QLatin1String(Keys::VoiceOutputVolume)
+           + QStringLiteral("\" data-display=\"val-voice-output-vol\" data-unit=\"%\"/>");
+    rml += QStringLiteral("</div>"); // .settings-slider-wrap
+    rml += QStringLiteral("</div>"); // .settings-grid-col
     rml += QStringLiteral("</div>"); // .settings-grid-2col
 
     rml += QStringLiteral("<div class=\"settings-description\" style=\"margin-top: 8dp; margin-bottom: 0;\">Device and volume changes take effect immediately during a call, or on your next voice connection.</div>");
@@ -841,14 +843,16 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
         setString(key, val);
 #ifndef STYX_NO_VOICE
         if (key == QLatin1String(Keys::VoiceInputDevice)) {
+            QByteArray devBytes = val.isEmpty() ? QByteArray() : QByteArray::fromHex(val.toLatin1());
             for (const auto &client : shell.session()->getClients()) {
                 if (client && client->voice())
-                    client->voice()->setInputDevice(val.toUtf8());
+                    client->voice()->setInputDevice(devBytes);
             }
         } else if (key == QLatin1String(Keys::VoiceOutputDevice)) {
+            QByteArray devBytes = val.isEmpty() ? QByteArray() : QByteArray::fromHex(val.toLatin1());
             for (const auto &client : shell.session()->getClients()) {
                 if (client && client->voice())
-                    client->voice()->setOutputDevice(val.toUtf8());
+                    client->voice()->setOutputDevice(devBytes);
             }
         } else if (key == QLatin1String(Keys::AudioBackend)) {
             Core::Audio::setConfiguredAudioBackend(val);

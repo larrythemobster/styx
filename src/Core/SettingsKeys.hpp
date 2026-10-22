@@ -29,6 +29,8 @@ inline constexpr const char *ThemeUseSystemStyle = "theme/use_system_style";
 inline constexpr const char *AudioBackend = "audio/backend";
 inline constexpr const char *VoiceInputDevice = "voice/input_device";
 inline constexpr const char *VoiceOutputDevice = "voice/output_device";
+inline constexpr const char *VoiceInputVolume = "voice/input_volume";
+inline constexpr const char *VoiceOutputVolume = "voice/output_volume";
 
 // Stream / Go Live
 inline constexpr const char *StreamQuality = "stream/quality";
@@ -58,6 +60,8 @@ inline constexpr bool ThemeUseSystemStyle = false;
 inline constexpr const char *AudioBackend = "";
 inline constexpr const char *VoiceInputDevice = "";
 inline constexpr const char *VoiceOutputDevice = "";
+inline constexpr int VoiceInputVolume = 100;
+inline constexpr int VoiceOutputVolume = 100;
 
 // Stream
 inline constexpr const char *StreamQuality = "720p30";
