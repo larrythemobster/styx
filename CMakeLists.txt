@@ -30,12 +30,8 @@ endif()
 
 project(styx LANGUAGES CXX)
 
-include(cmake/qt.cmake)
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-set(CMAKE_AUTORCC ON)
 
 option(BUILD_TESTS "Build test targets" ON)
 option(ENABLE_VOICE "Build with voice/audio support" ON)
@@ -73,37 +69,18 @@ if(ENABLE_VOICE)
     endif()
 endif()
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets Svg Test LinguistTools)
-find_package(Qt${QT_VERSION_MAJOR}
-    COMPONENTS
-        Core
-        Gui
-        Widgets
-        Svg
-        Concurrent
-        OpenGL
-        OpenGLWidgets
-        Test
-        LinguistTools
-)
-# The main window is drawn with RmlUi (HTML/CSS-style UI) on an OpenGL 3.3 surface.
 find_package(RmlUi CONFIG REQUIRED)
-find_package(Qt${QT_VERSION_MAJOR} COMPONENTS ZlibPrivate QUIET)
-qt_standard_project_setup(I18N_TRANSLATED_LANGUAGES en)
-
-# If Qt::ZlibPrivate is not available, create a QtZlib compatibility include
-# directory so that #include <QtZlib/zlib.h> resolves using system zlib.
-if(NOT TARGET Qt::ZlibPrivate)
-    find_package(ZLIB REQUIRED)
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/qtzlib-compat/QtZlib")
-    file(WRITE "${CMAKE_BINARY_DIR}/qtzlib-compat/QtZlib/zlib.h" "#include <zlib.h>\n")
-    file(WRITE "${CMAKE_BINARY_DIR}/qtzlib-compat/QtZlib/zconf.h" "#include <zconf.h>\n")
-    add_library(QtZlibCompat INTERFACE)
-    target_include_directories(QtZlibCompat INTERFACE
-        "${CMAKE_BINARY_DIR}/qtzlib-compat"
-        ${ZLIB_INCLUDE_DIRS}
-    )
-    target_link_libraries(QtZlibCompat INTERFACE ZLIB::ZLIB)
+find_package(ZLIB REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(Stb REQUIRED)
+find_package(WebP CONFIG REQUIRED)
+find_package(lunasvg CONFIG REQUIRED)
+find_package(libavif CONFIG REQUIRED)
+find_package(utf8proc CONFIG REQUIRED)
+find_package(PCRE2 CONFIG REQUIRED)
+if(BUILD_TESTS)
+    find_package(Catch2 3 CONFIG REQUIRED)
 endif()
 
 
@@ -154,12 +131,6 @@ if(ENABLE_SCREENSHARE AND NOT (WIN32 AND ENABLE_VOICE AND TARGET ffmpeg))
     message(STATUS "Screen sharing needs Windows, ENABLE_VOICE and ffmpeg; building without it")
     set(ENABLE_SCREENSHARE OFF)
 endif()
-# Windows Graphics Capture and process-loopback audio import WinRT/Windows 10 APIs, which
-# keep the executable from even loading on Windows 7, the platform the Qt 5 build targets.
-if(ENABLE_SCREENSHARE AND QT_VERSION_MAJOR LESS 6)
-    message(STATUS "Screen sharing is not built with Qt 5 (Windows 7 target)")
-    set(ENABLE_SCREENSHARE OFF)
-endif()
 if(ENABLE_SCREENSHARE)
     find_package(LibDataChannel CONFIG REQUIRED)
 endif()
@@ -167,7 +138,6 @@ endif()
 include(cmake/lottie.cmake)
 
 set(PROJECT_SOURCES
-    resources/resources.qrc
     src/main.cpp
     src/Core/Migration.cpp
     src/Core/Snowflake.cpp
@@ -248,6 +218,9 @@ set(PROJECT_SOURCES
     src/Storage/MemberRepository.cpp
     src/Storage/RoleRepository.cpp
     src/Discord/Client.cpp
+    src/Discord/ClientMessages.cpp
+    src/Discord/ClientGuild.cpp
+    src/Discord/ClientUploads.cpp
     src/Discord/Gateway.cpp
     src/Discord/RemoteAuthClient.cpp
     src/Discord/LoginClient.cpp
@@ -347,7 +320,7 @@ else()
     list(APPEND PROJECT_SOURCES vendor/qrcodegen/cpp/qrcodegen.cpp)
 endif()
 
-qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
+add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE vendor/emoji-segmenter)
 if(TARGET unofficial::nayuki-qr-code-generator::nayuki-qr-code-generator)
@@ -357,136 +330,64 @@ else()
 endif()
 
 if(BUILD_TESTS)
-    qt_add_executable(TestMarkdown tests/tst_Markdown.cpp src/Core/Markdown/Parser.cpp
+    function(styx_test target test_name)
+        add_executable(${target} ${ARGN})
+        target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(${target} PRIVATE styx_platform Catch2::Catch2WithMain)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /utf-8)
+        endif()
+        add_test(NAME ${test_name} COMMAND ${target})
+    endfunction()
+
+    styx_test(TestMarkdown MarkdownTests tests/tst_Markdown.cpp src/Core/Markdown/Parser.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Snowflake.cpp)
-    target_link_libraries(TestMarkdown PRIVATE Qt::Core Qt::Test)
-    target_include_directories(TestMarkdown PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/vendor/emoji-segmenter)
-    add_test(NAME MarkdownTests COMMAND TestMarkdown)
-
-    qt_add_executable(TestFrecency tests/tst_Frecency.cpp src/Core/Emoji/FrecencyTracker.cpp)
-    target_link_libraries(TestFrecency PRIVATE Qt::Core Catch2::Catch2WithMain)
-    target_include_directories(TestFrecency PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME FrecencyTests COMMAND TestFrecency)
-
-    qt_add_executable(TestUnicodeEmoji tests/tst_UnicodeEmoji.cpp
-        src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp resources/resources.qrc)
-    target_link_libraries(TestUnicodeEmoji PRIVATE Qt::Core Qt::Test)
-    target_include_directories(TestUnicodeEmoji PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME UnicodeEmojiTests COMMAND TestUnicodeEmoji)
-
-    qt_add_executable(TestOrderedJson tests/tst_OrderedJson.cpp src/Core/OrderedJson.cpp
-        src/Core/Snowflake.cpp src/Discord/ContextProperties.cpp)
-    target_link_libraries(TestOrderedJson PRIVATE Qt::Core Qt::Test)
-    target_include_directories(TestOrderedJson PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME OrderedJsonTests COMMAND TestOrderedJson)
-
-    add_executable(TestCalls tests/tst_Calls.cpp src/Core/Calls/CallStore.cpp
+    target_include_directories(TestMarkdown PRIVATE vendor/emoji-segmenter)
+    target_link_libraries(TestMarkdown PRIVATE PCRE2::8BIT utf8proc)
+    styx_test(TestFrecency FrecencyTests tests/tst_Frecency.cpp src/Core/Emoji/FrecencyTracker.cpp)
+    styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
+        src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)
+    styx_test(TestOrderedJson OrderedJsonTests tests/tst_OrderedJson.cpp
+        src/Core/OrderedJson.cpp src/Core/Snowflake.cpp src/Discord/ContextProperties.cpp)
+    styx_test(TestCalls CallTests tests/tst_Calls.cpp src/Core/Calls/CallStore.cpp
         src/Core/Snowflake.cpp src/Core/OrderedJson.cpp)
-    target_link_libraries(TestCalls PRIVATE Qt::Core Qt::Gui styx_platform Catch2::Catch2WithMain)
-    target_include_directories(TestCalls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    if(MSVC)
-        target_compile_options(TestCalls PRIVATE /utf-8)
-    endif()
-    add_test(NAME CallTests COMMAND TestCalls)
-
-    add_executable(TestVoicePayloads tests/tst_VoicePayloads.cpp
+    styx_test(TestVoicePayloads VoicePayloadTests tests/tst_VoicePayloads.cpp
         src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
-    target_link_libraries(TestVoicePayloads PRIVATE Qt::Core Catch2::Catch2WithMain)
-    target_include_directories(TestVoicePayloads PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    if(MSVC)
-        target_compile_options(TestVoicePayloads PRIVATE /utf-8)
-    endif()
-    add_test(NAME VoicePayloadTests COMMAND TestVoicePayloads)
-
-    add_executable(TestProto tests/tst_Proto.cpp src/Proto/ProtoReader.cpp
+    styx_test(TestProto ProtoTests tests/tst_Proto.cpp src/Proto/ProtoReader.cpp
         src/Proto/ProtoWriter.cpp src/Proto/FrecencySettings.cpp)
-    target_link_libraries(TestProto PRIVATE styx_platform Catch2::Catch2WithMain)
-    target_include_directories(TestProto PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME ProtoTests COMMAND TestProto)
-
-    qt_add_executable(TestProxy tests/tst_Proxy.cpp src/Core/ProxyConfig.cpp
+    styx_test(TestProxy ProxyTests tests/tst_Proxy.cpp src/Core/ProxyConfig.cpp
         src/Core/Logging.cpp src/Core/ImageManager.cpp src/Core/Snowflake.cpp
         src/Discord/Voice/Socks5UdpAssociation.cpp)
-
-    target_link_libraries(TestProxy PRIVATE Qt::Core Qt::Gui Qt::Widgets styx_platform Qt::Test)
-    target_include_directories(TestProxy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME ProxyTests COMMAND TestProxy)
-
-    qt_add_executable(TestEmojiGrid tests/tst_EmojiGrid.cpp
+    styx_test(TestEmojiGrid EmojiGridTests tests/tst_EmojiGrid.cpp
         src/UI/Rml/EmojiGridModel.cpp src/Core/Snowflake.cpp)
-    target_link_libraries(TestEmojiGrid PRIVATE Qt::Core Qt::Gui Qt::Test)
-    target_include_directories(TestEmojiGrid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME EmojiGridTests COMMAND TestEmojiGrid)
-
-    qt_add_executable(TestCdnUrls tests/tst_CdnUrls.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
-    target_link_libraries(TestCdnUrls PRIVATE Qt::Core Qt::Test)
-    target_include_directories(TestCdnUrls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME CdnUrlTests COMMAND TestCdnUrls)
-
-    qt_add_executable(TestRmlRender tests/tst_RmlRender.cpp resources/resources.qrc
+    styx_test(TestCdnUrls CdnUrlTests tests/tst_CdnUrls.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
+    styx_test(TestRmlRender RmlRenderTests tests/tst_RmlRender.cpp
         src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)
-    target_link_libraries(TestRmlRender PRIVATE Qt::Core Qt::Gui Qt::Widgets styx_platform
-        Qt::Svg Qt::OpenGL Qt::OpenGLWidgets Qt::Test RmlUi::RmlUi)
-    target_include_directories(TestRmlRender PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/emoji-segmenter ${CMAKE_CURRENT_SOURCE_DIR}/vendor/rmlui-backend)
-    add_test(NAME RmlRenderTests COMMAND TestRmlRender)
-
-    qt_add_executable(TestEmbeds tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
-    target_link_libraries(TestEmbeds PRIVATE Qt::Core Qt::Gui Qt::Test)
-    target_include_directories(TestEmbeds PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME EmbedTests COMMAND TestEmbeds)
-
-    qt_add_executable(TestFavoriteGifs tests/tst_FavoriteGifs.cpp src/Core/Gifs/FavoriteGifRules.cpp src/UI/Gifs/GifMasonryLayout.cpp
+    target_link_libraries(TestRmlRender PRIVATE RmlUi::RmlUi utf8proc)
+    target_include_directories(TestRmlRender PRIVATE vendor/emoji-segmenter vendor/rmlui-backend)
+    if(WIN32)
+        target_link_libraries(TestRmlRender PRIVATE opengl32 imm32 shell32 user32 gdi32 dwrite d2d1)
+    endif()
+    styx_test(TestEmbeds EmbedTests tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
+    styx_test(TestFavoriteGifs FavoriteGifTests tests/tst_FavoriteGifs.cpp
+        src/Core/Gifs/FavoriteGifRules.cpp src/UI/Gifs/GifMasonryLayout.cpp
         src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
-    target_link_libraries(TestFavoriteGifs PRIVATE Qt::Core Qt::Test)
-    target_include_directories(TestFavoriteGifs PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME FavoriteGifTests COMMAND TestFavoriteGifs)
-
     if(TARGET ffmpeg)
-        qt_add_executable(TestClips tests/tst_Clips.cpp src/Core/Media/ClipDecoder.cpp src/Core/Media/ClipPlayer.cpp)
-        target_link_libraries(TestClips PRIVATE Qt::Core Qt::Gui Qt::Test ffmpeg)
-        target_compile_definitions(TestClips PRIVATE STYX_HAVE_FFMPEG)
-        target_include_directories(TestClips PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-        add_test(NAME ClipTests COMMAND TestClips)
-
-        qt_add_executable(TestApng tests/tst_Apng.cpp src/Core/ApngDecoder.cpp)
-        target_link_libraries(TestApng PRIVATE Qt::Core Qt::Gui Qt::Test ffmpeg)
-        target_compile_definitions(TestApng PRIVATE STYX_HAVE_FFMPEG)
-        target_include_directories(TestApng PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-        add_test(NAME ApngTests COMMAND TestApng)
+        styx_test(TestClips ClipTests tests/tst_Clips.cpp
+            src/Core/Media/ClipDecoder.cpp src/Core/Media/ClipPlayer.cpp)
+        styx_test(TestApng ApngTests tests/tst_Apng.cpp src/Core/ApngDecoder.cpp)
+        foreach(target TestClips TestApng)
+            target_link_libraries(${target} PRIVATE ffmpeg WebP::webpdemux)
+            target_compile_definitions(${target} PRIVATE STYX_HAVE_FFMPEG)
+        endforeach()
     endif()
 endif()
 
-qt_add_translations(${PROJECT_NAME} TS_FILES translations/styx_en.ts SOURCE_TARGETS ${PROJECT_NAME})
-
-if (MSVC)
-    target_link_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Debug>:/INCREMENTAL>)
-    target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Debug>:/ZI> $<$<NOT:$<CONFIG:Debug>>:/Zi>)
-    target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
-
-    if(QT_VERSION_MAJOR LESS 6)
-        target_compile_options(${PROJECT_NAME} PRIVATE
-            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/qt5_compat.h")
-    endif()
-
-    if(BUILD_TESTS)
-        set(_msvc_test_targets TestMarkdown TestUnicodeEmoji TestOrderedJson TestFrecency TestProto TestProxy TestEmojiGrid TestCdnUrls TestEmbeds TestFavoriteGifs)
-        if(TARGET TestApng)
-            list(APPEND _msvc_test_targets TestApng TestClips)
-        endif()
-        foreach(test_target ${_msvc_test_targets})
-            target_link_options(${test_target} PRIVATE $<$<CONFIG:Debug>:/INCREMENTAL>)
-            target_compile_options(${test_target} PRIVATE $<$<CONFIG:Debug>:/ZI> $<$<NOT:$<CONFIG:Debug>>:/Zi>)
-            target_compile_options(${test_target} PRIVATE /utf-8)
-            if(QT_VERSION_MAJOR LESS 6)
-                target_compile_options(${test_target} PRIVATE
-                    "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/qt5_compat.h")
-            endif()
-        endforeach()
-    endif()
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /utf-8 /Zi)
 endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/vendor/rmlui-backend)
@@ -501,21 +402,11 @@ if(NOT ENABLE_VOICE)
     target_compile_definitions(${PROJECT_NAME} PRIVATE STYX_NO_VOICE)
 endif()
 
-target_link_libraries(${PROJECT_NAME}
-    PUBLIC
-        Qt::Core
-        Qt::Gui
-        Qt::Widgets
-        Qt::Svg
-        Qt::Concurrent
-        Qt::OpenGL
-        Qt::OpenGLWidgets
-        CURL::libcurl
-    PRIVATE
-        styx_platform
-        RmlUi::RmlUi
-        OpenSSL::Crypto
-)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    styx_platform RmlUi::RmlUi OpenSSL::Crypto ZLIB::ZLIB PCRE2::8BIT utf8proc WebP::webpdemux)
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE opengl32 imm32 shell32 user32 gdi32 dwrite d2d1)
+endif()
 if(ENABLE_VOICE)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         ${SODIUM_TARGET}
@@ -544,12 +435,6 @@ if(TARGET lottie)
     target_link_libraries(${PROJECT_NAME} PRIVATE lottie)
     target_compile_definitions(${PROJECT_NAME} PRIVATE STYX_HAVE_RLOTTIE)
 endif()
-if(TARGET Qt::ZlibPrivate)
-    target_link_libraries(${PROJECT_NAME} PRIVATE Qt::ZlibPrivate)
-else()
-    target_link_libraries(${PROJECT_NAME} PRIVATE QtZlibCompat)
-endif()
-target_precompile_headers(${PROJECT_NAME} PUBLIC src/pch.h)
 # glad (bundled with RmlUi's GL3 renderer) must be the first OpenGL header in its TU
 set_source_files_properties(vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
@@ -627,10 +512,6 @@ endif()
 # Qt-free Platform Foundation (styx_platform)
 # ---------------------------------------------------------------------------
 
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(unofficial-sqlite3 CONFIG REQUIRED)
-find_package(Stb REQUIRED)
-find_package(WebP CONFIG QUIET)
 
 set(PLATFORM_SOURCES
     src/Platform/Base64.cpp
@@ -674,12 +555,16 @@ target_link_libraries(styx_platform
         unofficial::sqlite3::sqlite3
         CURL::libcurl
         OpenSSL::Crypto
+        lunasvg::lunasvg
+        avif
+        utf8proc
+        WebP::webpdemux
 )
 if(TARGET WebP::webp)
     target_link_libraries(styx_platform PUBLIC WebP::webp)
 endif()
 if(WIN32)
-    target_link_libraries(styx_platform PUBLIC ws2_32 PRIVATE advapi32 crypt32 ole32)
+    target_link_libraries(styx_platform PUBLIC ws2_32 PRIVATE advapi32 crypt32 ole32 shell32 comdlg32 user32)
 endif()
 target_compile_features(styx_platform PUBLIC cxx_std_20)
 if(MSVC)

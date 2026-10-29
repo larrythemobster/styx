@@ -25,7 +25,11 @@
     "nlohmann-json",
     "sqlite3",
     "stb",
-    "libwebp"
+    "libwebp",
+    "lunasvg",
+    "libavif",
+    "utf8proc",
+    "pcre2"
   ],
   "features": {
     "ffmpeg": {
