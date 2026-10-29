@@ -28,8 +28,15 @@ Acheron's Qt widget layout. It has:
   Now panel and an Add Friend form
 - a voice call view
 
-Settings, profiles, account management and other dialogs still use Acheron's Qt
-widgets.
+Settings, profiles, account management, server settings, image viewing and
+pickers also use RmlUi. User, server, channel and message context menus render
+in the same view, with keyboard navigation, nested menus and viewport clamping.
+Member moderation includes kick, ban, timeout, nickname and searchable role
+forms. CAPTCHA prompts use RmlUi while the challenge still opens in your browser.
+
+Qt remains the application and OpenGL window host. Backend Qt types and models,
+native file dialogs, the system tray and the startup database error dialog have
+not yet been ported.
 
 **Go Live screen sharing (Windows 10+).**
 
@@ -81,15 +88,17 @@ or on `PATH`.
 
 ### Tests
 
-After a `configure` build, run the renderer regression tests from an MSVC
-prompt with Qt's `bin` directory on `PATH`:
+After a `configure` build, run the renderer and menu regression tests from an
+MSVC prompt. Put Qt's `bin` and curl-impersonate's `lib` directories on `PATH`:
 
 ```bat
 cmake --build build --target TestRmlRender
 ctest --test-dir build -R "^RmlRenderTests$" --output-on-failure
 ```
 
-They need a desktop session with OpenGL 3.3.
+They need a desktop session with OpenGL 3.3. Coverage includes texture lifetimes,
+background document updates, menu selection, disabled actions, dismissal,
+nested navigation and viewport bounds.
 
 ## Dependencies
 
