@@ -1,10 +1,12 @@
 #pragma once
 
-#include <QObject>
-#include <QTimer>
-#include <QHash>
-#include <QDateTime>
+#include <chrono>
 #include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include "Platform/Trackable.hpp"
+#include "Platform/Timer.hpp"
 
 #include "Snowflake.hpp"
 
@@ -17,14 +19,13 @@ struct TyperInfo
 {
     Snowflake userId;
     std::optional<Snowflake> guildId;
-    QString name;
+    std::string name;
 };
 
-class TypingTracker : public QObject
+class TypingTracker : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit TypingTracker(QObject *parent = nullptr);
+    TypingTracker();
 
     void setUserManager(UserManager *manager);
     void setActiveChannel(Snowflake channelId);
@@ -34,12 +35,11 @@ public:
     void removeTyper(Snowflake channelId, Snowflake userId);
     void clear();
 
-    QList<TyperInfo> getActiveTypers() const;
+    std::vector<TyperInfo> getActiveTypers() const;
 
-signals:
-    void typersChanged();
+    Platform::Signal<> typersChanged;
 
-private slots:
+private:
     void cleanupExpired();
 
 private:
@@ -47,14 +47,14 @@ private:
     {
         Snowflake userId;
         std::optional<Snowflake> guildId;
-        QDateTime expiresAt;
+        std::chrono::steady_clock::time_point expiresAt;
     };
 
-    QHash<Snowflake, QList<TypingEntry>> channelTypers;
+    std::unordered_map<Snowflake, std::vector<TypingEntry>> channelTypers;
     Snowflake activeChannel;
     Snowflake currentUserId;
     UserManager *userManager = nullptr;
-    QTimer cleanupTimer;
+    Platform::Timer cleanupTimer;
 };
 
 } // namespace Core

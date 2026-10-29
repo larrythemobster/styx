@@ -1,6 +1,9 @@
 #include "PresenceManager.hpp"
 
-#include <QDateTime>
+#include <algorithm>
+#include <chrono>
+
+#include "Platform/Native.hpp"
 
 #include "ActivityFormat.hpp"
 #include "Core/Logging.hpp"
@@ -17,9 +20,9 @@ bool sameEntry(const PresenceEntry &a, const PresenceEntry &b)
            a.sortedActivities == b.sortedActivities;
 }
 
-bool allOffline(const QHash<Snowflake, PresenceEntry> &guildSlots)
+bool allOffline(const std::unordered_map<Snowflake, PresenceEntry> &guildSlots)
 {
-    for (const PresenceEntry &entry : guildSlots) {
+    for (const auto &[guildId, entry] : guildSlots) {
         if (entry.status != Discord::StatusType::OFFLINE)
             return false;
     }
@@ -29,12 +32,6 @@ bool allOffline(const QHash<Snowflake, PresenceEntry> &guildSlots)
 
 } // namespace
 
-PresenceManager::PresenceManager(QObject *parent) : QObject(parent)
-{
-    flushTimer.setSingleShot(true);
-    flushTimer.setInterval(0);
-    connect(&flushTimer, &QTimer::timeout, this, &PresenceManager::flushDirty);
-}
 
 void PresenceManager::setSelfUserId(Snowflake userId)
 {
@@ -43,8 +40,8 @@ void PresenceManager::setSelfUserId(Snowflake userId)
 
 void PresenceManager::reset()
 {
-    for (auto it = presences.cbegin(); it != presences.cend(); ++it)
-        markDirty(it.key());
+    for (const auto &[userId, slots] : presences)
+        markDirty(userId);
 
     presences.clear();
     selfPresence = PresenceEntry();
@@ -60,18 +57,18 @@ void PresenceManager::markDirty(Snowflake userId)
         return;
 
     dirtyUsers.insert(userId);
-    if (!flushTimer.isActive())
-        flushTimer.start();
+    if (!flushTimer.active())
+        flushTimer.start(std::chrono::milliseconds(0), false, [this] { flushDirty(); });
 }
 
 void PresenceManager::flushDirty()
 {
-    if (dirtyUsers.isEmpty())
+    if (dirtyUsers.empty())
         return;
 
-    const QList<Snowflake> userIds(dirtyUsers.cbegin(), dirtyUsers.cend());
+    const std::vector<Snowflake> userIds(dirtyUsers.cbegin(), dirtyUsers.cend());
     dirtyUsers.clear();
-    emit presencesChanged(userIds);
+    presencesChanged.publish(userIds);
 }
 
 bool PresenceManager::apply(const Discord::Presence &presence, Snowflake guildId)
@@ -89,7 +86,7 @@ bool PresenceManager::apply(const Discord::Presence &presence, Snowflake guildId
         entry.clientStatus = presence.clientStatus.get();
     if (presence.activities.hasValue())
         entry.sortedActivities = ActivityFormat::sortAndFilter(presence.activities.get());
-    entry.receivedAtMs = QDateTime::currentMSecsSinceEpoch();
+    entry.receivedAtMs = Platform::DateTime::now().unixMillis();
 
     const bool offline = entry.status == Discord::StatusType::OFFLINE;
     if (offline) {
@@ -98,16 +95,16 @@ bool PresenceManager::apply(const Discord::Presence &presence, Snowflake guildId
         entry.sortedActivities.clear();
     }
 
-    QHash<Snowflake, PresenceEntry> &guildSlots = presences[userId];
+    auto &guildSlots = presences[userId];
     auto existing = guildSlots.find(guildId);
-    if (existing != guildSlots.end() && sameEntry(existing.value(), entry)) {
-        existing->receivedAtMs = entry.receivedAtMs;
+    if (existing != guildSlots.end() && sameEntry(existing->second, entry)) {
+        existing->second.receivedAtMs = entry.receivedAtMs;
         return false;
     }
 
-    guildSlots.insert(guildId, entry);
+    guildSlots.insert_or_assign(guildId, entry);
     if (offline && allOffline(guildSlots))
-        presences.remove(userId);
+        presences.erase(userId);
 
     markDirty(userId);
     return true;
@@ -132,7 +129,7 @@ void PresenceManager::ingestMember(const Discord::Member &member, Snowflake guil
     apply(presence, guildId);
 }
 
-void PresenceManager::loadMergedPresences(const Discord::MergedPresences &merged, const QList<Snowflake> &guildIdsInOrder)
+void PresenceManager::loadMergedPresences(const Discord::MergedPresences &merged, const std::vector<Snowflake> &guildIdsInOrder)
 {
     int count = 0;
 
@@ -144,9 +141,9 @@ void PresenceManager::loadMergedPresences(const Discord::MergedPresences &merged
     }
 
     if (merged.guilds.hasValue()) {
-        const QList<QList<Discord::Presence>> &guilds = merged.guilds.get();
-        const int guildCount = static_cast<int>(qMin(guilds.size(), guildIdsInOrder.size()));
-        for (int i = 0; i < guildCount; i++) {
+        const auto &guilds = merged.guilds.get();
+        const auto guildCount = std::min(guilds.size(), guildIdsInOrder.size());
+        for (std::size_t i = 0; i < guildCount; i++) {
             for (const Discord::Presence &presence : guilds.at(i)) {
                 if (apply(presence, guildIdsInOrder.at(i)))
                     count++;
@@ -154,18 +151,15 @@ void PresenceManager::loadMergedPresences(const Discord::MergedPresences &merged
         }
     }
 
-    qCInfo(LogCore) << "Applied" << count << "presences";
+    Core::log(Core::LogLevel::Info, LogCore) << "Applied " << count << " presences";
 }
 
-void PresenceManager::rebuildSelfActivities(QList<Discord::Activity> sessionActivities)
+void PresenceManager::rebuildSelfActivities(std::vector<Discord::Activity> sessionActivities)
 {
-    for (int i = sessionActivities.size() - 1; i >= 0; i--) {
-        if (sessionActivities.at(i).isCustom())
-            sessionActivities.removeAt(i);
-    }
+    std::erase_if(sessionActivities, [](const Discord::Activity &activity) { return activity.isCustom(); });
 
     if (selfCustomStatus.has_value())
-        sessionActivities.append(selfCustomStatus.value());
+        sessionActivities.push_back(selfCustomStatus.value());
 
     selfPresence.sortedActivities = ActivityFormat::sortAndFilter(sessionActivities);
 }
@@ -173,19 +167,19 @@ void PresenceManager::rebuildSelfActivities(QList<Discord::Activity> sessionActi
 void PresenceManager::applyProtoStatus(const Proto::PreloadedUserSettings &settings)
 {
     const Proto::StatusSettings status = settings.status.has_value() ? settings.status.value() : Proto::StatusSettings();
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const std::int64_t now = Platform::DateTime::now().unixMillis();
 
     showCurrentGame = status.showCurrentGame.value_or(true);
 
     if (!sessionsReplaceSeen) {
         Discord::StatusType resolved = Discord::StatusType::ONLINE;
         if (status.status.has_value()) {
-            resolved = Discord::parseStatus(QString::fromStdString(status.status.value()));
+            resolved = Discord::parseStatus(status.status.value());
             if (resolved == Discord::StatusType::UNKNOWN)
                 resolved = Discord::StatusType::ONLINE;
         }
 
-        if (status.statusExpiresAtMs != 0 && now > static_cast<qint64>(status.statusExpiresAtMs))
+        if (status.statusExpiresAtMs != 0 && now > static_cast<std::int64_t>(status.statusExpiresAtMs))
             resolved = Discord::StatusType::ONLINE;
 
         selfPresence.status = resolved;
@@ -194,21 +188,21 @@ void PresenceManager::applyProtoStatus(const Proto::PreloadedUserSettings &setti
     std::optional<Discord::Activity> custom;
     if (status.customStatus.has_value()) {
         const Proto::CustomStatus &source = status.customStatus.value();
-        const bool expired = source.expiresAtMs != 0 && now > static_cast<qint64>(source.expiresAtMs);
+        const bool expired = source.expiresAtMs != 0 && now > static_cast<std::int64_t>(source.expiresAtMs);
         const bool hasEmojiId = source.emojiId != 0;
 
         if (!expired &&
             (!source.text.empty() || !source.emojiName.empty() || hasEmojiId)) {
             Discord::Activity activity;
-            activity.name = QStringLiteral("Custom Status");
+            activity.name = "Custom Status";
             activity.type = Discord::ActivityType::CUSTOM;
-            activity.state = QString::fromStdString(source.text);
-            activity.createdAt = static_cast<qint64>(source.createdAtMs);
+            activity.state = source.text;
+            activity.createdAt = static_cast<std::int64_t>(source.createdAtMs);
 
             if (!source.emojiName.empty() || hasEmojiId) {
                 Discord::ActivityEmoji emoji;
                 if (!source.emojiName.empty())
-                    emoji.name = QString::fromStdString(source.emojiName);
+                    emoji.name = source.emojiName;
                 if (hasEmojiId)
                     emoji.id = Core::Snowflake(source.emojiId);
                 activity.emoji = emoji;
@@ -225,12 +219,12 @@ void PresenceManager::applyProtoStatus(const Proto::PreloadedUserSettings &setti
 
 const PresenceEntry *PresenceManager::newest(Snowflake userId) const
 {
-    auto it = presences.constFind(userId);
-    if (it == presences.constEnd())
+    auto it = presences.find(userId);
+    if (it == presences.end())
         return nullptr;
 
     const PresenceEntry *best = nullptr;
-    for (const PresenceEntry &entry : it.value()) {
+    for (const auto &[guildId, entry] : it->second) {
         if (best == nullptr) {
             best = &entry;
             continue;
@@ -252,11 +246,11 @@ const PresenceEntry *PresenceManager::resolve(Snowflake userId, Snowflake guildI
 
     const PresenceEntry *entry = nullptr;
     if (guildId.isValid()) {
-        auto it = presences.constFind(userId);
-        if (it != presences.constEnd()) {
-            auto slot = it.value().constFind(guildId);
-            if (slot != it.value().constEnd())
-                entry = &slot.value();
+        auto it = presences.find(userId);
+        if (it != presences.end()) {
+            auto slot = it->second.find(guildId);
+            if (slot != it->second.end())
+                entry = &slot->second;
         }
     }
 
@@ -297,7 +291,7 @@ PresenceBadge PresenceManager::badge(Snowflake userId, Snowflake guildId) const
     return badge;
 }
 
-QList<Discord::Activity> PresenceManager::activities(Snowflake userId, Snowflake guildId) const
+std::vector<Discord::Activity> PresenceManager::activities(Snowflake userId, Snowflake guildId) const
 {
     const PresenceEntry *entry = resolve(userId, guildId);
     if (entry == nullptr)
@@ -306,10 +300,10 @@ QList<Discord::Activity> PresenceManager::activities(Snowflake userId, Snowflake
     if (!hidesGames(userId))
         return entry->sortedActivities;
 
-    QList<Discord::Activity> visible;
+    std::vector<Discord::Activity> visible;
     for (const Discord::Activity &activity : entry->sortedActivities) {
         if (activity.isCustom())
-            visible.append(activity);
+            visible.push_back(activity);
     }
 
     return visible;
@@ -332,9 +326,9 @@ void PresenceManager::onPresenceUpdate(const Discord::Presence &presence)
     apply(presence, guildId);
 }
 
-void PresenceManager::onPresencesReplace(const QList<Discord::Presence> &replacements)
+void PresenceManager::onPresencesReplace(const std::vector<Discord::Presence> &replacements)
 {
-    if (replacements.isEmpty())
+    if (replacements.empty())
         return;
 
     dropSlot({});
@@ -343,9 +337,9 @@ void PresenceManager::onPresencesReplace(const QList<Discord::Presence> &replace
         apply(presence, {});
 }
 
-void PresenceManager::onSessionsReplace(const QList<Discord::UserSession> &sessions)
+void PresenceManager::onSessionsReplace(const std::vector<Discord::UserSession> &sessions)
 {
-    if (sessions.isEmpty())
+    if (sessions.empty())
         return;
 
     const Discord::UserSession *chosen = nullptr;
@@ -366,16 +360,16 @@ void PresenceManager::onSessionsReplace(const QList<Discord::UserSession> &sessi
     }
 
     if (chosen == nullptr)
-        chosen = &sessions.constFirst();
+        chosen = &sessions.front();
 
     selfPresence.status = chosen->statusType();
     if (selfPresence.status == Discord::StatusType::UNKNOWN)
         selfPresence.status = Discord::StatusType::ONLINE;
     rebuildSelfActivities(chosen->activities.hasValue() ? chosen->activities.get()
-                                                        : QList<Discord::Activity>());
+                                                        : std::vector<Discord::Activity>());
 
     selfPresence.clientStatus = Discord::ClientStatus();
-    selfPresence.receivedAtMs = QDateTime::currentMSecsSinceEpoch();
+    selfPresence.receivedAtMs = Platform::DateTime::now().unixMillis();
     sessionsReplaceSeen = true;
 
     markDirty(selfUserId);
@@ -399,13 +393,13 @@ void PresenceManager::onGuildRemoved(Snowflake guildId)
 void PresenceManager::dropSlot(Snowflake guildId)
 {
     for (auto it = presences.begin(); it != presences.end();) {
-        if (!it.value().remove(guildId)) {
+        if (!it->second.erase(guildId)) {
             ++it;
             continue;
         }
 
-        markDirty(it.key());
-        if (it.value().isEmpty())
+        markDirty(it->first);
+        if (it->second.empty())
             it = presences.erase(it);
         else
             ++it;

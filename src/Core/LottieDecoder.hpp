@@ -1,8 +1,8 @@
 #pragma once
 
-#include <QByteArray>
-#include <QImage>
-#include <QSize>
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
+#include <string>
 
 #include <memory>
 
@@ -12,18 +12,18 @@ namespace Lottie {
 
 [[nodiscard]] bool isSupported();
 
-[[nodiscard]] bool looksLikeLottie(const QByteArray &data);
+[[nodiscard]] bool looksLikeLottie(const std::string &data);
 
 class Animation
 {
 public:
     ~Animation();
 
-    [[nodiscard]] static std::unique_ptr<Animation> fromJson(const QByteArray &json);
+    [[nodiscard]] static std::unique_ptr<Animation> fromJson(const std::string &json);
 
     [[nodiscard]] int frameCount() const;
     [[nodiscard]] int frameDelayMs() const;
-    [[nodiscard]] QImage render(int frame, const QSize &size) const;
+    [[nodiscard]] Platform::ImageBuffer render(int frame, const Platform::Size &size) const;
 
 private:
     struct Impl;

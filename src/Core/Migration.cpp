@@ -1,237 +1,130 @@
 #include "Migration.hpp"
 #include "Logging.hpp"
-
-#include <QCoreApplication>
-#include <QDateTime>
-#include <QDir>
-#include <QDirIterator>
-#include <QFile>
-#include <QFileInfo>
-#include <QSettings>
-#include <QStandardPaths>
-#include <QTextStream>
-
+#include "Platform/Native.hpp"
+#include "Platform/Paths.hpp"
 #include "Platform/SecureStore.hpp"
+#include "Platform/Settings.hpp"
 #include "Platform/Sqlite.hpp"
-namespace Styx {
-namespace Core {
 
+#include <filesystem>
+#include <fstream>
+#include <regex>
+
+namespace Styx::Core {
 namespace {
+namespace fs = std::filesystem;
 
-bool copyDirectoryRecursively(const QString &sourcePath, const QString &targetPath)
+fs::path oldPath(const fs::path &newPath)
 {
-    QDir sourceDir(sourcePath);
-    if (!sourceDir.exists())
-        return false;
+    return newPath.parent_path().parent_path() / "ouwou" / "Acheron";
+}
 
-    QDir targetDir(targetPath);
-    if (!targetDir.exists())
-        targetDir.mkpath(".");
+std::string renamed(std::string value)
+{
+    value = std::regex_replace(value, std::regex("acheron", std::regex::icase), "styx");
+    return std::regex_replace(value, std::regex("ouwou", std::regex::icase), "larrythemobster");
+}
 
-    const QFileInfoList entries = sourceDir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QFileInfo &entry : entries) {
-        const QString srcItem = entry.filePath();
-        const QString dstItem = targetDir.filePath(entry.fileName());
-        if (entry.isDir()) {
-            if (!copyDirectoryRecursively(srcItem, dstItem))
-                return false;
-        } else {
-            if (!QFile::exists(dstItem)) {
-                if (!QFile::copy(srcItem, dstItem))
-                    return false;
-            }
-        }
+void renameValues(nlohmann::json &value)
+{
+    if (value.is_string())
+        value = renamed(value.get<std::string>());
+    else if (value.is_array())
+        for (auto &entry : value)
+            renameValues(entry);
+}
+
+bool copyDirectoryRecursively(const fs::path &source, const fs::path &target)
+{
+    std::error_code error;
+    fs::create_directories(target, error);
+    if (error) return false;
+    for (fs::recursive_directory_iterator it(source, error), end; !error && it != end; it.increment(error)) {
+        const auto destination = target / it->path().lexically_relative(source);
+        if (it->is_directory(error))
+            fs::create_directories(destination, error);
+        else if (it->is_regular_file(error) && !fs::exists(destination, error))
+            fs::copy_file(it->path(), destination, fs::copy_options::none, error);
+        if (error) return false;
     }
-    return true;
+    return !error;
 }
-
-static QString getOldRoamingDir()
-{
-#ifdef Q_OS_WIN
-    QString appdata = qEnvironmentVariable("APPDATA");
-    if (!appdata.isEmpty())
-        return QDir(appdata).filePath("ouwou/Acheron");
-#endif
-    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/ouwou/Acheron";
 }
-
-static QString getNewRoamingDir()
-{
-#ifdef Q_OS_WIN
-    QString appdata = qEnvironmentVariable("APPDATA");
-    if (!appdata.isEmpty())
-        return QDir(appdata).filePath("larrythemobster/Styx");
-#endif
-    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/larrythemobster/Styx";
-}
-
-static QString getOldLocalDir()
-{
-#ifdef Q_OS_WIN
-    QString local = qEnvironmentVariable("LOCALAPPDATA");
-    if (!local.isEmpty())
-        return QDir(local).filePath("ouwou/Acheron");
-#endif
-    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/ouwou/Acheron";
-}
-
-static QString getNewLocalDir()
-{
-#ifdef Q_OS_WIN
-    QString local = qEnvironmentVariable("LOCALAPPDATA");
-    if (!local.isEmpty())
-        return QDir(local).filePath("larrythemobster/Styx");
-#endif
-    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/larrythemobster/Styx";
-}
-} // namespace
 
 bool Migration::isMigrationDone()
 {
-    const QString markerPath = QDir(getNewRoamingDir()).filePath(".migration_done");
-    return QFile::exists(markerPath);
+    return fs::exists(Platform::Paths::dataDir() / ".migration_done");
 }
 
 void Migration::writeMigrationMarker()
 {
-    const QString newRoamPath = getNewRoamingDir();
-    QDir(newRoamPath).mkpath(".");
-    const QString markerPath = QDir(newRoamPath).filePath(".migration_done");
-    QFile markerFile(markerPath);
-    if (markerFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QTextStream out(&markerFile);
-        out << "Migrated on " << QDateTime::currentDateTime().toString(Qt::ISODate) << "\n";
-        markerFile.close();
-    }
+    const auto dir = Platform::Paths::dataDir();
+    fs::create_directories(dir);
+    std::ofstream marker(dir / ".migration_done");
+    if (marker) marker << "Migrated on " << Platform::DateTime::now().iso8601() << '\n';
 }
 
 void Migration::migrateSettingsAndData()
 {
-    if (isMigrationDone())
-        return;
-
-    const QString oldRoamPath = getOldRoamingDir();
-    const QString newRoamPath = getNewRoamingDir();
-
-    const QString oldLocalPath = getOldLocalDir();
-    const QString newLocalPath = getNewLocalDir();
-
-    QSettings oldSettings("ouwou", "Acheron");
-    const QStringList oldKeys = oldSettings.allKeys();
-    const bool oldRoamExists = QDir(oldRoamPath).exists();
-    const bool oldLocalExists = QDir(oldLocalPath).exists();
-    const bool oldSettingsExist = !oldKeys.isEmpty();
-
-    if (!oldRoamExists && !oldLocalExists && !oldSettingsExist) {
+    if (isMigrationDone()) return;
+    const auto newRoam = Platform::Paths::dataDir();
+    const auto oldRoam = oldPath(newRoam);
+    const auto newLocal = Platform::Paths::cacheDir();
+    const auto oldLocal = oldPath(newLocal);
+    auto oldSettings = Platform::Settings::importFromRegistry(L"Software\\ouwou\\Acheron");
+    if (!fs::exists(oldRoam) && !fs::exists(oldLocal) && oldSettings.empty()) {
         writeMigrationMarker();
         return;
     }
-
-    qCInfo(LogCore) << "Migrating Acheron data to Styx...";
-
-    if (oldSettingsExist) {
-        QSettings newSettings("larrythemobster", "Styx");
-        int migratedKeys = 0;
-        for (const QString &key : oldKeys) {
-            QVariant val = oldSettings.value(key);
-            QString newKey = key;
-            newKey.replace("acheron", "styx", Qt::CaseInsensitive);
-            newKey.replace("ouwou", "larrythemobster", Qt::CaseInsensitive);
-
-            if (val.userType() == QMetaType::QString) {
-                QString s = val.toString();
-                s.replace("acheron", "styx", Qt::CaseInsensitive);
-                s.replace("ouwou", "larrythemobster", Qt::CaseInsensitive);
-                val = s;
-            } else if (val.userType() == QMetaType::QStringList) {
-                QStringList list = val.toStringList();
-                for (QString &item : list) {
-                    item.replace("acheron", "styx", Qt::CaseInsensitive);
-                    item.replace("ouwou", "larrythemobster", Qt::CaseInsensitive);
-                }
-                val = list;
-            }
-            newSettings.setValue(newKey, val);
-            migratedKeys++;
-        }
-        newSettings.sync();
-        qCInfo(LogCore) << "Migrated" << migratedKeys << "settings keys from Acheron.";
+    Core::log(Core::LogLevel::Info, LogCore) << "Migrating Acheron data to Styx...";
+    auto &settings = Platform::Settings::instance();
+    for (auto &[key, value] : oldSettings) {
+        renameValues(value);
+        settings.setJson(renamed(key), value);
     }
-
-    if (oldRoamExists) {
-        QDir newRoamDir(newRoamPath);
-        if (!newRoamDir.exists())
-            newRoamDir.mkpath(".");
-
-        QDir oldRoamDir(oldRoamPath);
-        const QFileInfoList files = oldRoamDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-        for (const QFileInfo &fileInfo : files) {
-            const QString fileName = fileInfo.fileName();
-            QString destName = fileName;
-            if (fileName == "acheron.sqlite")
-                destName = "styx.sqlite";
-            else if (fileName == "acheron.sqlite-wal")
-                destName = "styx.sqlite-wal";
-            else if (fileName == "acheron.sqlite-shm")
-                destName = "styx.sqlite-shm";
-            else if (fileName == "acheron.log")
-                destName = "styx.log";
-            else if (fileName.startsWith("acheron.log."))
-                destName = "styx.log." + fileName.mid(12);
-
-            const QString dst = newRoamDir.filePath(destName);
-            if (!QFile::exists(dst)) {
-                if (QFile::copy(fileInfo.filePath(), dst)) {
-                    qCInfo(LogCore) << "Migrated AppData file:" << fileName << "->" << destName;
-                }
-            }
+    if (!oldSettings.empty()) settings.save();
+    if (fs::exists(oldRoam)) {
+        fs::create_directories(newRoam);
+        for (const auto &entry : fs::directory_iterator(oldRoam)) {
+            if (!entry.is_regular_file()) continue;
+            auto name = entry.path().filename().string();
+            auto destination = name;
+            if (name == "acheron.sqlite" || name == "acheron.sqlite-wal" || name == "acheron.sqlite-shm" || name == "acheron.log" || name.starts_with("acheron.log."))
+                destination.replace(0, 7, "styx");
+            std::error_code error;
+            fs::copy_file(entry.path(), newRoam / destination, fs::copy_options::skip_existing, error);
+            if (!error) Core::log(Core::LogLevel::Info, LogCore) << "Migrated AppData file: " << name << " -> " << destination;
         }
     }
-
-    if (oldLocalExists) {
-        QDir newLocalDir(newLocalPath);
-        if (!newLocalDir.exists())
-            newLocalDir.mkpath(".");
-
-        if (copyDirectoryRecursively(oldLocalPath, newLocalPath)) {
-            qCInfo(LogCore) << "Migrated LocalAppData cache directory.";
-        }
-    }
+    if (fs::exists(oldLocal) && copyDirectoryRecursively(oldLocal, newLocal))
+        Core::log(Core::LogLevel::Info, LogCore) << "Migrated LocalAppData cache directory.";
 }
 
 void Migration::migrateKeychain()
 {
-    if (isMigrationDone())
-        return;
-
-    const QString newRoamPath = getNewRoamingDir();
-    const QString dbPath = QDir(newRoamPath).filePath("styx.sqlite");
-
-    if (QFile::exists(dbPath)) {
+    if (isMigrationDone()) return;
+    const auto dbPath = Platform::Paths::dataDir() / "styx.sqlite";
+    if (fs::exists(dbPath)) {
         try {
-            Platform::Database db(std::filesystem::u8path(dbPath.toStdString()));
+            Platform::Database db(dbPath);
             auto query = db.prepare("SELECT id FROM accounts");
             while (query.step()) {
-                quint64 accountId = static_cast<quint64>(query.getInt64(0));
-                std::string key = QString("account_%1_token").arg(accountId).toStdString();
-
-                auto oldToken = Platform::SecureStore::readPassword("Acheron", key);
-                if (oldToken.has_value() && !oldToken->empty()) {
-                    if (Platform::SecureStore::writePassword("Styx", key, *oldToken)) {
-                        qCInfo(LogCore) << "Migrated keychain token for account" << accountId;
-                    } else {
-                        qCWarning(LogCore) << "Failed to store migrated keychain token for account" << accountId;
-                    }
+                auto id = static_cast<std::uint64_t>(query.getInt64(0));
+                auto key = "account_" + std::to_string(id) + "_token";
+                auto token = Platform::SecureStore::readPassword("Acheron", key);
+                if (token && !token->empty()) {
+                    if (Platform::SecureStore::writePassword("Styx", key, *token))
+                        Core::log(Core::LogLevel::Info, LogCore) << "Migrated keychain token for account " << id;
+                    else
+                        Core::log(Core::LogLevel::Warning, LogCore) << "Failed to store migrated keychain token for account " << id;
                 }
             }
-        } catch (const Platform::SqliteError &e) {
-            qCWarning(LogCore) << "Migration DB query failed:" << e.what();
+        } catch (const Platform::SqliteError &error) {
+            Core::log(Core::LogLevel::Warning, LogCore) << "Migration DB query failed: " << error.what();
         }
     }
-
     writeMigrationMarker();
-    qCInfo(LogCore) << "Migration from Acheron completed.";
+    Core::log(Core::LogLevel::Info, LogCore) << "Migration from Acheron completed.";
 }
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

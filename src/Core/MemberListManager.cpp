@@ -1,18 +1,13 @@
 #include "MemberListManager.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <functional>
 #include <optional>
+#include <utility>
 
 #include "MurmurHash3.hpp"
-
-// #define MEMBERLIST_DEBUG
-#ifdef MEMBERLIST_DEBUG
-#include "Logging.hpp"
-#define ML_LOG qCDebug(LogCore)
-#else
-#define ML_LOG QT_NO_QDEBUG_MACRO()
-#endif
-
 #include "Storage/ChannelRepository.hpp"
 #include "Storage/RoleRepository.hpp"
 
@@ -27,13 +22,9 @@ namespace Styx {
 namespace Core {
 
 MemberListManager::MemberListManager(Storage::ChannelRepository &channelRepo,
-                                     Storage::RoleRepository &roleRepo,
-                                     QObject *parent)
-    : QObject(parent), channelRepo(channelRepo), roleRepo(roleRepo)
+                                     Storage::RoleRepository &roleRepo)
+    : channelRepo(channelRepo), roleRepo(roleRepo)
 {
-    responseTimer.setSingleShot(true);
-    responseTimer.setInterval(5000);
-    connect(&responseTimer, &QTimer::timeout, this, &MemberListManager::flushPendingRanges);
 }
 
 GuildListState *MemberListManager::activeGuildState()
@@ -41,121 +32,91 @@ GuildListState *MemberListManager::activeGuildState()
     if (!activeGuildId.isValid())
         return nullptr;
     auto it = guildStates.find(activeGuildId);
-    if (it != guildStates.end())
-        return &it.value();
-    return nullptr;
+    return it != guildStates.end() ? &it->second : nullptr;
 }
 
 const GuildListState *MemberListManager::activeGuildState() const
 {
     if (!activeGuildId.isValid())
         return nullptr;
-    auto it = guildStates.constFind(activeGuildId);
-    if (it != guildStates.constEnd())
-        return &it.value();
-    return nullptr;
+    auto it = guildStates.find(activeGuildId);
+    return it != guildStates.end() ? &it->second : nullptr;
 }
 
 ListData *MemberListManager::activeListData()
 {
     auto *gs = activeGuildState();
-    if (!gs || listId.isEmpty())
+    if (!gs || listId.empty())
         return nullptr;
     auto it = gs->lists.find(listId);
-    if (it != gs->lists.end())
-        return &it.value();
-    return nullptr;
+    return it != gs->lists.end() ? &it->second : nullptr;
 }
 
 const ListData *MemberListManager::activeListData() const
 {
     const auto *gs = activeGuildState();
-    if (!gs || listId.isEmpty())
+    if (!gs || listId.empty())
         return nullptr;
-    auto it = gs->lists.constFind(listId);
-    if (it != gs->lists.constEnd())
-        return &it.value();
-    return nullptr;
+    auto it = gs->lists.find(listId);
+    return it != gs->lists.end() ? &it->second : nullptr;
 }
 
 void MemberListManager::setActiveChannel(Snowflake guildId, Snowflake channelId)
 {
-    ML_LOG << "[ML] setActiveChannel guild:" << guildId
-           << "ch:" << channelId
-           << "(was guild:" << activeGuildId
-           << "ch:" << activeChannelId
-           << "list:" << listId << ")";
-
     if (activeGuildId == guildId && activeChannelId == channelId)
         return;
 
-    bool sameGuild = (activeGuildId == guildId);
-
+    bool sameGuild = activeGuildId == guildId;
     responseTimer.stop();
     awaitingResponse = false;
     hasPendingRanges = false;
-
     activeGuildId = guildId;
     activeChannelId = channelId;
 
     GuildListState &gs = guildStates[activeGuildId];
-
-    if (gs.roleCache.isEmpty()) {
+    if (gs.roleCache.empty()) {
         const auto roles = roleRepo.getRolesForGuild(activeGuildId);
         for (const auto &role : roles)
-            gs.roleCache.insert(QString::number(role.id.get()), role);
-        ML_LOG << "[ML] loaded" << gs.roleCache.size() << "roles";
+            gs.roleCache.insert_or_assign(role.id.get().toString(), role);
     }
 
     auto overwrites = channelRepo.getPermissionOverwrites(activeChannelId);
     Discord::Permissions everyonePerms;
-    auto rit = gs.roleCache.find(QString::number(activeGuildId));
+    auto rit = gs.roleCache.find(activeGuildId.toString());
     if (rit != gs.roleCache.end())
-        everyonePerms = rit->permissions;
-    QString newListId = computeListId(overwrites, everyonePerms);
-
-    bool listChanged = (newListId != listId) || !sameGuild;
+        everyonePerms = rit->second.permissions.get();
+    std::string newListId = computeListId(overwrites, everyonePerms);
+    bool listChanged = newListId != listId || !sameGuild;
     listId = newListId;
+    gs.lists[newListId];
 
-    ListData &ld = gs.lists[newListId];
-    ML_LOG << "[ML] listId:" << newListId
-           << "sameGuild:" << sameGuild
-           << "listChanged:" << listChanged
-           << "cached items:" << ld.items.size()
-           << "cached groups:" << ld.groups.size();
-
-    // always [0, 99]
-    ranges = { { 0, 99 } };
-
+    ranges = {{0, 99}};
     if (listChanged) {
-        emit listAboutToReset();
-        emit listReset();
+        listAboutToReset.publish();
+        listReset.publish();
     }
 
     awaitingResponse = true;
-    responseTimer.start();
-    emit subscriptionRequested(activeGuildId, activeChannelId, ranges);
+    responseTimer.start(std::chrono::milliseconds(5000), false, [this] { flushPendingRanges(); });
+    subscriptionRequested.publish(activeGuildId, activeChannelId, ranges);
 }
 
 void MemberListManager::clear()
 {
-    ML_LOG << "[ML] clear (was guild:" << activeGuildId << "list:" << listId << ")";
     responseTimer.stop();
     awaitingResponse = false;
     hasPendingRanges = false;
-
-    emit listAboutToReset();
+    listAboutToReset.publish();
     activeGuildId = Snowflake::Invalid;
     activeChannelId = Snowflake::Invalid;
     listId.clear();
     ranges.clear();
-    emit listReset();
+    listReset.publish();
 }
 
 void MemberListManager::clearGuild(Snowflake guildId)
 {
-    guildStates.remove(guildId);
-
+    guildStates.erase(guildId);
     if (activeGuildId == guildId)
         clear();
 }
@@ -165,9 +126,7 @@ void MemberListManager::handleRoleCreated(Snowflake guildId, const Discord::Role
     auto it = guildStates.find(guildId);
     if (it == guildStates.end())
         return;
-
-    QString roleIdStr = QString::number(role.id.get());
-    it->roleCache.insert(roleIdStr, role);
+    it->second.roleCache.insert_or_assign(role.id.get().toString(), role);
 }
 
 void MemberListManager::handleRoleUpdated(Snowflake guildId, const Discord::Role &role)
@@ -176,21 +135,18 @@ void MemberListManager::handleRoleUpdated(Snowflake guildId, const Discord::Role
     if (it == guildStates.end())
         return;
 
-    GuildListState &gs = it.value();
-    QString roleIdStr = QString::number(role.id.get());
-    gs.roleCache.insert(roleIdStr, role);
-
+    GuildListState &gs = it->second;
+    std::string roleIdStr = role.id.get().toString();
+    gs.roleCache.insert_or_assign(roleIdStr, role);
     bool changed = false;
-    for (auto lit = gs.lists.begin(); lit != gs.lists.end(); ++lit) {
-        ListData &ld = lit.value();
-        for (auto iit = ld.items.begin(); iit != ld.items.end(); ++iit) {
-            auto &item = iit.value();
+    for (auto &[id, ld] : gs.lists) {
+        for (auto &[index, item] : ld.items) {
             if (item.type == MemberListItem::Type::Group && item.groupId == roleIdStr) {
                 resolveGroupInfo(item, gs, ld);
                 changed = true;
             } else if (item.type == MemberListItem::Type::Member && !item.member.roles.isUndefined()) {
                 for (const auto &rid : item.member.roles.get()) {
-                    if (QString::number(rid) == roleIdStr) {
+                    if (rid.toString() == roleIdStr) {
                         resolveMemberInfo(item, gs);
                         changed = true;
                         break;
@@ -199,10 +155,9 @@ void MemberListManager::handleRoleUpdated(Snowflake guildId, const Discord::Role
             }
         }
     }
-
-    if (changed && guildId == this->activeGuildId) {
-        emit listAboutToReset();
-        emit listReset();
+    if (changed && guildId == activeGuildId) {
+        listAboutToReset.publish();
+        listReset.publish();
     }
 }
 
@@ -212,18 +167,15 @@ void MemberListManager::handleRoleDeleted(Snowflake guildId, Snowflake roleId)
     if (it == guildStates.end())
         return;
 
-    GuildListState &gs = it.value();
-    QString roleIdStr = QString::number(roleId);
-    gs.roleCache.remove(roleIdStr);
-
+    GuildListState &gs = it->second;
+    std::string roleIdStr = roleId.toString();
+    gs.roleCache.erase(roleIdStr);
     bool changed = false;
-    for (auto lit = gs.lists.begin(); lit != gs.lists.end(); ++lit) {
-        ListData &ld = lit.value();
-        for (auto iit = ld.items.begin(); iit != ld.items.end(); ++iit) {
-            auto &item = iit.value();
+    for (auto &[id, ld] : gs.lists) {
+        for (auto &[index, item] : ld.items) {
             if (item.type == MemberListItem::Type::Member && !item.member.roles.isUndefined()) {
                 for (const auto &rid : item.member.roles.get()) {
-                    if (QString::number(rid) == roleIdStr) {
+                    if (rid.toString() == roleIdStr) {
                         resolveMemberInfo(item, gs);
                         changed = true;
                         break;
@@ -232,111 +184,74 @@ void MemberListManager::handleRoleDeleted(Snowflake guildId, Snowflake roleId)
             }
         }
     }
-
-    if (changed && guildId == this->activeGuildId) {
-        emit listAboutToReset();
-        emit listReset();
+    if (changed && guildId == activeGuildId) {
+        listAboutToReset.publish();
+        listReset.publish();
     }
 }
 
-static bool sameGroups(const QList<Discord::GuildMemberListUpdate::Group> &a,
-                       const QList<Discord::GuildMemberListUpdate::Group> &b)
+static bool sameGroups(const std::vector<Discord::GuildMemberListUpdate::Group> &a,
+                       const std::vector<Discord::GuildMemberListUpdate::Group> &b)
 {
     if (a.size() != b.size())
         return false;
-
-    for (int i = 0; i < a.size(); i++) {
-        if (a.at(i).id.get() != b.at(i).id.get() || a.at(i).count.get() != b.at(i).count.get())
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i].id.get() != b[i].id.get() || a[i].count.get() != b[i].count.get())
             return false;
     }
-
     return true;
 }
 
-static std::optional<QList<int>> inPlaceUpdateIndices(const Discord::GuildMemberListUpdate &update, const ListData &current)
+static std::optional<std::vector<int>> inPlaceUpdateIndices(const Discord::GuildMemberListUpdate &update, const ListData &current)
 {
-    if (!update.groups->isEmpty() && !sameGroups(update.groups.get(), current.groups))
+    if (!update.groups->empty() && !sameGroups(update.groups.get(), current.groups))
         return std::nullopt;
-
-    QList<int> indices;
+    std::vector<int> indices;
     for (const auto &op : update.ops.get()) {
-        if (op.op.get() != "UPDATE" || op.index.isUndefined() ||
-            op.item.isUndefined())
+        if (op.op.get() != "UPDATE" || op.index.isUndefined() || op.item.isUndefined())
             return std::nullopt;
-        indices.append(op.index);
+        indices.push_back(op.index.get());
     }
-
     return indices;
 }
 
 void MemberListManager::handleMemberListUpdate(const Discord::GuildMemberListUpdate &update)
 {
-    ML_LOG << "[ML] update guild:" << update.guildId.get()
-           << "list:" << update.id
-           << "ops:" << update.ops->size()
-           << "groups:" << update.groups->size()
-           << "(active guild:" << activeGuildId
-           << "list:" << listId << ")";
-
-    GuildListState &gs = guildStates[update.guildId];
-    gs.memberCount = update.memberCount;
-    gs.onlineCount = update.onlineCount;
-
-    ListData &ld = gs.lists[update.id];
-
-    const bool isActiveList = (update.guildId == activeGuildId && update.id == listId);
-
+    GuildListState &gs = guildStates[update.guildId.get()];
+    gs.memberCount = update.memberCount.get();
+    gs.onlineCount = update.onlineCount.get();
+    ListData &ld = gs.lists[update.id.get()];
+    const bool isActiveList = update.guildId.get() == activeGuildId && update.id.get() == listId;
     const auto updatedIndices = isActiveList ? inPlaceUpdateIndices(update, ld) : std::nullopt;
     const bool inPlace = updatedIndices.has_value();
-
-    if (!update.groups->isEmpty())
-        ld.groups = update.groups;
-
+    if (!update.groups->empty())
+        ld.groups = update.groups.get();
     if (isActiveList) {
         awaitingResponse = false;
         responseTimer.stop();
     }
-
     if (isActiveList && !inPlace)
-        emit listAboutToReset();
+        listAboutToReset.publish();
 
     for (const auto &op : update.ops.get()) {
-        const QString &opType = op.op;
-
-        if (opType == "SYNC") {
-            ML_LOG << "[ML]  SYNC [" << (op.range.isUndefined() ? -1 : op.range->first)
-                   << "-" << (op.range.isUndefined() ? -1 : op.range->second)
-                   << "] items:" << (op.items.isUndefined() ? -1 : op.items->size());
+        const auto &opType = op.op.get();
+        if (opType == "SYNC")
             processSync(op, ld, gs);
-        } else if (opType == "INSERT") {
-            ML_LOG << "[ML]  INSERT idx:" << (op.index.isUndefined() ? -1 : (int)op.index);
+        else if (opType == "INSERT")
             processInsert(op, ld, gs);
-        } else if (opType == "UPDATE") {
-            ML_LOG << "[ML]  UPDATE idx:" << (op.index.isUndefined() ? -1 : (int)op.index);
+        else if (opType == "UPDATE")
             processUpdate(op, ld, gs);
-        } else if (opType == "DELETE") {
-            ML_LOG << "[ML]  DELETE idx:" << (op.index.isUndefined() ? -1 : (int)op.index);
+        else if (opType == "DELETE")
             processDelete(op, ld);
-        } else if (opType == "INVALIDATE") {
-            ML_LOG << "[ML]  INVALIDATE [" << (op.range.isUndefined() ? -1 : op.range->first)
-                   << "-" << (op.range.isUndefined() ? -1 : op.range->second) << "]";
+        else if (opType == "INVALIDATE")
             processInvalidate(op, ld);
-        }
     }
-
-    ML_LOG << "[ML] after: list:" << update.id
-           << "items:" << ld.items.size()
-           << "groups:" << ld.groups.size()
-           << "isActive:" << isActiveList
-           << "totalItemCount:" << (isActiveList ? totalItemCount() : -1);
-
     if (isActiveList) {
         if (inPlace)
-            emit itemsChanged(updatedIndices.value());
+            itemsChanged.publish(updatedIndices.value());
         else
-            emit listReset();
+            listReset.publish();
     }
-
     if (isActiveList && hasPendingRanges && pendingRanges != ranges)
         applyAndSendRanges(pendingRanges);
     else if (isActiveList)
@@ -350,7 +265,7 @@ int MemberListManager::totalItemCount() const
         return 0;
     int count = 0;
     for (const auto &group : ld->groups)
-        count += 1 + group.count;
+        count += 1 + group.count.get();
     return count;
 }
 
@@ -359,26 +274,20 @@ const MemberListItem *MemberListManager::itemAt(int index) const
     const auto *ld = activeListData();
     if (!ld)
         return nullptr;
-    auto it = ld->items.constFind(index);
-    if (it != ld->items.constEnd())
-        return &it.value();
-    return nullptr;
+    auto it = ld->items.find(index);
+    return it != ld->items.end() ? &it->second : nullptr;
 }
 
-QList<int> MemberListManager::indicesForUsers(const QSet<Snowflake> &userIds) const
+std::vector<int> MemberListManager::indicesForUsers(const std::unordered_set<Snowflake> &userIds) const
 {
-    QList<int> indices;
-
+    std::vector<int> indices;
     const auto *ld = activeListData();
-    if (!ld || userIds.isEmpty())
+    if (!ld || userIds.empty())
         return indices;
-
-    for (auto it = ld->items.constBegin(); it != ld->items.constEnd(); ++it) {
-        if (it.value().type == MemberListItem::Type::Member &&
-            userIds.contains(it.value().userId))
-            indices.append(it.key());
+    for (const auto &[index, item] : ld->items) {
+        if (item.type == MemberListItem::Type::Member && userIds.contains(item.userId))
+            indices.push_back(index);
     }
-
     return indices;
 }
 
@@ -404,83 +313,69 @@ void MemberListManager::updateSubscriptionRange(int firstVisible, int lastVisibl
 {
     if (!activeGuildId.isValid() || !activeChannelId.isValid())
         return;
-
-    // always [0, 99]
-    QList<QPair<int, int>> newRanges = { { 0, 99 } };
-
+    std::vector<std::pair<int, int>> newRanges = {{0, 99}};
     if (lastVisible > 99) {
         int firstRangeStart = (firstVisible / 100) * 100;
         if (firstRangeStart > 0)
-            newRanges.append({ firstRangeStart, firstRangeStart + 99 });
-
+            newRanges.push_back({firstRangeStart, firstRangeStart + 99});
         int lastRangeStart = (lastVisible / 100) * 100;
         if (lastRangeStart != firstRangeStart && lastRangeStart > 0) {
             if (newRanges.size() < 3)
-                newRanges.append({ lastRangeStart, lastRangeStart + 99 });
+                newRanges.push_back({lastRangeStart, lastRangeStart + 99});
         }
     }
-
     if (newRanges == ranges && !hasPendingRanges)
         return;
-
     if (awaitingResponse) {
         pendingRanges = newRanges;
         hasPendingRanges = true;
         return;
     }
-
     if (newRanges == ranges)
         return;
-
     applyAndSendRanges(newRanges);
 }
 
-void MemberListManager::applyAndSendRanges(const QList<QPair<int, int>> &newRanges)
+void MemberListManager::applyAndSendRanges(const std::vector<std::pair<int, int>> &newRanges)
 {
-    QList<QPair<int, int>> oldRanges = ranges;
+    auto oldRanges = ranges;
     ranges = newRanges;
     hasPendingRanges = false;
-
     evictUnsubscribedItems(oldRanges, newRanges);
-
     awaitingResponse = true;
-    responseTimer.start();
-    emit subscriptionRequested(activeGuildId, activeChannelId, ranges);
+    responseTimer.start(std::chrono::milliseconds(5000), false, [this] { flushPendingRanges(); });
+    subscriptionRequested.publish(activeGuildId, activeChannelId, ranges);
 }
 
 void MemberListManager::flushPendingRanges()
 {
     awaitingResponse = false;
-
     if (hasPendingRanges && pendingRanges != ranges)
         applyAndSendRanges(pendingRanges);
     else
         hasPendingRanges = false;
 }
 
-void MemberListManager::evictUnsubscribedItems(const QList<QPair<int, int>> &,
-                                               const QList<QPair<int, int>> &newRanges)
+void MemberListManager::evictUnsubscribedItems(const std::vector<std::pair<int, int>> &,
+                                               const std::vector<std::pair<int, int>> &newRanges)
 {
     auto *ld = activeListData();
     if (!ld)
         return;
-
-    QList<int> toRemove;
-    for (auto it = ld->items.constBegin(); it != ld->items.constEnd(); ++it) {
-        if (!indexInRanges(it.key(), newRanges))
-            toRemove.append(it.key());
+    std::vector<int> toRemove;
+    for (const auto &[index, item] : ld->items) {
+        if (!indexInRanges(index, newRanges))
+            toRemove.push_back(index);
     }
-
-    if (toRemove.isEmpty())
+    if (toRemove.empty())
         return;
-
-    emit listAboutToReset();
+    listAboutToReset.publish();
     for (int idx : toRemove)
-        ld->items.remove(idx);
-    emit listReset();
+        ld->items.erase(idx);
+    listReset.publish();
 }
 
-bool MemberListManager::indexInRanges(int index, const QList<QPair<int, int>> &ranges)
+bool MemberListManager::indexInRanges(int index, const std::vector<std::pair<int, int>> &ranges)
 {
     for (const auto &r : ranges) {
         if (index >= r.first && index <= r.second)
@@ -494,23 +389,19 @@ MemberListItem MemberListManager::syncItemToListItem(
         const GuildListState &guildState, const ListData &listData)
 {
     MemberListItem listItem;
-
     if (!syncItem.group.isUndefined() && syncItem.group->id.hasValue()) {
         listItem.type = MemberListItem::Type::Group;
-        listItem.groupId = syncItem.group->id;
-        listItem.groupCount = syncItem.group->count;
+        listItem.groupId = syncItem.group->id.get();
+        listItem.groupCount = syncItem.group->count.get();
         resolveGroupInfo(listItem, guildState, listData);
     } else if (!syncItem.member.isUndefined()) {
         listItem.type = MemberListItem::Type::Member;
-        listItem.member = syncItem.member;
+        listItem.member = syncItem.member.get();
         listItem.member.presence.undefine();
-
         if (!syncItem.member->user.isUndefined())
-            listItem.userId = syncItem.member->user->id;
-
+            listItem.userId = syncItem.member->user->id.get();
         resolveMemberInfo(listItem, guildState);
     }
-
     return listItem;
 }
 
@@ -518,23 +409,22 @@ void MemberListManager::resolveGroupInfo(MemberListItem &item, const GuildListSt
 {
     for (const auto &group : listData.groups) {
         if (group.id.get() == item.groupId) {
-            item.groupCount = group.count;
+            item.groupCount = group.count.get();
             break;
         }
     }
-
     if (item.groupId == "online") {
         item.groupName = "Online";
-        item.groupColor = QColor();
+        item.groupColor = {};
     } else if (item.groupId == "offline") {
         item.groupName = "Offline";
-        item.groupColor = QColor();
+        item.groupColor = {};
     } else {
         auto it = guildState.roleCache.find(item.groupId);
         if (it != guildState.roleCache.end()) {
-            item.groupName = it->name;
-            if (it->hasColor())
-                item.groupColor = it->getColor();
+            item.groupName = it->second.name.get();
+            if (it->second.hasColor())
+                item.groupColor = it->second.getColor();
         } else {
             item.groupName = "Unknown Role";
         }
@@ -544,45 +434,34 @@ void MemberListManager::resolveGroupInfo(MemberListItem &item, const GuildListSt
 void MemberListManager::resolveMemberInfo(MemberListItem &item, const GuildListState &guildState)
 {
     const auto &member = item.member;
-
-    if (!member.nick.isUndefined() && !member.nick.isNull() && !member.nick->isEmpty())
-        item.displayName = member.nick;
+    if (!member.nick.isUndefined() && !member.nick.isNull() && !member.nick->empty())
+        item.displayName = member.nick.get();
     else if (!member.user.isUndefined())
         item.displayName = member.user->getDisplayName();
-
     if (!member.roles.isUndefined()) {
         int highestPos = -1;
         int bestColor = 0;
-
         for (const auto &roleId : member.roles.get()) {
-            QString roleIdStr = QString::number(roleId);
-            auto it = guildState.roleCache.find(roleIdStr);
+            auto it = guildState.roleCache.find(roleId.toString());
             if (it != guildState.roleCache.end()) {
-                if (!it->color.isUndefined() && it->color.get() != 0 && it->position.get() > highestPos) {
-                    highestPos = it->position.get();
-                    bestColor = it->color.get();
+                const auto &role = it->second;
+                if (!role.color.isUndefined() && role.color.get() != 0 && role.position.get() > highestPos) {
+                    highestPos = role.position.get();
+                    bestColor = role.color.get();
                 }
             }
         }
-
         if (bestColor != 0)
-            item.roleColor = QColor((bestColor >> 16) & 0xFF, (bestColor >> 8) & 0xFF, bestColor & 0xFF);
+            item.roleColor = Platform::Color::rgb(static_cast<uint32_t>(bestColor));
     }
 }
 
 void MemberListManager::processSync(const Discord::GuildMemberListUpdate::ListOp &op,
                                     ListData &listData, const GuildListState &guildState)
 {
-    if (op.range.isUndefined())
+    if (op.range.isUndefined() || op.items.isUndefined() || op.items->empty())
         return;
-
-    // no changes
-    if (op.items.isUndefined() || op.items->isEmpty())
-        return;
-
-    int rangeStart = op.range->first;
-
-    int idx = rangeStart;
+    int idx = op.range->first;
     for (const auto &syncItem : op.items.get()) {
         listData.items[idx] = syncItemToListItem(syncItem, guildState, listData);
         ++idx;
@@ -594,21 +473,20 @@ void MemberListManager::processInsert(const Discord::GuildMemberListUpdate::List
 {
     if (op.index.isUndefined() || op.item.isUndefined())
         return;
-
-    int insertIdx = op.index;
-
-    QList<int> keys;
+    int insertIdx = op.index.get();
+    std::vector<int> keys;
     keys.reserve(listData.items.size());
-    for (auto it = listData.items.constBegin(); it != listData.items.constEnd(); ++it) {
-        if (it.key() >= insertIdx)
-            keys.append(it.key());
+    for (const auto &[key, item] : listData.items) {
+        if (key >= insertIdx)
+            keys.push_back(key);
     }
-
     std::sort(keys.begin(), keys.end(), std::greater<int>());
-    for (int key : keys)
-        listData.items[key + 1] = listData.items.take(key);
-
-    listData.items[insertIdx] = syncItemToListItem(op.item, guildState, listData);
+    for (int key : keys) {
+        auto node = listData.items.extract(key);
+        node.key() = key + 1;
+        listData.items.insert(std::move(node));
+    }
+    listData.items[insertIdx] = syncItemToListItem(op.item.get(), guildState, listData);
 }
 
 void MemberListManager::processUpdate(const Discord::GuildMemberListUpdate::ListOp &op,
@@ -616,9 +494,7 @@ void MemberListManager::processUpdate(const Discord::GuildMemberListUpdate::List
 {
     if (op.index.isUndefined() || op.item.isUndefined())
         return;
-
-    int index = op.index;
-    listData.items[index] = syncItemToListItem(op.item, guildState, listData);
+    listData.items[op.index.get()] = syncItemToListItem(op.item.get(), guildState, listData);
 }
 
 void MemberListManager::processDelete(const Discord::GuildMemberListUpdate::ListOp &op,
@@ -626,20 +502,20 @@ void MemberListManager::processDelete(const Discord::GuildMemberListUpdate::List
 {
     if (op.index.isUndefined())
         return;
-
-    int deleteIdx = op.index;
-    listData.items.remove(deleteIdx);
-
-    QList<int> keys;
+    int deleteIdx = op.index.get();
+    listData.items.erase(deleteIdx);
+    std::vector<int> keys;
     keys.reserve(listData.items.size());
-    for (auto it = listData.items.constBegin(); it != listData.items.constEnd(); ++it) {
-        if (it.key() > deleteIdx)
-            keys.append(it.key());
+    for (const auto &[key, item] : listData.items) {
+        if (key > deleteIdx)
+            keys.push_back(key);
     }
-
     std::sort(keys.begin(), keys.end());
-    for (int key : keys)
-        listData.items[key - 1] = listData.items.take(key);
+    for (int key : keys) {
+        auto node = listData.items.extract(key);
+        node.key() = key - 1;
+        listData.items.insert(std::move(node));
+    }
 }
 
 void MemberListManager::processInvalidate(const Discord::GuildMemberListUpdate::ListOp &op,
@@ -647,15 +523,13 @@ void MemberListManager::processInvalidate(const Discord::GuildMemberListUpdate::
 {
     if (op.range.isUndefined())
         return;
-
     int rangeStart = op.range->first;
     int rangeEnd = op.range->second;
-
-    for (int i = rangeStart; i <= rangeEnd; i++)
-        listData.items.remove(i);
+    for (int i = rangeStart; i <= rangeEnd; ++i)
+        listData.items.erase(i);
 }
 
-QString MemberListManager::computeListId(const QList<Discord::PermissionOverwrite> &overwrites, Discord::Permissions everyonePermissions)
+std::string MemberListManager::computeListId(const std::vector<Discord::PermissionOverwrite> &overwrites, Discord::Permissions everyonePermissions)
 {
     bool hasDenyRules = false;
     for (const auto &ow : overwrites) {
@@ -664,24 +538,23 @@ QString MemberListManager::computeListId(const QList<Discord::PermissionOverwrit
             break;
         }
     }
-
     if (!hasDenyRules && everyonePermissions.testFlag(Discord::Permission::VIEW_CHANNEL))
-        return QStringLiteral("everyone");
-
-    QStringList hashInputs;
+        return "everyone";
+    std::vector<std::string> hashInputs;
     for (const auto &ow : overwrites) {
         if (ow.allow->testFlag(Discord::Permission::VIEW_CHANNEL))
-            hashInputs.append("allow:" + QString::number(ow.id.get()));
+            hashInputs.push_back("allow:" + ow.id.get().toString());
         else if (ow.deny->testFlag(Discord::Permission::VIEW_CHANNEL))
-            hashInputs.append("deny:" + QString::number(ow.id.get()));
+            hashInputs.push_back("deny:" + ow.id.get().toString());
     }
-
-    hashInputs.sort();
-
-    std::string input = hashInputs.join(",").toStdString();
-    uint32_t hash = mmh32(input, 0);
-
-    return QString::number(hash);
+    std::sort(hashInputs.begin(), hashInputs.end());
+    std::string input;
+    for (const auto &part : hashInputs) {
+        if (!input.empty())
+            input += ',';
+        input += part;
+    }
+    return std::to_string(mmh32(input, 0));
 }
 
 } // namespace Core

@@ -1,43 +1,36 @@
 #pragma once
 
-#include <QString>
-#include <QPixmap>
-#include <QMetaType>
+#include <format>
+#include <string>
 
 #include "Enums.hpp"
 #include "ProxyConfig.hpp"
 #include "Snowflake.hpp"
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 struct AccountInfo
 {
     Snowflake id;
-    QString username;
-    QString displayName;
-    QString token;
-    QString avatar;
+    std::string username;
+    std::string displayName;
+    std::string token;
+    std::string avatar;
 
-    QString gatewayUrl = "wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream";
-    QString restUrl = "https://discord.com/api/v9";
-    QString cdnUrl = "https://cdn.discordapp.com";
+    std::string gatewayUrl = "wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream";
+    std::string restUrl = "https://discord.com/api/v9";
+    std::string cdnUrl = "https://cdn.discordapp.com";
 
     ProxyConfig proxy;
 
     int displayOrder = 0;
     bool autoConnect = false;
-
     ConnectionState state = ConnectionState::Disconnected;
 
-    [[nodiscard]] QString getEntryString() const
+    [[nodiscard]] std::string getEntryString() const
     {
-        if (displayName.isEmpty())
+        if (displayName.empty())
             return username;
-
-        return QString("%1 (%2)").arg(displayName).arg(username);
+        return std::format("{} ({})", displayName, username);
     }
 };
-} // namespace Core
-} // namespace Styx
-
-Q_DECLARE_METATYPE(Styx::Core::AccountInfo)
+}

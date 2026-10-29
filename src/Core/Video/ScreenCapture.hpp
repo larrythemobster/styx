@@ -21,6 +21,7 @@ enum class CaptureMethod { Auto, GraphicsCapture, DesktopDuplication, Portal, X1
 [[nodiscard]] FrameSize encodeSizeOf(const CaptureSource &source, int maxHeight);
 [[nodiscard]] Platform::ImageBuffer captureThumbnail(const CaptureSource &source, FrameSize bound);
 
+constexpr int STILL_PICTURE_INTERVAL_MS = 500;
 [[nodiscard]] bool stillPictureIsDue(std::chrono::milliseconds sinceLastPicture, bool keyFrameWaitedFor, int framerate);
 
 struct StackedWindow {

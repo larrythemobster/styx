@@ -1,76 +1,67 @@
 #include "AnimatedImageCache.hpp"
 
-#include "Platform/Dispatcher.hpp"
-#include <QBuffer>
-#include <QFile>
-#include <QGuiApplication>
-#include <QImageReader>
-
-#include <algorithm>
-#include <cmath>
-#include <optional>
-
 #include "AnimationTiming.hpp"
 #include "ApngDecoder.hpp"
 #include "Logging.hpp"
 #include "LottieDecoder.hpp"
+#include "Media/ClipDecoder.hpp"
+#include "Platform/Dispatcher.hpp"
+#include "Platform/Native.hpp"
 
-namespace Styx {
-namespace Core {
+#include <algorithm>
+#include <cmath>
+#include <optional>
+#include <utility>
 
+namespace Styx::Core {
 namespace {
-
 constexpr int MaxFrames = 300;
-constexpr int KiBPerMiB = 1024;
-constexpr qsizetype BytesPerMiB = 1024 * 1024;
+constexpr size_t BytesPerMiB = 1024 * 1024;
 constexpr double MinBudgetScale = 0.5;
 
-std::optional<QSize> frameSizeWithinBudget(const QSize &wanted, int frameCount, qsizetype byteBudget)
+std::optional<Platform::Size> frameSizeWithinBudget(Platform::Size wanted, int frameCount, size_t byteBudget)
 {
-    if (frameCount > MaxFrames || wanted.isEmpty())
+    if (frameCount > MaxFrames || wanted.empty())
         return std::nullopt;
-
-    const double wantedBytes = double(frameCount) * wanted.width() * wanted.height() * 4;
+    const double wantedBytes = double(frameCount) * wanted.width * wanted.height * 4;
     if (wantedBytes <= double(byteBudget))
         return wanted;
-
     const double scale = std::sqrt(double(byteBudget) / wantedBytes);
     if (scale < MinBudgetScale)
         return std::nullopt;
-    return QSize(std::max(1, int(wanted.width() * scale)), std::max(1, int(wanted.height() * scale)));
+    return Platform::Size{std::max(1, int(wanted.width * scale)), std::max(1, int(wanted.height * scale))};
 }
 
-QImage scaledFrame(const QImage &source, const QSize &size)
+Platform::ImageBuffer scaledFrame(Platform::ImageBuffer source, Platform::Size size)
 {
-    QImage frame = source.size() == size ? source : source.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    if (frame.format() != QImage::Format_ARGB32_Premultiplied)
-        frame = frame.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    return frame;
+    if (source.width == size.width && source.height == size.height)
+        return source;
+    return Platform::Image::scale(source, size.width, size.height);
 }
-
 } // namespace
 
-int AnimatedFrames::frameAt(qint64 loopPhaseMs) const
+int AnimatedFrames::frameAt(int64_t loopPhaseMs) const
 {
     if (isStatic())
         return 0;
     auto it = std::upper_bound(frameEndMs.begin(), frameEndMs.end(), int(loopPhaseMs));
-    return int(std::min<qsizetype>(it - frameEndMs.begin(), frames.size() - 1));
+    return int(std::min<size_t>(size_t(it - frameEndMs.begin()), frames.size() - 1));
 }
 
-AnimatedImageCache::AnimatedImageCache(ImageManager *imageManager, QObject *parent)
-    : QObject(parent), imageManager(imageManager)
+AnimatedImageCache::AnimatedImageCache(ImageManager *imageManager) : imageManager(imageManager)
 {
     setCacheLimitMiB(CacheLimit.fallback);
-    connect(imageManager, &ImageManager::rawDownloadReady, this, &AnimatedImageCache::onRawDownloadReady);
+    track(imageManager->rawDownloadReady.connect([this](const std::string &url, const Platform::Size &size) {
+        onRawDownloadReady(url, size);
+    }));
 }
 
-static_assert(AnimatedImageCache::AnimationLimit.max <= AnimatedImageCache::CacheLimit.min,
-              "QCache deletes an entry that costs more than the whole cache, and it would be decoded again on every paint");
+static_assert(AnimatedImageCache::AnimationLimit.max <= AnimatedImageCache::CacheLimit.min);
 
 void AnimatedImageCache::setCacheLimitMiB(int mib)
 {
-    cache.setMaxCost(std::clamp(mib, CacheLimit.min, CacheLimit.max) * KiBPerMiB);
+    cacheLimitKiB = size_t(std::clamp(mib, CacheLimit.min, CacheLimit.max)) * 1024;
+    trimCache();
 }
 
 void AnimatedImageCache::setAnimationLimitMiB(int mib)
@@ -80,214 +71,189 @@ void AnimatedImageCache::setAnimationLimitMiB(int mib)
 
 AnimatedImageCache::~AnimatedImageCache()
 {
-    *m_alive = false;
+    alive->store(false);
     decodePool.clear();
     decodePool.stopAndWait();
 }
 
-AnimatedFramesPtr AnimatedImageCache::get(const QUrl &url, const QSize &logicalSize, Snowflake accountId)
+void AnimatedImageCache::removeCached(const ImageRequestKey &key)
 {
-    const ImageRequestKey key{ url, logicalSize };
-    if (const AnimatedFramesPtr *cached = cache.object(key))
-        return *cached;
+    auto it = cache.find(key);
+    if (it == cache.end()) return;
+    cacheCostKiB -= it->second.cost;
+    lru.erase(it->second.lru);
+    cache.erase(it);
+}
 
+void AnimatedImageCache::trimCache()
+{
+    while (cacheCostKiB > cacheLimitKiB && !lru.empty())
+        removeCached(lru.back());
+}
+
+AnimatedFramesPtr AnimatedImageCache::get(const std::string &url, const Platform::Size &logicalSize, Snowflake accountId)
+{
+    const ImageRequestKey key{url, logicalSize};
+    auto cached = cache.find(key);
+    if (cached != cache.end()) {
+        lru.splice(lru.begin(), lru, cached->second.lru);
+        return cached->second.frames;
+    }
     wanted.insert(key);
-    const auto inFlight = decoding.constFind(key);
-    if (inFlight != decoding.constEnd()) {
-        inFlight.value()->store(false);
+    auto inFlight = decoding.find(key);
+    if (inFlight != decoding.end()) {
+        inFlight->second->store(false);
         return nullptr;
     }
-
-    const QString path = imageManager->rawDownloadPath(url, logicalSize);
-    if (path.isEmpty())
+    const std::string path = imageManager->rawDownloadPath(url, logicalSize);
+    if (path.empty())
         imageManager->downloadToCache(url, logicalSize, accountId);
     else
         decode(key, path);
     return nullptr;
 }
 
-void AnimatedImageCache::discard(const QUrl &url, const QSize &logicalSize)
+void AnimatedImageCache::discard(const std::string &url, const Platform::Size &logicalSize)
 {
-    const ImageRequestKey key{ url, logicalSize };
-    wanted.remove(key);
-    cache.remove(key);
-
-    const auto inFlight = decoding.constFind(key);
-    if (inFlight != decoding.constEnd())
-        inFlight.value()->store(true);
+    const ImageRequestKey key{url, logicalSize};
+    wanted.erase(key);
+    removeCached(key);
+    auto inFlight = decoding.find(key);
+    if (inFlight != decoding.end())
+        inFlight->second->store(true);
 }
 
-void AnimatedImageCache::onRawDownloadReady(const QUrl &url, const QSize &size)
+void AnimatedImageCache::onRawDownloadReady(const std::string &url, const Platform::Size &size)
 {
-    const ImageRequestKey key{ url, size };
-    if (!wanted.contains(key) || decoding.contains(key))
-        return;
-    const QString path = imageManager->rawDownloadPath(url, size);
-    if (path.isEmpty())
-        wanted.remove(key);
-    else
-        decode(key, path);
+    const ImageRequestKey key{url, size};
+    if (!wanted.contains(key) || decoding.contains(key)) return;
+    const std::string path = imageManager->rawDownloadPath(url, size);
+    if (path.empty()) wanted.erase(key);
+    else decode(key, path);
 }
 
-void AnimatedImageCache::decode(const ImageRequestKey &key, const QString &path)
+void AnimatedImageCache::decode(const ImageRequestKey &key, const std::string &path)
 {
-    const DiscardedFlag discarded = std::make_shared<std::atomic_bool>(false);
-    decoding.insert(key, discarded);
-
-    const qreal dpr = qGuiApp->devicePixelRatio();
-    const DecodeTarget target{ key.size * dpr, animationLimitMiB * BytesPerMiB };
-
-    // newest first
-    decodePool.post([this, alive = m_alive, key, path, target, dpr, discarded]() {
+    auto discarded = std::make_shared<std::atomic_bool>(false);
+    decoding.emplace(key, discarded);
+    const DecodeTarget target{key.size, size_t(animationLimitMiB) * BytesPerMiB};
+    decodePool.post([this, alive = alive, key, path, target, discarded]() {
         if (discarded->load()) {
             Platform::Dispatcher::main().post([this, alive, key]() {
-                if (!*alive)
-                    return;
-                onDecodeSkipped(key);
+                if (alive->load()) onDecodeSkipped(key);
             });
             return;
         }
-        const Decoded decoded = decodeFrames(path, target);
-        Platform::Dispatcher::main().post([this, alive, key, decoded, dpr]() {
-            if (!*alive)
-                return;
-            publish(key, decoded, dpr);
+        auto decoded = decodeFrames(path, target);
+        Platform::Dispatcher::main().post([this, alive, key, decoded = std::move(decoded)]() mutable {
+            if (alive->load()) publish(key, std::move(decoded));
         });
     });
 }
 
 void AnimatedImageCache::onDecodeSkipped(const ImageRequestKey &key)
 {
-    decoding.remove(key);
-    const bool wantedAgainSince = wanted.contains(key);
-    if (wantedAgainSince)
-        onRawDownloadReady(key.url, key.size);
+    decoding.erase(key);
+    if (wanted.contains(key)) onRawDownloadReady(key.url, key.size);
 }
 
-AnimatedImageCache::Decoded AnimatedImageCache::decodeFrames(const QString &path, const DecodeTarget &target)
+AnimatedImageCache::Decoded AnimatedImageCache::decodeFrames(const std::string &path, const DecodeTarget &target)
 {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    const QByteArray data = file.readAll();
-
-    if (Lottie::looksLikeLottie(data))
-        return decodeLottie(data, target);
-
-    if (const auto apng = Apng::Reader::open(data))
-        return decodeApng(*apng, target);
-
-    return decodeWithImageReader(data, target);
+    const std::string data = Platform::Resources::readFile(std::filesystem::u8path(path));
+    if (data.empty()) return {};
+    if (Lottie::looksLikeLottie(data)) return decodeLottie(data, target);
+    if (auto apng = Apng::Reader::open(data)) return decodeApng(*apng, target);
+    const bool gif = data.size() >= 4 && data.compare(0, 4, "GIF8") == 0;
+    const bool webp = data.size() >= 12 && data.compare(0, 4, "RIFF") == 0 && data.compare(8, 4, "WEBP") == 0;
+    if (gif || webp) return decodeAnimatedImage(path, target);
+    return {};
 }
 
 AnimatedImageCache::Decoded AnimatedImageCache::decodeApng(Apng::Reader &apng, const DecodeTarget &target)
 {
-    const auto frameSize = frameSizeWithinBudget(apng.canvasSize().scaled(target.physicalSize, Qt::KeepAspectRatio), apng.frameCount(), target.byteBudget);
+    auto frameSize = frameSizeWithinBudget(Platform::fitWithin(apng.canvasSize(), target.physicalSize), apng.frameCount(), target.byteBudget);
     if (!frameSize) {
-        qCDebug(LogCore) << "APNG exceeds frame budget, rendering static";
+        Core::log(Core::LogLevel::Debug, LogCore) << "APNG exceeds frame budget, rendering static";
         return {};
     }
-
     Decoded out;
-    QImage canvas;
+    Platform::ImageBuffer canvas;
     int delayMs = 0;
     while (apng.next(canvas, delayMs)) {
-        out.frames.append(scaledFrame(canvas, *frameSize));
-        out.delaysMs.append(normalizedFrameDelayMs(delayMs));
+        out.frames.push_back(scaledFrame(canvas, *frameSize));
+        out.delaysMs.push_back(normalizedFrameDelayMs(delayMs));
     }
     return out;
 }
 
-AnimatedImageCache::Decoded AnimatedImageCache::decodeLottie(const QByteArray &data, const DecodeTarget &target)
+AnimatedImageCache::Decoded AnimatedImageCache::decodeLottie(const std::string &data, const DecodeTarget &target)
 {
     const auto animation = Lottie::Animation::fromJson(data);
-    if (!animation)
-        return {};
-
+    if (!animation) return {};
     const auto budgetedSize = frameSizeWithinBudget(target.physicalSize, animation->frameCount(), target.byteBudget);
-    if (!budgetedSize)
-        qCDebug(LogCore) << "Lottie animation exceeds frame budget, rendering static";
+    if (!budgetedSize) Core::log(Core::LogLevel::Debug, LogCore) << "Lottie animation exceeds frame budget, rendering static";
     const int frameCount = budgetedSize ? animation->frameCount() : 1;
-    const QSize frameSize = budgetedSize.value_or(target.physicalSize);
-
+    const auto frameSize = budgetedSize.value_or(target.physicalSize);
     Decoded out;
     for (int frame = 0; frame < frameCount; ++frame) {
-        out.frames.append(animation->render(frame, frameSize));
-        out.delaysMs.append(animation->frameDelayMs());
+        out.frames.push_back(animation->render(frame, frameSize));
+        out.delaysMs.push_back(animation->frameDelayMs());
     }
     return out;
 }
 
-AnimatedImageCache::Decoded AnimatedImageCache::decodeWithImageReader(const QByteArray &data, const DecodeTarget &target)
+AnimatedImageCache::Decoded AnimatedImageCache::decodeAnimatedImage(const std::string &path, const DecodeTarget &target)
 {
-    QBuffer buffer;
-    buffer.setData(data);
-    buffer.open(QIODevice::ReadOnly);
-
-    QImageReader reader(&buffer);
-    if (!reader.canRead() || !reader.supportsAnimation())
-        return {};
-
-    const int declaredFrames = reader.imageCount();
-    const bool frameCountKnown = declaredFrames > 0;
-
+    auto decoder = Media::ClipDecoder::open(path);
+    if (!decoder) return {};
+    const auto wantedSize = Platform::fitWithin(decoder->nativeSize(), target.physicalSize);
+    std::vector<int64_t> starts;
+    Platform::ImageBuffer frame;
+    int64_t start = 0;
+    while (decoder->nextFrameOfLoop(frame, start, {1, 1})) {
+        starts.push_back(start);
+        if (starts.size() > MaxFrames) return {};
+    }
+    if (starts.empty()) return {};
+    const int64_t loopEnd = decoder->finishedLoopMs();
+    const auto frameSize = frameSizeWithinBudget(wantedSize, int(starts.size()), target.byteBudget);
+    if (!frameSize || !decoder->rewind()) return {};
     Decoded out;
-    QSize frameSize;
-    qsizetype bytes = 0;
-    for (;;) {
-        const QImage source = reader.read();
-        if (source.isNull())
-            break;
-
-        const int delay = reader.nextImageDelay();
-
-        if (out.frames.isEmpty()) {
-            const QSize wantedSize = source.size().scaled(target.physicalSize, Qt::KeepAspectRatio);
-            const auto budgetedSize = frameCountKnown ? frameSizeWithinBudget(wantedSize, declaredFrames, target.byteBudget) : wantedSize;
-            if (!budgetedSize) {
-                qCDebug(LogCore) << "Animated image exceeds frame budget, rendering static";
-                return {};
-            }
-            frameSize = *budgetedSize;
-        }
-
-        const QImage frame = scaledFrame(source, frameSize);
-
-        bytes += frame.sizeInBytes();
-        if (bytes > target.byteBudget || out.frames.size() >= MaxFrames) {
-            qCDebug(LogCore) << "Animated image exceeds frame budget, rendering static";
-            return {};
-        }
-
-        out.frames.append(frame);
-        out.delaysMs.append(normalizedFrameDelayMs(delay));
+    out.frames.reserve(starts.size());
+    out.delaysMs.reserve(starts.size());
+    for (size_t i = 0; i < starts.size(); ++i) {
+        Platform::ImageBuffer image;
+        if (!decoder->nextFrameOfLoop(image, start, *frameSize)) return {};
+        const int64_t end = i + 1 < starts.size() ? starts[i + 1] : loopEnd;
+        out.frames.push_back(std::move(image));
+        out.delaysMs.push_back(normalizedFrameDelayMs(int(end - starts[i])));
     }
     return out;
 }
 
-void AnimatedImageCache::publish(const ImageRequestKey &key, const Decoded &decoded, qreal dpr)
+void AnimatedImageCache::publish(const ImageRequestKey &key, Decoded decoded)
 {
-    decoding.remove(key);
-    const bool discardedWhileDecoding = !wanted.remove(key);
-    if (discardedWhileDecoding)
-        return;
-
+    decoding.erase(key);
+    if (!wanted.erase(key)) return;
     auto frames = std::make_shared<AnimatedFrames>();
-    qsizetype bytes = 0;
+    size_t bytes = 0;
     int elapsed = 0;
-    for (qsizetype i = 0; i < decoded.frames.size(); ++i) {
-        QPixmap pixmap = QPixmap::fromImage(decoded.frames[i]);
-        pixmap.setDevicePixelRatio(dpr);
-        frames->frames.append(pixmap);
-        bytes += decoded.frames[i].sizeInBytes();
+    for (size_t i = 0; i < decoded.frames.size(); ++i) {
+        bytes += decoded.frames[i].byteSize();
         elapsed += decoded.delaysMs[i];
-        frames->frameEndMs.append(elapsed);
+        frames->frameEndMs.push_back(elapsed);
     }
-
+    frames->frames = std::move(decoded.frames);
     const AnimatedFramesPtr published = std::move(frames);
-    cache.insert(key, new AnimatedFramesPtr(published), int(std::max<qsizetype>(1, bytes / 1024)));
-    emit framesReady(key.url, key.size, published);
+    const size_t cost = std::max<size_t>(1, bytes / 1024);
+    removeCached(key);
+    if (cost <= cacheLimitKiB) {
+        lru.push_front(key);
+        cache.emplace(key, CacheEntry{published, cost, lru.begin()});
+        cacheCostKiB += cost;
+        trimCache();
+    }
+    framesReady.publish(key.url, key.size, published);
 }
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

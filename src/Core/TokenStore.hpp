@@ -1,7 +1,6 @@
 #pragma once
 
-#include <QCoreApplication>
-#include <QString>
+#include <string>
 
 #include "Result.hpp"
 #include "Snowflake.hpp"
@@ -11,18 +10,16 @@ namespace Core {
 
 class TokenStore
 {
-    Q_DECLARE_TR_FUNCTIONS(Styx::Core::TokenStore)
-
 public:
     static constexpr char const *SERVICE_NAME = "Styx";
 
-    static Result<void> saveToken(Snowflake accountId, const QString &token);
-    static Result<QString> loadToken(Snowflake accountId);
+    static Result<void> saveToken(Snowflake accountId, const std::string &token);
+    static Result<std::string> loadToken(Snowflake accountId);
     static bool deleteToken(Snowflake accountId);
 
 private:
-    static QString keyForAccount(Snowflake accountId);
-    static QString describeKeychainFailure(const QString &keychainError);
+    static std::string keyForAccount(Snowflake accountId);
+    static std::string describeKeychainFailure(const std::string &keychainError);
 };
 
 } // namespace Core

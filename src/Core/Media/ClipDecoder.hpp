@@ -1,28 +1,22 @@
 #pragma once
 
-#include <QImage>
-#include <QSize>
-#include <QString>
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
 
+#include <cstdint>
 #include <memory>
+#include <string>
 
-namespace Styx {
-namespace Core {
-namespace Media {
+namespace Styx::Core::Media {
 
-class ClipDecoder
-{
+class ClipDecoder {
 public:
     virtual ~ClipDecoder() = default;
-
-    [[nodiscard]] static std::unique_ptr<ClipDecoder> open(const QString &path);
-
-    [[nodiscard]] virtual QSize nativeSize() const = 0;
-    virtual bool nextFrameOfLoop(QImage &frame, qint64 &startMs, const QSize &frameSize) = 0;
-    [[nodiscard]] virtual qint64 finishedLoopMs() const = 0;
+    [[nodiscard]] static std::unique_ptr<ClipDecoder> open(const std::string &path);
+    [[nodiscard]] virtual Platform::Size nativeSize() const = 0;
+    virtual bool nextFrameOfLoop(Platform::ImageBuffer &frame, int64_t &startMs, Platform::Size frameSize) = 0;
+    [[nodiscard]] virtual int64_t finishedLoopMs() const = 0;
     virtual bool rewind() = 0;
 };
 
-} // namespace Media
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core::Media

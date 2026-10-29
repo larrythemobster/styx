@@ -63,7 +63,7 @@ void NoiseSuppressor::reconfigure(int channels)
 #endif
 }
 
-QByteArray NoiseSuppressor::process(const QByteArray &pcmFrame, float &outVoiceProb)
+std::string NoiseSuppressor::process(const std::string &pcmFrame, float &outVoiceProb)
 {
     outVoiceProb = -1.0f;
 
@@ -72,9 +72,9 @@ QByteArray NoiseSuppressor::process(const QByteArray &pcmFrame, float &outVoiceP
         return pcmFrame;
 
     const int frameSize = rnnoise_get_frame_size();
-    const auto *in = reinterpret_cast<const int16_t *>(pcmFrame.constData());
+    const auto *in = reinterpret_cast<const int16_t *>(pcmFrame.data());
 
-    QByteArray out(AUDIO_FRAME_SIZE, '\0');
+    std::string out(AUDIO_FRAME_SIZE, '\0');
     auto *outSamples = reinterpret_cast<int16_t *>(out.data());
     float prob = 0.0f;
 

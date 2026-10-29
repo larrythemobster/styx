@@ -1,12 +1,13 @@
 #pragma once
 
-#include <QHash>
-#include <QList>
-#include <QObject>
-#include <QSet>
-#include <QTimer>
-
+#include <cstdint>
 #include <optional>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include "Platform/Trackable.hpp"
+#include "Platform/Timer.hpp"
 
 #include "PresenceBadge.hpp"
 #include "Discord/Entities.hpp"
@@ -21,44 +22,41 @@ struct PresenceEntry
 {
     Discord::StatusType status = Discord::StatusType::OFFLINE;
     Discord::ClientStatus clientStatus;
-    QList<Discord::Activity> sortedActivities;
-    qint64 receivedAtMs = 0;
+    std::vector<Discord::Activity> sortedActivities;
+    std::int64_t receivedAtMs = 0;
 };
 
-class PresenceManager : public QObject
+class PresenceManager : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit PresenceManager(QObject *parent = nullptr);
+    PresenceManager() = default;
 
     void setSelfUserId(Snowflake userId);
     void reset();
 
     void loadMergedPresences(const Discord::MergedPresences &merged,
-                             const QList<Snowflake> &guildIdsInOrder);
+                             const std::vector<Snowflake> &guildIdsInOrder);
     void applyProtoStatus(const Proto::PreloadedUserSettings &settings);
 
     [[nodiscard]] PresenceBadge badge(Snowflake userId, Snowflake guildId = {}) const;
-    [[nodiscard]] QList<Discord::Activity> activities(Snowflake userId, Snowflake guildId = {}) const;
+    [[nodiscard]] std::vector<Discord::Activity> activities(Snowflake userId, Snowflake guildId = {}) const;
     [[nodiscard]] const Discord::Activity *primaryActivity(Snowflake userId, Snowflake guildId = {}) const;
 
-public slots:
     void onPresenceUpdate(const Discord::Presence &presence);
-    void onPresencesReplace(const QList<Discord::Presence> &presences);
-    void onSessionsReplace(const QList<Discord::UserSession> &sessions);
+    void onPresencesReplace(const std::vector<Discord::Presence> &presences);
+    void onSessionsReplace(const std::vector<Discord::UserSession> &sessions);
     void onGuildCreated(const Discord::GatewayGuild &guild);
     void onGuildRemoved(Snowflake guildId);
     void onGuildMemberListUpdate(const Discord::GuildMemberListUpdate &update);
     void onGuildMembersChunk(const Discord::GuildMembersChunk &chunk);
 
-signals:
-    void presencesChanged(const QList<Snowflake> &userIds);
+    Platform::Signal<std::vector<Snowflake>> presencesChanged;
 
 private:
     bool apply(const Discord::Presence &presence, Snowflake guildId);
     void ingestMember(const Discord::Member &member, Snowflake guildId);
     void dropSlot(Snowflake guildId);
-    void rebuildSelfActivities(QList<Discord::Activity> sessionActivities);
+    void rebuildSelfActivities(std::vector<Discord::Activity> sessionActivities);
     void markDirty(Snowflake userId);
     void flushDirty();
 
@@ -66,7 +64,7 @@ private:
     [[nodiscard]] const PresenceEntry *resolve(Snowflake userId, Snowflake guildId) const;
     [[nodiscard]] const PresenceEntry *newest(Snowflake userId) const;
 
-    QHash<Snowflake, QHash<Snowflake, PresenceEntry>> presences;
+    std::unordered_map<Snowflake, std::unordered_map<Snowflake, PresenceEntry>> presences;
 
     Snowflake selfUserId;
     PresenceEntry selfPresence;
@@ -74,8 +72,8 @@ private:
     bool sessionsReplaceSeen = false;
     bool showCurrentGame = true;
 
-    QSet<Snowflake> dirtyUsers;
-    QTimer flushTimer;
+    std::unordered_set<Snowflake> dirtyUsers;
+    Platform::Timer flushTimer;
 };
 
 } // namespace Core

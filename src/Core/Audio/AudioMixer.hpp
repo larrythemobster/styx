@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QByteArray>
-#include <QVector>
+#include <string>
+#include <vector>
 
 #include <cstdint>
 #include <utility>
@@ -14,7 +14,7 @@ class AudioMixer
 {
 public:
     // all frames must be same size
-    static QByteArray mix(const QVector<std::pair<QByteArray /* pcm */, float /* gain */>> &inputs);
+    static std::string mix(const std::vector<std::pair<std::string /* pcm */, float /* gain */>> &inputs);
 };
 
 } // namespace Audio

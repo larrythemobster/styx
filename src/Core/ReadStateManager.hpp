@@ -1,9 +1,13 @@
 #pragma once
 
-#include <QObject>
-#include <QHash>
-#include <QSet>
-#include <QDateTime>
+#include <cstdint>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "Platform/Native.hpp"
+#include "Platform/Trackable.hpp"
 
 #include "ChannelReadState.hpp"
 #include "Snowflake.hpp"
@@ -15,19 +19,17 @@ namespace Core {
 
 class PermissionManager;
 
-class ReadStateManager : public QObject
+class ReadStateManager : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit ReadStateManager(Snowflake accountId, PermissionManager *perms,
-                              QObject *parent = nullptr);
+    explicit ReadStateManager(Snowflake accountId, PermissionManager *perms);
 
-    void loadFromReady(const QList<Discord::ReadStateEntry> &readStates,
-                       const QList<Discord::UserGuildSettings> &guildSettings,
+    void loadFromReady(const std::vector<Discord::ReadStateEntry> &readStates,
+                       const std::vector<Discord::UserGuildSettings> &guildSettings,
                        int notificationSettingsFlags);
     void setNotificationSettingsFlags(int flags);
 
-    void setGuildReadInfo(Snowflake guildId, const QDateTime &joinedAt,
+    void setGuildReadInfo(Snowflake guildId, const Platform::DateTime &joinedAt,
                           Discord::MessageNotificationLevel defaultMessageNotifications,
                           bool isCommunity);
     void updateGuildDefaults(Snowflake guildId, Discord::MessageNotificationLevel defaultMessageNotifications, bool isCommunity);
@@ -67,7 +69,7 @@ public:
     void setActiveChannel(Snowflake channelId);
     void setActiveChannelAtBottom(bool atBottom);
     void markChannelAsRead(Snowflake channelId, Snowflake lastMessageId);
-    void markChannelsAsRead(const QList<Snowflake> &channelIds);
+    void markChannelsAsRead(const std::vector<Snowflake> &channelIds);
     void handleMessageCreated(Snowflake channelId, Snowflake messageId, bool fromSelf, bool isMention);
 
     void updateChannelLastMessageId(Snowflake channelId, Snowflake messageId);
@@ -76,11 +78,10 @@ public:
     static bool isMuteActive(bool muted, const Discord::MuteConfig *muteConfig);
     static int daysSinceDiscordEpoch();
 
-signals:
-    void readStateUpdated(Snowflake channelId);
-    void guildSettingsUpdated(Snowflake guildId);
-    void ackRequested(Snowflake channelId, Snowflake messageId);
-    void bulkAckRequested(const QList<QPair<Snowflake, Snowflake>> &channelMessagePairs);
+    Platform::Signal<Snowflake> readStateUpdated;
+    Platform::Signal<Snowflake> guildSettingsUpdated;
+    Platform::Signal<Snowflake, Snowflake> ackRequested;
+    Platform::Signal<const std::vector<std::pair<Snowflake, Snowflake>> &> bulkAckRequested;
 
 private:
     Discord::ReadStateEntry &entryFor(Snowflake channelId);
@@ -106,7 +107,7 @@ private:
 
     struct GuildReadInfo
     {
-        qint64 joinedAtMs = 0;
+        std::int64_t joinedAtMs = 0;
         Discord::MessageNotificationLevel defaultMessageNotifications = Discord::MessageNotificationLevel::ALL_MESSAGES;
         bool isCommunity = false;
     };
@@ -114,25 +115,25 @@ private:
     Snowflake accountId;
     PermissionManager *permissionManager;
 
-    QHash<Snowflake, Discord::ReadStateEntry> channelReadStates;
-    QHash<Snowflake, Snowflake> channelLastMessageIds;
-    QHash<Snowflake, Snowflake> ackIdAtSelect;
-    QHash<Snowflake, Discord::UserGuildSettings> guildSettingsMap; // Snowflake(0) for DMs
+    std::unordered_map<Snowflake, Discord::ReadStateEntry> channelReadStates;
+    std::unordered_map<Snowflake, Snowflake> channelLastMessageIds;
+    std::unordered_map<Snowflake, Snowflake> ackIdAtSelect;
+    std::unordered_map<Snowflake, Discord::UserGuildSettings> guildSettingsMap; // Snowflake(0) for DMs
 
-    QHash<Snowflake, Discord::ChannelOverride> channelOverrideCache;
-    QHash<Snowflake, QSet<Snowflake>> guildOverrideChannels;
+    std::unordered_map<Snowflake, Discord::ChannelOverride> channelOverrideCache;
+    std::unordered_map<Snowflake, std::unordered_set<Snowflake>> guildOverrideChannels;
 
-    QHash<Snowflake, GuildReadInfo> guildInfo;
-    QHash<Snowflake, Snowflake> channelGuildMap;
-    QSet<Snowflake> resourceChannels;
-    QSet<Snowflake> voiceChannels;
-    QSet<Snowflake> forumChannels;
-    QSet<Snowflake> messageRequestChannels;
+    std::unordered_map<Snowflake, GuildReadInfo> guildInfo;
+    std::unordered_map<Snowflake, Snowflake> channelGuildMap;
+    std::unordered_set<Snowflake> resourceChannels;
+    std::unordered_set<Snowflake> voiceChannels;
+    std::unordered_set<Snowflake> forumChannels;
+    std::unordered_set<Snowflake> messageRequestChannels;
     bool useNewNotifications = false;
 
     Snowflake activeChannelId;
     bool activeChannelAtBottom = true;
-    QHash<Snowflake, Snowflake> outgoingAcks;
+    std::unordered_map<Snowflake, Snowflake> outgoingAcks;
 };
 
 } // namespace Core

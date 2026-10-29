@@ -1,65 +1,46 @@
 #pragma once
 
-#include <QHash>
-#include <QList>
-#include <QRegularExpression>
-#include <QString>
-#include <QStringList>
+#include <regex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
 // `<:name:id>` / `<a:name:id>`.
-const QRegularExpression &customEmojiTagRe();
+const std::regex &customEmojiTagRe();
 
-struct UnicodeEmoji
-{
-    // aliases: primary is first and is used as frecency tracker key
-    QStringList names;
-    QStringList keywords;
-    QString surrogates;
-    QString category;
+struct UnicodeEmoji {
+    std::vector<std::string> names;
+    std::vector<std::string> keywords;
+    std::string surrogates;
+    std::string category;
     bool hasDiversity = false;
     bool isDiversityChild = false;
 };
 
-struct UnicodeEmojiCategory
-{
-    QString id;
-    QList<const UnicodeEmoji *> emojis;
+struct UnicodeEmojiCategory {
+    std::string id;
+    std::vector<const UnicodeEmoji *> emojis;
 };
 
-// index extracted from client
-class UnicodeEmojiIndex
-{
+class UnicodeEmojiIndex {
 public:
     static UnicodeEmojiIndex &instance();
-
-    // by any alias
-    [[nodiscard]] const UnicodeEmoji *byName(const QString &name) const;
-    [[nodiscard]] const UnicodeEmoji *bySurrogate(const QString &surrogates) const;
-    // toned to untoned
-    [[nodiscard]] const UnicodeEmoji *convertSurrogateToBase(const QString &surrogates) const;
-
-    [[nodiscard]] static QString primaryName(const UnicodeEmoji &emoji) { return emoji.names.value(0); }
-
-    // non-diversity
-    [[nodiscard]] const QList<const UnicodeEmoji *> &topLevel() const { return topLevelEmojis; }
-    [[nodiscard]] const QList<UnicodeEmojiCategory> &categories() const { return topLevelByCategory; }
-
-    // `:name:` / `:name::skin-tone-N:` to surrogates
-    [[nodiscard]] QString translateNamesToSurrogates(const QString &text) const;
-
+    [[nodiscard]] const UnicodeEmoji *byName(const std::string &name) const;
+    [[nodiscard]] const UnicodeEmoji *bySurrogate(const std::string &surrogates) const;
+    [[nodiscard]] const UnicodeEmoji *convertSurrogateToBase(const std::string &surrogates) const;
+    [[nodiscard]] static std::string primaryName(const UnicodeEmoji &emoji) { return emoji.names.empty() ? std::string{} : emoji.names.front(); }
+    [[nodiscard]] const std::vector<const UnicodeEmoji *> &topLevel() const { return topLevelEmojis; }
+    [[nodiscard]] const std::vector<UnicodeEmojiCategory> &categories() const { return topLevelByCategory; }
+    [[nodiscard]] std::string translateNamesToSurrogates(const std::string &text) const;
 private:
     UnicodeEmojiIndex();
-
-    // fixed
-    QList<UnicodeEmoji> emojis;
-    QHash<QString, int> nameToIndex;
-    QHash<QString, int> surrogateToIndex;
-    QList<const UnicodeEmoji *> topLevelEmojis; // -> emojis
-    QList<UnicodeEmojiCategory> topLevelByCategory;
+    std::vector<UnicodeEmoji> emojis;
+    std::unordered_map<std::string, int> nameToIndex;
+    std::unordered_map<std::string, int> surrogateToIndex;
+    std::vector<const UnicodeEmoji *> topLevelEmojis;
+    std::vector<UnicodeEmojiCategory> topLevelByCategory;
 };
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

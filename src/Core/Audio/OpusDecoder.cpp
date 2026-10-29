@@ -29,13 +29,13 @@ bool OpusDecoder::init(int sampleRate, int channels)
     int error;
     decoder = opus_decoder_create(sampleRate, channels, &error);
     if (error != OPUS_OK || !decoder) {
-        qCCritical(LogVoice) << "Failed to create Opus decoder:" << opus_strerror(error);
+        Core::log(Core::LogLevel::Error, LogVoice) << "Failed to create Opus decoder:" << opus_strerror(error);
         return false;
     }
     return true;
 }
 
-QVector<QByteArray> OpusDecoder::decode(const QByteArray &opusData)
+std::vector<std::string> OpusDecoder::decode(const std::string &opusData)
 {
     if (!decoder)
         return {};
@@ -43,29 +43,29 @@ QVector<QByteArray> OpusDecoder::decode(const QByteArray &opusData)
     // 120ms * 48khz
     static constexpr int MAX_OPUS_SAMPLES = 5760;
     int pcmSize = MAX_OPUS_SAMPLES * frameChannels * static_cast<int>(sizeof(opus_int16));
-    QByteArray pcm(pcmSize, '\0');
+    std::string pcm(pcmSize, '\0');
 
     int samples = opus_decode(decoder,
-                              reinterpret_cast<const unsigned char *>(opusData.constData()),
+                              reinterpret_cast<const unsigned char *>(opusData.data()),
                               opusData.size(),
                               reinterpret_cast<opus_int16 *>(pcm.data()),
                               MAX_OPUS_SAMPLES,
                               0);
 
     if (samples < 0) {
-        qCDebug(LogVoice) << "Opus decode failed:" << opus_strerror(samples);
+        Core::log(Core::LogLevel::Debug, LogVoice) << "Opus decode failed:" << opus_strerror(samples);
         return {};
     }
 
     return splitFrames(pcm, samples);
 }
 
-QByteArray OpusDecoder::decodePlc()
+std::string OpusDecoder::decodePlc()
 {
     if (!decoder)
         return {};
 
-    QByteArray pcm(frameBytes, '\0');
+    std::string pcm(frameBytes, '\0');
 
     int samples = opus_decode(decoder,
                               nullptr, 0,
@@ -74,7 +74,7 @@ QByteArray OpusDecoder::decodePlc()
                               0);
 
     if (samples < 0) {
-        qCDebug(LogVoice) << "Opus PLC failed:" << opus_strerror(samples);
+        Core::log(Core::LogLevel::Debug, LogVoice) << "Opus PLC failed:" << opus_strerror(samples);
         return {};
     }
 
@@ -82,21 +82,21 @@ QByteArray OpusDecoder::decodePlc()
     return pcm;
 }
 
-QVector<QByteArray> OpusDecoder::splitFrames(const QByteArray &pcm, int totalSamples)
+std::vector<std::string> OpusDecoder::splitFrames(const std::string &pcm, int totalSamples)
 {
-    QVector<QByteArray> frames;
+    std::vector<std::string> frames;
 
     int offset = 0;
     int remaining = totalSamples;
 
     while (remaining >= frameSamples) {
-        frames.append(pcm.mid(offset, frameBytes));
+        frames.push_back(pcm.substr(offset, frameBytes));
         offset += frameBytes;
         remaining -= frameSamples;
     }
 
     if (remaining > 0) {
-        qCDebug(LogVoice) << "Opus decoded partial tail:" << remaining << "samples";
+        Core::log(Core::LogLevel::Debug, LogVoice) << "Opus decoded partial tail:" << remaining << "samples";
     }
 
     return frames;

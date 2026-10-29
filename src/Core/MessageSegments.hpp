@@ -3,8 +3,6 @@
 #include <deque>
 #include <vector>
 
-#include <QList>
-
 #include "Snowflake.hpp"
 
 namespace Styx {
@@ -28,9 +26,9 @@ public:
     [[nodiscard]] Position find(Snowflake id) const;
     [[nodiscard]] const Run *tail() const;
 
-    void merge(const QList<Snowflake> &sortedIds, Snowflake anchorId, bool reachesPresent);
+    void merge(const std::vector<Snowflake> &sortedIds, Snowflake anchorId, bool reachesPresent);
 
-    void setTail(const QList<Snowflake> &sortedIds);
+    void setTail(const std::vector<Snowflake> &sortedIds);
 
     void remove(Snowflake id);
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QByteArray>
+#include <string>
 
 #include <opus.h>
 
@@ -19,7 +19,7 @@ public:
 
     bool init(int sampleRate, int channels, int application = OPUS_APPLICATION_VOIP);
 
-    QByteArray encode(const QByteArray &pcmFrame);
+    std::string encode(const std::string &pcmFrame);
 
     void setBitrate(int bitrate);
     void setComplexity(int complexity);

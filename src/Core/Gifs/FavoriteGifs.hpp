@@ -1,46 +1,37 @@
 #pragma once
 
-#include <QList>
-#include <QObject>
-#include <QString>
-#include <QTimer>
+#include <string>
+#include <vector>
 
 #include "Core/Gifs/FavoriteGifRules.hpp"
 #include "Discord/Events.hpp"
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
 #include "Proto/FrecencySettings.hpp"
 
 namespace Styx {
-
-namespace Discord {
-class Client;
-}
-
+namespace Discord { class Client; }
 namespace Core {
 
-class FavoriteGifs : public QObject
+class FavoriteGifs : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit FavoriteGifs(Discord::Client *client, QObject *parent = nullptr);
+    explicit FavoriteGifs(Discord::Client *client);
 
     [[nodiscard]] bool isLoaded() const { return loaded; }
-    [[nodiscard]] QList<Proto::FavoriteGif> newestFirst() const;
-    [[nodiscard]] bool contains(const QString &url) const;
-
+    [[nodiscard]] std::vector<Proto::FavoriteGif> newestFirst() const;
+    [[nodiscard]] bool contains(const std::string &url) const;
     void add(const FavoriteGifCandidate &candidate);
-    void remove(const QString &url);
+    void remove(const std::string &url);
     void toggle(const FavoriteGifCandidate &candidate);
-
-public slots:
     void onFrecencySettingsReceived(const Proto::FrecencyUserSettings &settings);
     void onUserSettingsProtoUpdated(const Discord::UserSettingsProtoUpdate &event);
 
-signals:
-    void changed();
-    void limitReached();
+    Platform::Signal<> changed;
+    Platform::Signal<> limitReached;
 
 private:
-    [[nodiscard]] int indexOf(const QString &key) const;
+    [[nodiscard]] int indexOf(const std::string &key) const;
     void replaceWith(const Proto::FavoriteGifs &fromServer);
     void saveSoon();
     void save();
@@ -48,7 +39,7 @@ private:
 
     Discord::Client *client;
     Proto::FavoriteGifs favorites;
-    QTimer retryTimer;
+    Platform::Timer retryTimer;
     bool loaded = false;
     bool unsavedEdits = false;
     bool saveInFlight = false;

@@ -7,29 +7,29 @@ namespace Styx {
 namespace Core {
 namespace Audio {
 
-QByteArray AudioMixer::mix(const QVector<std::pair<QByteArray, float>> &inputs)
+std::string AudioMixer::mix(const std::vector<std::pair<std::string, float>> &inputs)
 {
-    if (inputs.isEmpty())
+    if (inputs.empty())
         return {};
 
-    int frameSize = inputs.first().first.size();
+    int frameSize = static_cast<int>(inputs.front().first.size());
     if (frameSize == 0)
         return {};
 
     int sampleCount = frameSize / static_cast<int>(sizeof(int16_t));
 
-    QVector<int32_t> mixed(sampleCount, 0);
+    std::vector<int32_t> mixed(sampleCount, 0);
 
     for (const auto &[pcm, gain] : inputs) {
         if (pcm.size() != frameSize)
             continue;
 
-        const auto *samples = reinterpret_cast<const int16_t *>(pcm.constData());
+        const auto *samples = reinterpret_cast<const int16_t *>(pcm.data());
         for (int i = 0; i < sampleCount; i++)
             mixed[i] += static_cast<int32_t>(std::lround(samples[i] * gain));
     }
 
-    QByteArray output(frameSize, '\0');
+    std::string output(frameSize, '\0');
     auto *out = reinterpret_cast<int16_t *>(output.data());
     for (int i = 0; i < sampleCount; i++)
         out[i] = static_cast<int16_t>(std::clamp(mixed[i],

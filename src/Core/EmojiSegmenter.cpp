@@ -1,6 +1,7 @@
 #include "EmojiSegmenter.hpp"
 
-#include <QVarLengthArray>
+#include <utf8proc.h>
+#include <vector>
 
 namespace Styx {
 namespace Core {
@@ -158,31 +159,41 @@ namespace {
 
 struct Segment
 {
-    // UTF-16 range in the source text
-    int start;
-    int length;
+    size_t start;
+    size_t length;
     bool isEmoji;
 };
 
 // Runs the emoji-segmenter state machine over `text`, calling `visit(segment)` for each segment
 // until it returns false. Whitespace is fed to the scanner as OTHER so it never joins a sequence.
-template <typename Visit>
-void forEachSegment(const QString &text, Visit visit)
+bool isSpace(char32_t cp)
 {
-    QVarLengthArray<CharacterCategory, 64> categories;
-    QVarLengthArray<int, 64> unitOffsets; // UTF-16 offset of each codepoint, plus text.size()
+    const auto category = utf8proc_category(static_cast<utf8proc_int32_t>(cp));
+    return (cp >= 9 && cp <= 13) || cp == 0x85 ||
+           category == UTF8PROC_CATEGORY_ZS || category == UTF8PROC_CATEGORY_ZL ||
+           category == UTF8PROC_CATEGORY_ZP;
+}
 
-    for (int i = 0; i < text.size(); ++i) {
-        unitOffsets.append(i);
-        const QChar ch = text[i];
-        char32_t cp;
-        if (ch.isHighSurrogate() && i + 1 < text.size() && text[i + 1].isLowSurrogate())
-            cp = QChar::surrogateToUcs4(ch, text[++i]);
-        else
-            cp = ch.unicode();
-        categories.append(QChar::isSpace(cp) ? OTHER : categorizeCodepoint(cp));
+template <typename Visit>
+void forEachSegment(std::string_view text, Visit visit)
+{
+    std::vector<CharacterCategory> categories;
+    std::vector<size_t> offsets;
+    for (size_t i = 0; i < text.size();) {
+        offsets.push_back(i);
+        utf8proc_int32_t cp = 0;
+        auto length = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t *>(text.data() + i),
+                                       static_cast<utf8proc_ssize_t>(text.size() - i), &cp);
+        if (length < 0) {
+            cp = 0xfffd;
+            length = 1;
+        }
+        categories.push_back(isSpace(cp) ? OTHER : categorizeCodepoint(cp));
+        i += static_cast<size_t>(length);
     }
-    unitOffsets.append(text.size());
+    offsets.push_back(text.size());
+    if (categories.empty())
+        return;
 
     const emoji_text_iter_t begin = categories.data();
     const emoji_text_iter_t end = begin + categories.size();
@@ -195,8 +206,8 @@ void forEachSegment(const QString &text, Visit visit)
         if (segEnd == pos)
             segEnd = pos + 1;
 
-        const int start = unitOffsets[int(pos - begin)];
-        const int stop = unitOffsets[int(segEnd - begin)];
+        const size_t start = offsets[pos - begin];
+        const size_t stop = offsets[segEnd - begin];
         if (!visit(Segment{ start, stop - start, isEmoji }))
             return;
 
@@ -206,7 +217,7 @@ void forEachSegment(const QString &text, Visit visit)
 
 } // namespace
 
-int countUnicodeEmojisSegmented(const QString &text)
+int countUnicodeEmojisSegmented(std::string_view text)
 {
     int emojiCount = 0;
     bool onlyEmojiAndWhitespace = true;
@@ -216,11 +227,15 @@ int countUnicodeEmojisSegmented(const QString &text)
             emojiCount++;
             return true;
         }
-        for (int i = segment.start; i < segment.start + segment.length; ++i) {
-            if (!text.at(i).isSpace()) {
+        for (size_t i = segment.start; i < segment.start + segment.length;) {
+            utf8proc_int32_t cp = 0;
+            auto length = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t *>(text.data() + i),
+                                           static_cast<utf8proc_ssize_t>(segment.start + segment.length - i), &cp);
+            if (length < 0 || !isSpace(cp)) {
                 onlyEmojiAndWhitespace = false;
                 return false;
             }
+            i += static_cast<size_t>(length);
         }
         return true;
     });
@@ -228,12 +243,12 @@ int countUnicodeEmojisSegmented(const QString &text)
     return onlyEmojiAndWhitespace ? emojiCount : -1;
 }
 
-QStringList extractEmojiSequences(const QString &text)
+std::vector<std::string> extractEmojiSequences(std::string_view text)
 {
-    QStringList sequences;
+    std::vector<std::string> sequences;
     forEachSegment(text, [&](const Segment &segment) {
         if (segment.isEmoji)
-            sequences.append(text.mid(segment.start, segment.length));
+            sequences.emplace_back(text.substr(segment.start, segment.length));
         return true;
     });
     return sequences;

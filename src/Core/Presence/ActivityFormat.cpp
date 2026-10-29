@@ -1,8 +1,7 @@
 #include "ActivityFormat.hpp"
 
-#include <QCoreApplication>
-
 #include <algorithm>
+#include <format>
 
 namespace Styx {
 namespace Core {
@@ -41,7 +40,7 @@ bool isRich(const Activity &activity)
     if (activity.isCustom())
         return false;
 
-    if (!activity.detailsText().isEmpty() || !activity.stateText().isEmpty())
+    if (!activity.detailsText().empty() || !activity.stateText().empty())
         return true;
     if (activity.party.hasValue() && activity.party->hasSize())
         return true;
@@ -54,9 +53,9 @@ bool isRich(const Activity &activity)
 
 } // namespace
 
-QList<Activity> sortAndFilter(const QList<Activity> &activities)
+std::vector<Activity> sortAndFilter(const std::vector<Activity> &activities)
 {
-    QList<Activity> sorted = activities;
+    std::vector<Activity> sorted = activities;
 
     std::stable_sort(sorted.begin(), sorted.end(), [](const Activity &a, const Activity &b) {
         const int rankA = sortRank(a);
@@ -72,7 +71,7 @@ QList<Activity> sortAndFilter(const QList<Activity> &activities)
         return a.createdAtMs() > b.createdAtMs();
     });
 
-    QList<Activity> filtered;
+    std::vector<Activity> filtered;
     filtered.reserve(sorted.size());
     bool seenPlaying = false;
     for (const Activity &activity : sorted) {
@@ -81,13 +80,13 @@ QList<Activity> sortAndFilter(const QList<Activity> &activities)
                 continue;
             seenPlaying = true;
         }
-        filtered.append(activity);
+        filtered.push_back(activity);
     }
 
     return filtered;
 }
 
-const Activity *primary(const QList<Activity> &sorted)
+const Activity *primary(const std::vector<Activity> &sorted)
 {
     for (const Activity &activity : sorted) {
         if (activity.kind() == ActivityType::HANG)
@@ -97,7 +96,7 @@ const Activity *primary(const QList<Activity> &sorted)
     return nullptr;
 }
 
-const Activity *custom(const QList<Activity> &activities)
+const Activity *custom(const std::vector<Activity> &activities)
 {
     for (const Activity &activity : activities) {
         if (activity.isCustom())
@@ -106,43 +105,43 @@ const Activity *custom(const QList<Activity> &activities)
     return nullptr;
 }
 
-QList<Activity> profileCardActivities(const QList<Activity> &sorted)
+std::vector<Activity> profileCardActivities(const std::vector<Activity> &sorted)
 {
-    QList<Activity> cards;
+    std::vector<Activity> cards;
     for (const Activity &activity : sorted) {
         if (activity.isCustom() || activity.kind() == ActivityType::HANG)
             continue;
 
         const bool alreadyShown = std::any_of(cards.cbegin(), cards.cend(), [&activity](const Activity &shown) { return sameCard(shown, activity); });
         if (!alreadyShown)
-            cards.append(activity);
+            cards.push_back(activity);
     }
     return cards;
 }
 
-QString secondaryText(const Activity &activity)
+std::string secondaryText(const Activity &activity)
 {
     if (activity.isCustom())
         return activity.stateText();
 
-    const QString name = activity.nameText();
-    const QString details = activity.detailsText();
-    const QString state = activity.stateText();
+    const std::string name = activity.nameText();
+    const std::string details = activity.detailsText();
+    const std::string state = activity.stateText();
 
-    QString text = activity.kind() == ActivityType::STREAMING && !details.isEmpty() ? details : name;
+    std::string text = activity.kind() == ActivityType::STREAMING && !details.empty() ? details : name;
 
     if (activity.statusDisplayType.hasValue()) {
         switch (activity.statusDisplayType.get()) {
         case Discord::StatusDisplayType::NAME:
-            if (!name.isEmpty())
+            if (!name.empty())
                 text = name;
             break;
         case Discord::StatusDisplayType::STATE:
-            if (!state.isEmpty())
+            if (!state.empty())
                 text = state;
             break;
         case Discord::StatusDisplayType::DETAILS:
-            if (!details.isEmpty())
+            if (!details.empty())
                 text = details;
             break;
         }
@@ -151,21 +150,21 @@ QString secondaryText(const Activity &activity)
     return text;
 }
 
-QString cardHeading(const Activity &activity)
+std::string cardHeading(const Activity &activity)
 {
-    const QString name = activity.nameText();
+    const std::string name = activity.nameText();
 
     switch (activity.kind()) {
     case ActivityType::STREAMING:
-        return QCoreApplication::translate("ActivityFormat", "Streaming");
+        return "Streaming";
     case ActivityType::LISTENING:
-        return QCoreApplication::translate("ActivityFormat", "Listening to %1").arg(name);
+        return std::format("Listening to {}", name);
     case ActivityType::WATCHING:
-        return QCoreApplication::translate("ActivityFormat", "Watching %1").arg(name);
+        return std::format("Watching {}", name);
     case ActivityType::COMPETING:
-        return QCoreApplication::translate("ActivityFormat", "Competing in %1").arg(name);
+        return std::format("Competing in {}", name);
     default:
-        return QCoreApplication::translate("ActivityFormat", "Playing a game");
+        return "Playing a game";
     }
 }
 
@@ -181,23 +180,20 @@ bool headingHasName(const Activity &activity)
     }
 }
 
-QString partyText(const Activity &activity)
+std::string partyText(const Activity &activity)
 {
-    const QString state = activity.stateText();
+    const std::string state = activity.stateText();
     if (!activity.party.hasValue() || !activity.party->hasSize())
         return state;
 
     const Discord::ActivityParty &party = activity.party.get();
-    const QString count =
-            party.maxSize > 0
-                    ? QCoreApplication::translate("ActivityFormat", "%1 of %2", "party size")
-                              .arg(party.currentSize)
-                              .arg(party.maxSize)
-                    : QString::number(party.currentSize);
+    const std::string count = party.maxSize > 0
+            ? std::format("{} of {}", party.currentSize, party.maxSize)
+            : std::to_string(party.currentSize);
 
-    if (state.isEmpty())
-        return QStringLiteral("(%1)").arg(count);
-    return QStringLiteral("%1 (%2)").arg(state, count);
+    if (state.empty())
+        return std::format("({})", count);
+    return std::format("{} ({})", state, count);
 }
 
 TimerInfo timerFor(const Activity &activity)
@@ -207,7 +203,7 @@ TimerInfo timerFor(const Activity &activity)
     if (activity.isCustom() || activity.kind() == ActivityType::HANG)
         return info;
 
-    const qint64 start = activity.startMs();
+    const std::int64_t start = activity.startMs();
     if (start <= 0)
         return info;
 
@@ -226,43 +222,36 @@ TimerInfo timerFor(const Activity &activity)
 
 namespace {
 
-QString formatDuration(qint64 ms)
+std::string formatDuration(std::int64_t ms)
 {
     if (ms < 0)
         ms = 0;
 
-    const qint64 total = ms / 1000;
-    const qint64 hours = total / 3600;
-    const qint64 minutes = (total % 3600) / 60;
-    const qint64 seconds = total % 60;
+    const std::int64_t total = ms / 1000;
+    const std::int64_t hours = total / 3600;
+    const std::int64_t minutes = (total % 3600) / 60;
+    const std::int64_t seconds = total % 60;
 
     if (hours > 0)
-        return QStringLiteral("%1:%2:%3")
-                .arg(hours)
-                .arg(minutes, 2, 10, QLatin1Char('0'))
-                .arg(seconds, 2, 10, QLatin1Char('0'));
+        return std::format("{}:{:02}:{:02}", hours, minutes, seconds);
 
-    return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
+    return std::format("{}:{:02}", minutes, seconds);
 }
 
 } // namespace
 
-QString timerText(const TimerInfo &info, qint64 nowMs)
+std::string timerText(const TimerInfo &info, std::int64_t nowMs)
 {
     switch (info.kind) {
     case TimerInfo::Kind::Elapsed:
-        return QCoreApplication::translate("ActivityFormat", "%1 elapsed")
-                .arg(formatDuration(nowMs - info.startMs));
+        return std::format("{} elapsed", formatDuration(nowMs - info.startMs));
     case TimerInfo::Kind::Countdown:
         if (nowMs < info.endMs)
-            return QCoreApplication::translate("ActivityFormat", "%1 left")
-                    .arg(formatDuration(info.endMs - nowMs));
-        return QCoreApplication::translate("ActivityFormat", "%1 elapsed")
-                .arg(formatDuration(nowMs - info.startMs));
+            return std::format("{} left", formatDuration(info.endMs - nowMs));
+        return std::format("{} elapsed", formatDuration(nowMs - info.startMs));
     case TimerInfo::Kind::Progress: {
-        const qint64 elapsed = qMin(info.endMs, nowMs) - info.startMs;
-        return QCoreApplication::translate("ActivityFormat", "%1 of %2", "playback position")
-                .arg(formatDuration(elapsed), formatDuration(info.endMs - info.startMs));
+        const std::int64_t elapsed = std::min(info.endMs, nowMs) - info.startMs;
+        return std::format("{} of {}", formatDuration(elapsed), formatDuration(info.endMs - info.startMs));
     }
     case TimerInfo::Kind::None:
         break;
@@ -271,13 +260,13 @@ QString timerText(const TimerInfo &info, qint64 nowMs)
     return {};
 }
 
-double progress(const TimerInfo &info, qint64 nowMs)
+double progress(const TimerInfo &info, std::int64_t nowMs)
 {
-    const qint64 span = info.endMs - info.startMs;
+    const std::int64_t span = info.endMs - info.startMs;
     if (span <= 0)
         return 0.0;
 
-    const qint64 elapsed = qBound<qint64>(0, nowMs - info.startMs, span);
+    const std::int64_t elapsed = std::clamp<std::int64_t>(nowMs - info.startMs, 0, span);
     return static_cast<double>(elapsed) / static_cast<double>(span);
 }
 

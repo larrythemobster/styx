@@ -1,160 +1,86 @@
 #pragma once
 
-#include <QByteArray>
-#include <QDebug>
-#include <QJsonArray>
-#include <QJsonObject>
-#include <QString>
+#include <nlohmann/json.hpp>
 
+#include <concepts>
+#include <cstdint>
+#include <map>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
+#include "Flags.hpp"
 #include "OrderedJson.hpp"
+#include "Platform/Native.hpp"
 #include "Snowflake.hpp"
 
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-#include "qt_flags.hpp"
-#endif
-
-namespace Styx {
-namespace Core {
-namespace JsonUtils {
+namespace Styx::Core::JsonUtils {
 
 namespace detail {
-template <typename T>
-struct is_qflags : std::false_type
-{
-};
-template <typename T>
-struct is_qflags<QFlags<T>> : std::true_type
-{
-};
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-template <typename T>
-struct is_qflags<::Styx::Compat::Flags<T>> : std::true_type
-{
-};
-#endif
-} // namespace detail
-
-template <typename T>
-concept Serializable = requires(const T &t) {
-    { t.toJson() } -> std::convertible_to<OrderedJson>;
-};
-
-template <typename T>
-concept Deserializable = requires(const QJsonObject &object) {
-    { T::fromJson(object) } -> std::convertible_to<T>;
-};
-
-template <typename T>
-concept ListLike = requires(T t) {
+template <class> struct is_flags : std::false_type {};
+template <class E> struct is_flags<Flags<E>> : std::true_type {};
+template <class T> concept Sequence = requires(T t) {
     typename T::value_type;
-    t.append(std::declval<typename T::value_type>());
     t.begin();
     t.end();
+    t.push_back(std::declval<typename T::value_type>());
 };
-
-template <typename T>
-concept MapLike = requires(T t) {
+template <class T> concept Set = requires(T t) {
+    typename T::value_type;
+    t.begin();
+    t.end();
+    t.insert(std::declval<typename T::value_type>());
+};
+template <class T> concept Map = requires(T t) {
     typename T::key_type;
     typename T::mapped_type;
     t.begin();
     t.end();
-    // qt
-    t.begin().key();
-    t.begin().value();
+    t.insert(std::declval<typename T::value_type>());
 };
+}
 
-template <typename T>
-concept QFlagType = detail::is_qflags<T>::value;
+template <class T>
+concept Serializable = requires(const T &t) {
+    { t.toJson() } -> std::convertible_to<OrderedJson>;
+};
+template <class T>
+concept Deserializable = requires(const nlohmann::json &value) {
+    { T::fromJson(value) } -> std::convertible_to<T>;
+};
+template <class T>
+concept FlagType = detail::is_flags<T>::value;
 
 class JsonObject
 {
 public:
-    // so entities can default themselves
-    template <typename T>
-        requires std::is_same_v<T, JsonObject>
-    bool operator==(const T &) const
-    {
-        return true;
-    }
+    template <class T> requires std::same_as<T, JsonObject>
+    bool operator==(const T &) const { return true; }
 
 protected:
-    template <typename T, bool IsOptional = false, bool IsNullable = false>
+    template <class T, bool IsOptional = false, bool IsNullable = false>
     class Field
     {
     public:
-        Field()
-        {
-            if constexpr (IsOptional) {
-                state = State::Undefined;
-            } else {
-                state = State::Value;
-                value = T();
-            }
-        }
+        Field() { state = IsOptional ? State::Undefined : State::Value; }
+        Field(const Field &) = default;
+        Field(Field &&) = default;
+        Field &operator=(const Field &) = default;
+        Field &operator=(Field &&) = default;
+        Field(const T &v) : state(State::Value), value(v) {}
+        Field &operator=(const T &v) { value = v; state = State::Value; return *this; }
+        Field &operator=(std::nullptr_t) { static_assert(IsNullable); state = State::Null; return *this; }
+        Field(std::nullptr_t) { static_assert(IsNullable); state = State::Null; }
 
-        Field(const Field<T, IsOptional, IsNullable> &other)
-            : state(other.state), value(other.value)
-        {
-        }
-
-        Field(const T &value) : state(State::Value), value(value) {}
-
-        Field(Field<T, IsOptional, IsNullable> &&other)
-            : state(other.state), value(std::move(other.value))
-        {
-        }
-
-        Field &operator=(const Field<T, IsOptional, IsNullable> &other)
-        {
-            state = other.state;
-            value = other.value;
-            return *this;
-        }
-
-        Field &operator=(Field<T, IsOptional, IsNullable> &&other)
-        {
-            state = other.state;
-            value = std::move(other.value);
-            return *this;
-        }
-
-        Field &operator=(const T &value)
-        {
-            this->value = value;
-            state = State::Value;
-            return *this;
-        }
-
-        Field &operator=(std::nullptr_t)
-        {
-            static_assert(IsNullable, "The field is not nullable");
-            state = State::Null;
-            return *this;
-        }
-
-        Field(std::nullptr_t)
-        {
-            static_assert(IsNullable, "The field is not nullable");
-            state = State::Null;
-        }
-
-        template <typename U>
-        bool operator==(const U &value) const
-        {
-            return this->value == value;
-        }
-
-        bool operator==(const Field &other) const
-        {
-            return state == other.state && (state != State::Value || value == other.value);
-        }
+        template <class U> bool operator==(const U &other) const { return value == other; }
+        bool operator==(const Field &other) const { return state == other.state && (state != State::Value || value == other.value); }
 
         [[nodiscard]] bool isUndefined() const { return IsOptional && state == State::Undefined; }
         [[nodiscard]] bool isNull() const { return IsNullable && state == State::Null; }
         [[nodiscard]] bool hasValue() const { return state == State::Value; }
-
         [[nodiscard]] T valueOr(const T &fallback = T()) const { return hasValue() ? value : fallback; }
 
         T &get() { return value; }
@@ -165,176 +91,112 @@ protected:
         const T *operator->() const { return &value; }
         operator T &() { return value; }
         operator const T &() const { return value; }
-        operator QVariant() const
-        {
-            if constexpr (std::is_same_v<T, Snowflake>) {
-                return static_cast<quint64>(value);
-            } else {
-                return value;
-            }
-        }
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-        friend QDebug operator<<(QDebug dbg, const Field &f) { return dbg << f.value; }
-#endif
-
-        void undefine()
-        {
-            static_assert(IsOptional, "The field is not optional");
-            state = State::Undefined;
-        }
+        void undefine() { static_assert(IsOptional); state = State::Undefined; }
 
     private:
-        enum class State {
-            Undefined,
-            Null,
-            Value,
-        };
-        State state;
-        T value;
+        enum class State { Undefined, Null, Value };
+        State state = IsOptional ? State::Undefined : State::Value;
+        T value{};
     };
 
-    template <typename T>
-    static QJsonValue toJsonValue(const T &value)
+    template <class T> static nlohmann::json toJsonValue(const T &value)
     {
-        if constexpr (std::is_same_v<T, bool>) {
-            return value;
-        } else if constexpr (std::is_same_v<T, Snowflake>) {
-            return QString::number(value);
-        } else if constexpr (std::unsigned_integral<T>) {
-            return static_cast<qint64>(value);
-        } else if constexpr (std::is_enum_v<T> || QFlagType<T>) {
-            return static_cast<qint64>(value);
-        } else {
-            return QJsonValue::fromVariant(QVariant::fromValue(value));
-        }
+        if constexpr (std::same_as<T, bool>) return value;
+        else if constexpr (std::same_as<T, Snowflake>) return value.toString();
+        else if constexpr (std::same_as<T, std::string>) return value;
+        else if constexpr (std::same_as<T, Platform::DateTime>) return value.iso8601();
+        else if constexpr (std::same_as<T, Platform::Color>) return value.argb();
+        else if constexpr (std::same_as<T, Platform::Size>) return { value.width, value.height };
+        else if constexpr (std::same_as<T, std::vector<uint8_t>>) return value;
+        else if constexpr (std::unsigned_integral<T>) return static_cast<int64_t>(value);
+        else if constexpr (FlagType<T>) return static_cast<int64_t>(value.toInt());
+        else if constexpr (std::is_enum_v<T>) return static_cast<int64_t>(static_cast<std::underlying_type_t<T>>(value));
+        else return nlohmann::json(value);
     }
 
-    template <typename T>
-    static void insertValue(OrderedJson &object, const QString &key, const T &value)
+    template <class T> static void insertValue(OrderedJson &object, std::string_view key, const T &value)
     {
-        if constexpr (Serializable<T>) {
-            object.insert(key, value.toJson());
-        } else if constexpr (MapLike<T>) {
-            OrderedJson mapObject;
-            for (auto it = value.begin(); it != value.end(); ++it) {
-                if constexpr (std::is_same_v<typename T::key_type, Snowflake>)
-                    insertValue(mapObject, QString::number(it.key()), it.value());
+        if constexpr (Serializable<T>) object.insert(key, value.toJson());
+        else if constexpr (detail::Map<T>) {
+            OrderedJson map;
+            for (const auto &[k, v] : value) {
+                if constexpr (std::same_as<typename T::key_type, Snowflake>)
+                    insertValue(map, k.toString(), v);
                 else
-                    insertValue(mapObject, it.key(), it.value());
+                    insertValue(map, k, v);
             }
-            object.insert(key, mapObject);
-        } else if constexpr (std::is_same_v<T, QByteArray>) {
+            object.insert(key, map);
+        } else if constexpr (std::same_as<T, std::vector<uint8_t>>) {
             OrderedJson::Array array;
-            for (unsigned char byte : value)
-                array.append(static_cast<int>(byte));
+            for (uint8_t byte : value) array.append(static_cast<int>(byte));
             object.insert(key, array);
-        } else if constexpr (!std::is_same_v<T, QString> && ListLike<T>) {
+        } else if constexpr (detail::Sequence<T> || detail::Set<T>) {
             OrderedJson::Array array;
             for (const auto &element : value) {
-                if constexpr (Serializable<typename T::value_type>)
-                    array.append(element.toJson());
-                else
-                    array.append(toJsonValue(element));
+                if constexpr (Serializable<std::remove_cvref_t<decltype(element)>>) array.append(element.toJson());
+                else array.append(toJsonValue(element));
             }
             object.insert(key, array);
-        } else {
-            object.insert(key, toJsonValue(value));
-        }
+        } else object.insert(key, toJsonValue(value));
     }
 
-    template <typename T, bool IsOptional, bool IsNullable>
-    static void insert(OrderedJson &object, const QString &key,
-                       const Field<T, IsOptional, IsNullable> &field)
+    template <class T, bool O, bool N>
+    static void insert(OrderedJson &object, std::string_view key, const Field<T, O, N> &field)
     {
-        if (field.isUndefined())
-            return;
-
-        if (field.isNull()) {
-            object.insert(key, QJsonValue::Null);
-            return;
-        }
-
+        if (field.isUndefined()) return;
+        if (field.isNull()) { object.insert(key, nlohmann::json()); return; }
         insertValue(object, key, field.get());
     }
 
-    template <typename T>
-    static T fromJsonValue(const QJsonValue &value)
+    template <class T> static T fromJsonValue(const nlohmann::json &value)
     {
-        if constexpr (Deserializable<T>) {
-            return T::fromJson(value.toObject());
-        } else if constexpr (std::is_same_v<T, Snowflake>) {
-            return value.toString().toULongLong();
-        } else if constexpr (std::is_same_v<T, bool>) {
-            return value.toBool();
-        } else if constexpr (std::is_same_v<T, QString>) {
-            return value.toString();
-        } else if constexpr (QFlagType<T>) {
-            return T::fromInt(value.toInt());
-        } else if constexpr (std::is_enum_v<T>) {
-            return static_cast<T>(value.toInt());
-        } else if constexpr (std::is_same_v<T, QByteArray>) {
-            QByteArray result;
-            const QJsonArray array = value.toArray();
-            result.reserve(array.size());
-            for (const QJsonValue &element : array)
-                result.append(static_cast<char>(element.toInt()));
-            return result;
-        } else if constexpr (MapLike<T>) {
-            using KeyType = typename T::key_type;
-            using MappedType = typename T::mapped_type;
-
+        if constexpr (Deserializable<T>) return T::fromJson(value);
+        else if constexpr (std::same_as<T, Snowflake>) return Snowflake(value.get<uint64_t>());
+        else if constexpr (std::same_as<T, std::string>) return value.get<std::string>();
+        else if constexpr (std::same_as<T, Platform::DateTime>) return Platform::DateTime::parse(value.get<std::string>());
+        else if constexpr (std::same_as<T, Platform::Color>) return Platform::Color::parse(value.is_number() ? std::to_string(value.get<uint32_t>()) : value.get<std::string>());
+        else if constexpr (std::same_as<T, Platform::Size>) return { value.at(0).get<int>(), value.at(1).get<int>() };
+        else if constexpr (std::same_as<T, std::vector<uint8_t>>) {
+            std::vector<uint8_t> bytes;
+            if (value.is_array()) {
+                bytes.reserve(value.size());
+                for (const auto &item : value) bytes.push_back(item.get<int>());
+            } else if (value.is_string()) {
+                const auto text = value.get<std::string>();
+                bytes.assign(text.begin(), text.end());
+            }
+            return bytes;
+        } else if constexpr (FlagType<T>) return T::fromInt(static_cast<typename T::Int>(value.get<int64_t>()));
+        else if constexpr (std::is_enum_v<T>) return static_cast<T>(value.get<int64_t>());
+        else if constexpr (detail::Map<T>) {
             T map;
-            const QJsonObject object = value.toObject();
-            for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
-                KeyType key;
-                if constexpr (std::is_same_v<KeyType, Snowflake>) {
-                    key = Snowflake(it.key().toULongLong());
-                } else {
-                    key = it.key();
-                }
-                map.insert(key, fromJsonValue<MappedType>(it.value()));
+            for (auto it = value.begin(); it != value.end(); ++it) {
+                if constexpr (std::same_as<typename T::key_type, Snowflake>)
+                    map.emplace(Snowflake(it.key()), fromJsonValue<typename T::mapped_type>(it.value()));
+                else
+                    map.emplace(it.key(), fromJsonValue<typename T::mapped_type>(it.value()));
             }
             return map;
-        } else if constexpr (ListLike<T>) {
-            using InnerType = typename T::value_type;
-
+        } else if constexpr (detail::Set<T>) {
+            T set;
+            for (const auto &item : value) set.insert(fromJsonValue<typename T::value_type>(item));
+            return set;
+        } else if constexpr (detail::Sequence<T>) {
             T list;
-            const QJsonArray array = value.toArray();
-            list.reserve(array.size());
-
-            for (const QJsonValue &element : array) {
-                list.append(fromJsonValue<InnerType>(element));
-            }
+            list.reserve(value.size());
+            for (const auto &item : value) list.push_back(fromJsonValue<typename T::value_type>(item));
             return list;
-        } else {
-            return value.toVariant().value<T>();
-        }
+        } else return value.get<T>();
     }
 
-    template <typename T, bool IsOptional, bool IsNullable>
-    static void get(const QJsonObject &object, const QString &key,
-                    Field<T, IsOptional, IsNullable> &field)
+    template <class T, bool O, bool N>
+    static void get(const nlohmann::json &object, std::string_view key, Field<T, O, N> &field)
     {
-        auto it = object.find(key);
-
-        if (it == object.end()) {
-            if constexpr (IsOptional) {
-                field.undefine();
-            }
-            return;
-        }
-
-        if (it.value().isNull()) {
-            if constexpr (IsNullable) {
-                field = nullptr;
-            }
-            return;
-        }
-
-        field = fromJsonValue<T>(it.value());
+        const auto it = object.find(key);
+        if (it == object.end()) { if constexpr (O) field.undefine(); return; }
+        if (it->is_null()) { if constexpr (N) field = nullptr; return; }
+        field = fromJsonValue<T>(*it);
     }
 };
 
-} // namespace JsonUtils
-} // namespace Core
-} // namespace Styx
+}

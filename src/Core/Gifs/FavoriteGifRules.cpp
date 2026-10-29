@@ -1,184 +1,182 @@
 #include "Core/Gifs/FavoriteGifRules.hpp"
 
-#include <QRegularExpression>
-#include <QUrlQuery>
-
 #include <algorithm>
+#include <initializer_list>
+#include <regex>
+#include <string_view>
+#include <utility>
 
 #include "Discord/CdnUrls.hpp"
 
-namespace Styx {
-namespace Core {
-namespace FavoriteGifRules {
-
+namespace Styx::Core::FavoriteGifRules {
 namespace {
 
-bool isAnimatedImageFile(const QString &url)
+bool isAnimatedImageFile(const std::string &url)
 {
-    static const QRegularExpression pattern(QStringLiteral(R"(\.(webp|avif|gif)(\?|$))"), QRegularExpression::CaseInsensitiveOption);
-    return pattern.match(url).hasMatch();
+    static const std::regex pattern(R"(\.(webp|avif|gif)(\?|$))", std::regex::icase);
+    return std::regex_search(url, pattern);
 }
 
-bool isVideoFile(const QString &url)
+bool isVideoFile(const std::string &url)
 {
-    static const QRegularExpression pattern(QStringLiteral(R"(\.(mp4|webm)(\?|$))"), QRegularExpression::CaseInsensitiveOption);
-    return pattern.match(url).hasMatch();
+    static const std::regex pattern(R"(\.(mp4|webm)(\?|$))", std::regex::icase);
+    return std::regex_search(url, pattern);
 }
 
-bool isAttachmentOnDiscord(const QUrl &url)
+bool hasScheme(const std::string &url)
 {
-    const QString host = url.host();
-    const QString path = url.path();
-    return (host == QLatin1String("cdn.discordapp.com") || host == QLatin1String("media.discordapp.net")) &&
-           (path.startsWith(QLatin1String("/attachments/")) || path.startsWith(QLatin1String("/ephemeral-attachments/")));
+    const auto colon = url.find(':');
+    return colon != std::string::npos && colon > 0 && colon < url.find_first_of("/?#");
 }
 
-bool isProxiedExternalMedia(const QUrl &url)
+bool isAttachmentOnDiscord(const std::string &url)
 {
-    const QString host = url.host();
-    return host.startsWith(QLatin1String("images-ext-")) && host.endsWith(QLatin1String(".discordapp.net")) && url.path().startsWith(QLatin1String("/external/"));
+    const auto host = Platform::urlHost(url);
+    const auto path = Platform::urlPath(url);
+    return (host == "cdn.discordapp.com" || host == "media.discordapp.net") &&
+           (path.starts_with("/attachments/") || path.starts_with("/ephemeral-attachments/"));
 }
 
-bool isHostedByDiscord(const QString &src)
+bool isHostedByDiscord(const std::string &url)
 {
-    const QUrl url(src);
-    return !url.scheme().isEmpty() && (isProxiedExternalMedia(url) || isAttachmentOnDiscord(url));
-}
+    const auto host = Platform::urlHost(url);
+    return hasScheme(url) && (isAttachmentOnDiscord(url) ||
+        (host.starts_with("images-ext-") && host.ends_with(".discordapp.net") && Platform::urlPath(url).starts_with("/external/")));
+struct QueryItem {
+    std::string name;
+    std::string value;
+    bool hasEquals = false;
+};
+using QueryItems = std::vector<QueryItem>;
 
-QUrlQuery queryWithoutEmptyPairs(const QUrl &url)
+using QueryItems = std::vector<std::pair<std::string, std::string>>;
+
+std::string editQuery(const std::string &url, std::initializer_list<std::string_view> remove,
+                      const QueryItems &set = {})
 {
-    auto items = QUrlQuery(url).queryItems(QUrl::FullyEncoded);
-    items.erase(std::remove_if(items.begin(), items.end(), [](const auto &item) { return item.first.isEmpty() && item.second.isEmpty(); }), items.end());
-
-    QUrlQuery query;
-    query.setQueryItems(items);
-    return query;
-}
-
-void setQueryItem(QUrlQuery &query, const QString &name, const QString &value)
-{
-    auto items = query.queryItems(QUrl::FullyEncoded);
-    const auto named = [&name](const auto &item) { return item.first == name; };
-    const auto existing = std::find_if(items.begin(), items.end(), named);
-    if (existing == items.end()) {
-        query.addQueryItem(name, value);
-        return;
+    const auto fragment = url.find('#');
+    const auto question = url.find('?');
+    const bool hasQuery = question != std::string::npos && (fragment == std::string::npos || question < fragment);
+    const auto end = fragment == std::string::npos ? url.size() : fragment;
+    QueryItems items;
+    if (hasQuery) {
+        size_t start = question + 1;
+        while (start < end) {
+            const auto amp = url.find('&', start);
+            const auto stop = std::min(amp == std::string::npos ? end : amp, end);
+            const auto equals = url.find('=', start);
+            const bool hasEquals = equals < stop;
+            auto name = url.substr(start, (hasEquals ? equals : stop) - start);
+            auto value = hasEquals ? url.substr(equals + 1, stop - equals - 1) : std::string{};
+                items.push_back({std::move(name), std::move(value), hasEquals});
+                std::find(remove.begin(), remove.end(), name) == remove.end())
+                items.emplace_back(std::move(name), std::move(value));
+            start = stop + 1;
+    for (const auto &[name, value, unused] : set) {
+        auto first = std::find_if(items.begin(), items.end(), [&](const auto &item) { return item.name == name; });
+    for (const auto &[name, value] : set) {
+            items.push_back({name, value, true});
+        if (first == items.end()) {
+            first->value = value;
+            first->hasEquals = true;
+            items.erase(std::remove_if(first + 1, items.end(), [&](const auto &item) { return item.name == name; }), items.end());
+            first->second = value;
+            items.erase(std::remove_if(first + 1, items.end(), [&](const auto &item) { return item.first == name; }), items.end());
+        }
     }
-
-    existing->second = value;
-    items.erase(std::remove_if(existing + 1, items.end(), named), items.end());
-    query.setQueryItems(items);
+    for (const auto &[name, value, hasEquals] : items) {
+    bool first = true;
+    for (const auto &[name, value] : items) {
+        result += first ? '?' : '&';
+        if (hasEquals) {
+        result += name;
+        if (!value.empty()) {
+            result += '=';
+            result += value;
+        }
+    }
+    if (fragment != std::string::npos)
+        result += url.substr(fragment);
+    return result;
 }
 
-QUrl withoutQueryItems(QUrl url, std::initializer_list<QLatin1String> names)
+std::string asAnimatedWebp(const std::string &url)
 {
-    QUrlQuery query = queryWithoutEmptyPairs(url);
-    for (const QLatin1String name : names)
-        query.removeAllQueryItems(name);
-    url.setQuery(query);
-    return url;
-}
-
-QUrl asAnimatedWebp(QUrl url)
-{
-    const QString path = url.path().toLower();
-    const bool webp = path.endsWith(QLatin1String(".webp"));
-    const bool needsConversion = path.endsWith(QLatin1String(".avif")) || path.endsWith(QLatin1String(".gif"));
-    if (!webp && !needsConversion)
+    if (!hasScheme(url))
         return url;
-
-    QUrlQuery query = queryWithoutEmptyPairs(url);
-    if (needsConversion)
-        setQueryItem(query, QStringLiteral("format"), QStringLiteral("webp"));
-    setQueryItem(query, QStringLiteral("animated"), QStringLiteral("true"));
-    url.setQuery(query);
-    return url;
+    const auto path = Platform::unicodeLower(Platform::urlPath(url));
+    const bool conversion = path.ends_with(".avif") || path.ends_with(".gif");
+    if (!conversion && !path.ends_with(".webp"))
+        return url;
+    return conversion ? editQuery(url, {}, {{"format", "webp"}, {"animated", "true"}})
+                      : editQuery(url, {}, {{"animated", "true"}});
 }
 
-QString asAnimatedWebp(const QString &src)
+std::string withoutSearchNoise(const std::string &text, bool spaces)
 {
-    const QUrl url(src);
-    if (!url.isValid() || url.scheme().isEmpty())
-        return src;
-
-    const QUrl animated = asAnimatedWebp(url);
-    return animated == url ? src : animated.toString(QUrl::FullyEncoded);
-}
-
-QString withoutSearchNoise(QString text, const QRegularExpression &noise)
-{
-    return text.toLower().remove(noise);
+    auto result = Platform::unicodeLower(text);
+    result.erase(std::remove_if(result.begin(), result.end(), [spaces](char c) {
+        return c == '-' || c == '_' || (spaces && c == ' ');
+    }), result.end());
+    return result;
 }
 
 } // namespace
 
-QString keyFor(const QString &url)
+std::string keyFor(const std::string &url)
 {
-    const QUrl parsed(url);
-    if (!parsed.isValid() || parsed.scheme().isEmpty() || !isAttachmentOnDiscord(parsed))
-        return url;
-
-    return withoutQueryItems(parsed, { QLatin1String("ex"), QLatin1String("is"), QLatin1String("hm") }).toString(QUrl::FullyEncoded);
+    return hasScheme(url) && isAttachmentOnDiscord(url) ? editQuery(url, {"ex", "is", "hm"}) : url;
 }
 
 Proto::FavoriteGif stored(const FavoriteGifCandidate &candidate, uint32_t order)
 {
     const bool srcOnDiscord = isHostedByDiscord(candidate.src);
-    const bool hasOtherGifSrc = !candidate.gifSrc.isEmpty() && candidate.gifSrc != candidate.src;
-    const bool preferGifSrc = (isVideoFile(candidate.src) && hasOtherGifSrc) || (srcOnDiscord && !candidate.gifSrc.isEmpty());
-
-    QString src = preferGifSrc ? candidate.gifSrc : candidate.src;
+    const bool hasOtherGifSrc = !candidate.gifSrc.empty() && candidate.gifSrc != candidate.src;
+    const bool preferGifSrc = (isVideoFile(candidate.src) && hasOtherGifSrc) || (srcOnDiscord && !candidate.gifSrc.empty());
+    std::string src = preferGifSrc ? candidate.gifSrc : candidate.src;
     if (srcOnDiscord && isAnimatedImageFile(src))
         src = asAnimatedWebp(src);
-    if (src.startsWith(QLatin1String("//")))
-        src.prepend(QLatin1String("https:"));
+    if (src.starts_with("//"))
+        src.insert(0, "https:");
 
     Proto::FavoriteGif gif;
-    gif.url = keyFor(candidate.url).toStdString();
-    gif.src = src.toStdString();
+    gif.url = keyFor(candidate.url);
+    gif.src = src;
     gif.format = isAnimatedImageFile(src) ? Proto::GifType::Image : candidate.format;
-    gif.width = uint32_t(qMax(0, candidate.size.width()));
-    gif.height = uint32_t(qMax(0, candidate.size.height()));
+    gif.width = uint32_t(std::max(0, candidate.size.width));
+    gif.height = uint32_t(std::max(0, candidate.size.height));
     gif.order = order;
     return gif;
 }
 
-uint32_t orderAfter(const QList<Proto::FavoriteGif> &gifs)
+uint32_t orderAfter(const std::vector<Proto::FavoriteGif> &gifs)
 {
     uint32_t highest = 0;
-    for (const Proto::FavoriteGif &gif : gifs)
+    for (const auto &gif : gifs)
         highest = std::max(highest, gif.order);
     return highest + 1;
 }
 
-QList<Proto::FavoriteGif> newestFirst(QList<Proto::FavoriteGif> gifs)
+std::vector<Proto::FavoriteGif> newestFirst(std::vector<Proto::FavoriteGif> gifs)
 {
-    std::stable_sort(gifs.begin(), gifs.end(), [](const Proto::FavoriteGif &a, const Proto::FavoriteGif &b) { return a.order < b.order; });
+    std::stable_sort(gifs.begin(), gifs.end(), [](const auto &a, const auto &b) { return a.order < b.order; });
     std::reverse(gifs.begin(), gifs.end());
     return gifs;
 }
 
-bool matchesSearch(const QString &url, const QString &query)
+bool matchesSearch(const std::string &url, const std::string &query)
 {
-    static const QRegularExpression separators(QStringLiteral("[-_]"));
-    static const QRegularExpression separatorsAndSpaces(QStringLiteral("[-_ ]"));
-    return withoutSearchNoise(url, separators).contains(withoutSearchNoise(query, separatorsAndSpaces));
+    return withoutSearchNoise(url, false).find(withoutSearchNoise(query, true)) != std::string::npos;
 }
 
-QUrl clipServedByDiscord(const Proto::FavoriteGif &gif)
+std::string clipServedByDiscord(const Proto::FavoriteGif &gif)
 {
-    const QUrl url(QString::fromStdString(gif.src));
-    return Discord::Cdn::isDiscordAssetUrl(url) ? asAnimatedWebp(url) : QUrl();
+    return Discord::Cdn::isDiscordAssetUrl(gif.src) ? asAnimatedWebp(gif.src) : std::string{};
 }
 
-QUrl stillServedByDiscord(const Proto::FavoriteGif &gif)
+std::string stillServedByDiscord(const Proto::FavoriteGif &gif)
 {
-    const QUrl url(QString::fromStdString(gif.src));
-    if (!Discord::Cdn::isDiscordAssetUrl(url))
-        return {};
-    return withoutQueryItems(url, { QLatin1String("animated"), QLatin1String("format") });
+    return Discord::Cdn::isDiscordAssetUrl(gif.src) ? editQuery(gif.src, {"animated", "format"}) : std::string{};
 }
 
-} // namespace FavoriteGifRules
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core::FavoriteGifRules

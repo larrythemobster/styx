@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QtGlobal>
+#include <cstdint>
 
 #include <atomic>
 #include <cstdint>
@@ -36,18 +36,18 @@ public:
 
     [[nodiscard]] int bufferedFrames() const;
 
-    void reset(qint64 basePtsMs);
+    void reset(int64_t basePtsMs);
 
     void setVolume(float volume);
     [[nodiscard]] float volume() const { return outputVolume.load(std::memory_order_relaxed); }
     void setMuted(bool value);
     [[nodiscard]] bool isMuted() const { return muted.load(std::memory_order_relaxed); }
 
-    [[nodiscard]] qint64 clockMs() const;
+    [[nodiscard]] int64_t clockMs() const;
 
 private:
     void mixInto(float *output, uint32_t frameCount, std::vector<float> &scratch);
-    void resetLocked(qint64 basePtsMs);
+    void resetLocked(int64_t basePtsMs);
 
     friend class MediaAudioDevice;
 
@@ -56,8 +56,8 @@ private:
     std::atomic<float> outputVolume{ 1.0f };
     std::atomic<bool> muted{ false };
     std::atomic<bool> running{ false };
-    std::atomic<qint64> framesPlayed{ 0 };
-    std::atomic<qint64> basePts{ 0 };
+    std::atomic<int64_t> framesPlayed{ 0 };
+    std::atomic<int64_t> basePts{ 0 };
 };
 
 } // namespace Media

@@ -1,94 +1,96 @@
 #pragma once
 
-#include <QCache>
-#include <QHash>
-#include <QList>
-#include <QObject>
-#include <QPixmap>
-#include <QSet>
-#include <QSize>
-#include "Platform/ThreadPool.hpp"
-#include <QUrl>
-
 #include <atomic>
+#include <cstdint>
+#include <list>
+#include <map>
 #include <memory>
+#include <set>
+#include <string>
+#include <vector>
 
 #include "ImageManager.hpp"
 #include "MiBRange.hpp"
 #include "Snowflake.hpp"
+#include "Platform/Image.hpp"
+#include "Platform/ThreadPool.hpp"
+#include "Platform/Trackable.hpp"
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
 struct AnimatedFrames
 {
-    QList<QPixmap> frames;
-    QList<int> frameEndMs;
+    std::vector<Platform::ImageBuffer> frames;
+    std::vector<int> frameEndMs;
 
     [[nodiscard]] bool isStatic() const { return frames.size() <= 1; }
-    [[nodiscard]] int loopMs() const { return frameEndMs.isEmpty() ? 0 : frameEndMs.last(); }
-    [[nodiscard]] int frameAt(qint64 loopPhaseMs) const;
+    [[nodiscard]] int loopMs() const { return frameEndMs.empty() ? 0 : frameEndMs.back(); }
+    [[nodiscard]] int frameAt(int64_t loopPhaseMs) const;
 };
 
 using AnimatedFramesPtr = std::shared_ptr<const AnimatedFrames>;
 
-namespace Apng {
-class Reader;
-} // namespace Apng
+namespace Apng { class Reader; }
 
-class AnimatedImageCache : public QObject
+class AnimatedImageCache : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     static constexpr MiBRange CacheLimit{ 64, 96, 512 };
     static constexpr MiBRange AnimationLimit{ 8, 24, 64 };
 
-    explicit AnimatedImageCache(ImageManager *imageManager, QObject *parent = nullptr);
+    explicit AnimatedImageCache(ImageManager *imageManager);
     ~AnimatedImageCache() override;
 
     void setCacheLimitMiB(int mib);
-    // takes effect for animations decoded from now on
     void setAnimationLimitMiB(int mib);
+    AnimatedFramesPtr get(const std::string &url, const Platform::Size &logicalSize, Snowflake accountId);
+    void discard(const std::string &url, const Platform::Size &logicalSize);
 
-    // null while fetching or decoding
-    AnimatedFramesPtr get(const QUrl &url, const QSize &logicalSize, Snowflake accountId);
-    void discard(const QUrl &url, const QSize &logicalSize);
-
-signals:
-    void framesReady(const QUrl &url, const QSize &logicalSize, const AnimatedFramesPtr &frames);
+    Platform::Signal<const std::string &, const Platform::Size &, const AnimatedFramesPtr &> framesReady;
 
 private:
-    struct Decoded
-    {
-        QList<QImage> frames;
-        QList<int> delaysMs;
+    struct KeyLess {
+        bool operator()(const ImageRequestKey &a, const ImageRequestKey &b) const {
+            if (a.url != b.url) return a.url < b.url;
+            return a.size < b.size;
+        }
     };
-
-    struct DecodeTarget
-    {
-        QSize physicalSize;
-        qsizetype byteBudget;
+    struct Decoded {
+        std::vector<Platform::ImageBuffer> frames;
+        std::vector<int> delaysMs;
     };
+    struct DecodeTarget {
+        Platform::Size physicalSize;
+        size_t byteBudget;
+    };
+    struct CacheEntry {
+        AnimatedFramesPtr frames;
+        size_t cost;
+        std::list<ImageRequestKey>::iterator lru;
+    };
+    using DiscardedFlag = std::shared_ptr<std::atomic_bool>;
 
-    void onRawDownloadReady(const QUrl &url, const QSize &size);
-    void decode(const ImageRequestKey &key, const QString &path);
+    void onRawDownloadReady(const std::string &url, const Platform::Size &size);
+    void decode(const ImageRequestKey &key, const std::string &path);
     void onDecodeSkipped(const ImageRequestKey &key);
-    void publish(const ImageRequestKey &key, const Decoded &decoded, qreal dpr);
-    static Decoded decodeFrames(const QString &path, const DecodeTarget &target);
+    void publish(const ImageRequestKey &key, Decoded decoded);
+    void removeCached(const ImageRequestKey &key);
+    void trimCache();
+    static Decoded decodeFrames(const std::string &path, const DecodeTarget &target);
     static Decoded decodeApng(Apng::Reader &apng, const DecodeTarget &target);
-    static Decoded decodeLottie(const QByteArray &data, const DecodeTarget &target);
-    static Decoded decodeWithImageReader(const QByteArray &data, const DecodeTarget &target);
+    static Decoded decodeLottie(const std::string &data, const DecodeTarget &target);
+    static Decoded decodeAnimatedImage(const std::string &path, const DecodeTarget &target);
 
     ImageManager *imageManager;
     Platform::ThreadPool decodePool{4, "ImageDecode"};
-    std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
+    std::shared_ptr<std::atomic_bool> alive = std::make_shared<std::atomic_bool>(true);
     int animationLimitMiB = AnimationLimit.fallback;
-    int newestFirstPriority = 0;
-    QSet<ImageRequestKey> wanted;
-    using DiscardedFlag = std::shared_ptr<std::atomic_bool>;
-    QHash<ImageRequestKey, DiscardedFlag> decoding;
-    QCache<ImageRequestKey, AnimatedFramesPtr> cache;
+    size_t cacheLimitKiB = 0;
+    size_t cacheCostKiB = 0;
+    std::set<ImageRequestKey, KeyLess> wanted;
+    std::map<ImageRequestKey, DiscardedFlag, KeyLess> decoding;
+    std::list<ImageRequestKey> lru;
+    std::map<ImageRequestKey, CacheEntry, KeyLess> cache;
 };
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

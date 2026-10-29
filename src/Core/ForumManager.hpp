@@ -1,9 +1,12 @@
 #pragma once
 
-#include <QHash>
-#include <QList>
-#include <QObject>
-#include <QSet>
+#include <algorithm>
+#include <cstdint>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include "Platform/Trackable.hpp"
 
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
@@ -34,12 +37,11 @@ struct ForumBadge
     bool isNew = false;
 };
 
-class ForumManager : public QObject
+class ForumManager : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     explicit ForumManager(Discord::Client *client, Storage::ChannelRepository &channelRepo,
-                          ReadStateManager *readState, QObject *parent = nullptr);
+                          ReadStateManager *readState);
 
     void openForum(Snowflake forumId);
     void setCurrentForum(Snowflake forumId);
@@ -48,18 +50,18 @@ public:
     void setSortMode(Snowflake forumId, ForumSortMode mode);
     [[nodiscard]] ForumSortMode sortMode(Snowflake forumId) const;
 
-    [[nodiscard]] const QList<Discord::Channel> &posts(Snowflake forumId) const;
+    [[nodiscard]] const std::vector<Discord::Channel> &posts(Snowflake forumId) const;
     [[nodiscard]] const Discord::Channel *post(Snowflake threadId) const;
     [[nodiscard]] bool isLoading(Snowflake forumId) const;
     [[nodiscard]] bool hasMore(Snowflake forumId) const;
     [[nodiscard]] const Discord::Message *firstMessagePtr(Snowflake threadId) const;
     void addStarterMessage(Snowflake threadId, const Discord::Message &msg);
     void ensureStarter(Snowflake forumId, Snowflake threadId);
-    [[nodiscard]] QList<Discord::ForumTag> availableTags(Snowflake forumId) const;
+    [[nodiscard]] std::vector<Discord::ForumTag> availableTags(Snowflake forumId) const;
     [[nodiscard]] bool requiresTag(Snowflake forumId) const;
     [[nodiscard]] ForumBadge badge(Snowflake forumId) const;
-    void loadFromReady(const QList<Discord::GatewayGuild> &guilds);
-    [[nodiscard]] QList<Discord::Channel> joinedPosts(Snowflake forumId) const;
+    void loadFromReady(const std::vector<Discord::GatewayGuild> &guilds);
+    [[nodiscard]] std::vector<Discord::Channel> joinedPosts(Snowflake forumId) const;
 
     struct PostsContribution
     {
@@ -83,17 +85,15 @@ public:
     [[nodiscard]] UnreadMarker unreadMarker(Snowflake threadId) const;
     void ensureUnreadCount(Snowflake forumId, Snowflake threadId);
 
-signals:
-    void badgeChanged(Snowflake forumId);
-    void joinedPostsChanged(Snowflake forumId);
-    void postsReset(Snowflake forumId);
-    void postsAppended(Snowflake forumId, int startRow, int count);
-    void postInserted(Snowflake forumId, Snowflake threadId, int row);
-    void postUpdated(Snowflake forumId, Snowflake threadId);
-    void postRemoved(Snowflake forumId, Snowflake threadId);
-    void loadingChanged(Snowflake forumId, bool loading);
+    Platform::Signal<Snowflake> badgeChanged;
+    Platform::Signal<Snowflake> joinedPostsChanged;
+    Platform::Signal<Snowflake> postsReset;
+    Platform::Signal<Snowflake, int, int> postsAppended;
+    Platform::Signal<Snowflake, Snowflake, int> postInserted;
+    Platform::Signal<Snowflake, Snowflake> postUpdated;
+    Platform::Signal<Snowflake, Snowflake> postRemoved;
+    Platform::Signal<Snowflake, bool> loadingChanged;
 
-public slots:
     void onForumUnreads(const Discord::ForumUnreads &event);
     void onThreadCreated(const Discord::ChannelCreate &event);
     void onThreadUpdated(const Discord::ChannelUpdate &event);
@@ -105,7 +105,7 @@ public slots:
 private:
     struct ForumState
     {
-        QList<Discord::Channel> posts;
+        std::vector<Discord::Channel> posts;
         int offset = 0;
         bool hasMore = true;
         bool loading = false;
@@ -121,25 +121,27 @@ private:
     {
     public:
         bool add(Snowflake forumId, Snowflake threadId);
-        QList<Snowflake> take(Snowflake &forumId);
+        std::vector<Snowflake> take(Snowflake &forumId);
         [[nodiscard]] bool contains(Snowflake threadId) const { return requested.contains(threadId); }
         void forget(Snowflake threadId)
         {
-            requested.remove(threadId);
-            pending.removeOne(threadId);
+            requested.erase(threadId);
+            auto it = std::find(pending.begin(), pending.end(), threadId);
+            if (it != pending.end())
+                pending.erase(it);
         }
 
     private:
-        QSet<Snowflake> requested; // asked but not yet answered
-        QList<Snowflake> pending;
+        std::unordered_set<Snowflake> requested; // asked but not yet answered
+        std::vector<Snowflake> pending;
         Snowflake forumId;
         bool flushScheduled = false;
     };
 
     ForumState &state(Snowflake forumId);
     void fetchPage(Snowflake forumId, bool reset);
-    void applySearchReset(Snowflake forumId, ForumState &st, const QList<Discord::Channel> &threads);
-    void applySearchAppend(Snowflake forumId, ForumState &st, const QList<Discord::Channel> &threads);
+    void applySearchReset(Snowflake forumId, ForumState &st, const std::vector<Discord::Channel> &threads);
+    void applySearchAppend(Snowflake forumId, ForumState &st, const std::vector<Discord::Channel> &threads);
     void flushStarterRequests();
     void flushUnreadRequests();
     Discord::Channel *mutablePost(Snowflake threadId, Snowflake &forumId);
@@ -150,7 +152,7 @@ private:
     int addPost(Snowflake forumId, ForumState &st, const Discord::Channel &post);
     void appendPost(Snowflake forumId, ForumState &st, const Discord::Channel &post);
     void removePost(ForumState &st, int index);
-    void replacePosts(Snowflake forumId, ForumState &st, QList<Discord::Channel> posts);
+    void replacePosts(Snowflake forumId, ForumState &st, std::vector<Discord::Channel> posts);
     ForumSortMode defaultSortFor(Snowflake forumId) const;
     Snowflake sortKey(const Discord::Channel &post, ForumSortMode mode) const;
     bool sortsBefore(const Discord::Channel &a, const Discord::Channel &b, ForumSortMode mode) const;
@@ -165,13 +167,13 @@ private:
     Discord::Client *client;
     Storage::ChannelRepository &channelRepo;
     ReadStateManager *readState;
-    mutable QHash<Snowflake, bool> forumTypeCache;
-    mutable QHash<Snowflake, Snowflake> forumGuildCache;
-    QHash<Snowflake, ForumState> forums;
-    QHash<Snowflake, Snowflake> postToForum;
-    QHash<Snowflake, Discord::Message> starterMessages;
-    QHash<Snowflake, qint64> joinedAt;
-    QHash<Snowflake, int> unreadCounts;
+    mutable std::unordered_map<Snowflake, bool> forumTypeCache;
+    mutable std::unordered_map<Snowflake, Snowflake> forumGuildCache;
+    std::unordered_map<Snowflake, ForumState> forums;
+    std::unordered_map<Snowflake, Snowflake> postToForum;
+    std::unordered_map<Snowflake, Discord::Message> starterMessages;
+    std::unordered_map<Snowflake, std::int64_t> joinedAt;
+    std::unordered_map<Snowflake, int> unreadCounts;
     RequestBatch unreadBatch;
     RequestBatch starterBatch;
     Snowflake currentForumId;

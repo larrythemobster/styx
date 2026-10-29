@@ -25,7 +25,7 @@ bool OpusEncoder::init(int sampleRate, int channels, int application)
     int error;
     encoder = opus_encoder_create(sampleRate, channels, application, &error);
     if (error != OPUS_OK || !encoder) {
-        qCCritical(LogVoice) << "Failed to create Opus encoder:" << opus_strerror(error);
+        Core::log(Core::LogLevel::Error, LogVoice) << "Failed to create Opus encoder:" << opus_strerror(error);
         return false;
     }
 
@@ -38,28 +38,28 @@ bool OpusEncoder::init(int sampleRate, int channels, int application)
     return true;
 }
 
-QByteArray OpusEncoder::encode(const QByteArray &pcmFrame)
+std::string OpusEncoder::encode(const std::string &pcmFrame)
 {
     if (!encoder)
         return {};
 
     int expectedSize = frameSamples * frameChannels * static_cast<int>(sizeof(opus_int16));
     if (pcmFrame.size() != expectedSize) {
-        qCWarning(LogVoice) << "OpusEncoder: unexpected PCM size" << pcmFrame.size()
+        Core::log(Core::LogLevel::Warning, LogVoice) << "OpusEncoder: unexpected PCM size" << pcmFrame.size()
                             << "expected" << expectedSize;
         return {};
     }
 
-    QByteArray encoded(OPUS_MAX_PACKET_SIZE, '\0');
+    std::string encoded(OPUS_MAX_PACKET_SIZE, '\0');
 
     int bytes = opus_encode(encoder,
-                            reinterpret_cast<const opus_int16 *>(pcmFrame.constData()),
+                            reinterpret_cast<const opus_int16 *>(pcmFrame.data()),
                             frameSamples,
                             reinterpret_cast<unsigned char *>(encoded.data()),
                             OPUS_MAX_PACKET_SIZE);
 
     if (bytes < 0) {
-        qCWarning(LogVoice) << "Opus encode failed:" << opus_strerror(bytes);
+        Core::log(Core::LogLevel::Warning, LogVoice) << "Opus encode failed:" << opus_strerror(bytes);
         return {};
     }
 

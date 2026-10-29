@@ -3,10 +3,9 @@
 #include <cstdint>
 #include <optional>
 
-#include <QHash>
-#include <QList>
-#include <QString>
-#include <QStringList>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Styx {
 namespace Core {
@@ -21,7 +20,7 @@ public:
     struct Entry
     {
         uint32_t totalUses = 0;
-        QList<uint64_t> recentUses; // ms since epoch, ascending
+        std::vector<uint64_t> recentUses; // ms since epoch, ascending
         int32_t frecency = -1; // -1 means needs recompute
         double score = 0;
     };
@@ -46,33 +45,33 @@ public:
     static Options chatEmojiOptions();
     static Options reactionEmojiOptions();
 
-    void track(const QString &key, std::optional<uint64_t> timestampMs = {}, uint32_t usesSinceLastTrack = 1);
+    void track(const std::string &key, std::optional<uint64_t> timestampMs = {}, uint32_t usesSinceLastTrack = 1);
     // replace history from server state
-    void overwriteHistory(const QHash<QString, Entry> &history);
+    void overwriteHistory(const std::unordered_map<std::string, Entry> &history);
     void compute(uint64_t nowMs);
     // lazy. nowMs is param for tests
     void refresh(uint64_t nowMs);
 
-    const QStringList &frequently(uint64_t nowMs);
+    const std::vector<std::string> &frequently(uint64_t nowMs);
 
-    std::optional<double> score(const QString &key) const;
-    std::optional<int32_t> frecency(const QString &key) const;
+    std::optional<double> score(const std::string &key) const;
+    std::optional<int32_t> frecency(const std::string &key) const;
 
-    const QHash<QString, Entry> &usageHistory() const { return history; }
+    const std::unordered_map<std::string, Entry> &usageHistory() const { return history; }
     bool isDirty() const { return dirty; }
     void reset();
 
     static int ageInDays(uint64_t nowMs, uint64_t tMs);
 
     // keep only a limited amount to match client
-    static QHash<QString, Entry> capForPersistence(const QHash<QString, Entry> &source, int limit);
+    static std::unordered_map<std::string, Entry> capForPersistence(const std::unordered_map<std::string, Entry> &source, int limit);
 
 private:
     void markDirty();
 
     Options options;
-    QHash<QString, Entry> history;
-    QStringList frequentlyKeys;
+    std::unordered_map<std::string, Entry> history;
+    std::vector<std::string> frequentlyKeys;
     bool dirty = false;
 };
 

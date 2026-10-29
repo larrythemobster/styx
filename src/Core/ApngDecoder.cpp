@@ -28,27 +28,22 @@ constexpr int SignatureSize = 8;
 constexpr int IoBufferSize = 32 * 1024;
 constexpr size_t MaxPackets = 1000;
 
-#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-constexpr AVPixelFormat QImageArgb32Layout = AV_PIX_FMT_BGRA;
-#else
-constexpr AVPixelFormat QImageArgb32Layout = AV_PIX_FMT_ARGB;
-#endif
 
 struct MemorySource
 {
-    QByteArray data;
-    qint64 pos = 0;
+    std::string data;
+    int64_t pos = 0;
 };
 
 int readPacket(void *opaque, uint8_t *buffer, int size)
 {
     auto *source = static_cast<MemorySource *>(opaque);
-    const qint64 available = source->data.size() - source->pos;
+    const int64_t available = static_cast<int64_t>(source->data.size()) - source->pos;
     if (available <= 0)
         return AVERROR_EOF;
 
-    const int count = int(std::min<qint64>(size, available));
-    std::memcpy(buffer, source->data.constData() + source->pos, size_t(count));
+    const int count = int(std::min<int64_t>(size, available));
+    std::memcpy(buffer, source->data.data() + source->pos, size_t(count));
     source->pos += count;
     return count;
 }
@@ -59,7 +54,7 @@ int64_t seekPacket(void *opaque, int64_t offset, int whence)
     if (whence & AVSEEK_SIZE)
         return source->data.size();
 
-    qint64 target = offset;
+    int64_t target = offset;
     switch (whence & ~AVSEEK_FORCE) {
     case SEEK_SET:
         break;
@@ -73,7 +68,7 @@ int64_t seekPacket(void *opaque, int64_t offset, int whence)
         return AVERROR(EINVAL);
     }
 
-    if (target < 0 || target > source->data.size())
+    if (target < 0 || target > static_cast<int64_t>(source->data.size()))
         return AVERROR(EINVAL);
     source->pos = target;
     return target;
@@ -101,7 +96,7 @@ struct Reader::Impl
     bool readAllPackets();
     bool openCodec();
     bool receiveFrame();
-    QImage frameAsImage();
+    Platform::ImageBuffer frameAsImage();
 
     MemorySource source;
     AVIOContext *io = nullptr;
@@ -203,23 +198,25 @@ bool Reader::Impl::receiveFrame()
     }
 }
 
-QImage Reader::Impl::frameAsImage()
+Platform::ImageBuffer Reader::Impl::frameAsImage()
 {
     scaler = sws_getCachedContext(scaler, frame->width, frame->height, AVPixelFormat(frame->format), frame->width,
-                                  frame->height, QImageArgb32Layout, SWS_POINT, nullptr, nullptr, nullptr);
+                                  frame->height, AV_PIX_FMT_RGBA, SWS_POINT, nullptr, nullptr, nullptr);
     if (!scaler)
         return {};
-
-    QImage image(frame->width, frame->height, QImage::Format_ARGB32);
-    uint8_t *planes[4] = { image.bits(), nullptr, nullptr, nullptr };
-    int strides[4] = { int(image.bytesPerLine()), 0, 0, 0 };
+    Platform::ImageBuffer image;
+    image.width = frame->width;
+    image.height = frame->height;
+    image.pixels.resize(static_cast<size_t>(image.width) * image.height * 4);
+    uint8_t *planes[4] = { image.pixels.data(), nullptr, nullptr, nullptr };
+    int strides[4] = { int(image.stride()), 0, 0, 0 };
     sws_scale(scaler, frame->data, frame->linesize, 0, frame->height, planes, strides);
     return image;
 }
 
-std::unique_ptr<Reader> Reader::open(const QByteArray &png)
+std::unique_ptr<Reader> Reader::open(const std::string &png)
 {
-    if (!png.startsWith(QByteArray::fromRawData(Signature, SignatureSize)))
+    if (png.size() < SignatureSize || std::memcmp(png.data(), Signature, SignatureSize) != 0)
         return nullptr;
 
     auto impl = std::make_unique<Impl>();
@@ -229,10 +226,10 @@ std::unique_ptr<Reader> Reader::open(const QByteArray &png)
     return std::unique_ptr<Reader>(new Reader(std::move(impl)));
 }
 
-QSize Reader::canvasSize() const
+Platform::Size Reader::canvasSize() const
 {
     const AVCodecParameters *parameters = impl->format->streams[0]->codecpar;
-    return QSize(parameters->width, parameters->height);
+    return {parameters->width, parameters->height};
 }
 
 int Reader::frameCount() const
@@ -240,7 +237,7 @@ int Reader::frameCount() const
     return int(impl->packets.size());
 }
 
-bool Reader::next(QImage &canvas, int &delayMs)
+bool Reader::next(Platform::ImageBuffer &canvas, int &delayMs)
 {
     if (impl->nextFrame >= impl->packets.size() || !impl->receiveFrame())
         return false;
@@ -249,7 +246,7 @@ bool Reader::next(QImage &canvas, int &delayMs)
     delayMs = int(av_rescale_q(std::max<int64_t>(duration, 0), impl->timeBase, AVRational{ 1, 1000 }));
     canvas = impl->frameAsImage();
     av_frame_unref(impl->frame);
-    return !canvas.isNull();
+    return !canvas.empty();
 }
 
 #else
@@ -258,12 +255,12 @@ struct Reader::Impl
 {
 };
 
-std::unique_ptr<Reader> Reader::open(const QByteArray &)
+std::unique_ptr<Reader> Reader::open(const std::string &)
 {
     return nullptr;
 }
 
-QSize Reader::canvasSize() const
+Platform::Size Reader::canvasSize() const
 {
     return {};
 }
@@ -273,7 +270,7 @@ int Reader::frameCount() const
     return 0;
 }
 
-bool Reader::next(QImage &, int &)
+bool Reader::next(Platform::ImageBuffer &, int &)
 {
     return false;
 }

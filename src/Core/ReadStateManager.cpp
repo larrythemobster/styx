@@ -1,8 +1,10 @@
 #include "ReadStateManager.hpp"
 
-#include <QGuiApplication>
-#include <QTimeZone>
-#include <QTimer>
+#include <algorithm>
+#include <chrono>
+
+#include "Platform/Desktop.hpp"
+#include "Platform/Dispatcher.hpp"
 
 #include <optional>
 
@@ -16,13 +18,13 @@ namespace Core {
 namespace {
 
 constexpr int kDeferredAckDelayMs = 3000;
-constexpr qint64 kMsPerDay = 24 * 60 * 60 * 1000;
+constexpr std::int64_t kMsPerDay = 24 * 60 * 60 * 1000;
 
 bool isOlderThanDays(Snowflake id, int days)
 {
     if (!id.isValid())
         return true;
-    return id.toDateTime().toMSecsSinceEpoch() < QDateTime::currentMSecsSinceEpoch() - days * kMsPerDay;
+    return id.toDateTime().unixMillis() < Platform::DateTime::now().unixMillis() - days * kMsPerDay;
 }
 
 template <typename Settings, typename Flag>
@@ -46,19 +48,17 @@ bool isMutedSetting(const Settings &settings)
 
 } // namespace
 
-ReadStateManager::ReadStateManager(Snowflake accountId, PermissionManager *perms, QObject *parent)
-    : QObject(parent), accountId(accountId), permissionManager(perms)
+ReadStateManager::ReadStateManager(Snowflake accountId, PermissionManager *perms)
+    : accountId(accountId), permissionManager(perms)
 {
-    if (qGuiApp) {
-        connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
-            if (state == Qt::ApplicationActive)
-                tryAckActiveChannel();
-        });
-    }
+    track(Platform::Desktop::activationChanged().connect([this](bool active) {
+        if (active)
+            tryAckActiveChannel();
+    }));
 }
 
-void ReadStateManager::loadFromReady(const QList<Discord::ReadStateEntry> &readStates,
-                                     const QList<Discord::UserGuildSettings> &guildSettings,
+void ReadStateManager::loadFromReady(const std::vector<Discord::ReadStateEntry> &readStates,
+                                     const std::vector<Discord::UserGuildSettings> &guildSettings,
                                      int notificationSettingsFlags)
 {
     channelReadStates.clear();
@@ -77,7 +77,7 @@ void ReadStateManager::loadFromReady(const QList<Discord::ReadStateEntry> &readS
         if (rsType != 0)
             continue;
 
-        channelReadStates.insert(entry.id.get(), entry);
+        channelReadStates.insert_or_assign(entry.id.get(), entry);
     }
 
     channelOverrideCache.clear();
@@ -85,13 +85,13 @@ void ReadStateManager::loadFromReady(const QList<Discord::ReadStateEntry> &readS
 
     for (const auto &settings : guildSettings) {
         Snowflake key = settings.guildId.isNull() ? Snowflake(0) : settings.guildId.get();
-        guildSettingsMap.insert(key, settings);
+        guildSettingsMap.insert_or_assign(key, settings);
         rebuildChannelOverrideCache(key);
     }
 
     useNewNotifications = usesNewNotifications(notificationSettingsFlags);
 
-    qCDebug(LogCore) << "ReadStateManager loaded" << channelReadStates.size() << "read states and"
+    Core::log(Core::LogLevel::Debug, LogCore) << "ReadStateManager loaded" << channelReadStates.size() << "read states and"
                      << guildSettingsMap.size() << "guild settings";
 }
 
@@ -102,8 +102,8 @@ void ReadStateManager::setNotificationSettingsFlags(int flags)
         return;
 
     useNewNotifications = enabled;
-    for (auto it = guildInfo.constBegin(); it != guildInfo.constEnd(); ++it)
-        emit guildSettingsUpdated(it.key());
+    for (auto it = guildInfo.begin(); it != guildInfo.end(); ++it)
+        guildSettingsUpdated.publish(it->first);
 }
 
 void ReadStateManager::onNotificationSettingsUpdate(const Discord::NotificationSettings &settings)
@@ -204,27 +204,27 @@ bool ReadStateManager::canTrackUnreads(Snowflake channelId) const
 
 bool ReadStateManager::isOptInGuild(Snowflake guildId) const
 {
-    auto gi = guildInfo.constFind(guildId);
-    if (gi == guildInfo.constEnd() || !gi->isCommunity)
+    auto gi = guildInfo.find(guildId);
+    if (gi == guildInfo.end() || !gi->second.isCommunity)
         return false;
-    auto gs = guildSettingsMap.constFind(guildId);
-    return gs != guildSettingsMap.constEnd() && hasFlag(gs.value(), Discord::UserGuildSettingsFlag::OPT_IN_CHANNELS_ON);
+    auto gs = guildSettingsMap.find(guildId);
+    return gs != guildSettingsMap.end() && hasFlag(gs->second, Discord::UserGuildSettingsFlag::OPT_IN_CHANNELS_ON);
 }
 
 bool ReadStateManager::isChannelOptedIn(Snowflake channelId) const
 {
-    auto it = channelOverrideCache.constFind(channelId);
-    return it != channelOverrideCache.constEnd() && hasFlag(it.value(), Discord::ChannelOverrideFlag::OPT_IN_ENABLED);
+    auto it = channelOverrideCache.find(channelId);
+    return it != channelOverrideCache.end() && hasFlag(it->second, Discord::ChannelOverrideFlag::OPT_IN_ENABLED);
 }
 
 bool ReadStateManager::hasRecentlyVisitedAndRead(Snowflake channelId, Snowflake lastMessageId) const
 {
     if (!lastMessageId.isValid())
         return false;
-    auto it = channelReadStates.constFind(channelId);
-    return it != channelReadStates.constEnd() &&
-           it->lastMessageId.hasValue() &&
-           !isOlderThanDays(it->lastMessageId.get(), 3);
+    auto it = channelReadStates.find(channelId);
+    return it != channelReadStates.end() &&
+           it->second.lastMessageId.hasValue() &&
+           !isOlderThanDays(it->second.lastMessageId.get(), 3);
 }
 
 bool ReadStateManager::isMutedThroughParents(Snowflake channelId, Snowflake parentId, Snowflake categoryId,
@@ -252,8 +252,8 @@ bool ReadStateManager::hasUnreadOrMentions(Snowflake channelId) const
 
 bool ReadStateManager::hasBeenRead(Snowflake channelId) const
 {
-    auto it = channelReadStates.constFind(channelId);
-    return it != channelReadStates.constEnd() && it->lastMessageId.hasValue();
+    auto it = channelReadStates.find(channelId);
+    return it != channelReadStates.end() && it->second.lastMessageId.hasValue();
 }
 
 bool ReadStateManager::isForumPostUnread(Snowflake threadId, Snowflake lastMessageId,
@@ -262,9 +262,9 @@ bool ReadStateManager::isForumPostUnread(Snowflake threadId, Snowflake lastMessa
     if (archived || !lastMessageId.isValid())
         return false;
 
-    auto it = channelReadStates.constFind(threadId);
-    if (it != channelReadStates.constEnd() && it->lastMessageId.hasValue())
-        return lastMessageId > it->lastMessageId.get();
+    auto it = channelReadStates.find(threadId);
+    if (it != channelReadStates.end() && it->second.lastMessageId.hasValue())
+        return lastMessageId > it->second.lastMessageId.get();
 
     return true;
 }
@@ -283,11 +283,11 @@ bool ReadStateManager::isThreadRelevant(const Discord::Channel &thread) const
     if (!thread.threadMetadata.hasValue() || !thread.threadMetadata->autoArchiveDuration.hasValue())
         return false;
     const auto &meta = thread.threadMetadata.get();
-    qint64 base = thread.effectiveLastMessageId().toDateTime().toMSecsSinceEpoch();
+    std::int64_t base = thread.effectiveLastMessageId().toDateTime().unixMillis();
     if (meta.archiveTimestamp.hasValue())
-        base = qMax(base, meta.archiveTimestamp.get().toMSecsSinceEpoch());
-    const qint64 expiry = base + static_cast<qint64>(meta.autoArchiveDuration.get()) * 60000;
-    return expiry > QDateTime::currentMSecsSinceEpoch();
+        base = std::max(base, meta.archiveTimestamp.get().unixMillis());
+    const std::int64_t expiry = base + static_cast<std::int64_t>(meta.autoArchiveDuration.get()) * 60000;
+    return expiry > Platform::DateTime::now().unixMillis();
 }
 
 bool ReadStateManager::isForumPostNew(Snowflake threadId, Snowflake forumId, Snowflake guildId,
@@ -299,18 +299,18 @@ bool ReadStateManager::isForumPostNew(Snowflake threadId, Snowflake forumId, Sno
     if (hasBeenRead(threadId))
         return false;
 
-    auto snap = ackIdAtSelect.constFind(forumId);
-    if (snap == ackIdAtSelect.constEnd() || threadId <= snap.value())
+    auto snap = ackIdAtSelect.find(forumId);
+    if (snap == ackIdAtSelect.end() || threadId <= snap->second)
         return false;
 
     if (!guildId.isValid())
         return true;
 
-    auto gi = guildInfo.constFind(guildId);
-    qint64 joinedAtMs = gi != guildInfo.constEnd() && gi->joinedAtMs > 0
-                                ? gi->joinedAtMs
-                                : QDateTime::currentMSecsSinceEpoch();
-    return threadId.toDateTime().toMSecsSinceEpoch() > joinedAtMs;
+    auto gi = guildInfo.find(guildId);
+    std::int64_t joinedAtMs = gi != guildInfo.end() && gi->second.joinedAtMs > 0
+                                ? gi->second.joinedAtMs
+                                : Platform::DateTime::now().unixMillis();
+    return threadId.toDateTime().unixMillis() > joinedAtMs;
 }
 
 void ReadStateManager::markForumPostAsRead(Snowflake threadId, Snowflake lastMessageId)
@@ -318,8 +318,8 @@ void ReadStateManager::markForumPostAsRead(Snowflake threadId, Snowflake lastMes
     if (!lastMessageId.isValid())
         return;
 
-    auto it = channelReadStates.constFind(threadId);
-    if (it != channelReadStates.constEnd() && it->lastMessageId.hasValue() && lastMessageId <= it->lastMessageId.get())
+    auto it = channelReadStates.find(threadId);
+    if (it != channelReadStates.end() && it->second.lastMessageId.hasValue() && lastMessageId <= it->second.lastMessageId.get())
         return;
 
     ack(threadId, lastMessageId, true);
@@ -327,21 +327,21 @@ void ReadStateManager::markForumPostAsRead(Snowflake threadId, Snowflake lastMes
 
 Snowflake ReadStateManager::effectiveAckId(Snowflake channelId, Snowflake guildId) const
 {
-    auto it = channelReadStates.constFind(channelId);
-    if (it != channelReadStates.constEnd() && it->lastMessageId.hasValue())
-        return it->lastMessageId.get();
+    auto it = channelReadStates.find(channelId);
+    if (it != channelReadStates.end() && it->second.lastMessageId.hasValue())
+        return it->second.lastMessageId.get();
 
     if (guildId.isValid()) {
-        auto gi = guildInfo.constFind(guildId);
-        if (gi != guildInfo.constEnd() && gi->joinedAtMs > 0)
-            return Snowflake::fromUnixMs(gi->joinedAtMs);
-        return Snowflake::fromUnixMs(QDateTime::currentMSecsSinceEpoch());
+        auto gi = guildInfo.find(guildId);
+        if (gi != guildInfo.end() && gi->second.joinedAtMs > 0)
+            return Snowflake::fromUnixMs(gi->second.joinedAtMs);
+        return Snowflake::fromUnixMs(Platform::DateTime::now().unixMillis());
     }
 
     if (channelId.isValid())
-        return Snowflake::fromUnixMs(channelId.toDateTime().toMSecsSinceEpoch());
+        return Snowflake::fromUnixMs(channelId.toDateTime().unixMillis());
 
-    return Snowflake::fromUnixMs(QDateTime::currentMSecsSinceEpoch());
+    return Snowflake::fromUnixMs(Platform::DateTime::now().unixMillis());
 }
 
 Discord::MessageNotificationLevel ReadStateManager::resolveMessageNotifications(Snowflake guildId,
@@ -351,10 +351,10 @@ Discord::MessageNotificationLevel ReadStateManager::resolveMessageNotifications(
     using Level = Discord::MessageNotificationLevel;
 
     auto overrideNotif = [this](Snowflake id) -> std::optional<Level> {
-        auto it = channelOverrideCache.constFind(id);
-        if (it != channelOverrideCache.constEnd() && it->messageNotifications.hasValue() &&
-            it->messageNotifications.get() != Level::INHERIT)
-            return it->messageNotifications.get();
+        auto it = channelOverrideCache.find(id);
+        if (it != channelOverrideCache.end() && it->second.messageNotifications.hasValue() &&
+            it->second.messageNotifications.get() != Level::INHERIT)
+            return it->second.messageNotifications.get();
         return std::nullopt;
     };
 
@@ -364,14 +364,14 @@ Discord::MessageNotificationLevel ReadStateManager::resolveMessageNotifications(
         if (auto n = overrideNotif(parentId))
             return *n;
 
-    auto gs = guildSettingsMap.constFind(guildId);
-    if (gs != guildSettingsMap.constEnd() && gs->messageNotifications.hasValue() &&
-        gs->messageNotifications.get() != Level::INHERIT)
-        return gs->messageNotifications.get();
+    auto gs = guildSettingsMap.find(guildId);
+    if (gs != guildSettingsMap.end() && gs->second.messageNotifications.hasValue() &&
+        gs->second.messageNotifications.get() != Level::INHERIT)
+        return gs->second.messageNotifications.get();
 
-    auto gi = guildInfo.constFind(guildId);
-    if (gi != guildInfo.constEnd())
-        return gi->defaultMessageNotifications;
+    auto gi = guildInfo.find(guildId);
+    if (gi != guildInfo.end())
+        return gi->second.defaultMessageNotifications;
 
     return Level::ALL_MESSAGES;
 }
@@ -388,12 +388,12 @@ bool ReadStateManager::unreadCountsForGuild(Snowflake guildId, Snowflake channel
     using Discord::UserGuildSettingsFlag;
 
     auto channelSetting = [this](Snowflake id) -> std::optional<bool> {
-        auto it = channelOverrideCache.constFind(id);
-        if (it == channelOverrideCache.constEnd())
+        auto it = channelOverrideCache.find(id);
+        if (it == channelOverrideCache.end())
             return std::nullopt;
-        if (hasFlag(it.value(), ChannelOverrideFlag::UNREADS_ALL_MESSAGES))
+        if (hasFlag(it->second, ChannelOverrideFlag::UNREADS_ALL_MESSAGES))
             return true;
-        if (hasFlag(it.value(), ChannelOverrideFlag::UNREADS_ONLY_MENTIONS))
+        if (hasFlag(it->second, ChannelOverrideFlag::UNREADS_ONLY_MENTIONS))
             return false;
         return std::nullopt;
     };
@@ -404,11 +404,11 @@ bool ReadStateManager::unreadCountsForGuild(Snowflake guildId, Snowflake channel
         if (auto s = channelSetting(parentId))
             return *s;
 
-    auto gs = guildSettingsMap.constFind(guildId);
-    if (gs != guildSettingsMap.constEnd()) {
-        if (hasFlag(gs.value(), UserGuildSettingsFlag::UNREADS_ALL_MESSAGES))
+    auto gs = guildSettingsMap.find(guildId);
+    if (gs != guildSettingsMap.end()) {
+        if (hasFlag(gs->second, UserGuildSettingsFlag::UNREADS_ALL_MESSAGES))
             return true;
-        if (hasFlag(gs.value(), UserGuildSettingsFlag::UNREADS_ONLY_MENTIONS))
+        if (hasFlag(gs->second, UserGuildSettingsFlag::UNREADS_ONLY_MENTIONS))
             return false;
     }
 
@@ -417,11 +417,11 @@ bool ReadStateManager::unreadCountsForGuild(Snowflake guildId, Snowflake channel
 
 Snowflake ReadStateManager::guildForChannel(Snowflake channelId) const
 {
-    auto it = channelGuildMap.constFind(channelId);
-    return it != channelGuildMap.constEnd() ? it.value() : Snowflake::Invalid;
+    auto it = channelGuildMap.find(channelId);
+    return it != channelGuildMap.end() ? it->second : Snowflake::Invalid;
 }
 
-void ReadStateManager::setGuildReadInfo(Snowflake guildId, const QDateTime &joinedAt,
+void ReadStateManager::setGuildReadInfo(Snowflake guildId, const Platform::DateTime &joinedAt,
                                         Discord::MessageNotificationLevel defaultMessageNotifications,
                                         bool isCommunity)
 {
@@ -429,10 +429,10 @@ void ReadStateManager::setGuildReadInfo(Snowflake guildId, const QDateTime &join
         return;
 
     GuildReadInfo info;
-    info.joinedAtMs = joinedAt.isValid() ? joinedAt.toMSecsSinceEpoch() : 0;
+    info.joinedAtMs = joinedAt.valid() ? joinedAt.unixMillis() : 0;
     info.defaultMessageNotifications = defaultMessageNotifications;
     info.isCommunity = isCommunity;
-    guildInfo.insert(guildId, info);
+    guildInfo.insert_or_assign(guildId, info);
 }
 
 void ReadStateManager::updateGuildDefaults(Snowflake guildId, Discord::MessageNotificationLevel defaultMessageNotifications, bool isCommunity)
@@ -440,19 +440,19 @@ void ReadStateManager::updateGuildDefaults(Snowflake guildId, Discord::MessageNo
     auto it = guildInfo.find(guildId);
     if (it == guildInfo.end())
         return;
-    if (it->defaultMessageNotifications == defaultMessageNotifications && it->isCommunity == isCommunity)
+    if (it->second.defaultMessageNotifications == defaultMessageNotifications && it->second.isCommunity == isCommunity)
         return;
 
-    it->defaultMessageNotifications = defaultMessageNotifications;
-    it->isCommunity = isCommunity;
-    emit guildSettingsUpdated(guildId);
+    it->second.defaultMessageNotifications = defaultMessageNotifications;
+    it->second.isCommunity = isCommunity;
+    guildSettingsUpdated.publish(guildId);
 }
 
 void ReadStateManager::registerChannelGuild(Snowflake channelId, Snowflake guildId)
 {
     if (!channelId.isValid() || !guildId.isValid())
         return;
-    channelGuildMap.insert(channelId, guildId);
+    channelGuildMap.insert_or_assign(channelId, guildId);
 }
 
 void ReadStateManager::registerChannel(const Discord::Channel &channel, Snowflake guildId)
@@ -463,7 +463,7 @@ void ReadStateManager::registerChannel(const Discord::Channel &channel, Snowflak
     if (channel.isVoice())
         voiceChannels.insert(channelId);
     else
-        voiceChannels.remove(channelId);
+        voiceChannels.erase(channelId);
 
     bool isForum = channel.type.hasValue() &&
                    (channel.type.get() == Discord::ChannelType::GUILD_FORUM ||
@@ -471,14 +471,14 @@ void ReadStateManager::registerChannel(const Discord::Channel &channel, Snowflak
     if (isForum)
         forumChannels.insert(channelId);
     else
-        forumChannels.remove(channelId);
+        forumChannels.erase(channelId);
 
     if (!channel.flags.hasValue())
         return;
     if (channel.flags->testFlag(Discord::ChannelFlag::IS_GUILD_RESOURCE_CHANNEL))
         resourceChannels.insert(channelId);
     else
-        resourceChannels.remove(channelId);
+        resourceChannels.erase(channelId);
 }
 
 void ReadStateManager::registerPrivateChannel(const Discord::Channel &channel)
@@ -488,7 +488,7 @@ void ReadStateManager::registerPrivateChannel(const Discord::Channel &channel)
     if (channel.isPendingMessageRequest())
         messageRequestChannels.insert(channelId);
     else
-        messageRequestChannels.remove(channelId);
+        messageRequestChannels.erase(channelId);
 
     if (channel.lastMessageId.hasValue())
         updateChannelLastMessageId(channelId, channel.lastMessageId.get());
@@ -496,57 +496,60 @@ void ReadStateManager::registerPrivateChannel(const Discord::Channel &channel)
 
 void ReadStateManager::removeGuild(Snowflake guildId)
 {
-    const QList<Snowflake> channels = channelGuildMap.keys(guildId);
+    std::vector<Snowflake> channels;
+    for (const auto &[channelId, channelGuildId] : channelGuildMap)
+        if (channelGuildId == guildId)
+            channels.push_back(channelId);
     for (Snowflake channelId : channels) {
-        channelReadStates.remove(channelId);
-        channelLastMessageIds.remove(channelId);
-        ackIdAtSelect.remove(channelId);
-        channelOverrideCache.remove(channelId);
-        channelGuildMap.remove(channelId);
-        resourceChannels.remove(channelId);
-        voiceChannels.remove(channelId);
-        forumChannels.remove(channelId);
-        outgoingAcks.remove(channelId);
+        channelReadStates.erase(channelId);
+        channelLastMessageIds.erase(channelId);
+        ackIdAtSelect.erase(channelId);
+        channelOverrideCache.erase(channelId);
+        channelGuildMap.erase(channelId);
+        resourceChannels.erase(channelId);
+        voiceChannels.erase(channelId);
+        forumChannels.erase(channelId);
+        outgoingAcks.erase(channelId);
         if (activeChannelId == channelId)
             activeChannelId = Snowflake();
     }
 
-    guildInfo.remove(guildId);
-    guildSettingsMap.remove(guildId);
-    guildOverrideChannels.remove(guildId);
+    guildInfo.erase(guildId);
+    guildSettingsMap.erase(guildId);
+    guildOverrideChannels.erase(guildId);
 }
 
 int ReadStateManager::getMentionCount(Snowflake channelId) const
 {
-    auto it = channelReadStates.constFind(channelId);
-    if (it == channelReadStates.constEnd())
+    auto it = channelReadStates.find(channelId);
+    if (it == channelReadStates.end())
         return 0;
 
-    return it->mentionCount.hasValue() ? it->mentionCount.get() : 0;
+    return it->second.mentionCount.hasValue() ? it->second.mentionCount.get() : 0;
 }
 
 bool ReadStateManager::isChannelMuted(Snowflake channelId) const
 {
-    auto it = channelOverrideCache.constFind(channelId);
-    return it != channelOverrideCache.constEnd() && isMutedSetting(it.value());
+    auto it = channelOverrideCache.find(channelId);
+    return it != channelOverrideCache.end() && isMutedSetting(it->second);
 }
 
 bool ReadStateManager::isGuildMuted(Snowflake guildId) const
 {
-    auto it = guildSettingsMap.constFind(guildId);
-    return it != guildSettingsMap.constEnd() && isMutedSetting(it.value());
+    auto it = guildSettingsMap.find(guildId);
+    return it != guildSettingsMap.end() && isMutedSetting(it->second);
 }
 
 bool ReadStateManager::isSuppressEveryone(Snowflake guildId) const
 {
-    auto it = guildSettingsMap.constFind(guildId);
-    return it != guildSettingsMap.constEnd() && it->suppressEveryone.hasValue() && it->suppressEveryone.get();
+    auto it = guildSettingsMap.find(guildId);
+    return it != guildSettingsMap.end() && it->second.suppressEveryone.hasValue() && it->second.suppressEveryone.get();
 }
 
 bool ReadStateManager::isSuppressRoles(Snowflake guildId) const
 {
-    auto it = guildSettingsMap.constFind(guildId);
-    return it != guildSettingsMap.constEnd() && it->suppressRoles.hasValue() && it->suppressRoles.get();
+    auto it = guildSettingsMap.find(guildId);
+    return it != guildSettingsMap.end() && it->second.suppressRoles.hasValue() && it->second.suppressRoles.get();
 }
 
 bool ReadStateManager::isMuteActive(bool muted, const Discord::MuteConfig *muteConfig)
@@ -560,27 +563,27 @@ bool ReadStateManager::isMuteActive(bool muted, const Discord::MuteConfig *muteC
     if (!muteConfig->endTime.hasValue())
         return true;
 
-    QString endTimeStr = muteConfig->endTime.get();
-    if (endTimeStr.isEmpty())
+    const std::string &endTimeStr = muteConfig->endTime.get();
+    if (endTimeStr.empty())
         return true;
 
-    QDateTime endTime = QDateTime::fromString(endTimeStr, Qt::ISODate);
-    if (!endTime.isValid())
+    Platform::DateTime endTime = Platform::DateTime::parse(endTimeStr);
+    if (!endTime.valid())
         return true;
 
-    return QDateTime::currentDateTimeUtc() < endTime;
+    return Platform::DateTime::now() < endTime;
 }
 
 Discord::ReadStateEntry &ReadStateManager::entryFor(Snowflake channelId)
 {
     auto it = channelReadStates.find(channelId);
     if (it != channelReadStates.end())
-        return it.value();
+        return it->second;
 
     Discord::ReadStateEntry entry;
     entry.id = channelId;
     entry.mentionCount = 0;
-    return channelReadStates.insert(channelId, entry).value();
+    return channelReadStates.emplace(channelId, std::move(entry)).first->second;
 }
 
 void ReadStateManager::onMessageAck(const Discord::MessageAck &ack)
@@ -591,23 +594,23 @@ void ReadStateManager::onMessageAck(const Discord::MessageAck &ack)
     auto &entry = entryFor(channelId);
 
     if (manual)
-        outgoingAcks.remove(channelId);
+        outgoingAcks.erase(channelId);
     else if (entry.lastMessageId.hasValue() && entry.lastMessageId.get() == messageId)
         return;
 
     entry.lastMessageId = messageId;
     entry.mentionCount = manual && ack.mentionCount.hasValue() ? ack.mentionCount.get() : 0;
-    emit readStateUpdated(channelId);
+    readStateUpdated.publish(channelId);
 }
 
 void ReadStateManager::onUserGuildSettingsUpdate(const Discord::UserGuildSettings &settings)
 {
     Snowflake key = settings.guildId.isNull() ? Snowflake(0) : settings.guildId.get();
 
-    guildSettingsMap.insert(key, settings);
+    guildSettingsMap.insert_or_assign(key, settings);
     rebuildChannelOverrideCache(key);
 
-    emit guildSettingsUpdated(key);
+    guildSettingsUpdated.publish(key);
 }
 
 void ReadStateManager::ackLocally(Snowflake channelId, Snowflake messageId)
@@ -616,7 +619,7 @@ void ReadStateManager::ackLocally(Snowflake channelId, Snowflake messageId)
     entry.mentionCount = 0;
     if (messageId.isValid())
         entry.lastMessageId = messageId;
-    emit readStateUpdated(channelId);
+    readStateUpdated.publish(channelId);
 }
 
 void ReadStateManager::ack(Snowflake channelId, Snowflake messageId, bool immediate)
@@ -630,11 +633,16 @@ void ReadStateManager::ack(Snowflake channelId, Snowflake messageId, bool immedi
         return;
 
     bool alreadyScheduled = outgoingAcks.contains(channelId);
-    outgoingAcks.insert(channelId, messageId);
+    outgoingAcks.insert_or_assign(channelId, messageId);
     if (alreadyScheduled)
         return;
 
-    QTimer::singleShot(immediate || clearsMentions ? 0 : kDeferredAckDelayMs, this, [this, channelId]() { flushOutgoingAck(channelId); });
+    auto token = lifetime();
+    Platform::Dispatcher::main().setTimer(std::chrono::milliseconds(immediate || clearsMentions ? 0 : kDeferredAckDelayMs), false,
+        [this, token, channelId]() {
+            if (!token.expired())
+                flushOutgoingAck(channelId);
+        });
 }
 
 void ReadStateManager::flushOutgoingAck(Snowflake channelId)
@@ -643,16 +651,16 @@ void ReadStateManager::flushOutgoingAck(Snowflake channelId)
     if (it == outgoingAcks.end())
         return;
 
-    Snowflake messageId = it.value();
+    Snowflake messageId = it->second;
     outgoingAcks.erase(it);
-    emit ackRequested(channelId, messageId);
+    ackRequested.publish(channelId, messageId);
 }
 
 void ReadStateManager::setActiveChannel(Snowflake channelId)
 {
     if (activeChannelId != channelId) {
         if (channelId.isValid())
-            ackIdAtSelect.insert(channelId, effectiveAckId(channelId, guildForChannel(channelId)));
+            ackIdAtSelect.insert_or_assign(channelId, effectiveAckId(channelId, guildForChannel(channelId)));
 
         activeChannelId = channelId;
         activeChannelAtBottom = true;
@@ -675,7 +683,7 @@ bool ReadStateManager::canAutoAckActiveChannel() const
 {
     if (!activeChannelId.isValid() || !activeChannelAtBottom)
         return false;
-    return !qGuiApp || qGuiApp->applicationState() == Qt::ApplicationActive;
+    return Platform::Desktop::applicationActive();
 }
 
 void ReadStateManager::tryAckActiveChannel()
@@ -697,33 +705,33 @@ void ReadStateManager::markChannelAsRead(Snowflake channelId, Snowflake lastMess
 Snowflake ReadStateManager::markAsReadMessageId(Snowflake channelId) const
 {
     if (forumChannels.contains(channelId))
-        return Snowflake::fromUnixMs(QDateTime::currentMSecsSinceEpoch());
+        return Snowflake::fromUnixMs(Platform::DateTime::now().unixMillis());
     return getChannelLastMessageId(channelId);
 }
 
-void ReadStateManager::markChannelsAsRead(const QList<Snowflake> &channelIds)
+void ReadStateManager::markChannelsAsRead(const std::vector<Snowflake> &channelIds)
 {
-    QList<QPair<Snowflake, Snowflake>> toAck;
+    std::vector<std::pair<Snowflake, Snowflake>> toAck;
     for (Snowflake channelId : channelIds) {
         if (!forumChannels.contains(channelId) && !hasUnreadOrMentions(channelId))
             continue;
         Snowflake messageId = markAsReadMessageId(channelId);
         if (messageId.isValid())
-            toAck.append({ channelId, messageId });
+            toAck.push_back({ channelId, messageId });
     }
 
     if (toAck.size() == 1) {
-        ack(toAck.first().first, toAck.first().second, true);
+        ack(toAck.front().first, toAck.front().second, true);
         return;
     }
 
     for (const auto &[channelId, messageId] : toAck) {
-        outgoingAcks.remove(channelId);
+        outgoingAcks.erase(channelId);
         ackLocally(channelId, messageId);
     }
 
-    if (!toAck.isEmpty())
-        emit bulkAckRequested(toAck);
+    if (!toAck.empty())
+        bulkAckRequested.publish(toAck);
 }
 
 void ReadStateManager::handleMessageCreated(Snowflake channelId, Snowflake messageId, bool fromSelf, bool isMention)
@@ -731,7 +739,7 @@ void ReadStateManager::handleMessageCreated(Snowflake channelId, Snowflake messa
     updateChannelLastMessageId(channelId, messageId);
 
     if (fromSelf) {
-        outgoingAcks.remove(channelId);
+        outgoingAcks.erase(channelId);
         ackLocally(channelId, messageId);
         return;
     }
@@ -746,7 +754,7 @@ void ReadStateManager::handleMessageCreated(Snowflake channelId, Snowflake messa
 
     auto &entry = entryFor(channelId);
     entry.mentionCount = getMentionCount(channelId) + 1;
-    emit readStateUpdated(channelId);
+    readStateUpdated.publish(channelId);
 }
 
 void ReadStateManager::updateChannelLastMessageId(Snowflake channelId, Snowflake messageId)
@@ -754,48 +762,47 @@ void ReadStateManager::updateChannelLastMessageId(Snowflake channelId, Snowflake
     if (!messageId.isValid())
         return;
 
-    auto it = channelLastMessageIds.constFind(channelId);
-    if (it == channelLastMessageIds.constEnd() || messageId > it.value())
-        channelLastMessageIds.insert(channelId, messageId);
+    auto it = channelLastMessageIds.find(channelId);
+    if (it == channelLastMessageIds.end() || messageId > it->second)
+        channelLastMessageIds.insert_or_assign(channelId, messageId);
 }
 
 Snowflake ReadStateManager::getChannelLastMessageId(Snowflake channelId) const
 {
-    auto it = channelLastMessageIds.constFind(channelId);
-    return it != channelLastMessageIds.constEnd() ? it.value() : Snowflake::Invalid;
+    auto it = channelLastMessageIds.find(channelId);
+    return it != channelLastMessageIds.end() ? it->second : Snowflake::Invalid;
 }
 
 int ReadStateManager::daysSinceDiscordEpoch()
 {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    static const QDateTime epoch = QDateTime(QDate(2015, 1, 1), QTime(0, 0), QTimeZone::UTC);
-#else
-    static const QDateTime epoch = QDateTime(QDate(2015, 1, 1), QTime(0, 0), Qt::UTC);
-#endif
-    return epoch.daysTo(QDateTime::currentDateTimeUtc()) + 1;
+    constexpr std::int64_t discordEpochMs = 1420070400000LL;
+    return static_cast<int>((Platform::DateTime::now().unixMillis() - discordEpochMs) / kMsPerDay) + 1;
 }
 
 void ReadStateManager::rebuildChannelOverrideCache(Snowflake guildSettingsKey)
 {
-    auto oldChannels = guildOverrideChannels.take(guildSettingsKey);
-    for (const auto &channelId : oldChannels)
-        channelOverrideCache.remove(channelId);
+    auto old = guildOverrideChannels.find(guildSettingsKey);
+    if (old != guildOverrideChannels.end()) {
+        for (const auto &channelId : old->second)
+            channelOverrideCache.erase(channelId);
+        guildOverrideChannels.erase(old);
+    }
 
-    auto it = guildSettingsMap.constFind(guildSettingsKey);
-    if (it == guildSettingsMap.constEnd())
+    auto it = guildSettingsMap.find(guildSettingsKey);
+    if (it == guildSettingsMap.end())
         return;
 
-    const auto &settings = it.value();
+    const auto &settings = it->second;
     if (!settings.channelOverrides.hasValue())
         return;
 
-    QSet<Snowflake> newChannels;
+    std::unordered_set<Snowflake> newChannels;
     for (const auto &override_ : settings.channelOverrides.get()) {
         Snowflake channelId = override_.channelId.get();
-        channelOverrideCache.insert(channelId, override_);
+        channelOverrideCache.insert_or_assign(channelId, override_);
         newChannels.insert(channelId);
     }
-    guildOverrideChannels.insert(guildSettingsKey, newChannels);
+    guildOverrideChannels.insert_or_assign(guildSettingsKey, std::move(newChannels));
 }
 
 } // namespace Core

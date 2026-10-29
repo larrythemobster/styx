@@ -1,8 +1,7 @@
 #pragma once
 
-#include <QList>
-#include <QString>
-#include <QUrl>
+#include <string>
+#include <vector>
 
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
@@ -17,10 +16,10 @@ enum class EmojiIntention {
 
 struct PickerEmoji
 {
-    QString name;
-    QString surrogates;
+    std::string name;
+    std::string surrogates;
     Snowflake customId;
-    QString customName;
+    std::string customName;
     Snowflake guildId;
     bool animated = false;
 
@@ -36,7 +35,7 @@ struct PickerEmoji
         return isCustom() ? Discord::Emoji::custom(customId, customName, animated) : Discord::Emoji::unicode(surrogates);
     }
 
-    [[nodiscard]] QString messageText() const
+    [[nodiscard]] std::string messageText() const
     {
         if (!isCustom())
             return ":" + name + ":";
@@ -48,11 +47,11 @@ struct PickerSection
 {
     static constexpr auto RecentId = "recent";
 
-    QString id;
-    QString title;
+    std::string id;
+    std::string title;
     Snowflake guildId;
-    QUrl guildIconUrl;
-    QList<PickerEmoji> emojis;
+    std::string guildIconUrl;
+    std::vector<PickerEmoji> emojis;
 };
 
 } // namespace Core

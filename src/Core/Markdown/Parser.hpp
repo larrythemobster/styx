@@ -1,106 +1,60 @@
 #pragma once
 
-#include <QRegularExpression>
-#include <QSet>
-#include <QVariantMap>
-
+#include <functional>
+#include <string>
+#include <unordered_set>
+#include <vector>
+#include <nlohmann/json.hpp>
 #include "Core/Snowflake.hpp"
 
-namespace Styx {
-namespace Core {
-namespace Markdown {
+namespace Styx::Core::Markdown {
 
 inline constexpr int InlineEmojiPx = 22;
 inline constexpr int JumboEmojiPx = 44;
 
-struct AstNode
-{
-    QString type;
-    QString content;
-    QList<AstNode> children;
-    QVariantMap attributes;
+struct AstNode {
+    std::string type;
+    std::string content;
+    std::vector<AstNode> children;
+    nlohmann::json attributes = nlohmann::json::object();
 };
-
-struct ParseState
-{
+struct ParseState {
     bool isInline = false;
     bool inTable = false;
     int key = 0;
-    QString prevCapture = "";
-    QVariantMap customState;
-    QSet<QString> excludedRules;
+    std::string prevCapture;
+    nlohmann::json customState = nlohmann::json::object();
+    std::unordered_set<std::string> excludedRules;
 };
-
-using Capture = QRegularExpressionMatch;
-
-// clang-format off
-using NestedParseFn = std::function<QList<AstNode>(QString, ParseState)>;
-using MatchFn = std::function<Capture(const QString &, const ParseState &)>;
-using ParseFn = std::function<AstNode(const Capture &, NestedParseFn, ParseState)>;
-using QualityFn = std::function<double(const Capture&, const ParseState&, const QString&)>;
-using HtmlOutputFn = std::function<QString(const AstNode&, std::function<QString(const QList<AstNode>&)>)>;
-// clang-format on
-
-struct MarkdownRule
-{
-    QString name;
-    int order;
-    QRegularExpression regex;
-    MatchFn match = nullptr;
-    ParseFn parse;
-    HtmlOutputFn html;
-    QualityFn quality = nullptr;
-};
-
-using UserResolverFn = std::function<QString(Snowflake userId, Snowflake sourceChannelId)>;
-using ChannelResolverFn = std::function<QString(const QString &channelId)>;
-
-struct ChannelLinkRef
-{
-    Snowflake guildId; // invalid for DM links
+using UserResolverFn = std::function<std::string(Snowflake, Snowflake)>;
+using ChannelResolverFn = std::function<std::string(const std::string &)>;
+struct ChannelLinkRef {
+    Snowflake guildId;
     Snowflake channelId;
-    Snowflake messageId; // invalid for plain channel links
-    Snowflake sourceChannelId; // channel the message containing the link was posted in
+    Snowflake messageId;
+    Snowflake sourceChannelId;
 };
-
-struct ChannelLinkPart
-{
-    QString icon;
-    QString text;
+struct ChannelLinkPart {
+    std::string icon;
+    std::string text;
     bool italic = false;
 };
+using ChannelLinkResolverFn = std::function<std::vector<ChannelLinkPart>(const ChannelLinkRef &)>;
 
-using ChannelLinkResolverFn = std::function<QList<ChannelLinkPart>(const ChannelLinkRef &)>;
-
-class Parser
-{
+class Parser {
 public:
-    Parser();
-
-    QList<AstNode> parse(QString source, ParseState state = {});
-    QString toHtml(const QList<AstNode> &nodes, bool jumboEmoji = false);
-
+    Parser() = default;
+    std::vector<AstNode> parse(std::string source, ParseState state = {});
+    std::string toHtml(const std::vector<AstNode> &nodes, bool jumboEmoji = false);
     void setUserResolver(UserResolverFn resolver);
     void setChannelResolver(ChannelResolverFn resolver);
     void setChannelLinkResolver(ChannelLinkResolverFn resolver);
-
-    static bool isEmojiOnly(const QList<AstNode> &nodes, int maxEmojis = 30);
-    static bool isSingleLink(const QList<AstNode> &nodes);
-
+    static bool isEmojiOnly(const std::vector<AstNode> &nodes, int maxEmojis = 30);
+    static bool isSingleLink(const std::vector<AstNode> &nodes);
 private:
-    void setupDefaultRules();
-    void sortRules();
-
-    QString toHtmlInternal(const QList<AstNode> &nodes, bool jumboEmoji);
-
-private:
-    QList<MarkdownRule> rules;
-    QMap<QString, MarkdownRule *> ruleMap;
     UserResolverFn userResolver;
     ChannelResolverFn channelResolver;
     ChannelLinkResolverFn channelLinkResolver;
 };
 
-} // namespace Markdown
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core::Markdown

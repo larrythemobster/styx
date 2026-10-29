@@ -27,6 +27,8 @@
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
 #include <mmdeviceapi.h>
+#include <audiopolicy.h>
+#include <tlhelp32.h>
 #elif defined(__linux__) && defined(STYX_HAVE_PIPEWIRE)
 #include <pipewire/pipewire.h>
 #include <spa/debug/types.h>
@@ -159,6 +161,178 @@ bool processLoopbackAvailable() {
     return available;
 }
 
+std::vector<PlayingProgram> playingPrograms()
+{
+    if (!processLoopbackAvailable())
+        return {};
+
+    const HRESULT comInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool mustUninit = SUCCEEDED(comInit);
+
+    const DWORD selfPid = GetCurrentProcessId();
+    std::map<DWORD, DWORD> parents;
+    std::map<DWORD, std::string> toolhelpNames;
+
+    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W entry{};
+        entry.dwSize = sizeof(entry);
+        for (BOOL ok = Process32FirstW(snapshot, &entry); ok; ok = Process32NextW(snapshot, &entry)) {
+            parents[entry.th32ProcessID] = entry.th32ParentProcessID;
+            int bytes = WideCharToMultiByte(CP_UTF8, 0, entry.szExeFile, -1, nullptr, 0, nullptr, nullptr);
+            if (bytes > 1) {
+                std::string exeName(bytes - 1, '\0');
+                WideCharToMultiByte(CP_UTF8, 0, entry.szExeFile, -1, exeName.data(), bytes, nullptr, nullptr);
+                toolhelpNames[entry.th32ProcessID] = std::move(exeName);
+            }
+        }
+        CloseHandle(snapshot);
+    }
+
+    const auto inOurTree = [&](DWORD pid) -> bool {
+        for (DWORD cur = pid; cur != 0;) {
+            if (cur == selfPid)
+                return true;
+            const auto it = parents.find(cur);
+            if (it == parents.end() || it->second == cur)
+                break;
+            cur = it->second;
+        }
+        return false;
+    };
+
+    IMMDeviceEnumerator *rawEnum = nullptr;
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                  __uuidof(IMMDeviceEnumerator), reinterpret_cast<void **>(&rawEnum));
+    if (FAILED(hr) || !rawEnum) {
+        if (mustUninit)
+            CoUninitialize();
+        return {};
+    }
+    ComPointer<IMMDeviceEnumerator> deviceEnumerator(rawEnum);
+
+    IMMDeviceCollection *rawCollection = nullptr;
+    hr = deviceEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &rawCollection);
+    if (FAILED(hr) || !rawCollection) {
+        if (mustUninit)
+            CoUninitialize();
+        return {};
+    }
+    ComPointer<IMMDeviceCollection> deviceCollection(rawCollection);
+
+    UINT deviceCount = 0;
+    deviceCollection->GetCount(&deviceCount);
+
+    std::map<std::uint32_t, std::string> names;
+
+    for (UINT d = 0; d < deviceCount; ++d) {
+        IMMDevice *rawDevice = nullptr;
+        if (FAILED(deviceCollection->Item(d, &rawDevice)) || !rawDevice)
+            continue;
+        ComPointer<IMMDevice> device(rawDevice);
+
+        IAudioSessionManager2 *rawManager = nullptr;
+        if (FAILED(device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, reinterpret_cast<void **>(&rawManager))) || !rawManager)
+            continue;
+        ComPointer<IAudioSessionManager2> sessionManager(rawManager);
+
+        IAudioSessionEnumerator *rawSessions = nullptr;
+        if (FAILED(sessionManager->GetSessionEnumerator(&rawSessions)) || !rawSessions)
+            continue;
+        ComPointer<IAudioSessionEnumerator> sessionEnum(rawSessions);
+
+        int sessionCount = 0;
+        if (FAILED(sessionEnum->GetCount(&sessionCount)))
+            continue;
+
+        for (int s = 0; s < sessionCount; ++s) {
+            IAudioSessionControl *rawControl = nullptr;
+            if (FAILED(sessionEnum->GetSession(s, &rawControl)) || !rawControl)
+                continue;
+            ComPointer<IAudioSessionControl> control(rawControl);
+
+            IAudioSessionControl2 *rawControl2 = nullptr;
+            if (FAILED(control->QueryInterface(__uuidof(IAudioSessionControl2), reinterpret_cast<void **>(&rawControl2))) || !rawControl2)
+                continue;
+            ComPointer<IAudioSessionControl2> control2(rawControl2);
+
+            if (control2->IsSystemSoundsSession() == S_OK)
+                continue;
+
+            DWORD pid = 0;
+            if (FAILED(control2->GetProcessId(&pid)) || pid == 0)
+                continue;
+
+            if (inOurTree(pid))
+                continue;
+
+            AudioSessionState state = AudioSessionStateInactive;
+            if (FAILED(control2->GetState(&state)) || state == AudioSessionStateExpired)
+                continue;
+
+            if (names.find(pid) != names.end())
+                continue;
+
+            std::string name;
+            LPWSTR dispName = nullptr;
+            if (SUCCEEDED(control->GetDisplayName(&dispName)) && dispName) {
+                if (dispName[0] != L'\0' && dispName[0] != L'@') {
+                    int bytes = WideCharToMultiByte(CP_UTF8, 0, dispName, -1, nullptr, 0, nullptr, nullptr);
+                    if (bytes > 1) {
+                        std::string utf8(bytes - 1, '\0');
+                        WideCharToMultiByte(CP_UTF8, 0, dispName, -1, utf8.data(), bytes, nullptr, nullptr);
+                        name = std::move(utf8);
+                    }
+                }
+                CoTaskMemFree(dispName);
+            }
+
+            if (name.empty()) {
+                const auto it = toolhelpNames.find(pid);
+                if (it != toolhelpNames.end() && !it->second.empty()) {
+                    name = it->second;
+                }
+            }
+
+            if (name.empty()) {
+                HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+                if (proc) {
+                    WCHAR path[MAX_PATH];
+                    DWORD size = MAX_PATH;
+                    if (QueryFullProcessImageNameW(proc, 0, path, &size)) {
+                        const WCHAR *file = std::wcsrchr(path, L'\\');
+                        file = file ? file + 1 : path;
+                        int bytes = WideCharToMultiByte(CP_UTF8, 0, file, -1, nullptr, 0, nullptr, nullptr);
+                        if (bytes > 1) {
+                            std::string utf8(bytes - 1, '\0');
+                            WideCharToMultiByte(CP_UTF8, 0, file, -1, utf8.data(), bytes, nullptr, nullptr);
+                            name = std::move(utf8);
+                        }
+                    }
+                    CloseHandle(proc);
+                }
+            }
+
+            if (!name.empty()) {
+                names[pid] = std::move(name);
+            }
+        }
+    }
+
+    if (mustUninit)
+        CoUninitialize();
+
+    std::vector<PlayingProgram> programs;
+    programs.reserve(names.size());
+    for (auto &[pid, name] : names) {
+        programs.push_back({ pid, std::move(name) });
+    }
+    std::stable_sort(programs.begin(), programs.end(), [](const PlayingProgram &a, const PlayingProgram &b) {
+        return a.name < b.name;
+    });
+    return programs;
+}
+
 #elif defined(__linux__) && defined(STYX_HAVE_PIPEWIRE)
 namespace {
 constexpr int kAnswerTimeoutMs = 200;
@@ -237,7 +411,7 @@ class LoopbackCapture::Worker { public: explicit Worker(LoopbackCapture *owner) 
 bool processLoopbackAvailable() { return false; }
 #endif
 
-#if defined(_WIN32) || !(defined(__linux__) && defined(STYX_HAVE_PIPEWIRE))
+#if !defined(_WIN32) && !(defined(__linux__) && defined(STYX_HAVE_PIPEWIRE))
 std::vector<PlayingProgram> playingPrograms() { return {}; }
 #endif
 

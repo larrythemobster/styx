@@ -39,6 +39,8 @@ class StreamManager;
 
 class ReadStateManager;
 class ForumManager;
+class CallStore;
+
 
 class ClientInstance : public QObject
 {
@@ -63,6 +65,7 @@ public:
     [[nodiscard]] PresenceManager *presences() const;
     [[nodiscard]] EmojiManager *emojis() const;
     [[nodiscard]] FavoriteGifs *favoriteGifs() const;
+    [[nodiscard]] CallStore *calls() const;
 #ifndef STYX_NO_VOICE
     [[nodiscard]] Audio::VoiceManager *voice() const;
 #endif
@@ -77,6 +80,7 @@ public:
     [[nodiscard]] QList<Discord::Channel> getGuildChannels(Snowflake guildId);
     [[nodiscard]] std::optional<Snowflake> findDmChannelWithUser(Snowflake userId);
     using DmChannelCallback = std::function<void(const Result<Snowflake> &)>;
+    void noteChannelSelected(Snowflake channelId);
     void openDmChannel(Snowflake userId, DmChannelCallback callback);
     [[nodiscard]] int getChannelRateLimit(Snowflake channelId);
 
@@ -167,6 +171,10 @@ private slots:
     void handleBulkAckRequest(const QList<QPair<Snowflake, Snowflake>> &pairs);
     void onVoiceConnected();
     void onVoiceDisconnected();
+    void onCallCreated(const Discord::CallCreate &event);
+    void onCallDeleted(const Discord::CallDelete &event);
+    void onVoiceStateUpdated(const Discord::VoiceState &event);
+    void connectSelectedCall(bool force);
     void onHeartbeatSessionChanged(const Discord::HeartbeatSession &session);
     bool isMessageMentioningMe(const Discord::Message &msg) const;
 
@@ -204,6 +212,9 @@ private:
 #ifdef STYX_HAVE_SCREENSHARE
     Stream::StreamManager *streamManager;
 #endif
+    std::unique_ptr<CallStore> callStore;
+    Snowflake selectedChannelId;
+    QString gatewaySessionId;
 
     Storage::RoleRepository roleRepo;
     Storage::AccountRepository accountRepo;

@@ -3,54 +3,42 @@
 #include "Platform/SecureStore.hpp"
 #include "Logging.hpp"
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
-QString TokenStore::keyForAccount(Snowflake accountId)
+std::string TokenStore::keyForAccount(Snowflake accountId)
 {
-    return QString("account_%1_token").arg(accountId.toString());
+    return "account_" + accountId.toString() + "_token";
 }
 
-QString TokenStore::describeKeychainFailure(const QString &keychainError)
+std::string TokenStore::describeKeychainFailure(const std::string &keychainError)
 {
-    QString description = tr("The system keychain reported: %1").arg(keychainError);
-#if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS)
-    description += "\n\n" + tr("Styx keeps tokens in the system keyring, which needs a Secret Service provider such as GNOME Keyring, KWallet or KeePassXC to be installed and running.");
+    std::string description = "The system keychain reported: " + keychainError;
+#if !defined(_WIN32) && !defined(__APPLE__)
+    description += "\n\nStyx keeps tokens in the system keyring, which needs a Secret Service provider such as GNOME Keyring, KWallet or KeePassXC to be installed and running.";
 #endif
     return description;
 }
 
-Result<void> TokenStore::saveToken(Snowflake accountId, const QString &token)
+Result<void> TokenStore::saveToken(Snowflake accountId, const std::string &token)
 {
-    std::string key = keyForAccount(accountId).toStdString();
-    std::string pass = token.toStdString();
-
-    if (!Platform::SecureStore::writePassword(SERVICE_NAME, key, pass)) {
-        qCWarning(LogCore) << "TokenStore: Failed to save token for account"
-                           << accountId;
-        return Result<void>::makeError(describeKeychainFailure(tr("Failed to write credential to secure store")));
+    if (!Platform::SecureStore::writePassword(SERVICE_NAME, keyForAccount(accountId), token)) {
+        Core::log(Core::LogLevel::Warning, LogCore) << "TokenStore: Failed to save token for account" << accountId.toString();
+        return Result<void>::makeError(describeKeychainFailure("Failed to write credential to secure store"));
     }
-
     return Result<void>::makeOk();
 }
 
-Result<QString> TokenStore::loadToken(Snowflake accountId)
+Result<std::string> TokenStore::loadToken(Snowflake accountId)
 {
-    std::string key = keyForAccount(accountId).toStdString();
-    auto opt = Platform::SecureStore::readPassword(SERVICE_NAME, key);
-
-    if (!opt.has_value() || opt->empty()) {
-        return Result<QString>::makeError(tr("No token is stored for this account. Use \"Set Token\" to enter it again."));
-    }
-
-    return Result<QString>::makeOk(QString::fromStdString(*opt));
+    auto token = Platform::SecureStore::readPassword(SERVICE_NAME, keyForAccount(accountId));
+    if (!token || token->empty())
+        return Result<std::string>::makeError("No token is stored for this account. Use \"Set Token\" to enter it again.");
+    return Result<std::string>::makeOk(*token);
 }
 
 bool TokenStore::deleteToken(Snowflake accountId)
 {
-    std::string key = keyForAccount(accountId).toStdString();
-    return Platform::SecureStore::deletePassword(SERVICE_NAME, key);
+    return Platform::SecureStore::deletePassword(SERVICE_NAME, keyForAccount(accountId));
 }
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

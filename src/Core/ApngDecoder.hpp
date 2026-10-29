@@ -1,8 +1,8 @@
 #pragma once
 
-#include <QByteArray>
-#include <QImage>
-#include <QSize>
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
+#include <string>
 
 #include <memory>
 
@@ -16,12 +16,12 @@ public:
     ~Reader();
 
     // null unless this ffmpeg is enabled and this is apng (not png)
-    [[nodiscard]] static std::unique_ptr<Reader> open(const QByteArray &png);
+    [[nodiscard]] static std::unique_ptr<Reader> open(const std::string &png);
 
-    [[nodiscard]] QSize canvasSize() const;
+    [[nodiscard]] Platform::Size canvasSize() const;
     [[nodiscard]] int frameCount() const;
 
-    bool next(QImage &canvas, int &delayMs);
+    bool next(Platform::ImageBuffer &canvas, int &delayMs);
 
 private:
     struct Impl;

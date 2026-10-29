@@ -1,9 +1,6 @@
 #pragma once
 
-#include <QMetaType>
-
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
 enum class ConnectionState {
     Disconnecting,
@@ -12,7 +9,4 @@ enum class ConnectionState {
     Connected,
 };
 
-} // namespace Core
-} // namespace Styx
-
-Q_DECLARE_METATYPE(Styx::Core::ConnectionState)
+}

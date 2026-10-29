@@ -1,89 +1,61 @@
 #pragma once
 
-#include <QImage>
-#include <QObject>
-#include <QSize>
-#include <QString>
-#include <QUrl>
-
+#include <cstdint>
 #include <memory>
+#include <string>
 
 #include "Core/ProxyConfig.hpp"
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
+#include "Platform/Trackable.hpp"
 
-namespace Styx {
-namespace Core {
-namespace Media {
+namespace Styx::Core::Media {
 
-enum class MediaKind {
-    Video,
-    Audio,
-};
+enum class MediaKind { Video, Audio };
 
 bool isSupported();
-
-bool canPlay(const QString &contentType, const QUrl &url);
-
-bool canPlayAudio(const QString &contentType, const QUrl &url);
-
+bool canPlay(const std::string &contentType, const std::string &url);
+bool canPlayAudio(const std::string &contentType, const std::string &url);
 float storedVolume();
 void setStoredVolume(float volume);
 bool storedMuted();
 void setStoredMuted(bool muted);
 
-class Player : public QObject
-{
-    Q_OBJECT
+class Player : public Platform::Trackable {
 public:
-    enum class State {
-        Idle,
-        Opening,
-        Playing,
-        Paused,
-        Ended,
-        Error,
-    };
-    Q_ENUM(State)
+    enum class State { Idle, Opening, Playing, Paused, Ended, Error };
 
-    explicit Player(QObject *parent = nullptr);
+    Player();
     ~Player() override;
-
-    void open(const QUrl &url, const ProxyConfig &proxy);
+    void open(const std::string &url, const ProxyConfig &proxy);
     void close();
-
     void play();
     void pause();
     void togglePlayPause();
-    void seek(qint64 positionMs);
-
+    void seek(int64_t positionMs);
     void setVolume(float volume);
     [[nodiscard]] float volume() const;
     void setMuted(bool muted);
     [[nodiscard]] bool isMuted() const;
-    void setTargetSize(const QSize &size);
-
-    [[nodiscard]] QImage currentFrame() const;
-    [[nodiscard]] qint64 position() const;
-    [[nodiscard]] qint64 duration() const;
-    [[nodiscard]] qint64 bufferedPosition() const;
-    [[nodiscard]] QSize nativeSize() const;
+    void setTargetSize(const Platform::Size &size);
+    [[nodiscard]] Platform::ImageBuffer currentFrame() const;
+    [[nodiscard]] int64_t position() const;
+    [[nodiscard]] int64_t duration() const;
+    [[nodiscard]] int64_t bufferedPosition() const;
+    [[nodiscard]] Platform::Size nativeSize() const;
     [[nodiscard]] bool hasVideo() const;
     [[nodiscard]] State state() const;
-
     [[nodiscard]] bool isPlaying() const { return state() == State::Playing; }
     [[nodiscard]] bool isSeekable() const;
 
-signals:
-    void frameReady();
-    void positionChanged(qint64 positionMs);
-    void durationChanged(qint64 durationMs);
-    void stateChanged(Styx::Core::Media::Player::State state);
-    void errorOccurred(const QString &message);
-
+    Platform::Signal<> frameReady;
+    Platform::Signal<int64_t> positionChanged;
+    Platform::Signal<int64_t> durationChanged;
+    Platform::Signal<State> stateChanged;
+    Platform::Signal<std::string> errorOccurred;
 private:
     struct Impl;
     std::unique_ptr<Impl> d;
 };
 
-} // namespace Media
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core::Media

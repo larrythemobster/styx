@@ -1,7 +1,5 @@
 #pragma once
 
-#include <QMetaType>
-
 #include "Discord/Enums.hpp"
 
 namespace Styx {
@@ -16,5 +14,3 @@ struct PresenceBadge
 
 } // namespace Core
 } // namespace Styx
-
-Q_DECLARE_METATYPE(Styx::Core::PresenceBadge)

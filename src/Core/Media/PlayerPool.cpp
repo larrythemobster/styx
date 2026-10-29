@@ -1,132 +1,83 @@
 #include "Core/Media/PlayerPool.hpp"
-
 #include "Core/Logging.hpp"
+#include <algorithm>
 
-namespace Styx {
-namespace Core {
-namespace Media {
+namespace Styx::Core::Media {
 
-QString attachmentKey(quint64 attachmentId, MediaKind kind)
+std::string attachmentKey(uint64_t id, MediaKind kind)
 {
-    return QStringLiteral("%1:%2")
-            .arg(kind == MediaKind::Audio ? QLatin1String("audio") : QLatin1String("video"))
-            .arg(attachmentId);
+    return std::string(kind == MediaKind::Audio ? "audio:" : "video:") + std::to_string(id);
 }
-
-QString embedKey(quint64 messageId, int embedIndex)
+std::string embedKey(uint64_t id, int index)
 {
-    return QStringLiteral("embed:%1:%2").arg(messageId).arg(embedIndex);
+    return "embed:" + std::to_string(id) + ":" + std::to_string(index);
 }
-
-PlayerPool::PlayerPool(QObject *parent) : QObject(parent) {}
-
-PlayerPool::~PlayerPool()
+PlayerPool::~PlayerPool() { clear(); }
+Player *PlayerPool::find(const std::string &key) const
 {
-    clear();
+    auto it = players.find(key);
+    return it == players.end() ? nullptr : it->second.get();
 }
-
-Player *PlayerPool::find(const QString &key) const
+Player *PlayerPool::acquire(const std::string &key, const std::string &url, const ProxyConfig &proxy)
 {
-    auto it = players.constFind(key);
-    return it != players.constEnd() ? it.value() : nullptr;
-}
-
-Player *PlayerPool::acquire(const QString &key, const QUrl &url, const ProxyConfig &proxy)
-{
-    if (!isSupported() || key.isEmpty() || url.isEmpty())
-        return nullptr;
-
-    if (Player *existing = find(key)) {
-        touch(key);
-        return existing;
-    }
-
+    if (!isSupported() || key.empty() || url.empty()) return nullptr;
+    if (auto *existing = find(key)) { touch(key); return existing; }
     enforceLimit();
-
-    auto *player = new Player(this);
-    players.insert(key, player);
-    order.append(key);
-
-    connect(player, &Player::frameReady, this, [this, key] { emit frameReady(key); });
-    connect(player, &Player::positionChanged, this, [this, key](qint64) { emit playerPositionChanged(key); });
-    connect(player, &Player::stateChanged, this, [this, key] { emit playerStateChanged(key); });
-    connect(player, &Player::errorOccurred, this, [key](const QString &message) {
-        qCWarning(LogVideo) << "player" << key << "failed:" << message;
-    });
-
+    auto owned = std::make_unique<Player>();
+    auto *player = owned.get();
+    players.emplace(key, std::move(owned));
+    order.push_back(key);
+    player->track(player->frameReady.connect([this, key] { frameReady.publish(key); }));
+    player->track(player->positionChanged.connect([this, key](int64_t) { playerPositionChanged.publish(key); }));
+    player->track(player->stateChanged.connect([this, key](Player::State) { playerStateChanged.publish(key); }));
+    player->track(player->errorOccurred.connect([key](const std::string &message) {
+        Core::log(Core::LogLevel::Warning, LogVideo) << "player" << key << "failed:" << message;
+    }));
     player->open(url, proxy);
     return player;
 }
-
-void PlayerPool::touch(const QString &key)
+void PlayerPool::touch(const std::string &key)
 {
-    if (!players.contains(key))
-        return;
-
-    order.removeAll(key);
-    order.append(key);
+    if (!players.contains(key)) return;
+    std::erase(order, key);
+    order.push_back(key);
 }
-
-void PlayerPool::setPinned(const QString &key)
-{
-    pinnedKey = key;
-}
-
-void PlayerPool::release(const QString &key)
+void PlayerPool::setPinned(const std::string &key) { pinnedKey = key; }
+void PlayerPool::release(const std::string &key)
 {
     auto it = players.find(key);
-    if (it == players.end())
-        return;
-
-    Player *player = it.value();
+    if (it == players.end()) return;
+    auto player = std::move(it->second);
     players.erase(it);
-    order.removeAll(key);
-    if (pinnedKey == key)
-        pinnedKey.clear();
-
+    std::erase(order, key);
+    if (pinnedKey == key) pinnedKey.clear();
     player->close();
-    player->deleteLater();
-
-    emit playerReleased(key);
+    playerReleased.publish(key);
 }
-
 void PlayerPool::clear()
 {
-    const QStringList keys = players.keys();
-    for (const QString &key : keys)
+    while (!players.empty()) {
+        const auto key = players.begin()->first;
         release(key);
-}
-
-QString PlayerPool::evictionCandidate() const
-{
-    QString playingFallback;
-
-    for (const QString &key : order) {
-        if (key == pinnedKey)
-            continue;
-
-        if (!find(key)->isPlaying())
-            return key;
-
-        if (playingFallback.isEmpty())
-            playingFallback = key;
     }
-
-    return playingFallback;
 }
-
+std::string PlayerPool::evictionCandidate() const
+{
+    std::string fallback;
+    for (const auto &key : order) {
+        if (key == pinnedKey) continue;
+        if (!find(key)->isPlaying()) return key;
+        if (fallback.empty()) fallback = key;
+    }
+    return fallback;
+}
 void PlayerPool::enforceLimit()
 {
     while (players.size() >= MaxActivePlayers) {
-        const QString victim = evictionCandidate();
-        if (victim.isEmpty())
-            return;
-
-        qCDebug(LogVideo) << "evicting player" << victim << "to stay under the decoder cap";
+        const auto victim = evictionCandidate();
+        if (victim.empty()) return;
+        Core::log(Core::LogLevel::Debug, LogVideo) << "evicting player" << victim << "to stay under the decoder cap";
         release(victim);
     }
 }
-
-} // namespace Media
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core::Media

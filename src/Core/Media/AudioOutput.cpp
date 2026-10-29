@@ -67,7 +67,7 @@ public:
         }
     }
 
-    void resetStream(AudioOutput *stream, qint64 basePtsMs)
+    void resetStream(AudioOutput *stream, int64_t basePtsMs)
     {
         std::lock_guard<std::mutex> lock(mixMutex);
         stream->resetLocked(basePtsMs);
@@ -86,7 +86,7 @@ public:
         }
 
         for (size_t i = 0; i < samples; ++i)
-            out[i] = qBound(-1.0f, out[i], 1.0f);
+            out[i] = std::clamp(out[i], -1.0f, 1.0f);
     }
 
 private:
@@ -114,7 +114,7 @@ private:
             config.wasapi.noAutoConvertSRC = MA_TRUE;
 
             if (!Audio::initAudioDevice(&config, &device)) {
-                qCWarning(LogVideo) << "failed to init the media playback device";
+                Core::log(Core::LogLevel::Warning, LogVideo) << "failed to init the media playback device";
                 return false;
             }
             deviceInit = true;
@@ -124,7 +124,7 @@ private:
             return true;
 
         if (ma_device_start(&device) != MA_SUCCESS) {
-            qCWarning(LogVideo) << "failed to start the media playback device";
+            Core::log(Core::LogLevel::Warning, LogVideo) << "failed to start the media playback device";
             return false;
         }
 
@@ -166,7 +166,7 @@ bool AudioOutput::start()
 
     if (!state->rbInit.load(std::memory_order_acquire)) {
         if (ma_pcm_rb_init(ma_format_f32, Channels, RingBufferFrames, nullptr, nullptr, &state->rb) != MA_SUCCESS) {
-            qCWarning(LogVideo) << "failed to allocate the audio ring buffer";
+            Core::log(Core::LogLevel::Warning, LogVideo) << "failed to allocate the audio ring buffer";
             return false;
         }
 
@@ -224,12 +224,12 @@ int AudioOutput::write(const float *interleaved, int frameCount)
     return written;
 }
 
-void AudioOutput::reset(qint64 basePtsMs)
+void AudioOutput::reset(int64_t basePtsMs)
 {
     MediaAudioDevice::instance().resetStream(this, basePtsMs);
 }
 
-void AudioOutput::resetLocked(qint64 basePtsMs)
+void AudioOutput::resetLocked(int64_t basePtsMs)
 {
     if (state->rbInit.load(std::memory_order_acquire))
         ma_pcm_rb_reset(&state->rb);
@@ -240,7 +240,7 @@ void AudioOutput::resetLocked(qint64 basePtsMs)
 
 void AudioOutput::setVolume(float volume)
 {
-    outputVolume.store(qBound(0.0f, volume, 1.0f), std::memory_order_relaxed);
+    outputVolume.store(std::clamp(volume, 0.0f, 1.0f), std::memory_order_relaxed);
 }
 
 void AudioOutput::setMuted(bool value)
@@ -248,9 +248,9 @@ void AudioOutput::setMuted(bool value)
     muted.store(value, std::memory_order_relaxed);
 }
 
-qint64 AudioOutput::clockMs() const
+int64_t AudioOutput::clockMs() const
 {
-    const qint64 played = framesPlayed.load(std::memory_order_relaxed);
+    const int64_t played = framesPlayed.load(std::memory_order_relaxed);
     return basePts.load(std::memory_order_relaxed) + (played * 1000) / SampleRate;
 }
 

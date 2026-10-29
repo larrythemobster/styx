@@ -1,15 +1,17 @@
 #pragma once
 
-#include <QObject>
-#include <QList>
-#include <QColor>
-#include <QSet>
-#include <QString>
-#include <QTimer>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "Snowflake.hpp"
 #include "Discord/Entities.hpp"
 #include "Discord/Events.hpp"
+#include "Platform/Native.hpp"
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
 
 namespace Styx {
 
@@ -29,38 +31,36 @@ struct MemberListItem
     };
     Type type = Type::Placeholder;
 
-    QString groupId; // role snowflake string, "online", or "offline"
-    QString groupName;
+    std::string groupId; // role snowflake string, "online", or "offline"
+    std::string groupName;
     int groupCount = 0;
-    QColor groupColor;
+    Platform::Color groupColor;
 
     Discord::Member member;
     Snowflake userId;
-    QString displayName;
-    QColor roleColor;
+    std::string displayName;
+    Platform::Color roleColor;
 };
 
 struct ListData
 {
-    QHash<int, MemberListItem> items;
-    QList<Discord::GuildMemberListUpdate::Group> groups;
+    std::unordered_map<int, MemberListItem> items;
+    std::vector<Discord::GuildMemberListUpdate::Group> groups;
 };
 
 struct GuildListState
 {
-    QHash<QString, ListData> lists; // listId -> items + groups
-    QHash<QString, Discord::Role> roleCache;
+    std::unordered_map<std::string, ListData> lists; // listId -> items + groups
+    std::unordered_map<std::string, Discord::Role> roleCache;
     int memberCount = 0;
     int onlineCount = 0;
 };
 
-class MemberListManager : public QObject
+class MemberListManager : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     explicit MemberListManager(Storage::ChannelRepository &channelRepo,
-                               Storage::RoleRepository &roleRepo,
-                               QObject *parent = nullptr);
+                               Storage::RoleRepository &roleRepo);
 
     void setActiveChannel(Snowflake guildId, Snowflake channelId);
     void clear();
@@ -74,28 +74,22 @@ public:
 
     void updateSubscriptionRange(int firstVisible, int lastVisible);
 
-    // virtual row count
     [[nodiscard]] int totalItemCount() const;
-
-    // virtual index
     [[nodiscard]] const MemberListItem *itemAt(int index) const;
-
     [[nodiscard]] bool isLoaded(int index) const;
     [[nodiscard]] Snowflake currentGuildId() const { return activeGuildId; }
     [[nodiscard]] Snowflake currentChannelId() const { return activeChannelId; }
     [[nodiscard]] int totalMemberCount() const;
     [[nodiscard]] int onlineCount() const;
-    [[nodiscard]] const QList<QPair<int, int>> &currentRanges() const { return ranges; }
-    [[nodiscard]] QList<int> indicesForUsers(const QSet<Snowflake> &userIds) const;
+    [[nodiscard]] const std::vector<std::pair<int, int>> &currentRanges() const { return ranges; }
+    [[nodiscard]] std::vector<int> indicesForUsers(const std::unordered_set<Snowflake> &userIds) const;
 
-    static QString computeListId(const QList<Discord::PermissionOverwrite> &overwrites, Discord::Permissions everyonePermissions);
+    static std::string computeListId(const std::vector<Discord::PermissionOverwrite> &overwrites, Discord::Permissions everyonePermissions);
 
-signals:
-    void listAboutToReset();
-    void listReset();
-    void itemsChanged(const QList<int> &indices);
-
-    void subscriptionRequested(Snowflake guildId, Snowflake channelId, const QList<QPair<int, int>> &ranges);
+    Platform::Signal<> listAboutToReset;
+    Platform::Signal<> listReset;
+    Platform::Signal<const std::vector<int> &> itemsChanged;
+    Platform::Signal<Snowflake, Snowflake, const std::vector<std::pair<int, int>> &> subscriptionRequested;
 
 private:
     GuildListState *activeGuildState();
@@ -117,28 +111,23 @@ private:
     void processDelete(const Discord::GuildMemberListUpdate::ListOp &op, ListData &listData);
     void processInvalidate(const Discord::GuildMemberListUpdate::ListOp &op, ListData &listData);
 
-    void evictUnsubscribedItems(const QList<QPair<int, int>> &oldRanges,
-                                const QList<QPair<int, int>> &newRanges);
-    void applyAndSendRanges(const QList<QPair<int, int>> &newRanges);
+    void evictUnsubscribedItems(const std::vector<std::pair<int, int>> &oldRanges,
+                                const std::vector<std::pair<int, int>> &newRanges);
+    void applyAndSendRanges(const std::vector<std::pair<int, int>> &newRanges);
     void flushPendingRanges();
-    static bool indexInRanges(int index, const QList<QPair<int, int>> &ranges);
+    static bool indexInRanges(int index, const std::vector<std::pair<int, int>> &ranges);
 
     Storage::ChannelRepository &channelRepo;
     Storage::RoleRepository &roleRepo;
-
-    QHash<Snowflake, GuildListState> guildStates;
-
+    std::unordered_map<Snowflake, GuildListState> guildStates;
     Snowflake activeGuildId;
     Snowflake activeChannelId;
-    QString listId; // active list
-
-    QList<QPair<int, int>> ranges;
-
-    // avoid spamming
-    QTimer responseTimer;
+    std::string listId;
+    std::vector<std::pair<int, int>> ranges;
+    Platform::Timer responseTimer;
     bool awaitingResponse = false;
     bool hasPendingRanges = false;
-    QList<QPair<int, int>> pendingRanges;
+    std::vector<std::pair<int, int>> pendingRanges;
 };
 
 } // namespace Core

@@ -1,8 +1,9 @@
 #pragma once
 
-#include <QHash>
-#include <QList>
-#include <QObject>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include "Platform/Trackable.hpp"
 
 #include <functional>
 #include <optional>
@@ -30,18 +31,17 @@ struct ReactionRef
     [[nodiscard]] bool sameReaction(const ReactionRef &other) const;
 };
 
-class MessageReactors : public QObject
+class MessageReactors : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     static constexpr int TooltipSample = 3;
     static constexpr int PageSize = 100;
 
-    MessageReactors(Discord::Client *client, UserManager *users, QObject *parent = nullptr);
+    MessageReactors(Discord::Client *client, UserManager *users);
 
-    [[nodiscard]] QList<Discord::User> reactors(Snowflake channelId, const ReactionRef &reaction, int firstReadLimit);
+    [[nodiscard]] std::vector<Discord::User> reactors(Snowflake channelId, const ReactionRef &reaction, int firstReadLimit);
 
-    using PageFetched = std::function<void(const Result<QList<Snowflake>> &pageReactorIds)>;
+    using PageFetched = std::function<void(const Result<std::vector<Snowflake>> &pageReactorIds)>;
     void fetchPage(Snowflake channelId, const ReactionRef &reaction, std::optional<Snowflake> after, PageFetched onFetched);
 
     void add(const ReactionRef &reaction, Snowflake userId);
@@ -49,10 +49,9 @@ public:
     void forgetReactors(Snowflake messageId);
     void forgetReactors(Snowflake messageId, const Discord::Emoji &emoji);
 
-signals:
-    void reactorsChanged(Core::Snowflake messageId);
+    Platform::Signal<Snowflake> reactorsChanged;
 
-private slots:
+private:
     void onReady();
 
 private:
@@ -60,7 +59,7 @@ private:
     {
         Snowflake messageId;
         Snowflake customEmojiId;
-        QString unicodeEmoji;
+        std::string unicodeEmoji;
         bool isBurst;
 
         bool operator==(const Key &other) const
@@ -68,16 +67,23 @@ private:
             return messageId == other.messageId && customEmojiId == other.customEmojiId && unicodeEmoji == other.unicodeEmoji && isBurst == other.isBurst;
         }
 
-        friend size_t qHash(const Key &key, size_t seed = 0)
-        {
-            return qHashMulti(seed, key.messageId, key.customEmojiId, key.unicodeEmoji, key.isBurst);
-        }
+        struct Hash {
+            size_t operator()(const Key &key) const
+            {
+                size_t h = std::hash<Snowflake>{}(key.messageId);
+                auto combine = [&h](size_t value) { h ^= value + 0x9e3779b9 + (h << 6) + (h >> 2); };
+                combine(std::hash<Snowflake>{}(key.customEmojiId));
+                combine(std::hash<std::string>{}(key.unicodeEmoji));
+                combine(std::hash<bool>{}(key.isBurst));
+                return h;
+            }
+        };
     };
 
     struct Known
     {
         bool askedApi = false;
-        QList<Snowflake> reactorIds;
+        std::vector<Snowflake> reactorIds;
     };
 
     [[nodiscard]] static Key keyOf(const ReactionRef &reaction);
@@ -85,7 +91,7 @@ private:
 
     Discord::Client *client;
     UserManager *users;
-    QHash<Key, Known> knownByReaction;
+    std::unordered_map<Key, Known, Key::Hash> knownByReaction;
 };
 
 } // namespace Core

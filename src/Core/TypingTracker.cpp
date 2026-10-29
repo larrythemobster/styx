@@ -1,14 +1,13 @@
 #include "TypingTracker.hpp"
 #include "UserManager.hpp"
+#include <algorithm>
 
 namespace Styx {
 namespace Core {
 
-TypingTracker::TypingTracker(QObject *parent) : QObject(parent)
+TypingTracker::TypingTracker()
 {
-    cleanupTimer.setInterval(1000);
-    connect(&cleanupTimer, &QTimer::timeout, this, &TypingTracker::cleanupExpired);
-    cleanupTimer.start();
+    cleanupTimer.start(std::chrono::seconds(1), true, [this] { cleanupExpired(); });
 }
 
 void TypingTracker::setUserManager(UserManager *manager)
@@ -20,7 +19,7 @@ void TypingTracker::setActiveChannel(Snowflake channelId)
 {
     if (activeChannel != channelId) {
         activeChannel = channelId;
-        emit typersChanged();
+        typersChanged();
     }
 }
 
@@ -35,7 +34,7 @@ void TypingTracker::addTyper(Snowflake channelId, Snowflake userId,
     if (userId == currentUserId)
         return;
 
-    QDateTime expiresAt = QDateTime::currentDateTime().addSecs(10);
+    auto expiresAt = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     TypingEntry entry{ userId, guildId, expiresAt };
 
     auto &typers = channelTypers[channelId];
@@ -49,11 +48,11 @@ void TypingTracker::addTyper(Snowflake channelId, Snowflake userId,
         }
     }
     if (!found) {
-        typers.append(entry);
+        typers.push_back(entry);
     }
 
     if (channelId == activeChannel) {
-        emit typersChanged();
+        typersChanged();
     }
 }
 
@@ -64,53 +63,53 @@ void TypingTracker::removeTyper(Snowflake channelId, Snowflake userId)
                            [userId](const TypingEntry &t) { return t.userId == userId; });
     if (it != typers.end()) {
         typers.erase(it);
-        emit typersChanged();
+        typersChanged();
     }
 }
 
 void TypingTracker::clear()
 {
     channelTypers.clear();
-    emit typersChanged();
+    typersChanged();
 }
 
-QList<TyperInfo> TypingTracker::getActiveTypers() const
+std::vector<TyperInfo> TypingTracker::getActiveTypers() const
 {
     if (!userManager || !activeChannel.isValid())
         return {};
 
     auto it = channelTypers.find(activeChannel);
-    if (it == channelTypers.end() || it.value().isEmpty())
+    if (it == channelTypers.end() || it->second.empty())
         return {};
 
-    QList<TyperInfo> typers;
-    for (const auto &entry : it.value()) {
+    std::vector<TyperInfo> typers;
+    for (const auto &entry : it->second) {
         TyperInfo info;
         info.userId = entry.userId;
         info.guildId = entry.guildId;
         info.name = userManager->getDisplayName(entry.userId, entry.guildId.value_or(Snowflake::Invalid));
-        typers.append(info);
+        typers.push_back(std::move(info));
     }
     return typers;
 }
 
 void TypingTracker::cleanupExpired()
 {
-    QDateTime now = QDateTime::currentDateTime();
+    auto now = std::chrono::steady_clock::now();
     bool activeChannelChanged = false;
 
     for (auto it = channelTypers.begin(); it != channelTypers.end();) {
-        auto &list = it.value();
-        int before = list.size();
+        auto &list = it->second;
+        auto before = list.size();
 
         list.erase(std::remove_if(list.begin(), list.end(),
                                   [&now](const TypingEntry &e) { return e.expiresAt <= now; }),
                    list.end());
 
-        if (list.size() != before && it.key() == activeChannel)
+        if (list.size() != before && it->first == activeChannel)
             activeChannelChanged = true;
 
-        if (list.isEmpty()) {
+        if (list.empty()) {
             it = channelTypers.erase(it);
         } else {
             ++it;
@@ -118,7 +117,7 @@ void TypingTracker::cleanupExpired()
     }
 
     if (activeChannelChanged)
-        emit typersChanged();
+        typersChanged();
 }
 
 } // namespace Core

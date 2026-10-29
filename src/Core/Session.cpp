@@ -1,164 +1,118 @@
 #include "Session.hpp"
-
-#include <QDebug>
-#include <QPointer>
-
 #include "Discord/CurlUtils.hpp"
-#include "ImageManager.hpp"
 #include "Logging.hpp"
 #include "TokenStore.hpp"
+#include "Platform/Dispatcher.hpp"
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
-Session::Session(QObject *parent) : QObject(parent)
+Session::Session()
+    : imageManager(std::make_unique<ImageManager>()),
+      animatedImageCache(std::make_unique<AnimatedImageCache>(imageManager.get()))
 {
-    imageManager = new ImageManager(this);
-    animatedImageCache = new AnimatedImageCache(imageManager, this);
-
     for (const auto &acc : repo.getAllAccounts())
         imageManager->setAccountProxy(acc.id, acc.proxy);
 }
-
-Session::~Session()
-{
-    shutdown();
-}
-
-void Session::start()
-{
-    qCDebug(LogCore) << "Session started";
-}
-
+Session::~Session() { shutdown(); }
+void Session::start() { Core::log(Core::LogLevel::Debug, LogCore) << "Session started"; }
 void Session::shutdown()
 {
-    qCDebug(LogCore) << "Session shutdown";
-    for (auto it = clients.begin(); it != clients.end(); ++it) {
-        it.value()->stop();
-    }
-    qDeleteAll(clients);
-    clients.clear();
+    Core::log(Core::LogLevel::Debug, LogCore) << "Session shutdown";
+    connectingAccounts.clear();
+    auto stopping = std::move(clients);
+    for (auto &[id, instance] : stopping) instance->stop();
 }
-
 void Session::connectAccount(Snowflake accountId)
 {
-    if (connectingAccounts.contains(accountId))
-        return;
-
-    if (clients.contains(accountId)) {
-        ClientInstance *existing = clients.value(accountId);
-
-        if (existing->state() != ConnectionState::Disconnected) {
-            qCWarning(LogCore) << "Account already connected or connecting:" << accountId;
+    if (connectingAccounts.contains(accountId)) return;
+    if (auto it = clients.find(accountId); it != clients.end()) {
+        if (it->second->state() != ConnectionState::Disconnected) {
+            Core::log(Core::LogLevel::Warning, LogCore) << "Account already connected or connecting: " << accountId.toString();
             return;
         }
-
-        // were dead
-        clients.take(accountId)->deleteLater();
+        clients.erase(it);
     }
-
     AccountInfo acc = repo.getAccount(accountId);
     if (acc.id == 0) {
-        qCWarning(LogCore) << "Account not found:" << accountId;
+        Core::log(Core::LogLevel::Warning, LogCore) << "Account not found: " << accountId.toString();
         return;
     }
-
-    Result<QString> token = TokenStore::loadToken(accountId);
+    auto token = TokenStore::loadToken(accountId);
     if (!token.success()) {
-        qCWarning(LogCore) << "No token found in keychain for account:" << accountId;
-        emit connectFailed(accountId, token.error);
+        Core::log(Core::LogLevel::Warning, LogCore) << "No token found in keychain for account: " << accountId.toString();
+        connectFailed(accountId, token.error);
         return;
     }
     acc.token = *token.value;
-
     imageManager->setAccountProxy(acc.id, acc.proxy);
-
     connectingAccounts.insert(accountId);
-    Discord::CurlUtils::ensureBuildNumber(
-            acc.proxy,
-            [self = QPointer<Session>(this), acc]() {
-                if (self && self->connectingAccounts.remove(acc.id))
-                    self->startInstance(acc);
-            });
+    Discord::CurlUtils::ensureBuildNumber(acc.proxy, [self = Platform::Guard<Session>(this), acc]() {
+        if (self && self->connectingAccounts.erase(acc.id)) self->startInstance(acc);
+    });
 }
-
 void Session::startInstance(const AccountInfo &acc)
 {
     const Snowflake accountId = acc.id;
-
-    auto *instance = new ClientInstance(acc, captchaResolver, this);
-
-    connect(instance, &ClientInstance::stateChanged, this,
-            [this, accountId, instance](ConnectionState state) {
-                emit connectionStateChanged(accountId, state);
-
-                if (state == ConnectionState::Disconnected) {
-                    if (clients.value(accountId) == instance) {
-                        clients.take(accountId)->deleteLater();
-                    }
-                }
+    auto owned = std::make_unique<ClientInstance>(acc, captchaResolver);
+    auto *instance = owned.get();
+    track(instance->stateChanged.connect([this, accountId, instance](ConnectionState state) {
+        connectionStateChanged(accountId, state);
+        if (state == ConnectionState::Disconnected) {
+            Platform::Dispatcher::main().post([self = Platform::Guard<Session>(this), accountId, instance]() {
+                if (!self) return;
+                auto it = self->clients.find(accountId);
+                if (it != self->clients.end() && it->second.get() == instance) self->clients.erase(it);
             });
-
-    connect(instance, &ClientInstance::detailsUpdated, this, [this](const AccountInfo &info) {
+        }
+    }));
+    track(instance->detailsUpdated.connect([this](const AccountInfo &info) {
         repo.saveAccount(info);
-        emit accountDetailsUpdated(info);
-    });
-
-    connect(instance, &ClientInstance::ready, this,
-            [this](const Discord::Ready &ready) { emit this->ready(ready); });
-
-    clients.insert(accountId, instance);
-
+        accountDetailsUpdated(info);
+    }));
+    track(instance->ready.connect([this](const Discord::Ready &event) { ready(event); }));
+    clients.emplace(accountId, std::move(owned));
     instance->start();
 }
-
 void Session::autoConnectAccounts()
 {
-    for (const auto &acc : repo.getAllAccounts()) {
-        if (acc.autoConnect)
-            connectAccount(acc.id);
-    }
+    for (const auto &acc : repo.getAllAccounts()) if (acc.autoConnect) connectAccount(acc.id);
 }
-
 void Session::setAccountProxy(Snowflake accountId, const ProxyConfig &proxy)
 {
     repo.updateProxy(accountId, proxy);
     imageManager->setAccountProxy(accountId, proxy);
 }
-
 void Session::disconnectAccount(Snowflake accountId)
 {
-    // cancels a connect still waiting on the build-number fetch
-    connectingAccounts.remove(accountId);
-
-    if (!clients.contains(accountId))
-        return;
-
-    ClientInstance *instance = clients.take(accountId);
-
+    connectingAccounts.erase(accountId);
+    auto it = clients.find(accountId);
+    if (it == clients.end()) return;
+    auto instance = std::move(it->second);
+    clients.erase(it);
     instance->stop();
 }
-
+std::vector<ClientInstance *> Session::getClients() const
+{
+    std::vector<ClientInstance *> result;
+    result.reserve(clients.size());
+    for (const auto &[id, instance] : clients) result.push_back(instance.get());
+    return result;
+}
 ClientInstance *Session::client(Snowflake accountId) const
 {
-    return clients.value(accountId, nullptr);
+    auto it = clients.find(accountId);
+    return it == clients.end() ? nullptr : it->second.get();
 }
-
 AccountInfo Session::getAccountInfo(Snowflake accountId)
 {
-    if (clients.contains(accountId)) {
-        return clients[accountId]->accountInfo();
-    }
+    if (auto *instance = client(accountId)) return instance->accountInfo();
     return repo.getAccount(accountId);
 }
-
 bool Session::hasActiveConnection() const
 {
-    for (auto *c : clients)
-        if (c->state() == ConnectionState::Connected || c->state() == ConnectionState::Connecting)
-            return true;
+    for (const auto &[id, instance] : clients)
+        if (instance->state() == ConnectionState::Connected || instance->state() == ConnectionState::Connecting) return true;
     return false;
 }
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

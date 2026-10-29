@@ -1,164 +1,141 @@
 #include "Core/Media/ClipPlayer.hpp"
-
 #include "Core/Media/ClipDecoder.hpp"
 
 #include <algorithm>
-#include <limits>
+#include <cmath>
 #include <utility>
 
-namespace Styx {
-namespace Core {
-namespace Media {
-
+namespace Styx::Core::Media {
 namespace {
-
-constexpr qint64 MinFrameGapMs = 10;
-constexpr qint64 MaxFrameGapMs = 60 * 1000;
+constexpr int64_t MinFrameGapMs = 10;
+constexpr int64_t MaxFrameGapMs = 60000;
 constexpr int FramesInAnAnimation = 2;
-constexpr int BytesPerPixel = 4;
-constexpr int FrameBuffersPerClip = 2;
-constexpr int NativeSizedCopiesInsideADecoder = 2;
 
-qint64 pixelCount(const QSize &size)
+Platform::Size frameSizeWithoutUpscaling(Platform::Size native, Platform::Size bounds, ClipPlayer::Fit fit)
 {
-    return qint64(size.width()) * size.height();
-}
-
-QSize frameSizeWithoutUpscaling(const QSize &native, const QSize &boundPixels, Qt::AspectRatioMode fit)
-{
-    const QSize scaled = native.scaled(boundPixels, fit);
-    if (scaled.isEmpty() || scaled.width() >= native.width() || scaled.height() >= native.height())
-        return native;
+    if (native.empty() || bounds.empty()) return native;
+    Platform::Size scaled;
+    if (fit == ClipPlayer::Fit::Stretch) {
+        scaled = bounds;
+    } else {
+        const double x = double(bounds.width) / native.width;
+        const double y = double(bounds.height) / native.height;
+        const double ratio = fit == ClipPlayer::Fit::Cover ? std::max(x, y) : std::min(x, y);
+        scaled = {std::max(1, int(native.width * ratio)), std::max(1, int(native.height * ratio))};
+    }
+    if (scaled.empty() || scaled.width >= native.width || scaled.height >= native.height) return native;
     return scaled;
 }
+}
 
-} // namespace
-
-struct ClipPlayer::Clip
-{
-    QString path;
-    QSize boundPixels;
-    Qt::AspectRatioMode fit = Qt::KeepAspectRatio;
-    qint64 memoryLimitBytes = 0;
-
+struct ClipPlayer::Clip {
+    std::string path;
+    Platform::Size boundPixels;
+    Fit fit = Fit::Contain;
+    int64_t memoryLimitBytes = 0;
     std::unique_ptr<ClipDecoder> decoder;
-    QSize frameSize;
-    qint64 previousStartMs = 0;
+    Platform::Size frameSize;
+    int64_t previousStartMs = 0;
     int framesThisLoop = 0;
-
     bool playing = false;
     bool failed = false;
     bool hasReady = false;
-    QImage ready;
-    qint64 readyGapMs = 0;
-    QImage spare;
-
-    QImage shown;
-    std::optional<qint64> shownAtMs;
+    Platform::ImageBuffer ready;
+    int64_t readyGapMs = 0;
+    Platform::ImageBuffer spare;
+    Platform::ImageBuffer shown;
+    std::optional<int64_t> shownAtMs;
     bool failureReported = false;
 };
 
-ClipPlayer::ClipPlayer(QObject *parent) : QObject(parent)
-{
-    clock.start();
-    presentTimer.setSingleShot(true);
-    connect(&presentTimer, &QTimer::timeout, this, &ClipPlayer::presentDueFrames);
-}
-
+ClipPlayer::ClipPlayer() = default;
 ClipPlayer::~ClipPlayer()
 {
+    callbackLifetime.reset();
+    presentTimer.stop();
     {
-        std::lock_guard<std::mutex> lock(mutex);
+        std::lock_guard lock(mutex);
         stopping = true;
     }
     frameWanted.notify_all();
-    if (decodeThread.joinable())
-        decodeThread.join();
+    if (decodeThread.joinable()) decodeThread.join();
 }
 
-ClipPlayer::ClipId ClipPlayer::open(const QString &path, const QSize &boundPixels, Qt::AspectRatioMode fit)
+int64_t ClipPlayer::elapsedMs() const
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - clock).count();
+}
+
+ClipPlayer::ClipId ClipPlayer::open(const std::string &path, Platform::Size bounds, Fit fit)
 {
     auto clip = std::make_shared<Clip>();
     clip->path = path;
-    clip->boundPixels = boundPixels;
+    clip->boundPixels = bounds;
     clip->fit = fit;
     clip->memoryLimitBytes = newClipMemoryLimitBytes;
-
     const ClipId id = ++lastId;
-    clips.insert(id, clip);
+    clips.emplace(id, clip);
     {
-        std::lock_guard<std::mutex> lock(mutex);
-        decodeOrder.push_back(clip);
+        std::lock_guard lock(mutex);
+        decodeOrder.push_back(std::move(clip));
     }
-
-    if (!decodeThread.joinable())
-        decodeThread = std::thread(&ClipPlayer::decodeLoop, this);
+    if (!decodeThread.joinable()) decodeThread = std::thread(&ClipPlayer::decodeLoop, this);
     return id;
 }
 
-qint64 ClipPlayer::memoryToPlay(const QSize &nativeSize, const QSize &frameSize)
+int64_t ClipPlayer::memoryToPlay(Platform::Size native, Platform::Size frame)
 {
-    return (pixelCount(nativeSize) * NativeSizedCopiesInsideADecoder + pixelCount(frameSize) * FrameBuffersPerClip) * BytesPerPixel;
+    if (native.empty() || frame.empty()) return 0;
+    const uint64_t nativePixels = uint64_t(native.width) * native.height;
+    const uint64_t framePixels = uint64_t(frame.width) * frame.height;
+    constexpr uint64_t limit = uint64_t(std::numeric_limits<int64_t>::max());
+    if (nativePixels > limit / 8 || framePixels > limit / 8 || nativePixels + framePixels > limit / 8)
+        return std::numeric_limits<int64_t>::max();
+    return int64_t((nativePixels + framePixels) * 8);
 }
-
-void ClipPlayer::setMemoryLimitForNewClips(qint64 bytes)
-{
-    newClipMemoryLimitBytes = bytes;
-}
+void ClipPlayer::setMemoryLimitForNewClips(int64_t bytes) { newClipMemoryLimitBytes = bytes; }
 
 void ClipPlayer::close(ClipId id)
 {
-    const ClipPtr clip = clips.take(id);
-    if (!clip)
-        return;
-
-    std::lock_guard<std::mutex> lock(mutex);
+    auto it = clips.find(id);
+    if (it == clips.end()) return;
+    auto clip = std::move(it->second);
+    clips.erase(it);
+    std::lock_guard lock(mutex);
     decodeOrder.erase(std::remove(decodeOrder.begin(), decodeOrder.end(), clip), decodeOrder.end());
 }
-
 void ClipPlayer::closeAll()
 {
     clips.clear();
     presentTimer.stop();
-
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard lock(mutex);
     decodeOrder.clear();
 }
-
 void ClipPlayer::setPlaying(ClipId id, bool playing)
 {
-    const auto it = clips.constFind(id);
-    if (it == clips.constEnd())
-        return;
-
-    Clip &clip = **it;
+    auto it = clips.find(id);
+    if (it == clips.end()) return;
+    Clip &clip = *it->second;
     {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (clip.playing == playing)
-            return;
+        std::lock_guard lock(mutex);
+        if (clip.playing == playing) return;
         clip.playing = playing;
     }
-
-    if (!playing)
-        return;
-
-    if (clip.shownAtMs)
-        clip.shownAtMs = clock.elapsed();
+    if (!playing) return;
+    if (clip.shownAtMs) clip.shownAtMs = elapsedMs();
     frameWanted.notify_one();
     presentDueFrames();
 }
-
-QImage ClipPlayer::frame(ClipId id) const
+const Platform::ImageBuffer *ClipPlayer::frame(ClipId id) const
 {
-    const auto it = clips.constFind(id);
-    return it != clips.constEnd() ? (*it)->shown : QImage();
+    auto it = clips.find(id);
+    return it == clips.end() || it->second->shown.empty() ? nullptr : &it->second->shown;
 }
-
 ClipPlayer::ClipPtr ClipPlayer::nextClipAwaitingFrame()
 {
     for (size_t offset = 0; offset < decodeOrder.size(); ++offset) {
         const size_t slot = (nextToServe + offset) % decodeOrder.size();
-        const ClipPtr &clip = decodeOrder[slot];
+        const auto &clip = decodeOrder[slot];
         if (clip->playing && !clip->failed && !clip->hasReady) {
             nextToServe = slot + 1;
             return clip;
@@ -166,136 +143,95 @@ ClipPlayer::ClipPtr ClipPlayer::nextClipAwaitingFrame()
     }
     return nullptr;
 }
-
-std::optional<qint64> ClipPlayer::decodeNextFrame(Clip &clip, QImage &buffer)
+std::optional<int64_t> ClipPlayer::decodeNextFrame(Clip &clip, Platform::ImageBuffer &buffer)
 {
     if (!clip.decoder) {
         clip.decoder = ClipDecoder::open(clip.path);
-        if (!clip.decoder)
-            return std::nullopt;
-        const QSize native = clip.decoder->nativeSize();
+        if (!clip.decoder) return std::nullopt;
+        const auto native = clip.decoder->nativeSize();
         clip.frameSize = frameSizeWithoutUpscaling(native, clip.boundPixels, clip.fit);
-        if (clip.frameSize.isEmpty() || memoryToPlay(native, clip.frameSize) > clip.memoryLimitBytes) {
+        if (clip.frameSize.empty() || memoryToPlay(native, clip.frameSize) > clip.memoryLimitBytes) {
             clip.decoder.reset();
             return std::nullopt;
         }
     }
-
-    qint64 startMs = 0;
-    qint64 gapMs = 0;
+    int64_t startMs = 0;
+    int64_t gapMs = 0;
     if (clip.decoder->nextFrameOfLoop(buffer, startMs, clip.frameSize)) {
-        const bool firstFrameEver = clip.framesThisLoop == 0;
-        gapMs = firstFrameEver ? 0 : startMs - clip.previousStartMs;
+        gapMs = clip.framesThisLoop == 0 ? 0 : startMs - clip.previousStartMs;
     } else {
-        if (clip.framesThisLoop < FramesInAnAnimation)
-            return std::nullopt;
-
-        const qint64 lastFrameShownForMs = std::max<qint64>(0, clip.decoder->finishedLoopMs() - clip.previousStartMs);
+        if (clip.framesThisLoop < FramesInAnAnimation) return std::nullopt;
+        const int64_t lastFrameMs = std::max<int64_t>(0, clip.decoder->finishedLoopMs() - clip.previousStartMs);
         clip.framesThisLoop = 0;
-        if (!clip.decoder->rewind() || !clip.decoder->nextFrameOfLoop(buffer, startMs, clip.frameSize))
-            return std::nullopt;
-        gapMs = lastFrameShownForMs + startMs;
+        if (!clip.decoder->rewind() || !clip.decoder->nextFrameOfLoop(buffer, startMs, clip.frameSize)) return std::nullopt;
+        gapMs = lastFrameMs + startMs;
     }
-
     clip.previousStartMs = startMs;
     ++clip.framesThisLoop;
     return std::clamp(gapMs, MinFrameGapMs, MaxFrameGapMs);
 }
-
 void ClipPlayer::decodeLoop()
 {
-    std::unique_lock<std::mutex> lock(mutex);
+    std::unique_lock lock(mutex);
     for (;;) {
         ClipPtr clip;
         frameWanted.wait(lock, [this, &clip] {
-            if (!stopping)
-                clip = nextClipAwaitingFrame();
-            return stopping || clip;
+            if (!stopping) clip = nextClipAwaitingFrame();
+            return stopping || bool(clip);
         });
-        if (stopping)
-            return;
-
-        QImage buffer = std::exchange(clip->spare, QImage());
+        if (stopping) return;
+        auto buffer = std::exchange(clip->spare, {});
         lock.unlock();
-
-        const std::optional<qint64> gapMs = decodeNextFrame(*clip, buffer);
-
+        const auto gap = decodeNextFrame(*clip, buffer);
         lock.lock();
-        if (gapMs) {
+        if (gap) {
             clip->ready = std::move(buffer);
-            clip->readyGapMs = *gapMs;
+            clip->readyGapMs = *gap;
             clip->hasReady = true;
-        } else {
-            clip->failed = true;
-        }
+        } else clip->failed = true;
         lock.unlock();
-
         clip.reset();
         requestPresent();
-
         lock.lock();
     }
 }
-
 void ClipPlayer::requestPresent()
 {
-    if (presentRequested.exchange(true))
-        return;
-
-    // clang-format off
-    QMetaObject::invokeMethod(this, [this]() {
+    if (presentRequested.exchange(true)) return;
+    std::weak_ptr<void> alive = callbackLifetime;
+    Platform::Dispatcher::main().post([this, alive] {
+        if (alive.expired()) return;
         presentRequested.store(false);
         presentDueFrames();
-    }, Qt::QueuedConnection);
-    // clang-format on
+    });
 }
-
 void ClipPlayer::presentDueFrames()
 {
-    const qint64 now = clock.elapsed();
-    qint64 nextDueMs = std::numeric_limits<qint64>::max();
-    QList<ClipId> changed;
-    QList<ClipId> failed;
-
+    const int64_t now = elapsedMs();
+    int64_t nextDue = std::numeric_limits<int64_t>::max();
+    std::vector<ClipId> changed, failed;
     {
-        std::lock_guard<std::mutex> lock(mutex);
-        for (auto it = clips.constBegin(); it != clips.constEnd(); ++it) {
-            Clip &clip = **it;
+        std::lock_guard lock(mutex);
+        for (auto &[id, ptr] : clips) {
+            Clip &clip = *ptr;
             if (clip.failed) {
-                if (!std::exchange(clip.failureReported, true))
-                    failed.append(it.key());
+                if (!std::exchange(clip.failureReported, true)) failed.push_back(id);
                 continue;
             }
-            if (!clip.playing || !clip.hasReady)
-                continue;
-
-            const qint64 dueMs = clip.shownAtMs ? *clip.shownAtMs + clip.readyGapMs : now;
-            if (dueMs > now) {
-                nextDueMs = std::min(nextDueMs, dueMs);
-                continue;
-            }
-
-            clip.spare = std::exchange(clip.shown, std::exchange(clip.ready, QImage()));
+            if (!clip.playing || !clip.hasReady) continue;
+            const int64_t due = clip.shownAtMs ? *clip.shownAtMs + clip.readyGapMs : now;
+            if (due > now) { nextDue = std::min(nextDue, due); continue; }
+            clip.spare = std::exchange(clip.shown, std::exchange(clip.ready, {}));
             clip.hasReady = false;
-
-            const bool fellBehind = now - dueMs > clip.readyGapMs;
-            clip.shownAtMs = fellBehind ? now : dueMs;
-            changed.append(it.key());
+            clip.shownAtMs = now - due > clip.readyGapMs ? now : due;
+            changed.push_back(id);
         }
     }
-
-    if (!changed.isEmpty())
-        frameWanted.notify_one();
-
-    if (nextDueMs != std::numeric_limits<qint64>::max())
-        presentTimer.start(int(nextDueMs - now));
-
-    for (const ClipId id : std::as_const(failed))
-        emit clipFailed(id);
-    for (const ClipId id : std::as_const(changed))
-        emit frameChanged(id);
+    if (!changed.empty()) frameWanted.notify_one();
+    if (nextDue != std::numeric_limits<int64_t>::max())
+        presentTimer.start(std::chrono::milliseconds(nextDue - now), false, [this] { presentDueFrames(); });
+    for (ClipId id : failed) clipFailed.publish(id);
+    for (ClipId id : changed) frameChanged.publish(id);
 }
 
-} // namespace Media
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core::Media

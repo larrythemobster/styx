@@ -2,7 +2,7 @@
 
 #ifdef STYX_HAVE_FFMPEG
 
-#include <QtGlobal>
+#include <cstdint>
 
 #include <cstddef>
 #include <deque>
@@ -33,11 +33,11 @@ public:
         entries.push_back({ packet, -1 });
     }
 
-    void pushFlushLocked(qint64 targetMs) { entries.push_back({ nullptr, targetMs }); }
+    void pushFlushLocked(int64_t targetMs) { entries.push_back({ nullptr, targetMs }); }
 
-    [[nodiscard]] qint64 takeFlushLocked()
+    [[nodiscard]] int64_t takeFlushLocked()
     {
-        const qint64 target = entries.front().flushToMs;
+        const int64_t target = entries.front().flushToMs;
         entries.pop_front();
         return target;
     }
@@ -64,7 +64,7 @@ private:
     struct Entry
     {
         AVPacket *packet = nullptr;
-        qint64 flushToMs = -1;
+        int64_t flushToMs = -1;
     };
 
     std::deque<Entry> entries;

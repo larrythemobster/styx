@@ -2,9 +2,10 @@
 
 #ifdef STYX_HAVE_FFMPEG
 
-#include <QImage>
-#include <QSize>
-#include <QString>
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
+#include <cstdint>
+#include <string>
 
 #include <vector>
 
@@ -32,8 +33,8 @@ public:
 
     struct Info
     {
-        QSize native;
-        qint64 durationMs = 0;
+        Platform::Size native;
+        int64_t durationMs = 0;
         bool seekable = false;
         bool hasAudio = false;
         bool hasVideo = false;
@@ -47,31 +48,31 @@ public:
 
     void setInterrupt(int (*callback)(void *), void *opaque);
 
-    bool open(const QString &input, const ProxyConfig &proxy, QString *error);
+    bool open(const std::string &input, const ProxyConfig &proxy, std::string *error);
     void close();
 
     [[nodiscard]] Info info() const;
     [[nodiscard]] bool hasVideo() const { return videoStream >= 0; }
     [[nodiscard]] bool hasAudio() const { return audioStream >= 0; }
-    [[nodiscard]] qint64 containerDurationMs() const;
+    [[nodiscard]] int64_t containerDurationMs() const;
 
     int readPacket(AVPacket *packet);
     [[nodiscard]] Stream streamOf(const AVPacket *packet) const;
-    [[nodiscard]] qint64 packetTimestampMs(const AVPacket *packet) const;
+    [[nodiscard]] int64_t packetTimestampMs(const AVPacket *packet) const;
 
-    bool seek(qint64 targetMs, QString *error);
+    bool seek(int64_t targetMs, std::string *error);
     void flush();
 
     bool sendPacket(Stream stream, AVPacket *packet);
     bool drain(Stream stream) { return sendPacket(stream, nullptr); }
     int receiveFrame(Stream stream, AVFrame *frame);
-    [[nodiscard]] qint64 frameTimestampMs(const AVFrame *frame, Stream stream) const;
+    [[nodiscard]] int64_t frameTimestampMs(const AVFrame *frame, Stream stream) const;
 
-    QImage scaleToImage(const AVFrame *frame, const QSize &target);
+    Platform::ImageBuffer scaleToImage(const AVFrame *frame, const Platform::Size &target);
 
     int appendResampledFrames(const AVFrame *frame, std::vector<float> &out, std::vector<float> &scratch);
 
-    [[nodiscard]] static QString errorString(int code);
+    [[nodiscard]] static std::string errorString(int code);
 
 private:
     bool openCodec(int streamIndex, AVCodecContext **out);
@@ -86,7 +87,7 @@ private:
     SwrContext *swrCtx = nullptr;
     int videoStream = -1;
     int audioStream = -1;
-    QSize swsTarget;
+    Platform::Size swsTarget;
 
     static int denyNestedOpen(AVFormatContext *, AVIOContext **, const char *url, int, AVDictionary **);
 

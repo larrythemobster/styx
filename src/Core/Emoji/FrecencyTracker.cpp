@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include <QDateTime>
+#include <chrono>
 
 namespace Styx {
 namespace Core {
@@ -14,7 +14,7 @@ constexpr double MS_PER_DAY = 86400000.0;
 
 uint64_t lastUse(const FrecencyTracker::Entry &entry)
 {
-    return entry.recentUses.isEmpty() ? 0 : entry.recentUses.last();
+    return entry.recentUses.empty() ? 0 : entry.recentUses.back();
 }
 
 int32_t computeFrecency(FrecencyTracker::Formula formula, const FrecencyTracker::Entry &entry,
@@ -77,43 +77,40 @@ void FrecencyTracker::markDirty()
     dirty = true;
 }
 
-void FrecencyTracker::track(const QString &key, std::optional<uint64_t> timestampMs,
+void FrecencyTracker::track(const std::string &key, std::optional<uint64_t> timestampMs,
                             uint32_t usesSinceLastTrack)
 {
-    if (key.isNull())
-        return;
-
-    const uint64_t timestamp =
-            timestampMs.value_or(static_cast<uint64_t>(QDateTime::currentMSecsSinceEpoch()));
-
+    const uint64_t timestamp = timestampMs.value_or(static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count()));
     auto it = history.find(key);
     if (it == history.end()) {
         Entry entry;
         entry.totalUses = usesSinceLastTrack;
-        entry.recentUses.append(timestamp);
-        history.insert(key, entry);
+        entry.recentUses.push_back(timestamp);
+        history.emplace(key, std::move(entry));
     } else {
-        Entry &entry = *it;
+        Entry &entry = it->second;
         entry.frecency = -1;
         entry.totalUses += usesSinceLastTrack;
-        entry.recentUses.append(timestamp);
+        entry.recentUses.push_back(timestamp);
         if (timestampMs)
             std::sort(entry.recentUses.begin(), entry.recentUses.end());
-        while (entry.recentUses.size() > options.maxSamples)
-            entry.recentUses.removeFirst();
+        while (static_cast<int>(entry.recentUses.size()) > options.maxSamples)
+            entry.recentUses.erase(entry.recentUses.begin());
     }
 
     markDirty();
 }
 
-void FrecencyTracker::overwriteHistory(const QHash<QString, Entry> &newHistory)
+void FrecencyTracker::overwriteHistory(const std::unordered_map<std::string, Entry> &newHistory)
 {
     history = newHistory;
-    for (auto it = history.begin(); it != history.end(); ++it) {
-        it->recentUses.erase(std::remove(it->recentUses.begin(), it->recentUses.end(), 0),
-                             it->recentUses.end());
-        std::sort(it->recentUses.begin(), it->recentUses.end());
-        it->frecency = -1;
+    for (auto &[key, entry] : history) {
+        entry.recentUses.erase(std::remove(entry.recentUses.begin(), entry.recentUses.end(), 0),
+                               entry.recentUses.end());
+        std::sort(entry.recentUses.begin(), entry.recentUses.end());
+        entry.frecency = -1;
     }
     markDirty();
 }
@@ -121,11 +118,11 @@ void FrecencyTracker::overwriteHistory(const QHash<QString, Entry> &newHistory)
 void FrecencyTracker::compute(uint64_t nowMs)
 {
     uint32_t maxTotalUse = 0;
-    for (auto it = history.constBegin(); it != history.constEnd(); ++it)
-        maxTotalUse = std::max(maxTotalUse, it->totalUses);
+    for (const auto &[key, entry] : history)
+        maxTotalUse = std::max(maxTotalUse, entry.totalUses);
 
     for (auto it = history.begin(); it != history.end();) {
-        Entry &entry = *it;
+        Entry &entry = it->second;
         if (entry.frecency != -1) {
             ++it;
             continue;
@@ -146,15 +143,14 @@ void FrecencyTracker::compute(uint64_t nowMs)
         ++it;
     }
 
-    QList<std::pair<QString, int32_t>> ranked;
+    std::vector<std::pair<std::string, int32_t>> ranked;
     ranked.reserve(history.size());
-    for (auto it = history.constBegin(); it != history.constEnd(); ++it)
-        ranked.append({ it.key(), it->frecency });
+    for (const auto &[key, entry] : history)
+        ranked.emplace_back(key, entry.frecency);
 
-    // Discord sorts by -frecency only; the key tiebreak keeps our order deterministic since QHash
-    // iteration is not.
+    // Discord sorts by -frecency only; the key tiebreak keeps our order deterministic.
     std::sort(ranked.begin(), ranked.end(),
-              [](const std::pair<QString, int32_t> &a, const std::pair<QString, int32_t> &b) {
+              [](const std::pair<std::string, int32_t> &a, const std::pair<std::string, int32_t> &b) {
                   if (a.second != b.second)
                       return a.second > b.second;
                   return a.first < b.first;
@@ -164,7 +160,7 @@ void FrecencyTracker::compute(uint64_t nowMs)
     frequentlyKeys.clear();
     frequentlyKeys.reserve(count);
     for (int i = 0; i < count; ++i)
-        frequentlyKeys.append(ranked.at(i).first);
+        frequentlyKeys.push_back(ranked.at(i).first);
 
     dirty = false;
 }
@@ -175,26 +171,26 @@ void FrecencyTracker::refresh(uint64_t nowMs)
         compute(nowMs);
 }
 
-const QStringList &FrecencyTracker::frequently(uint64_t nowMs)
+const std::vector<std::string> &FrecencyTracker::frequently(uint64_t nowMs)
 {
     refresh(nowMs);
     return frequentlyKeys;
 }
 
-std::optional<double> FrecencyTracker::score(const QString &key) const
+std::optional<double> FrecencyTracker::score(const std::string &key) const
 {
-    const auto it = history.constFind(key);
-    if (it == history.constEnd())
+    const auto it = history.find(key);
+    if (it == history.end())
         return std::nullopt;
-    return it->score;
+    return it->second.score;
 }
 
-std::optional<int32_t> FrecencyTracker::frecency(const QString &key) const
+std::optional<int32_t> FrecencyTracker::frecency(const std::string &key) const
 {
-    const auto it = history.constFind(key);
-    if (it == history.constEnd())
+    const auto it = history.find(key);
+    if (it == history.end())
         return std::nullopt;
-    return it->frecency;
+    return it->second.frecency;
 }
 
 void FrecencyTracker::reset()
@@ -204,18 +200,18 @@ void FrecencyTracker::reset()
     dirty = false;
 }
 
-QHash<QString, FrecencyTracker::Entry> FrecencyTracker::capForPersistence(const QHash<QString, Entry> &source, int limit)
+std::unordered_map<std::string, FrecencyTracker::Entry> FrecencyTracker::capForPersistence(const std::unordered_map<std::string, Entry> &source, int limit)
 {
     const int keep = std::max(limit, 0);
 
-    QList<std::pair<QString, Entry>> entries;
+    std::vector<std::pair<std::string, Entry>> entries;
     entries.reserve(source.size());
-    for (auto it = source.constBegin(); it != source.constEnd(); ++it)
-        entries.append({ it.key(), it.value() });
+    for (const auto &[key, entry] : source)
+        entries.emplace_back(key, entry);
 
-    if (entries.size() > keep) {
+    if (entries.size() > static_cast<size_t>(keep)) {
         std::sort(entries.begin(), entries.end(),
-                  [](const std::pair<QString, Entry> &a, const std::pair<QString, Entry> &b) {
+                  [](const std::pair<std::string, Entry> &a, const std::pair<std::string, Entry> &b) {
                       const uint64_t lhs = lastUse(a.second);
                       const uint64_t rhs = lastUse(b.second);
                       if (lhs != rhs)
@@ -225,12 +221,12 @@ QHash<QString, FrecencyTracker::Entry> FrecencyTracker::capForPersistence(const 
         entries.erase(entries.begin() + keep, entries.end());
     }
 
-    QHash<QString, Entry> capped;
+    std::unordered_map<std::string, Entry> capped;
     capped.reserve(entries.size());
     for (const auto &pair : entries) {
         Entry entry = pair.second;
         entry.score = std::round(entry.score);
-        capped.insert(pair.first, entry);
+        capped.emplace(pair.first, std::move(entry));
     }
 
     return capped;

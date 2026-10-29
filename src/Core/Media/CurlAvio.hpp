@@ -2,7 +2,7 @@
 
 #ifdef STYX_HAVE_FFMPEG
 
-#include <QString>
+#include <string>
 
 #include "Core/ProxyConfig.hpp"
 
@@ -16,10 +16,10 @@ namespace Media {
 
 namespace CurlAvio {
 
-AVIOContext *create(const QString &url, const ProxyConfig &proxy, const AVIOInterruptCB &interrupt);
+AVIOContext *create(const std::string &url, const ProxyConfig &proxy, const AVIOInterruptCB &interrupt);
 void destroy(AVIOContext *context);
 
-[[nodiscard]] bool handlesScheme(const QString &url);
+[[nodiscard]] bool handlesScheme(const std::string &url);
 
 } // namespace CurlAvio
 

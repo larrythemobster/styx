@@ -12,7 +12,7 @@ namespace Styx {
 namespace Core {
 namespace Lottie {
 
-bool looksLikeLottie(const QByteArray &data)
+bool looksLikeLottie(const std::string &data)
 {
     const auto firstInk = std::find_if(data.cbegin(), data.cend(), [](char c) { return !std::isspace(static_cast<unsigned char>(c)); });
     return firstInk != data.cend() && *firstInk == '{';
@@ -37,11 +37,11 @@ bool isSupported()
     return true;
 }
 
-std::unique_ptr<Animation> Animation::fromJson(const QByteArray &json)
+std::unique_ptr<Animation> Animation::fromJson(const std::string &json)
 {
     const std::string modelCacheKey;
     const std::string externalResourceDir;
-    auto animation = rlottie::Animation::loadFromData(json.toStdString(), modelCacheKey, externalResourceDir, false);
+    auto animation = rlottie::Animation::loadFromData(json, modelCacheKey, externalResourceDir, false);
     if (!animation || animation->totalFrame() == 0 || animation->frameRate() <= 0)
         return nullptr;
 
@@ -63,14 +63,28 @@ int Animation::frameDelayMs() const
     return int(std::lround(impl->sourceFramesPerRendered * 1000.0 / impl->sourceFps));
 }
 
-QImage Animation::render(int frame, const QSize &size) const
+Platform::ImageBuffer Animation::render(int frame, const Platform::Size &size) const
 {
-    QImage image(size, QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::transparent);
-
-    rlottie::Surface surface(reinterpret_cast<uint32_t *>(image.bits()), size_t(image.width()),
-                             size_t(image.height()), size_t(image.bytesPerLine()));
+    if (size.width <= 0 || size.height <= 0)
+        return {};
+    std::vector<uint32_t> argb(static_cast<size_t>(size.width) * size.height);
+    rlottie::Surface surface(argb.data(), size.width, size.height, size.width * sizeof(uint32_t));
     impl->animation->renderSync(size_t(frame * impl->sourceFramesPerRendered), surface);
+    Platform::ImageBuffer image;
+    image.width = size.width;
+    image.height = size.height;
+    image.pixels.resize(argb.size() * 4);
+    for (size_t i = 0; i < argb.size(); ++i) {
+        uint32_t pixel = argb[i];
+        unsigned alpha = pixel >> 24;
+        auto unpremultiply = [alpha](unsigned value) {
+            return static_cast<uint8_t>(alpha ? std::min(255u, (value * 255u + alpha / 2) / alpha) : 0);
+        };
+        image.pixels[i * 4] = unpremultiply((pixel >> 16) & 255);
+        image.pixels[i * 4 + 1] = unpremultiply((pixel >> 8) & 255);
+        image.pixels[i * 4 + 2] = unpremultiply(pixel & 255);
+        image.pixels[i * 4 + 3] = static_cast<uint8_t>(alpha);
+    }
     return image;
 }
 
@@ -85,7 +99,7 @@ bool isSupported()
     return false;
 }
 
-std::unique_ptr<Animation> Animation::fromJson(const QByteArray &)
+std::unique_ptr<Animation> Animation::fromJson(const std::string &)
 {
     return nullptr;
 }
@@ -100,7 +114,7 @@ int Animation::frameDelayMs() const
     return 0;
 }
 
-QImage Animation::render(int, const QSize &) const
+Platform::ImageBuffer Animation::render(int, const Platform::Size &) const
 {
     return {};
 }

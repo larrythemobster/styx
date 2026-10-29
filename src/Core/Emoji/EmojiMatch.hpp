@@ -1,7 +1,6 @@
 #pragma once
 
-#include <QString>
-#include <QUrl>
+#include <string>
 
 #include "Core/Snowflake.hpp"
 
@@ -11,11 +10,11 @@ namespace Core {
 struct EmojiMatch
 {
     // replacement. `:name:` or `<:name:id>` / `<a:name:id>`
-    QString insertText;
-    QString displayLabel;
-    QString surrogates; // unicode only
+    std::string insertText;
+    std::string displayLabel;
+    std::string surrogates; // unicode only
     Snowflake customId; // custom only
-    QUrl imageUrl; // custom only
+    std::string imageUrl; // custom only
 
     [[nodiscard]] bool isCustom() const { return customId.isValid(); }
 };

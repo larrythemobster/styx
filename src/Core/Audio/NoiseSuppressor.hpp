@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QByteArray>
+#include <string>
 
 struct DenoiseState;
 
@@ -22,7 +22,7 @@ public:
     void reconfigure(int channels);
 
     // 960 samples stereo int16
-    QByteArray process(const QByteArray &pcmFrame, float &outVoiceProb);
+    std::string process(const std::string &pcmFrame, float &outVoiceProb);
 
 private:
     DenoiseState *states[2] = { nullptr, nullptr };

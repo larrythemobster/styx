@@ -1,41 +1,31 @@
 #pragma once
 
-#include <QByteArray>
-#include <QJsonValue>
-#include <QList>
-#include <QString>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <string_view>
+#include <vector>
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
 class OrderedJson
 {
 public:
-    class Array
-    {
+    class Array {
     public:
-        Array &append(const QJsonValue &value);
+        Array &append(const nlohmann::json &value);
         Array &append(const OrderedJson &object);
         Array &append(const Array &array);
-
-        QByteArray toBytes() const;
-
+        std::string toBytes() const;
     private:
-        QList<QByteArray> elements;
+        std::vector<std::string> elements;
     };
-
-    OrderedJson &insert(const QString &key, const QJsonValue &value);
-    OrderedJson &insert(const QString &key, const OrderedJson &object);
-    OrderedJson &insert(const QString &key, const Array &array);
-
-    QByteArray toBytes() const;
-
+    OrderedJson &insert(std::string_view key, const nlohmann::json &value);
+    OrderedJson &insert(std::string_view key, const OrderedJson &object);
+    OrderedJson &insert(std::string_view key, const Array &array);
+    std::string toBytes() const;
 private:
-    static QByteArray serialize(const QJsonValue &value);
-    OrderedJson &insertRaw(const QString &key, const QByteArray &json);
-
-    QList<QByteArray> members;
+    OrderedJson &insertRaw(std::string_view key, std::string json);
+    std::vector<std::string> members;
 };
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

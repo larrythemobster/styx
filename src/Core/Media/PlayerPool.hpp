@@ -1,53 +1,40 @@
 #pragma once
 
-#include <QHash>
-#include <QObject>
-#include <QStringList>
-#include <QUrl>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "Core/Media/Player.hpp"
 
-namespace Styx {
-namespace Core {
-namespace Media {
+namespace Styx::Core::Media {
 
-QString attachmentKey(quint64 attachmentId, MediaKind kind);
-QString embedKey(quint64 messageId, int embedIndex);
+std::string attachmentKey(uint64_t attachmentId, MediaKind kind);
+std::string embedKey(uint64_t messageId, int embedIndex);
 
-class PlayerPool : public QObject
-{
-    Q_OBJECT
+class PlayerPool : public Platform::Trackable {
 public:
     static constexpr int MaxActivePlayers = 3;
-
-    explicit PlayerPool(QObject *parent = nullptr);
+    PlayerPool() = default;
     ~PlayerPool() override;
-
-    [[nodiscard]] Player *find(const QString &key) const;
-
-    Player *acquire(const QString &key, const QUrl &url, const ProxyConfig &proxy);
-
-    void touch(const QString &key);
-    void release(const QString &key);
+    [[nodiscard]] Player *find(const std::string &key) const;
+    Player *acquire(const std::string &key, const std::string &url, const ProxyConfig &proxy);
+    void touch(const std::string &key);
+    void release(const std::string &key);
     void clear();
+    void setPinned(const std::string &key);
 
-    void setPinned(const QString &key);
-
-signals:
-    void frameReady(const QString &key);
-    void playerPositionChanged(const QString &key);
-    void playerStateChanged(const QString &key);
-    void playerReleased(const QString &key);
-
+    Platform::Signal<std::string> frameReady;
+    Platform::Signal<std::string> playerPositionChanged;
+    Platform::Signal<std::string> playerStateChanged;
+    Platform::Signal<std::string> playerReleased;
 private:
     void enforceLimit();
-    [[nodiscard]] QString evictionCandidate() const;
-
-    QHash<QString, Player *> players;
-    QStringList order;
-    QString pinnedKey;
+    [[nodiscard]] std::string evictionCandidate() const;
+    std::unordered_map<std::string, std::unique_ptr<Player>> players;
+    std::vector<std::string> order;
+    std::string pinnedKey;
 };
 
-} // namespace Media
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core::Media

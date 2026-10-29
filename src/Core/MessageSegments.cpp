@@ -40,7 +40,7 @@ const MessageSegments::Run *MessageSegments::tail() const
     return nullptr;
 }
 
-void MessageSegments::merge(const QList<Snowflake> &sortedIds, Snowflake anchorId, bool reachesPresent)
+void MessageSegments::merge(const std::vector<Snowflake> &sortedIds, Snowflake anchorId, bool reachesPresent)
 {
     std::set<int> joined;
     if (Location anchor = locate(anchorId); anchor.run >= 0)
@@ -56,7 +56,7 @@ void MessageSegments::merge(const QList<Snowflake> &sortedIds, Snowflake anchorI
         }
     }
 
-    if (joined.empty() && sortedIds.isEmpty())
+    if (joined.empty() && sortedIds.empty())
         return;
 
     Run merged;
@@ -83,7 +83,7 @@ void MessageSegments::merge(const QList<Snowflake> &sortedIds, Snowflake anchorI
     runs.insert(insertAt, std::move(merged));
 }
 
-void MessageSegments::setTail(const QList<Snowflake> &sortedIds)
+void MessageSegments::setTail(const std::vector<Snowflake> &sortedIds)
 {
     for (auto &run : runs)
         run.isTail = false;

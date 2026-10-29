@@ -1,63 +1,51 @@
 #pragma once
 
-#include <QObject>
-#include <QMap>
-#include <QSet>
+#include <map>
 #include <memory>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
+#include "Platform/Trackable.hpp"
 #include "ClientInstance.hpp"
 #include "Storage/AccountRepository.hpp"
 #include "Core/Enums.hpp"
 #include "Core/AnimatedImageCache.hpp"
 #include "Core/ImageManager.hpp"
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
-class Session : public QObject
-{
-    Q_OBJECT
+class Session : public Platform::Trackable {
 public:
-    explicit Session(QObject *parent = nullptr);
+    Session();
     ~Session() override;
-
     void start();
     void shutdown();
-
     void connectAccount(Snowflake accountId);
     void disconnectAccount(Snowflake accountId);
-
     void autoConnectAccounts();
-
     void setAccountProxy(Snowflake accountId, const ProxyConfig &proxy);
-
-    [[nodiscard]] QList<ClientInstance *> getClients() const { return clients.values(); }
+    [[nodiscard]] std::vector<ClientInstance *> getClients() const;
     [[nodiscard]] ClientInstance *client(Snowflake accountId) const;
     [[nodiscard]] AccountInfo getAccountInfo(Snowflake accountId);
-    [[nodiscard]] ImageManager *getImageManager() { return imageManager; }
-    [[nodiscard]] AnimatedImageCache *getAnimatedImageCache() { return animatedImageCache; }
+    [[nodiscard]] ImageManager *getImageManager() { return imageManager.get(); }
+    [[nodiscard]] AnimatedImageCache *getAnimatedImageCache() { return animatedImageCache.get(); }
     [[nodiscard]] bool hasActiveConnection() const;
-
     void setCaptchaResolver(Discord::CaptchaResolver *resolver) { captchaResolver = resolver; }
     [[nodiscard]] Discord::CaptchaResolver *getCaptchaResolver() const { return captchaResolver; }
 
-signals:
-    void connectionStateChanged(Snowflake accountId, Core::ConnectionState newState);
-    void connectFailed(Snowflake accountId, const QString &reason);
-    void accountDetailsUpdated(const Core::AccountInfo &info);
-
-    void ready(const Discord::Ready &ready);
-
+    Platform::Signal<Snowflake, Core::ConnectionState> connectionStateChanged;
+    Platform::Signal<Snowflake, const std::string &> connectFailed;
+    Platform::Signal<const Core::AccountInfo &> accountDetailsUpdated;
+    Platform::Signal<const Discord::Ready &> ready;
 private:
     void startInstance(const AccountInfo &acc);
-
-    ImageManager *imageManager;
-    AnimatedImageCache *animatedImageCache;
+    std::unique_ptr<ImageManager> imageManager;
+    std::unique_ptr<AnimatedImageCache> animatedImageCache;
     Storage::AccountRepository repo;
-    QMap<Snowflake, ClientInstance *> clients;
-    QSet<Snowflake> connectingAccounts;
+    std::map<Snowflake, std::unique_ptr<ClientInstance>> clients;
+    std::unordered_set<Snowflake> connectingAccounts;
     Discord::CaptchaResolver *captchaResolver = nullptr;
 };
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

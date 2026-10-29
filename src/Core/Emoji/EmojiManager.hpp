@@ -1,12 +1,12 @@
 #pragma once
 
-#include <QHash>
-#include <QList>
-#include <QObject>
-#include <QSet>
-#include <QString>
-#include <QStringList>
-#include <QTimer>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include "Platform/Trackable.hpp"
+#include "Platform/Timer.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -33,29 +33,28 @@ namespace Core {
 struct UnicodeEmoji;
 class ClientInstance;
 
-class EmojiManager : public QObject
+class EmojiManager : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    EmojiManager(Discord::Client *client, ClientInstance *instance, QObject *parent = nullptr);
+    EmojiManager(Discord::Client *client, ClientInstance *instance);
 
-    void setGuildEmojis(Snowflake guildId, const QList<Discord::Emoji> &emojis);
+    void setGuildEmojis(Snowflake guildId, const std::vector<Discord::Emoji> &emojis);
     void removeGuild(Snowflake guildId);
 
-    [[nodiscard]] QList<EmojiMatch> search(const QString &query, Snowflake channelId, int maxResults = 10);
+    [[nodiscard]] std::vector<EmojiMatch> search(const std::string &query, Snowflake channelId, int maxResults = 10);
 
-    [[nodiscard]] QList<PickerSection> pickerSections(Snowflake channelId, EmojiIntention intention);
-    [[nodiscard]] QList<PickerEmoji> searchPicker(const QString &query, Snowflake channelId, EmojiIntention intention);
-    [[nodiscard]] QList<PickerEmoji> frequentlyUsed(Snowflake channelId, EmojiIntention intention);
-    [[nodiscard]] QList<PickerEmoji> quickReactions(Snowflake channelId, int count);
+    [[nodiscard]] std::vector<PickerSection> pickerSections(Snowflake channelId, EmojiIntention intention);
+    [[nodiscard]] std::vector<PickerEmoji> searchPicker(const std::string &query, Snowflake channelId, EmojiIntention intention);
+    [[nodiscard]] std::vector<PickerEmoji> frequentlyUsed(Snowflake channelId, EmojiIntention intention);
+    [[nodiscard]] std::vector<PickerEmoji> quickReactions(Snowflake channelId, int count);
 
-    void trackMessageEmojis(const QString &content);
-    void trackReaction(const QString &reactionEmoji);
+    void trackMessageEmojis(const std::string &content);
+    void trackReaction(const std::string &reactionEmoji);
 
     // write back to settings-proto/2
     void savePendingUsage();
 
-public slots:
+public:
     void onReady();
     void onGuildEmojisUpdated(const Discord::GuildEmojisUpdate &event);
     void onUserSettingsProtoUpdated(const Discord::UserSettingsProtoUpdate &event);
@@ -66,21 +65,21 @@ private:
     {
         Discord::Emoji emoji;
         Snowflake guildId;
-        QString originalName;
+        std::string originalName;
         // `name~1`, `name~2`
-        QString disambiguatedName;
-        QString normalizedName;
+        std::string disambiguatedName;
+        std::string normalizedName;
     };
 
     struct UnicodeCandidate
     {
         const UnicodeEmoji *emoji = nullptr;
-        QStringList normalizedNames;
+        std::vector<std::string> normalizedNames;
     };
 
     struct PendingUsage
     {
-        QString key;
+        std::string key;
         uint64_t timestamp = 0;
         bool reaction = false;
     };
@@ -92,7 +91,7 @@ private:
         Snowflake channelGuildId;
         Snowflake selfId;
         bool premium = false;
-        QHash<Snowflake, QSet<Snowflake>> rolesByGuild;
+        std::unordered_map<Snowflake, std::unordered_set<Snowflake>> rolesByGuild;
         std::optional<bool> externalEmojisAllowed;
     };
 
@@ -107,44 +106,45 @@ private:
     void replayPendingUsages();
     void seedDefaultsIfEmpty();
 
-    void trackUsage(const QString &key, bool reaction);
-    void trackSurrogates(const QString &content);
+    void trackUsage(const std::string &key, bool reaction);
+    void trackSurrogates(const std::string &content);
 
     void onSyncTimer();
+    void scheduleSync(int milliseconds);
 
-    const QList<CustomEmoji> &customEmojis();
-    const QList<UnicodeCandidate> &unicodeCandidates();
+    const std::vector<CustomEmoji> &customEmojis();
+    const std::vector<UnicodeCandidate> &unicodeCandidates();
     bool isUsable(const CustomEmoji &custom, UsabilityContext &context) const;
     [[nodiscard]] UsabilityContext usabilityIn(Snowflake channelId) const;
-    [[nodiscard]] QList<RankedEmoji> rankedMatches(const QString &query, Snowflake channelId, FrecencyTracker &tracker);
-    [[nodiscard]] QList<Snowflake> guildsInSidebarOrder() const;
+    [[nodiscard]] std::vector<RankedEmoji> rankedMatches(const std::string &query, Snowflake channelId, FrecencyTracker &tracker);
+    [[nodiscard]] std::vector<Snowflake> guildsInSidebarOrder() const;
     [[nodiscard]] FrecencyTracker &trackerFor(EmojiIntention intention);
 
     [[nodiscard]] static PickerEmoji toPickerEmoji(const UnicodeEmoji &emoji);
     [[nodiscard]] static PickerEmoji toPickerEmoji(const CustomEmoji &custom);
-    [[nodiscard]] static QString unicodeCategoryTitle(const QString &categoryId);
+    [[nodiscard]] static std::string unicodeCategoryTitle(const std::string &categoryId);
 
     [[nodiscard]] static uint64_t nowMs();
-    [[nodiscard]] static QString unicodeKey(const QString &surrogates);
+    [[nodiscard]] static std::string unicodeKey(const std::string &surrogates);
 
     Discord::Client *client;
     ClientInstance *instance;
 
-    QHash<Snowflake /*guildId*/, QList<Discord::Emoji>> guildEmojis;
-    QList<CustomEmoji> customCandidates;
-    QHash<Snowflake, int> customCandidateIndex;
+    std::unordered_map<Snowflake /*guildId*/, std::vector<Discord::Emoji>> guildEmojis;
+    std::vector<CustomEmoji> customCandidates;
+    std::unordered_map<Snowflake, int> customCandidateIndex;
     bool customCandidatesDirty = true;
-    QList<UnicodeCandidate> unicodeCandidateCache;
+    std::vector<UnicodeCandidate> unicodeCandidateCache;
 
     FrecencyTracker chatTracker;
     FrecencyTracker reactionTracker;
 
-    QList<PendingUsage> pendingUsages;
+    std::vector<PendingUsage> pendingUsages;
     std::optional<uint32_t> dataVersion;
     bool loaded = false;
     bool saveInFlight = false;
 
-    QTimer syncTimer;
+    Platform::Timer syncTimer;
 };
 
 } // namespace Core

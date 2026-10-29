@@ -1,7 +1,8 @@
 #pragma once
 
-#include <QString>
-#include <QStringList>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace Styx {
 namespace Core {
@@ -32,11 +33,11 @@ typedef CharacterCategory *emoji_text_iter_t;
 // Count the number of emoji presentation sequences in a text string.
 // Returns -1 if any non-emoji, non-whitespace content is found.
 // Returns the emoji sequence count (0 if empty/all whitespace).
-int countUnicodeEmojisSegmented(const QString &text);
+int countUnicodeEmojisSegmented(std::string_view text);
 
 // Every emoji presentation sequence in `text` (ZWJ chains, tone and keycap sequences, flags),
 // in order, as the exact substring that formed it.
-QStringList extractEmojiSequences(const QString &text);
+std::vector<std::string> extractEmojiSequences(std::string_view text);
 
 } // namespace Core
 } // namespace Styx

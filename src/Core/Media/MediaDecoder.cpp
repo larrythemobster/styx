@@ -7,7 +7,7 @@
 #include "Core/Media/CurlAvio.hpp"
 #include "Discord/CurlUtils.hpp"
 
-#include <QCoreApplication>
+#include <algorithm>
 
 #include <thread>
 
@@ -34,11 +34,11 @@ MediaDecoder::~MediaDecoder()
     close();
 }
 
-QString MediaDecoder::errorString(int code)
+std::string MediaDecoder::errorString(int code)
 {
     char buf[AV_ERROR_MAX_STRING_SIZE] = {};
     av_strerror(code, buf, sizeof(buf));
-    return QString::fromUtf8(buf);
+    return std::string(buf);
 }
 
 void MediaDecoder::setInterrupt(int (*callback)(void *), void *opaque)
@@ -50,16 +50,16 @@ void MediaDecoder::setInterrupt(int (*callback)(void *), void *opaque)
 // just in case it tries for some reason
 int MediaDecoder::denyNestedOpen(AVFormatContext *, AVIOContext **, const char *url, int, AVDictionary **)
 {
-    qCWarning(LogVideo) << "refusing nested open of" << url << "while proxied";
+    Core::log(Core::LogLevel::Warning, LogVideo) << "refusing nested open of" << url << "while proxied";
     return AVERROR(EPERM);
 }
 
-bool MediaDecoder::open(const QString &input, const ProxyConfig &proxy, QString *error)
+bool MediaDecoder::open(const std::string &input, const ProxyConfig &proxy, std::string *error)
 {
     fmtCtx = avformat_alloc_context();
     if (!fmtCtx) {
         if (error)
-            *error = QCoreApplication::translate("Styx::Core::Media::Player", "out of memory");
+            *error = "out of memory";
         return false;
     }
 
@@ -73,7 +73,7 @@ bool MediaDecoder::open(const QString &input, const ProxyConfig &proxy, QString 
             curlIo = CurlAvio::create(input, proxy, fmtCtx->interrupt_callback);
         if (!curlIo) {
             if (error)
-                *error = QCoreApplication::translate("Styx::Core::Media::Player", "could not open a proxied connection");
+                *error = "could not open a proxied connection";
             return false;
         }
 
@@ -83,15 +83,14 @@ bool MediaDecoder::open(const QString &input, const ProxyConfig &proxy, QString 
     }
 
     AVDictionary *options = nullptr;
-    const QByteArray userAgent = Discord::CurlUtils::getUserAgent().toUtf8();
-    av_dict_set(&options, "user_agent", userAgent.constData(), 0);
+    const std::string userAgent = Discord::CurlUtils::getUserAgent();
+    av_dict_set(&options, "user_agent", userAgent.c_str(), 0);
     av_dict_set(&options, "reconnect", "1", 0);
     av_dict_set(&options, "reconnect_streamed", "1", 0);
     av_dict_set(&options, "reconnect_delay_max", "5", 0);
     av_dict_set(&options, "rw_timeout", "15000000", 0);
 
-    const QByteArray inputUtf8 = input.toUtf8();
-    int ret = avformat_open_input(&fmtCtx, inputUtf8.constData(), nullptr, &options);
+    int ret = avformat_open_input(&fmtCtx, input.c_str(), nullptr, &options);
     av_dict_free(&options);
 
     if (ret < 0) {
@@ -116,7 +115,7 @@ bool MediaDecoder::open(const QString &input, const ProxyConfig &proxy, QString 
 
     if (videoStream < 0 && audioStream < 0) {
         if (error)
-            *error = QCoreApplication::translate("Styx::Core::Media::Player", "no playable stream found");
+            *error = "no playable stream found";
         return false;
     }
 
@@ -149,7 +148,7 @@ bool MediaDecoder::openCodec(int streamIndex, AVCodecContext **out)
     }
 
     const int cores = static_cast<int>(std::thread::hardware_concurrency());
-    ctx->thread_count = qBound(1, cores > 0 ? cores : 2, MaxDecoderThreads);
+    ctx->thread_count = std::clamp(cores > 0 ? cores : 2, 1, MaxDecoderThreads);
     if (codec->capabilities & AV_CODEC_CAP_FRAME_THREADS)
         ctx->thread_type = FF_THREAD_FRAME;
     else if (codec->capabilities & AV_CODEC_CAP_SLICE_THREADS)
@@ -205,7 +204,7 @@ void MediaDecoder::close()
 
     videoStream = -1;
     audioStream = -1;
-    swsTarget = QSize();
+    swsTarget = Platform::Size();
 }
 
 MediaDecoder::Info MediaDecoder::info() const
@@ -214,7 +213,7 @@ MediaDecoder::Info MediaDecoder::info() const
     if (!fmtCtx)
         return result;
 
-    result.native = videoCtx ? QSize(videoCtx->width, videoCtx->height) : QSize();
+    result.native = videoCtx ? Platform::Size{videoCtx->width, videoCtx->height} : Platform::Size();
     result.durationMs = containerDurationMs();
     result.seekable = result.durationMs > 0 && (!fmtCtx->pb || fmtCtx->pb->seekable != 0);
     result.hasAudio = audioStream >= 0;
@@ -222,7 +221,7 @@ MediaDecoder::Info MediaDecoder::info() const
     return result;
 }
 
-qint64 MediaDecoder::containerDurationMs() const
+int64_t MediaDecoder::containerDurationMs() const
 {
     if (!fmtCtx || fmtCtx->duration == AV_NOPTS_VALUE)
         return 0;
@@ -269,17 +268,17 @@ AVCodecContext *MediaDecoder::contextFor(Stream stream) const
     return nullptr;
 }
 
-qint64 MediaDecoder::packetTimestampMs(const AVPacket *packet) const
+int64_t MediaDecoder::packetTimestampMs(const AVPacket *packet) const
 {
     const int64_t ts = packet->pts != AV_NOPTS_VALUE ? packet->pts : packet->dts;
     if (ts == AV_NOPTS_VALUE || !fmtCtx)
         return -1;
 
     const AVStream *stream = fmtCtx->streams[packet->stream_index];
-    return static_cast<qint64>(ts * av_q2d(stream->time_base) * 1000.0);
+    return static_cast<int64_t>(ts * av_q2d(stream->time_base) * 1000.0);
 }
 
-qint64 MediaDecoder::frameTimestampMs(const AVFrame *frame, Stream stream) const
+int64_t MediaDecoder::frameTimestampMs(const AVFrame *frame, Stream stream) const
 {
     const int streamIndex = streamIndexFor(stream);
     if (!fmtCtx || streamIndex < 0)
@@ -290,10 +289,10 @@ qint64 MediaDecoder::frameTimestampMs(const AVFrame *frame, Stream stream) const
     if (pts == AV_NOPTS_VALUE)
         return 0;
 
-    return static_cast<qint64>(pts * av_q2d(fmtCtx->streams[streamIndex]->time_base) * 1000.0);
+    return static_cast<int64_t>(pts * av_q2d(fmtCtx->streams[streamIndex]->time_base) * 1000.0);
 }
 
-bool MediaDecoder::seek(qint64 targetMs, QString *error)
+bool MediaDecoder::seek(int64_t targetMs, std::string *error)
 {
     const int64_t ts = targetMs * AV_TIME_BASE / 1000;
     const int ret = av_seek_frame(fmtCtx, -1, ts, AVSEEK_FLAG_BACKWARD);
@@ -322,41 +321,26 @@ int MediaDecoder::receiveFrame(Stream stream, AVFrame *frame)
     return ctx ? avcodec_receive_frame(ctx, frame) : AVERROR(EINVAL);
 }
 
-QImage MediaDecoder::scaleToImage(const AVFrame *frame, const QSize &target)
+Platform::ImageBuffer MediaDecoder::scaleToImage(const AVFrame *frame, const Platform::Size &target)
 {
-    if (target.isEmpty())
-        return QImage();
-
+    if (target.empty()) return {};
     if (!swsCtx || swsTarget != target) {
-        if (swsCtx)
-            sws_freeContext(swsCtx);
-
-        swsCtx = sws_getContext(frame->width, frame->height,
-                                static_cast<AVPixelFormat>(frame->format),
-                                target.width(), target.height(),
-                                AV_PIX_FMT_RGB32,
-                                SWS_BILINEAR,
+        if (swsCtx) sws_freeContext(swsCtx);
+        swsCtx = sws_getContext(frame->width, frame->height, static_cast<AVPixelFormat>(frame->format),
+                                target.width, target.height, AV_PIX_FMT_RGBA, SWS_BILINEAR,
                                 nullptr, nullptr, nullptr);
-        if (!swsCtx)
-            return QImage();
+        if (!swsCtx) return {};
         swsTarget = target;
     }
-
-    // swscale will oob without extra room because of simd stuff
-    const int stride = target.width() * 4;
+    const int stride = target.width * 4;
     const int spareRows = (64 + stride - 1) / stride;
-
-    auto *storage = new QImage(target.width(), target.height() + spareRows, QImage::Format_RGB32);
-    if (storage->isNull()) {
-        delete storage;
-        return QImage();
-    }
-
-    uint8_t *dstData[4] = { storage->bits(), nullptr, nullptr, nullptr };
-    int dstStride[4] = { static_cast<int>(storage->bytesPerLine()), 0, 0, 0 };
-    sws_scale(swsCtx, frame->data, frame->linesize, 0, frame->height, dstData, dstStride);
-
-    return QImage(storage->bits(), target.width(), target.height(), storage->bytesPerLine(), QImage::Format_RGB32, [](void *owner) { delete static_cast<QImage *>(owner); }, storage);
+    Platform::ImageBuffer image{target.width, target.height, 4};
+    image.pixels.resize(static_cast<size_t>(stride) * (target.height + spareRows));
+    uint8_t *dst[4] = {image.pixels.data(), nullptr, nullptr, nullptr};
+    int strides[4] = {stride, 0, 0, 0};
+    sws_scale(swsCtx, frame->data, frame->linesize, 0, frame->height, dst, strides);
+    image.pixels.resize(static_cast<size_t>(stride) * target.height);
+    return image;
 }
 
 int MediaDecoder::appendResampledFrames(const AVFrame *frame, std::vector<float> &out,

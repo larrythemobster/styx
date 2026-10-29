@@ -1,24 +1,22 @@
 #pragma once
 
-#include <QList>
-#include <QSize>
-#include <QString>
-#include <QUrl>
+#include <string>
+#include <vector>
 
+#include "Platform/Native.hpp"
 #include "Proto/FrecencySettings.hpp"
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
 struct FavoriteGifCandidate
 {
-    QString url;
-    QString src;
-    QString gifSrc;
+    std::string url;
+    std::string src;
+    std::string gifSrc;
     Proto::GifType format = Proto::GifType::Image;
-    QSize size;
+    Platform::Size size;
 
-    [[nodiscard]] bool isValid() const { return !url.isEmpty() && !src.isEmpty(); }
+    [[nodiscard]] bool isValid() const { return !url.empty() && !src.empty(); }
 };
 
 namespace FavoriteGifRules {
@@ -26,16 +24,13 @@ namespace FavoriteGifRules {
 inline constexpr int OfficialClientMaxSerializedBytes = 762880;
 inline constexpr int CountThatHidesTheTooltip = 2;
 
-[[nodiscard]] QString keyFor(const QString &url);
+[[nodiscard]] std::string keyFor(const std::string &url);
 [[nodiscard]] Proto::FavoriteGif stored(const FavoriteGifCandidate &candidate, uint32_t order);
-[[nodiscard]] uint32_t orderAfter(const QList<Proto::FavoriteGif> &gifs);
-[[nodiscard]] QList<Proto::FavoriteGif> newestFirst(QList<Proto::FavoriteGif> gifs);
-[[nodiscard]] bool matchesSearch(const QString &url, const QString &query);
-
-[[nodiscard]] QUrl clipServedByDiscord(const Proto::FavoriteGif &gif);
-[[nodiscard]] QUrl stillServedByDiscord(const Proto::FavoriteGif &gif);
+[[nodiscard]] uint32_t orderAfter(const std::vector<Proto::FavoriteGif> &gifs);
+[[nodiscard]] std::vector<Proto::FavoriteGif> newestFirst(std::vector<Proto::FavoriteGif> gifs);
+[[nodiscard]] bool matchesSearch(const std::string &url, const std::string &query);
+[[nodiscard]] std::string clipServedByDiscord(const Proto::FavoriteGif &gif);
+[[nodiscard]] std::string stillServedByDiscord(const Proto::FavoriteGif &gif);
 
 } // namespace FavoriteGifRules
-
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core
