@@ -1,118 +1,94 @@
 #include "Discord/CdnUrls.hpp"
 
-#include <QTest>
+#include <catch2/catch_test_macros.hpp>
+#include <string>
 
+using namespace Styx;
 using namespace Styx::Discord;
 
-class TestCdnUrls : public QObject
+TEST_CASE("CdnUrls: testGifIsAnimatedWhateverItsFlags", "[cdn]")
 {
-    Q_OBJECT
-private slots:
-    void testGifIsAnimatedWhateverItsFlags();
-    void testWebpAndAvifNeedTheAnimatedFlag();
-    void testExtensionMustBeFollowedByEndQueryOrFragment();
-
-    void testAnimatedGifUrlAsksOnlyForItsSize();
-    void testAnimatedGifUrlAtItsOwnSizeIsTheProxyUrl();
-    void testAnimatedWebpUrlAsksForAnimation();
-    void testAnimatedAvifUrlAsksForAnimatedWebp();
-    void testRequestedSizeIsCappedAtTheProxyLimit();
-    void testCdnHostUrlIsLeftAlone();
-
-    void testDiscordAssetHosts();
-    void testLoopingVideoLimitAllowsEitherOrientation();
-};
-
-void TestCdnUrls::testGifIsAnimatedWhateverItsFlags()
-{
-    QVERIFY(Cdn::isAnimatedImage(QUrl("https://cdn.discordapp.com/attachments/1/2/cat.gif?ex=a&is=b&hm=c&"), false));
-    QVERIFY(Cdn::isAnimatedImage(QUrl("https://cdn.discordapp.com/attachments/1/2/CAT.GIF"), false));
-    QVERIFY(Cdn::isAnimatedImage(QUrl("https://example.com/a.gif#frag"), false));
-    QVERIFY(!Cdn::isAnimatedImage(QUrl("https://cdn.discordapp.com/attachments/1/2/cat.png?ex=a"), false));
-    QVERIFY(!Cdn::isAnimatedImage(QUrl("https://cdn.discordapp.com/attachments/1/2/cat.png?ex=a"), true));
+    REQUIRE(Cdn::isAnimatedImage("https://cdn.discordapp.com/attachments/1/2/cat.gif?ex=a&is=b&hm=c&", false));
+    REQUIRE(Cdn::isAnimatedImage("https://cdn.discordapp.com/attachments/1/2/CAT.GIF", false));
+    REQUIRE(Cdn::isAnimatedImage("https://example.com/a.gif#frag", false));
+    REQUIRE(!Cdn::isAnimatedImage("https://cdn.discordapp.com/attachments/1/2/cat.png?ex=a", false));
+    REQUIRE(!Cdn::isAnimatedImage("https://cdn.discordapp.com/attachments/1/2/cat.png?ex=a", true));
 }
 
-void TestCdnUrls::testWebpAndAvifNeedTheAnimatedFlag()
+TEST_CASE("CdnUrls: testWebpAndAvifNeedTheAnimatedFlag", "[cdn]")
 {
-    const QUrl webp("https://cdn.discordapp.com/attachments/1/2/cat.webp?ex=a&is=b&hm=c&");
-    const QUrl avif("https://cdn.discordapp.com/attachments/1/2/cat.avif?ex=a&is=b&hm=c&");
-    QVERIFY(!Cdn::isAnimatedImage(webp, false));
-    QVERIFY(Cdn::isAnimatedImage(webp, true));
-    QVERIFY(!Cdn::isAnimatedImage(avif, false));
-    QVERIFY(Cdn::isAnimatedImage(avif, true));
+    const std::string webp = "https://cdn.discordapp.com/attachments/1/2/cat.webp?ex=a&is=b&hm=c&";
+    const std::string avif = "https://cdn.discordapp.com/attachments/1/2/cat.avif?ex=a&is=b&hm=c&";
+    REQUIRE(!Cdn::isAnimatedImage(webp, false));
+    REQUIRE(Cdn::isAnimatedImage(webp, true));
+    REQUIRE(!Cdn::isAnimatedImage(avif, false));
+    REQUIRE(Cdn::isAnimatedImage(avif, true));
 }
 
-void TestCdnUrls::testExtensionMustBeFollowedByEndQueryOrFragment()
+TEST_CASE("CdnUrls: testExtensionMustBeFollowedByEndQueryOrFragment", "[cdn]")
 {
-    QVERIFY(!Cdn::isAnimatedImage(QUrl("https://example.com/a.gifv"), false));
-    QVERIFY(!Cdn::isAnimatedImage(QUrl("https://example.com/a.gif.png"), false));
-    QVERIFY(Cdn::isAnimatedImage(QUrl("https://example.com/a.gif.png?source=b.gif"), false));
+    REQUIRE(!Cdn::isAnimatedImage("https://example.com/a.gifv", false));
+    REQUIRE(!Cdn::isAnimatedImage("https://example.com/a.gif.png", false));
+    REQUIRE(Cdn::isAnimatedImage("https://example.com/a.gif.png?source=b.gif", false));
 }
 
-void TestCdnUrls::testAnimatedGifUrlAsksOnlyForItsSize()
+TEST_CASE("CdnUrls: testAnimatedGifUrlAsksOnlyForItsSize", "[cdn]")
 {
-    const QUrl proxy("https://media.discordapp.net/attachments/1/2/cat.gif?ex=a&is=b&hm=c");
-    const QUrl animated = Cdn::animatedImageUrl(proxy, false, QSize(800, 600), QSize(400, 300));
-    QCOMPARE(animated.toString(), QString("https://media.discordapp.net/attachments/1/2/cat.gif?ex=a&is=b&hm=c&width=400&height=300"));
+    const std::string proxy = "https://media.discordapp.net/attachments/1/2/cat.gif?ex=a&is=b&hm=c";
+    const std::string animated = Cdn::animatedImageUrl(proxy, false, Platform::Size{800, 600}, Platform::Size{400, 300});
+    REQUIRE(animated == "https://media.discordapp.net/attachments/1/2/cat.gif?ex=a&is=b&hm=c&width=400&height=300");
 }
 
-void TestCdnUrls::testAnimatedGifUrlAtItsOwnSizeIsTheProxyUrl()
+TEST_CASE("CdnUrls: testAnimatedGifUrlAtItsOwnSizeIsTheProxyUrl", "[cdn]")
 {
-    const QUrl proxy("https://media.discordapp.net/attachments/1/2/cat.gif?ex=a&is=b&hm=c");
-    QCOMPARE(Cdn::animatedImageUrl(proxy, false, QSize(320, 240), QSize(320, 240)), proxy);
+    const std::string proxy = "https://media.discordapp.net/attachments/1/2/cat.gif?ex=a&is=b&hm=c";
+    REQUIRE(Cdn::animatedImageUrl(proxy, false, Platform::Size{320, 240}, Platform::Size{320, 240}) == proxy);
 }
 
-void TestCdnUrls::testAnimatedWebpUrlAsksForAnimation()
+TEST_CASE("CdnUrls: testAnimatedWebpUrlAsksForAnimation", "[cdn]")
 {
-    const QUrl proxy("https://media.discordapp.net/attachments/1/2/cat.webp?ex=a&is=b&hm=c");
-    QCOMPARE(Cdn::animatedImageUrl(proxy, true, QSize(800, 600), QSize(400, 300)).toString(),
-             QString("https://media.discordapp.net/attachments/1/2/cat.webp?ex=a&is=b&hm=c&animated=true&width=400&height=300"));
-    QCOMPARE(Cdn::animatedImageUrl(proxy, false, QSize(800, 600), QSize(400, 300)).toString(),
-             QString("https://media.discordapp.net/attachments/1/2/cat.webp?ex=a&is=b&hm=c&width=400&height=300"));
+    const std::string proxy = "https://media.discordapp.net/attachments/1/2/cat.webp?ex=a&is=b&hm=c";
+    REQUIRE(Cdn::animatedImageUrl(proxy, true, Platform::Size{800, 600}, Platform::Size{400, 300}) == "https://media.discordapp.net/attachments/1/2/cat.webp?ex=a&is=b&hm=c&animated=true&width=400&height=300");
+    REQUIRE(Cdn::animatedImageUrl(proxy, false, Platform::Size{800, 600}, Platform::Size{400, 300}) == "https://media.discordapp.net/attachments/1/2/cat.webp?ex=a&is=b&hm=c&width=400&height=300");
 }
 
-void TestCdnUrls::testAnimatedAvifUrlAsksForAnimatedWebp()
+TEST_CASE("CdnUrls: testAnimatedAvifUrlAsksForAnimatedWebp", "[cdn]")
 {
-    const QUrl proxy("https://media.discordapp.net/attachments/1/2/cat.avif?ex=a&is=b&hm=c");
-    QCOMPARE(Cdn::animatedImageUrl(proxy, true, QSize(800, 600), QSize(400, 300)).toString(),
-             QString("https://media.discordapp.net/attachments/1/2/cat.avif?ex=a&is=b&hm=c&animated=true&format=webp&width=400&height=300"));
+    const std::string proxy = "https://media.discordapp.net/attachments/1/2/cat.avif?ex=a&is=b&hm=c";
+    REQUIRE(Cdn::animatedImageUrl(proxy, true, Platform::Size{800, 600}, Platform::Size{400, 300}) == "https://media.discordapp.net/attachments/1/2/cat.avif?ex=a&is=b&hm=c&animated=true&format=webp&width=400&height=300");
 }
 
-void TestCdnUrls::testRequestedSizeIsCappedAtTheProxyLimit()
+TEST_CASE("CdnUrls: testRequestedSizeIsCappedAtTheProxyLimit", "[cdn]")
 {
-    const QUrl proxy("https://media.discordapp.net/attachments/1/2/wide.gif");
-    QCOMPARE(Cdn::animatedImageUrl(proxy, false, QSize(9000, 100), QSize(8192, 1000)).toString(),
-             QString("https://media.discordapp.net/attachments/1/2/wide.gif?width=4096&height=500"));
-    QCOMPARE(Cdn::animatedImageUrl(proxy, false, QSize(100, 9000), QSize(1000, 8192)).toString(),
-             QString("https://media.discordapp.net/attachments/1/2/wide.gif?width=500&height=4096"));
+    const std::string proxy = "https://media.discordapp.net/attachments/1/2/wide.gif";
+    REQUIRE(Cdn::animatedImageUrl(proxy, false, Platform::Size{9000, 100}, Platform::Size{8192, 1000}) == "https://media.discordapp.net/attachments/1/2/wide.gif?width=4096&height=500");
+    REQUIRE(Cdn::animatedImageUrl(proxy, false, Platform::Size{100, 9000}, Platform::Size{1000, 8192}) == "https://media.discordapp.net/attachments/1/2/wide.gif?width=500&height=4096");
 }
 
-void TestCdnUrls::testCdnHostUrlIsLeftAlone()
+TEST_CASE("CdnUrls: testCdnHostUrlIsLeftAlone", "[cdn]")
 {
-    const QUrl cdn("https://cdn.discordapp.com/attachments/1/2/cat.gif?ex=a&is=b&hm=c");
-    QCOMPARE(Cdn::animatedImageUrl(cdn, false, QSize(800, 600), QSize(400, 300)), cdn);
+    const std::string cdn = "https://cdn.discordapp.com/attachments/1/2/cat.gif?ex=a&is=b&hm=c";
+    REQUIRE(Cdn::animatedImageUrl(cdn, false, Platform::Size{800, 600}, Platform::Size{400, 300}) == cdn);
 }
 
-void TestCdnUrls::testDiscordAssetHosts()
+TEST_CASE("CdnUrls: testDiscordAssetHosts", "[cdn]")
 {
-    QVERIFY(Cdn::isDiscordAssetUrl(QUrl("https://cdn.discordapp.com/attachments/1/2/cat.gif")));
-    QVERIFY(Cdn::isDiscordAssetUrl(QUrl("https://media.discordapp.net/attachments/1/2/cat.gif")));
-    QVERIFY(Cdn::isDiscordAssetUrl(QUrl("https://images-ext-1.discordapp.net/external/abc/https/media.tenor.com/x/y.mp4")));
-    QVERIFY(!Cdn::isDiscordAssetUrl(QUrl("http://media.discordapp.net/attachments/1/2/cat.gif")));
-    QVERIFY(!Cdn::isDiscordAssetUrl(QUrl("https://media.tenor.com/x/y.mp4")));
-    QVERIFY(!Cdn::isDiscordAssetUrl(QUrl("https://discordapp.net.evil.example/x.mp4")));
-    QVERIFY(!Cdn::isDiscordAssetUrl(QUrl("https://evildiscordapp.net/x.mp4")));
-    QVERIFY(!Cdn::isDiscordAssetUrl(QUrl::fromLocalFile("C:/x.gif")));
+    REQUIRE(Cdn::isDiscordAssetUrl("https://cdn.discordapp.com/attachments/1/2/cat.gif"));
+    REQUIRE(Cdn::isDiscordAssetUrl("https://media.discordapp.net/attachments/1/2/cat.gif"));
+    REQUIRE(Cdn::isDiscordAssetUrl("https://images-ext-1.discordapp.net/external/abc/https/media.tenor.com/x/y.mp4"));
+    REQUIRE(!Cdn::isDiscordAssetUrl("http://media.discordapp.net/attachments/1/2/cat.gif"));
+    REQUIRE(!Cdn::isDiscordAssetUrl("https://media.tenor.com/x/y.mp4"));
+    REQUIRE(!Cdn::isDiscordAssetUrl("https://discordapp.net.evil.example/x.mp4"));
+    REQUIRE(!Cdn::isDiscordAssetUrl("https://evildiscordapp.net/x.mp4"));
+    REQUIRE(!Cdn::isDiscordAssetUrl("file:///C:/x.gif"));
 }
 
-void TestCdnUrls::testLoopingVideoLimitAllowsEitherOrientation()
+TEST_CASE("CdnUrls: testLoopingVideoLimitAllowsEitherOrientation", "[cdn]")
 {
-    QVERIFY(Cdn::fitsLoopingVideoLimit(QSize(498, 280)));
-    QVERIFY(Cdn::fitsLoopingVideoLimit(QSize(6016, 3384)));
-    QVERIFY(Cdn::fitsLoopingVideoLimit(QSize(3384, 6016)));
-    QVERIFY(!Cdn::fitsLoopingVideoLimit(QSize(6017, 3384)));
-    QVERIFY(!Cdn::fitsLoopingVideoLimit(QSize(4000, 4000)));
+    REQUIRE(Cdn::fitsLoopingVideoLimit(Platform::Size{498, 280}));
+    REQUIRE(Cdn::fitsLoopingVideoLimit(Platform::Size{6016, 3384}));
+    REQUIRE(Cdn::fitsLoopingVideoLimit(Platform::Size{3384, 6016}));
+    REQUIRE(!Cdn::fitsLoopingVideoLimit(Platform::Size{6017, 3384}));
+    REQUIRE(!Cdn::fitsLoopingVideoLimit(Platform::Size{4000, 4000}));
 }
 
-QTEST_GUILESS_MAIN(TestCdnUrls)
-#include "tst_CdnUrls.moc"

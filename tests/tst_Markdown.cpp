@@ -1,100 +1,21 @@
 #include "Core/EmojiSegmenter.hpp"
 #include "Core/Markdown/Parser.hpp"
 
-#include <QElapsedTimer>
-#include <QTest>
+#include <catch2/catch_test_macros.hpp>
+#include <string>
+#include <vector>
 
 using namespace Styx::Core::Markdown;
 
-class TestMarkdown : public QObject
-{
-    Q_OBJECT
-private slots:
-    void testNewlines();
-    void testAutolink();
-    void testUrl();
-    void testSingleLink();
-    void testEmojiSequences();
-};
-
-static QString renderInline(const QString &source)
+static std::string renderInline(const std::string &source)
 {
     Parser parser;
     ParseState state;
     state.isInline = true;
-    auto nodes = parser.parse(source, state);
-    return parser.toHtml(nodes);
+    return parser.toHtml(parser.parse(source, state));
 }
 
-void TestMarkdown::testNewlines()
-{
-    Parser parser;
-
-    ParseState state;
-    state.isInline = true;
-    auto nodes = parser.parse("i\nlove\n\ncats", state);
-    auto html = parser.toHtml(nodes);
-
-    QVERIFY(html == "i<br>love<br><br>cats");
-
-    return;
-}
-
-void TestMarkdown::testAutolink()
-{
-    // `<url>` (embed suppression): the angle brackets are stripped from both the visible text and
-    // the href. Regression test for the trailing `>` leaking into the opened URL. Note the "/" —
-    // a host-only http(s) URL is normalized to have a "/" path, matching Discord.
-    QCOMPARE(renderInline("<https://example.com>"),
-             QStringLiteral("<a href=\"https://example.com/\">https://example.com/</a>"));
-
-    // Autolink embedded in surrounding text.
-    QCOMPARE(renderInline("a <https://example.com> b"),
-             QStringLiteral("a <a href=\"https://example.com/\">https://example.com/</a> b"));
-
-    // A bare url (no brackets) is normalized the same way.
-    QCOMPARE(renderInline("https://example.com"),
-             QStringLiteral("<a href=\"https://example.com/\">https://example.com/</a>"));
-
-    // A url that already has a path is left untouched.
-    QCOMPARE(renderInline("<https://example.com/a/b>"),
-             QStringLiteral("<a href=\"https://example.com/a/b\">https://example.com/a/b</a>"));
-
-    // Non-special scheme (discord): a valid link, but WHATWG does NOT add a "/" path to it.
-    QCOMPARE(renderInline("<discord://foo>"),
-             QStringLiteral("<a href=\"discord://foo\">discord://foo</a>"));
-
-    // Disallowed scheme: brackets are still removed, but it renders as plain text, not a link.
-    QCOMPARE(renderInline("<ftp://example.com>"), QStringLiteral("ftp://example.com"));
-
-    // http/https with no host is not a valid link target -> plain text.
-    QCOMPARE(renderInline("<https://>"), QStringLiteral("https://"));
-}
-
-void TestMarkdown::testUrl()
-{
-    // Balanced parentheses inside a URL are kept (regression: the closing paren used to be dropped
-    // from Wikipedia-style links). Mirrors Discord's `url` rule.
-    QCOMPARE(
-            renderInline("https://en.wikipedia.org/wiki/Django_(web_framework)"),
-            QStringLiteral("<a href=\"https://en.wikipedia.org/wiki/Django_(web_framework)\">"
-                           "https://en.wikipedia.org/wiki/Django_(web_framework)</a>"));
-
-    // A URL wrapped in parens links only the URL; the unbalanced trailing `)` stays as text.
-    // (The linked URL is then normalized to a "/" path.)
-    QCOMPARE(renderInline("(https://example.com)"),
-             QStringLiteral("(<a href=\"https://example.com/\">https://example.com/</a>)"));
-
-    // Only a single unbalanced trailing `)` is trimmed, matching Discord's scan exactly.
-    QCOMPARE(renderInline("https://example.com))"),
-             QStringLiteral("<a href=\"https://example.com)/\">https://example.com)/</a>)"));
-
-    // A host-only URL with a non-default port still gets the "/" path.
-    QCOMPARE(renderInline("https://localhost:3000"),
-             QStringLiteral("<a href=\"https://localhost:3000/\">https://localhost:3000/</a>"));
-}
-
-static bool isSingleLink(const QString &source)
+static bool isSingleLink(const std::string &source)
 {
     Parser parser;
     ParseState state;
@@ -102,40 +23,51 @@ static bool isSingleLink(const QString &source)
     return Parser::isSingleLink(parser.parse(source, state));
 }
 
-void TestMarkdown::testSingleLink()
+TEST_CASE("Markdown newlines", "[markdown]")
 {
-    QVERIFY(isSingleLink("https://klipy.com/gifs/cat-jump"));
-    QVERIFY(isSingleLink("https://tenor.com/view/cat-gif-12345"));
-    QVERIFY(isSingleLink("[a cat](https://klipy.com/gifs/cat-jump)"));
-
-    QVERIFY(!isSingleLink("look https://klipy.com/gifs/cat-jump"));
-    QVERIFY(!isSingleLink("https://klipy.com/gifs/cat-jump lol"));
-    QVERIFY(!isSingleLink("https://klipy.com/gifs/a https://klipy.com/gifs/b"));
-    QVERIFY(!isSingleLink("**https://klipy.com/gifs/cat-jump**"));
-    QVERIFY(!isSingleLink("||https://klipy.com/gifs/cat-jump||"));
-    QVERIFY(!isSingleLink("just text"));
-    QVERIFY(!isSingleLink(""));
+    CHECK(renderInline("i\nlove\n\ncats") == "i<br>love<br><br>cats");
 }
 
-void TestMarkdown::testEmojiSequences()
+TEST_CASE("Markdown autolinks and URL normalization", "[markdown]")
+{
+    CHECK(renderInline("<https://example.com>") == "<a href=\"https://example.com/\">https://example.com/</a>");
+    CHECK(renderInline("a <https://example.com> b") == "a <a href=\"https://example.com/\">https://example.com/</a> b");
+    CHECK(renderInline("https://example.com") == "<a href=\"https://example.com/\">https://example.com/</a>");
+    CHECK(renderInline("<https://example.com/a/b>") == "<a href=\"https://example.com/a/b\">https://example.com/a/b</a>");
+    CHECK(renderInline("<discord://foo>") == "<a href=\"discord://foo\">discord://foo</a>");
+    CHECK(renderInline("<ftp://example.com>") == "ftp://example.com");
+    CHECK(renderInline("<https://>") == "https://");
+    CHECK(renderInline("https://en.wikipedia.org/wiki/Django_(web_framework)") == "<a href=\"https://en.wikipedia.org/wiki/Django_(web_framework)\">https://en.wikipedia.org/wiki/Django_(web_framework)</a>");
+    CHECK(renderInline("(https://example.com)") == "(<a href=\"https://example.com/\">https://example.com/</a>)");
+    CHECK(renderInline("https://example.com))") == "<a href=\"https://example.com)/\">https://example.com)/</a>)");
+    CHECK(renderInline("https://localhost:3000") == "<a href=\"https://localhost:3000/\">https://localhost:3000/</a>");
+}
+
+TEST_CASE("Markdown single-link detection", "[markdown]")
+{
+    CHECK(isSingleLink("https://klipy.com/gifs/cat-jump"));
+    CHECK(isSingleLink("https://tenor.com/view/cat-gif-12345"));
+    CHECK(isSingleLink("[a cat](https://klipy.com/gifs/cat-jump)"));
+    CHECK(!isSingleLink("look https://klipy.com/gifs/cat-jump"));
+    CHECK(!isSingleLink("https://klipy.com/gifs/cat-jump lol"));
+    CHECK(!isSingleLink("https://klipy.com/gifs/a https://klipy.com/gifs/b"));
+    CHECK(!isSingleLink("**https://klipy.com/gifs/cat-jump**"));
+    CHECK(!isSingleLink("||https://klipy.com/gifs/cat-jump||"));
+    CHECK(!isSingleLink("just text"));
+    CHECK(!isSingleLink(""));
+}
+
+TEST_CASE("Emoji segmentation preserves sequences", "[markdown][emoji]")
 {
     using Styx::Core::countUnicodeEmojisSegmented;
     using Styx::Core::extractEmojiSequences;
-
-    const QString thumbsUp = QString::fromUtf8("\xF0\x9F\x91\x8D");
-    const QString thumbsUpTone2 = QString::fromUtf8("\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBC");
-    const QString family = QString::fromUtf8("\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7");
-    const QString keycapOne = QString::fromUtf8("1\xEF\xB8\x8F\xE2\x83\xA3");
-
-    // Tone modifiers, ZWJ chains and keycaps each come back as one intact sequence.
-    QCOMPARE(extractEmojiSequences("hi " + thumbsUpTone2 + " and " + family + keycapOne + "!"),
-             QStringList({ thumbsUpTone2, family, keycapOne }));
-    QVERIFY(extractEmojiSequences("plain text <:pepe:123> 1 + 1").isEmpty());
-
-    QCOMPARE(countUnicodeEmojisSegmented(thumbsUp + " " + family), 2);
-    QCOMPARE(countUnicodeEmojisSegmented("x " + thumbsUp), -1);
-    QCOMPARE(countUnicodeEmojisSegmented("   "), 0);
+    const std::string thumbsUp = "\xF0\x9F\x91\x8D";
+    const std::string thumbsUpTone2 = "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBC";
+    const std::string family = "\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7";
+    const std::string keycapOne = "1\xEF\xB8\x8F\xE2\x83\xA3";
+    CHECK((extractEmojiSequences("hi " + thumbsUpTone2 + " and " + family + keycapOne + "!") == std::vector<std::string>{thumbsUpTone2, family, keycapOne}));
+    CHECK(extractEmojiSequences("plain text <:pepe:123> 1 + 1").empty());
+    CHECK(countUnicodeEmojisSegmented(thumbsUp + " " + family) == 2);
+    CHECK(countUnicodeEmojisSegmented("x " + thumbsUp) == -1);
+    CHECK(countUnicodeEmojisSegmented("   ") == 0);
 }
-
-QTEST_MAIN(TestMarkdown)
-#include "tst_Markdown.moc"

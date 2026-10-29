@@ -1,120 +1,96 @@
 #include "Core/Gifs/FavoriteGifRules.hpp"
 #include "UI/Gifs/GifMasonryLayout.hpp"
 
-#include <QTest>
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <string>
+#include <vector>
 
 using namespace Styx;
 using namespace Styx::Core;
 using Styx::Proto::FavoriteGif;
 using Styx::Proto::GifType;
 
-class TestFavoriteGifs : public QObject
+TEST_CASE("Favorite GIFs: testKeyDropsTheSignatureOfDiscordAttachmentsOnly")
 {
-    Q_OBJECT
-private slots:
-    void testKeyDropsTheSignatureOfDiscordAttachmentsOnly();
-
-    void testGifvEmbedIsStoredAsItsProxiedVideo();
-    void testGifAttachmentIsStoredAsAnimatedWebp();
-    void testWebpAttachmentOnlyGainsTheAnimatedFlag();
-    void testKlipyEmbedIsStoredAsItsThumbnail();
-    void testProviderResultPrefersItsGifSource();
-    void testProtocolRelativeSourceGainsHttps();
-
-    void testOrderFollowsTheHighestExisting();
-    void testNewestComesFirst();
-    void testSearchIgnoresCaseDashesUnderscoresAndSpaces();
-
-    void testOnlyDiscordHostedSourcesAreLoaded();
-    void testTileUrlsForAGifSource();
-    void testTileUrlsForAVideoSource();
-
-    void testGutterTightensAsColumnsAreAdded();
-    void testTilesFillTheShortestColumn();
-    void testDenseGridFitsMoreColumnsInTheSameWidth();
-    void testStillsComeInTwoSizesWhateverTheDensity();
-    void testTileHeightKeepsTheAspectRatio();
-};
-
-void TestFavoriteGifs::testKeyDropsTheSignatureOfDiscordAttachmentsOnly()
-{
-    QCOMPARE(FavoriteGifRules::keyFor("https://cdn.discordapp.com/attachments/1/2/cat.gif?ex=aa&is=bb&hm=cc&"), QString("https://cdn.discordapp.com/attachments/1/2/cat.gif"));
-    QCOMPARE(FavoriteGifRules::keyFor("https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&width=10&is=bb&hm=cc"), QString("https://media.discordapp.net/attachments/1/2/cat.gif?width=10"));
-    QCOMPARE(FavoriteGifRules::keyFor("https://tenor.com/view/cat-123?ex=aa"), QString("https://tenor.com/view/cat-123?ex=aa"));
-    QCOMPARE(FavoriteGifRules::keyFor("https://images-ext-1.discordapp.net/external/sig/https/x.test/a.gif?ex=aa"), QString("https://images-ext-1.discordapp.net/external/sig/https/x.test/a.gif?ex=aa"));
-    QCOMPARE(FavoriteGifRules::keyFor("not a url"), QString("not a url"));
+    REQUIRE(FavoriteGifRules::keyFor("https://cdn.discordapp.com/attachments/1/2/cat.gif?ex=aa&is=bb&hm=cc&") == std::string("https://cdn.discordapp.com/attachments/1/2/cat.gif"));
+    REQUIRE(FavoriteGifRules::keyFor("https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&width=10&is=bb&hm=cc") == std::string("https://media.discordapp.net/attachments/1/2/cat.gif?width=10"));
+    REQUIRE(FavoriteGifRules::keyFor("https://tenor.com/view/cat-123?ex=aa") == std::string("https://tenor.com/view/cat-123?ex=aa"));
+    REQUIRE(FavoriteGifRules::keyFor("https://images-ext-1.discordapp.net/external/sig/https/x.test/a.gif?ex=aa") == std::string("https://images-ext-1.discordapp.net/external/sig/https/x.test/a.gif?ex=aa"));
+    REQUIRE(FavoriteGifRules::keyFor("not a url") == std::string("not a url"));
 }
 
-void TestFavoriteGifs::testGifvEmbedIsStoredAsItsProxiedVideo()
+TEST_CASE("Favorite GIFs: testGifvEmbedIsStoredAsItsProxiedVideo")
 {
-    const FavoriteGifCandidate candidate{ "https://tenor.com/view/cat-123", "https://images-ext-1.discordapp.net/external/sig/https/media.tenor.com/abc/cat.mp4", {}, GifType::Video, QSize(498, 280) };
+    const FavoriteGifCandidate candidate{ "https://tenor.com/view/cat-123", "https://images-ext-1.discordapp.net/external/sig/https/media.tenor.com/abc/cat.mp4", {}, GifType::Video, Platform::Size{498, 280} };
     const FavoriteGif gif = FavoriteGifRules::stored(candidate, 7);
 
-    QCOMPARE(gif.url, QString("https://tenor.com/view/cat-123"));
-    QCOMPARE(gif.src, candidate.src);
-    QCOMPARE(gif.format, GifType::Video);
-    QCOMPARE(gif.width, 498u);
-    QCOMPARE(gif.height, 280u);
-    QCOMPARE(gif.order, 7u);
-    QVERIFY(gif.messageAsReceived.empty());
+    REQUIRE(gif.url == std::string("https://tenor.com/view/cat-123"));
+    REQUIRE(gif.src == candidate.src);
+    REQUIRE(gif.format == GifType::Video);
+    REQUIRE(gif.width == 498u);
+    REQUIRE(gif.height == 280u);
+    REQUIRE(gif.order == 7u);
+    REQUIRE(gif.messageAsReceived.empty());
 }
 
-void TestFavoriteGifs::testGifAttachmentIsStoredAsAnimatedWebp()
+TEST_CASE("Favorite GIFs: testGifAttachmentIsStoredAsAnimatedWebp")
 {
-    const FavoriteGifCandidate candidate{ "https://cdn.discordapp.com/attachments/1/2/cat.gif?ex=aa&is=bb&hm=cc&", "https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&is=bb&hm=cc&", {}, GifType::Image, QSize(320, 240) };
+    const FavoriteGifCandidate candidate{ "https://cdn.discordapp.com/attachments/1/2/cat.gif?ex=aa&is=bb&hm=cc&", "https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&is=bb&hm=cc&", {}, GifType::Image, Platform::Size{320, 240} };
     const FavoriteGif gif = FavoriteGifRules::stored(candidate, 1);
 
-    QCOMPARE(gif.url, QString("https://cdn.discordapp.com/attachments/1/2/cat.gif"));
-    QCOMPARE(gif.src, QString("https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&is=bb&hm=cc&format=webp&animated=true"));
-    QCOMPARE(gif.format, GifType::Image);
+    REQUIRE(gif.url == std::string("https://cdn.discordapp.com/attachments/1/2/cat.gif"));
+    REQUIRE(gif.src == std::string("https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&is=bb&hm=cc&format=webp&animated=true"));
+    REQUIRE(gif.format == GifType::Image);
 }
 
-void TestFavoriteGifs::testWebpAttachmentOnlyGainsTheAnimatedFlag()
+TEST_CASE("Favorite GIFs: testWebpAttachmentOnlyGainsTheAnimatedFlag")
 {
-    const FavoriteGifCandidate candidate{ "https://cdn.discordapp.com/attachments/1/2/cat.webp", "https://media.discordapp.net/attachments/1/2/cat.webp?ex=aa", {}, GifType::Image, QSize(320, 240) };
-    QCOMPARE(FavoriteGifRules::stored(candidate, 1).src, QString("https://media.discordapp.net/attachments/1/2/cat.webp?ex=aa&animated=true"));
+    const FavoriteGifCandidate candidate{ "https://cdn.discordapp.com/attachments/1/2/cat.webp", "https://media.discordapp.net/attachments/1/2/cat.webp?ex=aa", {}, GifType::Image, Platform::Size{320, 240} };
+    REQUIRE(FavoriteGifRules::stored(candidate, 1).src == std::string("https://media.discordapp.net/attachments/1/2/cat.webp?ex=aa&animated=true"));
 }
 
-void TestFavoriteGifs::testKlipyEmbedIsStoredAsItsThumbnail()
+TEST_CASE("Favorite GIFs: testKlipyEmbedIsStoredAsItsThumbnail")
 {
     const FavoriteGifCandidate candidate{ "https://klipy.com/gifs/cat", "https://images-ext-1.discordapp.net/external/sig/https/static.klipy.com/cat.mp4",
-                                          "https://images-ext-1.discordapp.net/external/sig2/https/static.klipy.com/cat.webp", GifType::Video, QSize(400, 300) };
+                                          "https://images-ext-1.discordapp.net/external/sig2/https/static.klipy.com/cat.webp", GifType::Video, Platform::Size{400, 300} };
     const FavoriteGif gif = FavoriteGifRules::stored(candidate, 1);
 
-    QCOMPARE(gif.src, QString("https://images-ext-1.discordapp.net/external/sig2/https/static.klipy.com/cat.webp?animated=true"));
-    QCOMPARE(gif.format, GifType::Image);
+    REQUIRE(gif.src == std::string("https://images-ext-1.discordapp.net/external/sig2/https/static.klipy.com/cat.webp?animated=true"));
+    REQUIRE(gif.format == GifType::Image);
 }
 
-void TestFavoriteGifs::testProviderResultPrefersItsGifSource()
+TEST_CASE("Favorite GIFs: testProviderResultPrefersItsGifSource")
 {
-    const FavoriteGifCandidate candidate{ "https://tenor.com/view/cat-123", "//media.tenor.com/abc/cat.webm", "//media.tenor.com/abc/cat.gif", GifType::Video, QSize(400, 300) };
+    const FavoriteGifCandidate candidate{ "https://tenor.com/view/cat-123", "//media.tenor.com/abc/cat.webm", "//media.tenor.com/abc/cat.gif", GifType::Video, Platform::Size{400, 300} };
     const FavoriteGif gif = FavoriteGifRules::stored(candidate, 1);
 
-    QCOMPARE(gif.src, QString("https://media.tenor.com/abc/cat.gif"));
-    QCOMPARE(gif.format, GifType::Image);
+    REQUIRE(gif.src == std::string("https://media.tenor.com/abc/cat.gif"));
+    REQUIRE(gif.format == GifType::Image);
 }
 
-void TestFavoriteGifs::testProtocolRelativeSourceGainsHttps()
+TEST_CASE("Favorite GIFs: testProtocolRelativeSourceGainsHttps")
 {
-    const FavoriteGifCandidate candidate{ "https://tenor.com/view/cat-123", "//media.tenor.com/abc/cat.mp4", {}, GifType::Video, QSize(400, 300) };
+    const FavoriteGifCandidate candidate{ "https://tenor.com/view/cat-123", "//media.tenor.com/abc/cat.mp4", {}, GifType::Video, Platform::Size{400, 300} };
     const FavoriteGif gif = FavoriteGifRules::stored(candidate, 1);
 
-    QCOMPARE(gif.src, QString("https://media.tenor.com/abc/cat.mp4"));
-    QCOMPARE(gif.format, GifType::Video);
+    REQUIRE(gif.src == std::string("https://media.tenor.com/abc/cat.mp4"));
+    REQUIRE(gif.format == GifType::Video);
 }
 
-void TestFavoriteGifs::testOrderFollowsTheHighestExisting()
+TEST_CASE("Favorite GIFs: testOrderFollowsTheHighestExisting")
 {
-    QCOMPARE(FavoriteGifRules::orderAfter({}), 1u);
+    REQUIRE(FavoriteGifRules::orderAfter({}) == 1u);
 
     FavoriteGif low;
     low.order = 3;
     FavoriteGif high;
     high.order = 41;
-    QCOMPARE(FavoriteGifRules::orderAfter({ high, low }), 42u);
+    REQUIRE(FavoriteGifRules::orderAfter({ high, low }) == 42u);
 }
 
-void TestFavoriteGifs::testNewestComesFirst()
+TEST_CASE("Favorite GIFs: testNewestComesFirst")
 {
     FavoriteGif first;
     first.url = "first";
@@ -126,135 +102,134 @@ void TestFavoriteGifs::testNewestComesFirst()
     third.url = "third";
     third.order = 3;
 
-    const QList<FavoriteGif> sorted = FavoriteGifRules::newestFirst({ second, third, first });
-    QCOMPARE(sorted[0].url, QString("third"));
-    QCOMPARE(sorted[1].url, QString("second"));
-    QCOMPARE(sorted[2].url, QString("first"));
+    const std::vector<FavoriteGif> sorted = FavoriteGifRules::newestFirst({ second, third, first });
+    REQUIRE(sorted[0].url == std::string("third"));
+    REQUIRE(sorted[1].url == std::string("second"));
+    REQUIRE(sorted[2].url == std::string("first"));
 }
 
-void TestFavoriteGifs::testSearchIgnoresCaseDashesUnderscoresAndSpaces()
+TEST_CASE("Favorite GIFs: testSearchIgnoresCaseDashesUnderscoresAndSpaces")
 {
-    const QString url = "https://tenor.com/view/Happy-Cat_dance-123";
-    QVERIFY(FavoriteGifRules::matchesSearch(url, "happy cat"));
-    QVERIFY(FavoriteGifRules::matchesSearch(url, "CAT_DANCE"));
-    QVERIFY(FavoriteGifRules::matchesSearch(url, "catdance"));
-    QVERIFY(!FavoriteGifRules::matchesSearch(url, "dog"));
+    const std::string url = "https://tenor.com/view/Happy-Cat_dance-123";
+    REQUIRE(FavoriteGifRules::matchesSearch(url, "happy cat"));
+    REQUIRE(FavoriteGifRules::matchesSearch(url, "CAT_DANCE"));
+    REQUIRE(FavoriteGifRules::matchesSearch(url, "catdance"));
+    REQUIRE(!FavoriteGifRules::matchesSearch(url, "dog"));
 }
 
-void TestFavoriteGifs::testOnlyDiscordHostedSourcesAreLoaded()
+TEST_CASE("Favorite GIFs: testOnlyDiscordHostedSourcesAreLoaded")
 {
     FavoriteGif direct;
     direct.src = "https://media.tenor.com/abc/cat.mp4";
     direct.format = GifType::Video;
-    QVERIFY(FavoriteGifRules::clipServedByDiscord(direct).isEmpty());
-    QVERIFY(FavoriteGifRules::stillServedByDiscord(direct).isEmpty());
+    REQUIRE(FavoriteGifRules::clipServedByDiscord(direct).empty());
+    REQUIRE(FavoriteGifRules::stillServedByDiscord(direct).empty());
 
     FavoriteGif insecure;
     insecure.src = "http://media.discordapp.net/attachments/1/2/cat.gif";
-    QVERIFY(FavoriteGifRules::clipServedByDiscord(insecure).isEmpty());
+    REQUIRE(FavoriteGifRules::clipServedByDiscord(insecure).empty());
 }
 
-void TestFavoriteGifs::testTileUrlsForAGifSource()
+TEST_CASE("Favorite GIFs: testTileUrlsForAGifSource")
 {
     FavoriteGif gif;
     gif.format = GifType::Image;
 
     gif.src = "https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&format=webp&animated=true";
-    QCOMPARE(FavoriteGifRules::clipServedByDiscord(gif).toString(), QString("https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&format=webp&animated=true"));
-    QCOMPARE(FavoriteGifRules::stillServedByDiscord(gif).toString(), QString("https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa"));
+    REQUIRE(FavoriteGifRules::clipServedByDiscord(gif) == std::string("https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa&format=webp&animated=true"));
+    REQUIRE(FavoriteGifRules::stillServedByDiscord(gif) == std::string("https://media.discordapp.net/attachments/1/2/cat.gif?ex=aa"));
 
     gif.src = "https://images-ext-1.discordapp.net/external/sig/https/x.test/cat.gif";
-    QCOMPARE(FavoriteGifRules::clipServedByDiscord(gif).toString(), QString("https://images-ext-1.discordapp.net/external/sig/https/x.test/cat.gif?format=webp&animated=true"));
-    QCOMPARE(FavoriteGifRules::stillServedByDiscord(gif).toString(), QString("https://images-ext-1.discordapp.net/external/sig/https/x.test/cat.gif"));
+    REQUIRE(FavoriteGifRules::clipServedByDiscord(gif) == std::string("https://images-ext-1.discordapp.net/external/sig/https/x.test/cat.gif?format=webp&animated=true"));
+    REQUIRE(FavoriteGifRules::stillServedByDiscord(gif) == std::string("https://images-ext-1.discordapp.net/external/sig/https/x.test/cat.gif"));
 
     gif.src = "https://media.discordapp.net/attachments/1/2/cat.avif?ex=aa";
-    QCOMPARE(FavoriteGifRules::clipServedByDiscord(gif).toString(), QString("https://media.discordapp.net/attachments/1/2/cat.avif?ex=aa&format=webp&animated=true"));
+    REQUIRE(FavoriteGifRules::clipServedByDiscord(gif) == std::string("https://media.discordapp.net/attachments/1/2/cat.avif?ex=aa&format=webp&animated=true"));
 
     gif.src = "https://media.discordapp.net/attachments/1/2/cat.webp?ex=aa";
-    QCOMPARE(FavoriteGifRules::clipServedByDiscord(gif).toString(), QString("https://media.discordapp.net/attachments/1/2/cat.webp?ex=aa&animated=true"));
+    REQUIRE(FavoriteGifRules::clipServedByDiscord(gif) == std::string("https://media.discordapp.net/attachments/1/2/cat.webp?ex=aa&animated=true"));
 }
 
-void TestFavoriteGifs::testTileUrlsForAVideoSource()
+TEST_CASE("Favorite GIFs: testTileUrlsForAVideoSource")
 {
     FavoriteGif gif;
     gif.format = GifType::Video;
     gif.src = "https://images-ext-1.discordapp.net/external/sig/https/media.tenor.com/abc/cat.mp4";
 
-    QCOMPARE(FavoriteGifRules::clipServedByDiscord(gif).toString(), gif.src);
-    QCOMPARE(FavoriteGifRules::stillServedByDiscord(gif).toString(), gif.src);
+    REQUIRE(FavoriteGifRules::clipServedByDiscord(gif) == gif.src);
+    REQUIRE(FavoriteGifRules::stillServedByDiscord(gif) == gif.src);
 }
 
-void TestFavoriteGifs::testGutterTightensAsColumnsAreAdded()
+TEST_CASE("Favorite GIFs: testGutterTightensAsColumnsAreAdded")
 {
     using namespace UI::GifMasonry;
-    QCOMPARE(gutterFor(1), RoomiestGutter);
-    QCOMPARE(gutterFor(2), 12);
-    QCOMPARE(gutterFor(3), 8);
-    QCOMPARE(gutterFor(4), 6);
-    QCOMPARE(gutterFor(5), TightestGutter);
-    QCOMPARE(gutterFor(MostColumns), TightestGutter);
+    REQUIRE(gutterFor(1) == RoomiestGutter);
+    REQUIRE(gutterFor(2) == 12);
+    REQUIRE(gutterFor(3) == 8);
+    REQUIRE(gutterFor(4) == 6);
+    REQUIRE(gutterFor(5) == TightestGutter);
+    REQUIRE(gutterFor(MostColumns) == TightestGutter);
 }
 
-void TestFavoriteGifs::testDenseGridFitsMoreColumnsInTheSameWidth()
+TEST_CASE("Favorite GIFs: testDenseGridFitsMoreColumnsInTheSameWidth")
 {
     using namespace UI::GifMasonry;
-    QList<QSize> sevenSquares;
+    std::vector<Platform::Size> sevenSquares;
     for (int i = 0; i < 7; ++i)
-        sevenSquares.append(QSize(100, 100));
+        sevenSquares.push_back(Platform::Size{100, 100});
     const Arrangement arrangement = arrange(sevenSquares, 498, MostColumns);
 
     const int columnWidth = 78;
-    QCOMPARE(arrangement.gutter, TightestGutter);
+    REQUIRE(arrangement.gutter == TightestGutter);
     for (int column = 0; column < MostColumns; ++column)
-        QCOMPARE(arrangement.tiles[column], QRect(TightestGutter + column * (columnWidth + TightestGutter), TightestGutter, columnWidth, columnWidth));
-    QCOMPARE(arrangement.tiles[6], QRect(TightestGutter, TightestGutter + columnWidth + TightestGutter, columnWidth, columnWidth));
-    QVERIFY(arrangement.tiles[5].right() < 498);
+        REQUIRE((arrangement.tiles[column] == Platform::Rect{static_cast<float>(TightestGutter + column * (columnWidth + TightestGutter)), TightestGutter, columnWidth, columnWidth}));
+    REQUIRE((arrangement.tiles[6] == Platform::Rect{TightestGutter, TightestGutter + columnWidth + TightestGutter, columnWidth, columnWidth}));
+    REQUIRE(arrangement.tiles[5].x + arrangement.tiles[5].width <= 498);
 }
 
-void TestFavoriteGifs::testTilesFillTheShortestColumn()
+TEST_CASE("Favorite GIFs: testTilesFillTheShortestColumn")
 {
     using namespace UI::GifMasonry;
-    const Arrangement arrangement = arrange({ QSize(100, 200), QSize(100, 50), QSize(100, 50), QSize(100, 100) }, 436, 2);
+    const Arrangement arrangement = arrange({ Platform::Size{100, 200}, Platform::Size{100, 50}, Platform::Size{100, 50}, Platform::Size{100, 100} }, 436, 2);
 
     const int Gutter = RoomiestGutter;
     const int columnWidth = 200;
-    QCOMPARE(arrangement.tiles.size(), 4);
-    QCOMPARE(arrangement.tiles[0], QRect(Gutter, Gutter, columnWidth, 400));
-    QCOMPARE(arrangement.tiles[1], QRect(Gutter + columnWidth + Gutter, Gutter, columnWidth, 100));
-    QCOMPARE(arrangement.tiles[2], QRect(Gutter + columnWidth + Gutter, Gutter + 100 + Gutter, columnWidth, 100));
-    QCOMPARE(arrangement.tiles[3], QRect(Gutter + columnWidth + Gutter, Gutter + 2 * (100 + Gutter), columnWidth, 200));
-    QCOMPARE(arrangement.contentHeight, Gutter + 2 * (100 + Gutter) + 200 + Gutter);
+    REQUIRE(arrangement.tiles.size() == 4);
+    REQUIRE((arrangement.tiles[0] == Platform::Rect{Gutter, Gutter, columnWidth, 400}));
+    REQUIRE((arrangement.tiles[1] == Platform::Rect{Gutter + columnWidth + Gutter, Gutter, columnWidth, 100}));
+    REQUIRE((arrangement.tiles[2] == Platform::Rect{Gutter + columnWidth + Gutter, Gutter + 100 + Gutter, columnWidth, 100}));
+    REQUIRE((arrangement.tiles[3] == Platform::Rect{Gutter + columnWidth + Gutter, Gutter + 2 * (100 + Gutter), columnWidth, 200}));
+    REQUIRE(arrangement.contentHeight == Gutter + 2 * (100 + Gutter) + 200 + Gutter);
 }
 
-void TestFavoriteGifs::testTileHeightKeepsTheAspectRatio()
+TEST_CASE("Favorite GIFs: testTileHeightKeepsTheAspectRatio")
 {
     using namespace UI::GifMasonry;
-    const Arrangement arrangement = arrange({ QSize(498, 280), QSize(0, 0) }, 236, 1);
+    const Arrangement arrangement = arrange({ Platform::Size{498, 280}, Platform::Size{0, 0} }, 236, 1);
 
     const int Gutter = RoomiestGutter;
-    QCOMPARE(arrangement.tiles[0], QRect(Gutter, Gutter, 212, 119));
-    QCOMPARE(arrangement.tiles[1].size(), QSize(212, 212));
-    QCOMPARE(arrange({}, 236, 1).contentHeight, Gutter);
+    REQUIRE((arrangement.tiles[0] == Platform::Rect{Gutter, Gutter, 212, 119}));
+    REQUIRE((Platform::Size{static_cast<int>(arrangement.tiles[1].width), static_cast<int>(arrangement.tiles[1].height)} == Platform::Size{212, 212}));
+    REQUIRE(arrange({}, 236, 1).contentHeight == Gutter);
 }
 
-void TestFavoriteGifs::testStillsComeInTwoSizesWhateverTheDensity()
+TEST_CASE("Favorite GIFs: testStillsComeInTwoSizesWhateverTheDensity")
 {
     using namespace UI::GifMasonry;
-    const QSize natural(498, 280);
+    const Platform::Size natural(498, 280);
     const int viewportWidth = 498;
 
-    QList<QSize> sizesAskedFor;
+    std::vector<Platform::Size> sizesAskedFor;
     for (int columns = FewestColumns; columns <= MostColumns; ++columns) {
-        const int tileWidth = arrange({ natural }, viewportWidth, columns).tiles[0].width();
-        const QSize still = stillSizeFor(natural, tileWidth);
-        QVERIFY(still.width() >= tileWidth);
-        if (!sizesAskedFor.contains(still))
-            sizesAskedFor.append(still);
+        const int tileWidth = arrange({ natural }, viewportWidth, columns).tiles[0].width;
+        const Platform::Size still = stillSizeFor(natural, tileWidth);
+        REQUIRE(still.width >= tileWidth);
+        if (std::find(sizesAskedFor.begin(), sizesAskedFor.end(), still) == sizesAskedFor.end())
+            sizesAskedFor.push_back(still);
     }
 
-    QCOMPARE(sizesAskedFor, (QList<QSize>{ QSize(RoomyStillWidth, 144), QSize(DenseStillWidth, 72) }));
-    QCOMPARE(stillSizeFor(QSize(0, 0), 100), QSize(DenseStillWidth, DenseStillWidth));
+    REQUIRE((sizesAskedFor == std::vector<Platform::Size>{Platform::Size{RoomyStillWidth, 144}, Platform::Size{DenseStillWidth, 72}}));
+    REQUIRE((stillSizeFor(Platform::Size{0, 0}, 100) == Platform::Size{DenseStillWidth, DenseStillWidth}));
 }
 
-QTEST_GUILESS_MAIN(TestFavoriteGifs)
-#include "tst_FavoriteGifs.moc"
+

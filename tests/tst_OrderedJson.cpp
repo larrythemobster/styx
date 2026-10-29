@@ -6,58 +6,44 @@
 #include "Core/OrderedJson.hpp"
 #include "Discord/ContextProperties.hpp"
 
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QTest>
+#include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
+#include <cstdint>
+#include <map>
+#include <string>
+#include <vector>
 
 #include <cmath>
 
 using namespace Styx;
 using Core::OrderedJson;
 
-class TestOrderedJson : public QObject
+TEST_CASE("OrderedJson: testEmpty", "[ordered-json]")
 {
-    Q_OBJECT
-private slots:
-    void testEmpty();
-    void testInsertionOrder();
-    void testScalars();
-    void testNumbers();
-    void testStringEscaping();
-    void testNesting();
-    void testQJsonArrayValue();
-    void testMatchesQtWhenAlreadySorted();
-    void testFieldInsert();
-    void testContextProperties();
-};
-
-void TestOrderedJson::testEmpty()
-{
-    QCOMPARE(OrderedJson().toBytes(), QByteArray("{}"));
-    QCOMPARE(OrderedJson::Array().toBytes(), QByteArray("[]"));
+    REQUIRE(OrderedJson().toBytes() == std::string("{}"));
+    REQUIRE(OrderedJson::Array().toBytes() == std::string("[]"));
 }
 
-void TestOrderedJson::testInsertionOrder()
+TEST_CASE("OrderedJson: testInsertionOrder", "[ordered-json]")
 {
     OrderedJson obj;
     obj.insert("zeta", 1);
     obj.insert("alpha", 2);
     obj.insert("mid", 3);
-    QCOMPARE(obj.toBytes(), QByteArray(R"({"zeta":1,"alpha":2,"mid":3})"));
+    REQUIRE(obj.toBytes() == std::string(R"({"zeta":1,"alpha":2,"mid":3})"));
 }
 
-void TestOrderedJson::testScalars()
+TEST_CASE("OrderedJson: testScalars", "[ordered-json]")
 {
     OrderedJson obj;
     obj.insert("t", true);
     obj.insert("f", false);
-    obj.insert("n", QJsonValue::Null);
+    obj.insert("n", nullptr);
     obj.insert("s", "text");
-    QCOMPARE(obj.toBytes(), QByteArray(R"({"t":true,"f":false,"n":null,"s":"text"})"));
+    REQUIRE(obj.toBytes() == std::string(R"({"t":true,"f":false,"n":null,"s":"text"})"));
 }
 
-void TestOrderedJson::testNumbers()
+TEST_CASE("OrderedJson: testNumbers", "[ordered-json]")
 {
     OrderedJson obj;
     obj.insert("int", 42);
@@ -65,32 +51,31 @@ void TestOrderedJson::testNumbers()
     obj.insert("wholeDouble", 2.0);
     obj.insert("negZero", -0.0);
     obj.insert("fraction", 1.5);
-    obj.insert("big", static_cast<qint64>(1700000000000LL));
+    obj.insert("big", static_cast<int64_t>(1700000000000LL));
     obj.insert("nan", std::nan(""));
     obj.insert("inf", INFINITY);
-    QCOMPARE(obj.toBytes(),
-             QByteArray(R"({"int":42,"neg":-7,"wholeDouble":2,"negZero":0,"fraction":1.5,)"
+    REQUIRE(obj.toBytes() == std::string(R"({"int":42,"neg":-7,"wholeDouble":2,"negZero":0,"fraction":1.5,)"
                         R"("big":1700000000000,"nan":null,"inf":null})"));
 }
 
-void TestOrderedJson::testStringEscaping()
+TEST_CASE("OrderedJson: testStringEscaping", "[ordered-json]")
 {
     OrderedJson obj;
     obj.insert("q", "say \"hi\"");
     obj.insert("bs", "a\\b");
-    obj.insert("ctl", QString("tab\tnl\ncr\rbs\bff\f"));
-    obj.insert("low", QString(QChar(0x01)) + QChar(0x1f));
+    obj.insert("ctl", std::string("tab\tnl\ncr\rbs\bff\f"));
+    obj.insert("low", std::string("\x01\x1f", 2));
     obj.insert("slash", "a/b");
-    obj.insert("uni", QString::fromUtf8("caf\xC3\xA9 \xF0\x9F\x98\x80"));
-    obj.insert(QString::fromUtf8("k\xC3\xA9y"), 1);
-    // Kept out of QCOMPARE: Visual Studio 2022 cannot turn a raw string with \" in it into the text of a macro argument.
-    const QByteArray expected = QByteArray(R"({"q":"say \"hi\"","bs":"a\\b","ctl":"tab\tnl\ncr\rbs\bff\f",)"
+    obj.insert("uni", std::string("caf\xC3\xA9 \xF0\x9F\x98\x80"));
+    obj.insert(std::string("k\xC3\xA9y"), 1);
+    // Keep the escaped raw string outside the assertion macro for Visual Studio.
+    const std::string expected = std::string(R"({"q":"say \"hi\"","bs":"a\\b","ctl":"tab\tnl\ncr\rbs\bff\f",)"
                                            R"("low":"\u0001\u001f","slash":"a/b","uni":"caf)") +
-                                QByteArray("\xC3\xA9 \xF0\x9F\x98\x80") + QByteArray(R"(","k)") + QByteArray("\xC3\xA9") + QByteArray(R"(y":1})");
-    QCOMPARE(obj.toBytes(), expected);
+                                std::string("\xC3\xA9 \xF0\x9F\x98\x80") + std::string(R"(","k)") + std::string("\xC3\xA9") + std::string(R"(y":1})");
+    REQUIRE(obj.toBytes() == expected);
 }
 
-void TestOrderedJson::testNesting()
+TEST_CASE("OrderedJson: testNesting", "[ordered-json]")
 {
     OrderedJson inner;
     inner.insert("b", 1);
@@ -108,40 +93,34 @@ void TestOrderedJson::testNesting()
     obj.insert("pairs", pairs);
     obj.insert("objects", objects);
     obj.insert("empty", OrderedJson());
-    QCOMPARE(obj.toBytes(),
-             QByteArray(R"({"inner":{"b":1,"a":2},"pairs":[[0,99],[100,199]],"objects":[{"b":1,"a":2}],"empty":{}})"));
+    REQUIRE(obj.toBytes() == std::string(R"({"inner":{"b":1,"a":2},"pairs":[[0,99],[100,199]],"objects":[{"b":1,"a":2}],"empty":{}})"));
 }
 
-void TestOrderedJson::testQJsonArrayValue()
+TEST_CASE("OrderedJson: native array values", "[ordered-json]")
 {
     OrderedJson obj;
-    obj.insert("activities", QJsonArray());
-    obj.insert("mixed", QJsonArray{ 1, "two", QJsonValue::Null, true });
-    QCOMPARE(obj.toBytes(), QByteArray(R"({"activities":[],"mixed":[1,"two",null,true]})"));
+    obj.insert("activities", nlohmann::json::array());
+    obj.insert("mixed", nlohmann::json::array({ 1, "two", nullptr, true }));
+    REQUIRE(obj.toBytes() == std::string(R"({"activities":[],"mixed":[1,"two",null,true]})"));
 }
 
-void TestOrderedJson::testMatchesQtWhenAlreadySorted()
+TEST_CASE("OrderedJson: sorted native JSON values", "[ordered-json]")
 {
-    QJsonObject qt;
-    qt["a"] = QString::fromUtf8("q\"uote\\ \n \xC3\xA9");
-    qt["b"] = 1234567890123LL;
-    qt["c"] = 0.1;
-    qt["d"] = QJsonArray{ 1, 2.5, "x" };
-    qt["e"] = QJsonValue::Null;
-    qt["f"] = false;
-
+    nlohmann::json native = {{"a", std::string("q\"uote\\ \n \xC3\xA9")},
+                             {"b", 1234567890123LL}, {"c", 0.1},
+                             {"d", nlohmann::json::array({1, 2.5, "x"})},
+                             {"e", nullptr}, {"f", false}};
     OrderedJson ordered;
-    for (auto it = qt.constBegin(); it != qt.constEnd(); ++it)
+    for (auto it = native.cbegin(); it != native.cend(); ++it)
         ordered.insert(it.key(), it.value());
-
-    QCOMPARE(ordered.toBytes(), QJsonDocument(qt).toJson(QJsonDocument::Compact));
+    REQUIRE(ordered.toBytes() == native.dump());
 }
 
 namespace {
 
 struct Inner : Core::JsonUtils::JsonObject
 {
-    Field<QString> name;
+    Field<std::string> name;
     Field<int> value;
 
     Core::OrderedJson toJson() const
@@ -156,14 +135,14 @@ struct Inner : Core::JsonUtils::JsonObject
 struct Outer : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> id;
-    Field<QList<Core::Snowflake>> ids;
-    Field<QString, true> absent;
-    Field<QString, false, true> nulled;
+    Field<std::vector<Core::Snowflake>> ids;
+    Field<std::string, true> absent;
+    Field<std::string, false, true> nulled;
     Field<Inner> inner;
-    Field<QList<Inner>> inners;
-    Field<QMap<Core::Snowflake, Inner>> byId;
-    Field<QByteArray> bytes;
-    Field<quint32> ssrc;
+    Field<std::vector<Inner>> inners;
+    Field<std::map<Core::Snowflake, Inner>> byId;
+    Field<std::vector<uint8_t>> bytes;
+    Field<uint32_t> ssrc;
 
     Core::OrderedJson toJson() const
     {
@@ -183,7 +162,7 @@ struct Outer : Core::JsonUtils::JsonObject
 
 } // namespace
 
-void TestOrderedJson::testFieldInsert()
+TEST_CASE("OrderedJson: testFieldInsert", "[ordered-json]")
 {
     Inner one;
     one.name = "one";
@@ -194,32 +173,27 @@ void TestOrderedJson::testFieldInsert()
 
     Outer outer;
     outer.id = Core::Snowflake(1234567890123456789ULL);
-    outer.ids = QList<Core::Snowflake>{ Core::Snowflake(1), Core::Snowflake(2) };
+    outer.ids = std::vector<Core::Snowflake>{ Core::Snowflake(1), Core::Snowflake(2) };
     outer.nulled = nullptr;
     outer.inner = one;
-    outer.inners = QList<Inner>{ one, two };
-    outer.byId = QMap<Core::Snowflake, Inner>{ { Core::Snowflake(7), two } };
-    outer.bytes = QByteArray("\x00\xff", 2);
+    outer.inners = std::vector<Inner>{ one, two };
+    outer.byId = std::map<Core::Snowflake, Inner>{ { Core::Snowflake(7), two } };
+    outer.bytes = std::vector<uint8_t>{ 0, 255 };
     outer.ssrc = 4000000000u;
 
-    QCOMPARE(outer.toJson().toBytes(),
-             QByteArray(R"({"id":"1234567890123456789","ids":["1","2"],"nulled":null,)"
+    REQUIRE(outer.toJson().toBytes() == std::string(R"({"id":"1234567890123456789","ids":["1","2"],"nulled":null,)"
                         R"("inner":{"name":"one","value":1},)"
                         R"("inners":[{"name":"one","value":1},{"name":"two","value":2}],)"
                         R"("by_id":{"7":{"name":"two","value":2}},"bytes":[0,255],"ssrc":4000000000})"));
 }
 
-void TestOrderedJson::testContextProperties()
+TEST_CASE("OrderedJson: testContextProperties", "[ordered-json]")
 {
-    QCOMPARE(Discord::ContextProperties::empty().toHeaderValue(), QByteArray("e30="));
-    QCOMPARE(Discord::ContextProperties::location("chat_input").toHeaderValue(),
-             QByteArray("eyJsb2NhdGlvbiI6ImNoYXRfaW5wdXQifQ=="));
+    REQUIRE(Discord::ContextProperties::empty().toHeaderValue() == std::string("e30="));
+    REQUIRE(Discord::ContextProperties::location("chat_input").toHeaderValue() == std::string("eyJsb2NhdGlvbiI6ImNoYXRfaW5wdXQifQ=="));
 
     Discord::ContextProperties invite = Discord::ContextProperties::location("Join Guild");
     invite.add("location_guild_id", "1").add("location_channel_type", 0);
-    QCOMPARE(QByteArray::fromBase64(invite.toHeaderValue()),
-             QByteArray(R"({"location":"Join Guild","location_guild_id":"1","location_channel_type":0})"));
+    REQUIRE(invite.toHeaderValue() == std::string("eyJsb2NhdGlvbiI6IkpvaW4gR3VpbGQiLCJsb2NhdGlvbl9ndWlsZF9pZCI6IjEiLCJsb2NhdGlvbl9jaGFubmVsX3R5cGUiOjB9"));
 }
 
-QTEST_GUILESS_MAIN(TestOrderedJson)
-#include "tst_OrderedJson.moc"

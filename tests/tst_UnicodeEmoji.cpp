@@ -1,103 +1,67 @@
 #include "Core/Emoji/UnicodeEmojiIndex.hpp"
 
-#include <QTest>
+#include <catch2/catch_test_macros.hpp>
+#include <algorithm>
+#include <string>
+#include <vector>
 
 using namespace Styx::Core;
 
-class TestUnicodeEmoji : public QObject
+static const std::string thumbsUpTone2 = "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBC";
+
+TEST_CASE("Unicode emoji names and aliases", "[emoji]")
 {
-    Q_OBJECT
-private slots:
-    void testByName();
-    void testAliases();
-    void testConvertSurrogateToBase();
-    void testTranslateNamesToSurrogates();
-    void testTopLevel();
-    void testCategories();
-};
-
-// U+1F44D U+1F3FC — thumbsup with the medium-light skin tone.
-static const QString thumbsUpTone2 = QString::fromUtf8("\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBC");
-
-void TestUnicodeEmoji::testByName()
-{
-    const UnicodeEmoji *emoji = UnicodeEmojiIndex::instance().byName("thumbsup::skin-tone-2");
-    QVERIFY(emoji != nullptr);
-    QCOMPARE(emoji->surrogates, thumbsUpTone2);
-    QVERIFY(emoji->isDiversityChild);
-
-    // The parent is reachable under each of its aliases.
-    const UnicodeEmoji *parent = UnicodeEmojiIndex::instance().byName("thumbsup");
-    QVERIFY(parent != nullptr);
-    QCOMPARE(UnicodeEmojiIndex::instance().byName("+1"), parent);
-    QVERIFY(parent->hasDiversity);
-    QCOMPARE(UnicodeEmojiIndex::primaryName(*parent), QStringLiteral("thumbsup"));
-
-    QVERIFY(UnicodeEmojiIndex::instance().byName("definitely_not_an_emoji") == nullptr);
+    const auto &index = UnicodeEmojiIndex::instance();
+    const auto *emoji = index.byName("thumbsup::skin-tone-2");
+    REQUIRE(emoji);
+    CHECK(emoji->surrogates == thumbsUpTone2);
+    CHECK(emoji->isDiversityChild);
+    const auto *parent = index.byName("thumbsup");
+    REQUIRE(parent);
+    CHECK(index.byName("+1") == parent);
+    CHECK(parent->hasDiversity);
+    CHECK(UnicodeEmojiIndex::primaryName(*parent) == "thumbsup");
+    CHECK(index.byName("definitely_not_an_emoji") == nullptr);
+    REQUIRE(index.byName("laughing"));
+    CHECK(index.byName("satisfied") == index.byName("laughing"));
+    const auto *grinning = index.byName("grinning");
+    REQUIRE(grinning);
+    CHECK(std::find(grinning->keywords.begin(), grinning->keywords.end(), "happy") != grinning->keywords.end());
+    CHECK(index.byName("happy") == nullptr);
+    CHECK(index.convertSurrogateToBase(thumbsUpTone2) == parent);
+    CHECK(index.bySurrogate(thumbsUpTone2) == emoji);
 }
 
-void TestUnicodeEmoji::testAliases()
+TEST_CASE("Unicode emoji name translation preserves custom tags", "[emoji]")
 {
-    const UnicodeEmojiIndex &index = UnicodeEmojiIndex::instance();
-    QVERIFY(index.byName("laughing") != nullptr);
-    QCOMPARE(index.byName("satisfied"), index.byName("laughing"));
-
-    // Keywords widen search but are not names.
-    QVERIFY(index.byName("grinning")->keywords.contains("happy"));
-    QVERIFY(index.byName("happy") == nullptr);
+    const auto &index = UnicodeEmojiIndex::instance();
+    CHECK(index.translateNamesToSurrogates(":thumbsup: hi <:pepe:123> :nope:") == "\xF0\x9F\x91\x8D hi <:pepe:123> :nope:");
+    CHECK(index.translateNamesToSurrogates(":thumbsup::skin-tone-2:") == thumbsUpTone2);
+    CHECK(index.translateNamesToSurrogates("<a:pepe:123>") == "<a:pepe:123>");
+    CHECK(index.translateNamesToSurrogates("no emoji here") == "no emoji here");
+    CHECK(index.translateNamesToSurrogates("<:100:123456789>") == "<:100:123456789>");
+    CHECK(index.translateNamesToSurrogates(":100: <:100:123456789>") == "\xF0\x9F\x92\xAF <:100:123456789>");
 }
 
-void TestUnicodeEmoji::testConvertSurrogateToBase()
+TEST_CASE("Unicode emoji categories contain top-level emoji", "[emoji]")
 {
-    const UnicodeEmojiIndex &index = UnicodeEmojiIndex::instance();
-    QCOMPARE(index.convertSurrogateToBase(thumbsUpTone2), index.byName("thumbsup"));
-    QCOMPARE(index.bySurrogate(thumbsUpTone2), index.byName("thumbsup::skin-tone-2"));
-}
-
-void TestUnicodeEmoji::testTranslateNamesToSurrogates()
-{
-    const UnicodeEmojiIndex &index = UnicodeEmojiIndex::instance();
-
-    // Unknown names and custom emoji tags are left alone.
-    QCOMPARE(index.translateNamesToSurrogates(":thumbsup: hi <:pepe:123> :nope:"),
-             QString::fromUtf8("\xF0\x9F\x91\x8D") + QStringLiteral(" hi <:pepe:123> :nope:"));
-
-    QCOMPARE(index.translateNamesToSurrogates(":thumbsup::skin-tone-2:"), thumbsUpTone2);
-    QCOMPARE(index.translateNamesToSurrogates("<a:pepe:123>"), QStringLiteral("<a:pepe:123>"));
-    QCOMPARE(index.translateNamesToSurrogates("no emoji here"), QStringLiteral("no emoji here"));
-
-    // A custom emoji may be named after a unicode one; the tag must survive intact.
-    QCOMPARE(index.translateNamesToSurrogates("<:100:123456789>"), QStringLiteral("<:100:123456789>"));
-    QCOMPARE(index.translateNamesToSurrogates(":100: <:100:123456789>"),
-             QString::fromUtf8("\xF0\x9F\x92\xAF") + QStringLiteral(" <:100:123456789>"));
-}
-
-void TestUnicodeEmoji::testTopLevel()
-{
-    const UnicodeEmojiIndex &index = UnicodeEmojiIndex::instance();
-    QVERIFY(!index.topLevel().isEmpty());
-    for (const UnicodeEmoji *emoji : index.topLevel())
-        QVERIFY(!emoji->isDiversityChild);
-}
-
-void TestUnicodeEmoji::testCategories()
-{
-    const UnicodeEmojiIndex &index = UnicodeEmojiIndex::instance();
-
-    QStringList ids;
-    qsizetype categorized = 0;
-    for (const UnicodeEmojiCategory &category : index.categories()) {
-        ids.append(category.id);
+    const auto &index = UnicodeEmojiIndex::instance();
+    REQUIRE(!index.topLevel().empty());
+    for (const auto *emoji : index.topLevel())
+        CHECK(!emoji->isDiversityChild);
+    std::vector<std::string> ids;
+    std::size_t categorized = 0;
+    for (const auto &category : index.categories()) {
+        ids.push_back(category.id);
         categorized += category.emojis.size();
-        for (const UnicodeEmoji *emoji : category.emojis)
-            QCOMPARE(emoji->category, category.id);
+        for (const auto *emoji : category.emojis)
+            CHECK(emoji->category == category.id);
     }
-
-    QCOMPARE(ids, QStringList({ "people", "nature", "food", "activity", "travel", "objects", "symbols", "flags" }));
-    QCOMPARE(categorized, index.topLevel().size());
-    QCOMPARE(index.categories().first().emojis.first(), index.byName("grinning"));
-    QCOMPARE(index.byName("thumbsup::skin-tone-2")->category, QStringLiteral("people"));
+    CHECK((ids == std::vector<std::string>{"people", "nature", "food", "activity", "travel", "objects", "symbols", "flags"}));
+    CHECK(categorized == index.topLevel().size());
+    REQUIRE(!index.categories().empty());
+    REQUIRE(!index.categories().front().emojis.empty());
+    CHECK(index.categories().front().emojis.front() == index.byName("grinning"));
+    REQUIRE(index.byName("thumbsup::skin-tone-2"));
+    CHECK(index.byName("thumbsup::skin-tone-2")->category == "people");
 }
-
-QTEST_GUILESS_MAIN(TestUnicodeEmoji)
-#include "tst_UnicodeEmoji.moc"

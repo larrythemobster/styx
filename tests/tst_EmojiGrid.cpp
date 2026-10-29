@@ -1,207 +1,164 @@
 #include "UI/Rml/EmojiGridModel.hpp"
 
-#include <QSignalSpy>
-#include <QTest>
+#include <catch2/catch_test_macros.hpp>
+
+#include <string>
+#include <vector>
 
 using namespace Styx;
 using UI::Rml::EmojiGridModel;
 
-class TestEmojiGrid : public QObject
-{
-    Q_OBJECT
-private slots:
-    void initTestCase();
-    void init();
-    void cleanup();
-
-    void firstCellBecomesActive();
-    void horizontalMovesWrapAcrossRowsAndSections();
-    void verticalMovesClampToShorterRows();
-    void movesStopAtTheGridEdges();
-    void keyboardSelectionScrollsIntoView();
-    void clickReportsEmojiAndModifiers();
-    void headerClickCollapsesSection();
-    void topSectionFollowsScroll();
-
-private:
-    [[nodiscard]] QString activeName() const;
-
-    EmojiGridModel *grid = nullptr;
-};
-
-static Core::PickerSection makeSection(const QString &id, const QString &title, int count)
+namespace {
+Core::PickerSection makeSection(const std::string &id, const std::string &title, int count)
 {
     Core::PickerSection section;
     section.id = id;
     section.title = title;
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < count; ++i) {
         Core::PickerEmoji emoji;
-        emoji.name = id + QString::number(i);
-        emoji.surrogates = QString::fromUtf8("\xF0\x9F\x98\x80");
-        section.emojis.append(emoji);
+        emoji.name = id + std::to_string(i);
+        emoji.surrogates = "\xF0\x9F\x98\x80";
+        section.emojis.push_back(emoji);
     }
     return section;
 }
 
-void TestEmojiGrid::initTestCase()
-{
-    QCOMPARE(EmojiGridModel::Columns, 9);
+struct GridFixture {
+    EmojiGridModel grid;
+
+    GridFixture()
+    {
+        grid.setViewportHeight(360);
+        grid.setSections({makeSection("a", "First", 11), makeSection("b", "Second", 3), makeSection("c", "Third", 200)});
+    }
+
+    std::string activeName() const
+    {
+        const auto *emoji = grid.activeEmoji();
+        return emoji ? emoji->name : std::string{};
+    }
+};
 }
 
-void TestEmojiGrid::init()
+TEST_CASE_METHOD(GridFixture, "Emoji grid first cell becomes active")
 {
-    grid = new EmojiGridModel;
-    grid->setViewportHeight(360);
-    grid->setSections({ makeSection("a", "First", 11), makeSection("b", "Second", 3), makeSection("c", "Third", 200) });
+    REQUIRE(EmojiGridModel::Columns == 9);
+    REQUIRE(grid.activeEmoji() == nullptr);
+    int activeChanges = 0;
+    auto connection = grid.activeEmojiChanged.connect([&] { ++activeChanges; });
+    grid.activateFirst();
+    REQUIRE(activeName() == "a0");
+    REQUIRE(grid.activeIsFirst());
+    REQUIRE(activeChanges == 1);
+    grid.moveActive(1, 0);
+    REQUIRE_FALSE(grid.activeIsFirst());
 }
 
-void TestEmojiGrid::cleanup()
+TEST_CASE_METHOD(GridFixture, "Emoji grid horizontal moves wrap across rows and sections")
 {
-    delete grid;
-    grid = nullptr;
+    grid.activateFirst();
+    for (int i = 0; i < 8; ++i)
+        grid.moveActive(1, 0);
+    REQUIRE(activeName() == "a8");
+    grid.moveActive(1, 0);
+    REQUIRE(activeName() == "a9");
+    grid.moveActive(1, 0);
+    grid.moveActive(1, 0);
+    REQUIRE(activeName() == "b0");
+    grid.moveActive(-1, 0);
+    REQUIRE(activeName() == "a10");
 }
 
-QString TestEmojiGrid::activeName() const
+TEST_CASE_METHOD(GridFixture, "Emoji grid vertical moves clamp to shorter rows")
 {
-    const Core::PickerEmoji *emoji = grid->activeEmoji();
-    return emoji ? emoji->name : QString();
+    grid.activateFirst();
+    for (int i = 0; i < 4; ++i)
+        grid.moveActive(1, 0);
+    REQUIRE(activeName() == "a4");
+    grid.moveActive(0, 1);
+    REQUIRE(activeName() == "a10");
+    grid.moveActive(0, 1);
+    REQUIRE(activeName() == "b1");
+    grid.moveActive(0, 1);
+    REQUIRE(activeName() == "c1");
+    grid.moveActive(0, -1);
+    REQUIRE(activeName() == "b1");
+    grid.moveActive(0, -1);
+    REQUIRE(activeName() == "a10");
+    grid.moveActive(0, -1);
+    REQUIRE(activeName() == "a1");
 }
 
-void TestEmojiGrid::firstCellBecomesActive()
+TEST_CASE_METHOD(GridFixture, "Emoji grid moves stop at the edges")
 {
-    QVERIFY(grid->activeEmoji() == nullptr);
-
-    QSignalSpy activeChanged(grid, &EmojiGridModel::activeEmojiChanged);
-    grid->activateFirst();
-    QCOMPARE(activeName(), QStringLiteral("a0"));
-    QVERIFY(grid->activeIsFirst());
-    QCOMPARE(activeChanged.count(), 1);
-
-    grid->moveActive(1, 0);
-    QVERIFY(!grid->activeIsFirst());
+    grid.activateFirst();
+    grid.moveActive(-1, 0);
+    REQUIRE(activeName() == "a0");
+    grid.moveActive(0, -1);
+    REQUIRE(activeName() == "a0");
+    grid.setSections({makeSection("a", "Only", 2)});
+    grid.activateFirst();
+    grid.moveActive(1, 0);
+    grid.moveActive(1, 0);
+    REQUIRE(activeName() == "a1");
+    grid.moveActive(0, 1);
+    REQUIRE(activeName() == "a1");
 }
 
-void TestEmojiGrid::horizontalMovesWrapAcrossRowsAndSections()
+TEST_CASE_METHOD(GridFixture, "Emoji grid keyboard selection scrolls into view")
 {
-    grid->activateFirst();
-    for (int i = 0; i < 8; i++)
-        grid->moveActive(1, 0);
-    QCOMPARE(activeName(), QStringLiteral("a8"));
-
-    grid->moveActive(1, 0);
-    QCOMPARE(activeName(), QStringLiteral("a9"));
-    grid->moveActive(1, 0);
-    grid->moveActive(1, 0);
-    QCOMPARE(activeName(), QStringLiteral("b0"));
-
-    grid->moveActive(-1, 0);
-    QCOMPARE(activeName(), QStringLiteral("a10"));
-}
-
-void TestEmojiGrid::verticalMovesClampToShorterRows()
-{
-    grid->activateFirst();
-    for (int i = 0; i < 4; i++)
-        grid->moveActive(1, 0);
-    QCOMPARE(activeName(), QStringLiteral("a4"));
-
-    grid->moveActive(0, 1);
-    QCOMPARE(activeName(), QStringLiteral("a10"));
-    grid->moveActive(0, 1);
-    QCOMPARE(activeName(), QStringLiteral("b1"));
-    grid->moveActive(0, 1);
-    QCOMPARE(activeName(), QStringLiteral("c1"));
-
-    grid->moveActive(0, -1);
-    QCOMPARE(activeName(), QStringLiteral("b1"));
-    grid->moveActive(0, -1);
-    QCOMPARE(activeName(), QStringLiteral("a10"));
-    grid->moveActive(0, -1);
-    QCOMPARE(activeName(), QStringLiteral("a1"));
-}
-
-void TestEmojiGrid::movesStopAtTheGridEdges()
-{
-    grid->activateFirst();
-    grid->moveActive(-1, 0);
-    QCOMPARE(activeName(), QStringLiteral("a0"));
-    grid->moveActive(0, -1);
-    QCOMPARE(activeName(), QStringLiteral("a0"));
-
-    grid->setSections({ makeSection("a", "Only", 2) });
-    grid->activateFirst();
-    grid->moveActive(1, 0);
-    grid->moveActive(1, 0);
-    QCOMPARE(activeName(), QStringLiteral("a1"));
-    grid->moveActive(0, 1);
-    QCOMPARE(activeName(), QStringLiteral("a1"));
-}
-
-void TestEmojiGrid::keyboardSelectionScrollsIntoView()
-{
-    grid->activateFirst();
-    QCOMPARE(grid->scrollY(), 0);
-
+    grid.activateFirst();
+    REQUIRE(grid.scrollY() == 0);
     constexpr int RowsDown = 20;
-    for (int i = 0; i < RowsDown; i++)
-        grid->moveActive(0, 1);
-
-    QCOMPARE(activeName(), QStringLiteral("c%1").arg((RowsDown - 3) * EmojiGridModel::Columns));
-    QVERIFY(grid->scrollY() > 0);
-    QCOMPARE(grid->topSection(), 2);
+    for (int i = 0; i < RowsDown; ++i)
+        grid.moveActive(0, 1);
+    REQUIRE(activeName() == "c" + std::to_string((RowsDown - 3) * EmojiGridModel::Columns));
+    REQUIRE(grid.scrollY() > 0);
+    REQUIRE(grid.topSection() == 2);
 }
 
-void TestEmojiGrid::clickReportsEmojiAndModifiers()
+TEST_CASE_METHOD(GridFixture, "Emoji grid click reports emoji and keep-open modifier")
 {
-    grid->setSections({ makeSection("a", QString(), 20) });
-
-    QStringList clickedNames;
-    Qt::KeyboardModifiers clickedWith;
-    connect(grid, &EmojiGridModel::emojiClicked, this, [&](const Core::PickerEmoji &emoji, Qt::KeyboardModifiers modifiers) {
-        clickedNames.append(emoji.name);
-        clickedWith = modifiers;
+    grid.setSections({makeSection("a", "", 20)});
+    std::vector<std::string> clickedNames;
+    bool keepOpen = false;
+    auto connection = grid.emojiClicked.connect([&](const Core::PickerEmoji &emoji, bool modifier) {
+        clickedNames.push_back(emoji.name);
+        keepOpen = modifier;
     });
-
-    const QPoint secondRowFirstCell(EmojiGridModel::CellPx - 1, EmojiGridModel::CellPx + EmojiGridModel::CellPx / 2);
-    grid->mouseClick(secondRowFirstCell, Qt::ShiftModifier);
-
-    QCOMPARE(clickedNames, QStringList({ QStringLiteral("a9") }));
-    QVERIFY(clickedWith.testFlag(Qt::ShiftModifier));
+    const Platform::Point secondRowFirstCell{EmojiGridModel::CellPx - 1, EmojiGridModel::CellPx + EmojiGridModel::CellPx / 2};
+    grid.mouseClick(secondRowFirstCell, true);
+    REQUIRE((clickedNames == std::vector<std::string>{"a9"}));
+    REQUIRE(keepOpen);
 }
 
-void TestEmojiGrid::headerClickCollapsesSection()
+TEST_CASE_METHOD(GridFixture, "Emoji grid header click collapses section")
 {
-    QSignalSpy collapsedChanged(grid, &EmojiGridModel::collapsedSectionsChanged);
-    const QPoint firstHeader(EmojiGridModel::CellPx, 4);
-    grid->mouseClick(firstHeader, Qt::NoModifier);
-
-    QCOMPARE(collapsedChanged.count(), 1);
-    QVERIFY(grid->collapsedSections().contains(QStringLiteral("a")));
-
-    grid->activateFirst();
-    QCOMPARE(activeName(), QStringLiteral("b0"));
-    grid->moveActive(-1, 0);
-    QCOMPARE(activeName(), QStringLiteral("b0"));
-
-    grid->mouseClick(firstHeader, Qt::NoModifier);
-    QVERIFY(grid->collapsedSections().isEmpty());
-    grid->activateFirst();
-    QCOMPARE(activeName(), QStringLiteral("a0"));
+    int changes = 0;
+    auto connection = grid.collapsedSectionsChanged.connect([&] { ++changes; });
+    const Platform::Point firstHeader{EmojiGridModel::CellPx, 4};
+    grid.mouseClick(firstHeader);
+    REQUIRE(changes == 1);
+    REQUIRE(grid.collapsedSections().contains("a"));
+    grid.activateFirst();
+    REQUIRE(activeName() == "b0");
+    grid.moveActive(-1, 0);
+    REQUIRE(activeName() == "b0");
+    grid.mouseClick(firstHeader);
+    REQUIRE(grid.collapsedSections().empty());
+    grid.activateFirst();
+    REQUIRE(activeName() == "a0");
 }
 
-void TestEmojiGrid::topSectionFollowsScroll()
+TEST_CASE_METHOD(GridFixture, "Emoji grid top section follows scroll")
 {
-    QSignalSpy topChanged(grid, &EmojiGridModel::topSectionChanged);
-    QCOMPARE(grid->topSection(), 0);
-
-    grid->scrollToSection(2);
-    QCOMPARE(grid->topSection(), 2);
-    QCOMPARE(topChanged.last().at(0).toInt(), 2);
-
-    grid->scrollToSection(1);
-    QCOMPARE(grid->topSection(), 1);
+    std::vector<int> changes;
+    auto connection = grid.topSectionChanged.connect([&](int section) { changes.push_back(section); });
+    REQUIRE(grid.topSection() == 0);
+    grid.scrollToSection(2);
+    REQUIRE(grid.topSection() == 2);
+    REQUIRE_FALSE(changes.empty());
+    REQUIRE(changes.back() == 2);
+    grid.scrollToSection(1);
+    REQUIRE(grid.topSection() == 1);
 }
-
-QTEST_GUILESS_MAIN(TestEmojiGrid)
-
-#include "tst_EmojiGrid.moc"

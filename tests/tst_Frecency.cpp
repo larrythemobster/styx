@@ -2,6 +2,8 @@
 
 #include "Core/Emoji/FrecencyTracker.hpp"
 
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace Styx::Core;
@@ -9,7 +11,7 @@ using namespace Styx::Core;
 static constexpr uint64_t DAY = 86400000ULL;
 static constexpr uint64_t NOW = 1700000000000ULL;
 
-static FrecencyTracker::Entry makeEntry(uint32_t totalUses, const QList<uint64_t> &recentUses)
+static FrecencyTracker::Entry makeEntry(uint32_t totalUses, const std::vector<uint64_t> &recentUses)
 {
     FrecencyTracker::Entry entry;
     entry.totalUses = totalUses;
@@ -59,18 +61,18 @@ TEST_CASE("Frecency: Track", "[frecency]")
     REQUIRE(tracker.isDirty());
     REQUIRE(tracker.usageHistory().size() == 1);
 
-    const FrecencyTracker::Entry &fresh = tracker.usageHistory().value("thumbsup");
+    const FrecencyTracker::Entry &fresh = tracker.usageHistory().at("thumbsup");
     REQUIRE(fresh.totalUses == 1u);
-    REQUIRE(fresh.recentUses == QList<uint64_t>({ NOW - 5 * DAY }));
+    REQUIRE(fresh.recentUses == std::vector<uint64_t>({ NOW - 5 * DAY }));
     REQUIRE(fresh.frecency == -1);
     REQUIRE(fresh.score == 0.0);
 
     // An existing entry accumulates uses; an explicit timestamp older than what is already there
     // is sorted back into place.
     tracker.track("thumbsup", NOW - 9 * DAY, 3);
-    const FrecencyTracker::Entry &merged = tracker.usageHistory().value("thumbsup");
+    const FrecencyTracker::Entry &merged = tracker.usageHistory().at("thumbsup");
     REQUIRE(merged.totalUses == 4u);
-    REQUIRE(merged.recentUses == QList<uint64_t>({ NOW - 9 * DAY, NOW - 5 * DAY }));
+    REQUIRE(merged.recentUses == std::vector<uint64_t>({ NOW - 9 * DAY, NOW - 5 * DAY }));
     REQUIRE(merged.frecency == -1);
 
     // Only the newest maxSamples (10) timestamps are kept; the oldest are shifted off the front.
@@ -78,19 +80,19 @@ TEST_CASE("Frecency: Track", "[frecency]")
     for (int i = 0; i < 12; ++i)
         capped.track("eyes", NOW - static_cast<uint64_t>(12 - i) * DAY);
 
-    const FrecencyTracker::Entry &shifted = capped.usageHistory().value("eyes");
+    const FrecencyTracker::Entry &shifted = capped.usageHistory().at("eyes");
     REQUIRE(shifted.totalUses == 12u);
     REQUIRE(shifted.recentUses.size() == 10);
-    REQUIRE(shifted.recentUses.first() == NOW - 10 * DAY);
-    REQUIRE(shifted.recentUses.last() == NOW - DAY);
+    REQUIRE(shifted.recentUses.front() == NOW - 10 * DAY);
+    REQUIRE(shifted.recentUses.back() == NOW - DAY);
 }
 
 TEST_CASE("Frecency: Compute", "[frecency]")
 {
     FrecencyTracker tracker(FrecencyTracker::chatEmojiOptions());
 
-    QHash<QString, FrecencyTracker::Entry> history;
-    history.insert("thumbsup", makeEntry(5, { NOW - 40 * DAY, NOW - 10 * DAY, NOW - DAY }));
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
+    history.emplace("thumbsup", makeEntry(5, { NOW - 40 * DAY, NOW - 10 * DAY, NOW - DAY }));
     tracker.overwriteHistory(history);
 
     tracker.compute(NOW);
@@ -111,8 +113,8 @@ TEST_CASE("Frecency: Old entry survives", "[frecency]")
     // positive score.
     FrecencyTracker tracker;
 
-    QHash<QString, FrecencyTracker::Entry> history;
-    history.insert("ancient", makeEntry(1, { NOW - 400 * DAY }));
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
+    history.emplace("ancient", makeEntry(1, { NOW - 400 * DAY }));
     tracker.overwriteHistory(history);
     tracker.compute(NOW);
 
@@ -126,15 +128,15 @@ TEST_CASE("Frecency: Empty recent uses dropped", "[frecency]")
     // Score 0 is only reachable with no samples at all, and that entry is deleted.
     FrecencyTracker tracker;
 
-    QHash<QString, FrecencyTracker::Entry> history;
-    history.insert("empty", makeEntry(9, {}));
-    history.insert("used", makeEntry(1, { NOW - DAY }));
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
+    history.emplace("empty", makeEntry(9, {}));
+    history.emplace("used", makeEntry(1, { NOW - DAY }));
     tracker.overwriteHistory(history);
     tracker.compute(NOW);
 
     REQUIRE(tracker.usageHistory().size() == 1);
     REQUIRE(!tracker.score("empty").has_value());
-    REQUIRE(tracker.frequently(NOW) == QStringList({ "used" }));
+    REQUIRE(tracker.frequently(NOW) == std::vector<std::string>({ "used" }));
 }
 
 TEST_CASE("Frecency: Frequently ordering and cap", "[frecency]")
@@ -143,21 +145,21 @@ TEST_CASE("Frecency: Frequently ordering and cap", "[frecency]")
 
     // 50 entries, all used once a day ago (score 100), so frecency == totalUses * 100 and the
     // ordering is exactly the reverse of the index.
-    QHash<QString, FrecencyTracker::Entry> history;
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
     for (int i = 0; i < 50; ++i) {
-        history.insert(QStringLiteral("k%1").arg(i, 2, 10, QLatin1Char('0')),
+        history.emplace("k" + (i < 10 ? std::string("0") : std::string()) + std::to_string(i),
                        makeEntry(static_cast<uint32_t>(i + 1), { NOW - DAY }));
     }
     tracker.overwriteHistory(history);
 
     REQUIRE(tracker.isDirty());
-    const QStringList frequently = tracker.frequently(NOW);
+    const std::vector<std::string> frequently = tracker.frequently(NOW);
     REQUIRE(!tracker.isDirty());
 
     REQUIRE(frequently.size() == 42);
-    REQUIRE(frequently.first() == QStringLiteral("k49"));
-    REQUIRE(frequently.at(1) == QStringLiteral("k48"));
-    REQUIRE(frequently.last() == QStringLiteral("k08"));
+    REQUIRE(frequently.front() == "k49");
+    REQUIRE(frequently.at(1) == "k48");
+    REQUIRE(frequently.back() == "k08");
     REQUIRE(tracker.frecency("k49").value() == 5000);
 
     // Entries below the cut are still tracked, just not "frequently".
@@ -171,8 +173,8 @@ TEST_CASE("Frecency: Compute skips clean entries", "[frecency]")
     // the client (only track/overwriteHistory invalidate).
     FrecencyTracker tracker;
 
-    QHash<QString, FrecencyTracker::Entry> history;
-    history.insert("thumbsup", makeEntry(2, { NOW - DAY }));
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
+    history.emplace("thumbsup", makeEntry(2, { NOW - DAY }));
     tracker.overwriteHistory(history);
     tracker.compute(NOW);
     REQUIRE(tracker.frecency("thumbsup").value() == 200);
@@ -194,9 +196,9 @@ TEST_CASE("Frecency: Reaction formula", "[frecency]")
 {
     FrecencyTracker tracker(FrecencyTracker::reactionEmojiOptions());
 
-    QHash<QString, FrecencyTracker::Entry> history;
-    history.insert("hot", makeEntry(3, { NOW - 40 * DAY, NOW - 10 * DAY, NOW - DAY }));
-    history.insert("stale", makeEntry(7, { NOW - 100 * DAY }));
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
+    history.emplace("hot", makeEntry(3, { NOW - 40 * DAY, NOW - 10 * DAY, NOW - DAY }));
+    history.emplace("stale", makeEntry(7, { NOW - 100 * DAY }));
     tracker.overwriteHistory(history);
     tracker.compute(NOW);
 
@@ -207,21 +209,21 @@ TEST_CASE("Frecency: Reaction formula", "[frecency]")
     REQUIRE(tracker.frecency("hot").value() == 245);
     // trunc(1000 * ((7/7)*0.2 + (1/1000)*0.8)) = trunc(200.8)
     REQUIRE(tracker.frecency("stale").value() == 200);
-    REQUIRE(tracker.frequently(NOW) == QStringList({ "hot", "stale" }));
+    REQUIRE(tracker.frequently(NOW) == std::vector<std::string>({ "hot", "stale" }));
 }
 
 TEST_CASE("Frecency: Cap for persistence", "[frecency]")
 {
-    QHash<QString, FrecencyTracker::Entry> history;
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
     FrecencyTracker::Entry newest = makeEntry(1, { NOW - 50 * DAY, NOW - DAY });
     newest.score = 12.4;
     FrecencyTracker::Entry middle = makeEntry(2, { NOW - 5 * DAY });
     middle.score = 7.6;
     FrecencyTracker::Entry oldest = makeEntry(9, { NOW - 90 * DAY });
     oldest.score = 1.0;
-    history.insert("newest", newest);
-    history.insert("middle", middle);
-    history.insert("oldest", oldest);
+    history.emplace("newest", newest);
+    history.emplace("middle", middle);
+    history.emplace("oldest", oldest);
 
     const auto capped = FrecencyTracker::capForPersistence(history, 2);
     REQUIRE(capped.size() == 2);
@@ -229,9 +231,9 @@ TEST_CASE("Frecency: Cap for persistence", "[frecency]")
     REQUIRE(capped.contains("middle"));
     REQUIRE(!capped.contains("oldest"));
 
-    REQUIRE(capped.value("newest").score == 12.0);
-    REQUIRE(capped.value("middle").score == 8.0);
-    REQUIRE(capped.value("newest").totalUses == 1u);
+    REQUIRE(capped.at("newest").score == 12.0);
+    REQUIRE(capped.at("middle").score == 8.0);
+    REQUIRE(capped.at("newest").totalUses == 1u);
 
     // Under the limit nothing is dropped.
     REQUIRE(FrecencyTracker::capForPersistence(history, 100).size() == 3);
@@ -241,18 +243,18 @@ TEST_CASE("Frecency: Overwrite history", "[frecency]")
 {
     FrecencyTracker tracker;
 
-    QHash<QString, FrecencyTracker::Entry> history;
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
     FrecencyTracker::Entry loaded = makeEntry(2, { NOW - DAY, 0, NOW - 3 * DAY });
     loaded.frecency = 999; // whatever the server had stored
     loaded.score = 55.0;
-    history.insert("thumbsup", loaded);
+    history.emplace("thumbsup", loaded);
     tracker.overwriteHistory(history);
 
     REQUIRE(tracker.isDirty());
     REQUIRE(tracker.frecency("thumbsup").value() == -1);
     // Server timestamps arrive unsorted and may contain zeros.
-    REQUIRE(tracker.usageHistory().value("thumbsup").recentUses ==
-             QList<uint64_t>({ NOW - 3 * DAY, NOW - DAY }));
+    REQUIRE(tracker.usageHistory().at("thumbsup").recentUses ==
+             std::vector<uint64_t>({ NOW - 3 * DAY, NOW - DAY }));
 
     tracker.frequently(NOW);
     // weight(3) + weight(1) = 200; ceil(2 * (200 / 2)) = 200
@@ -260,12 +262,12 @@ TEST_CASE("Frecency: Overwrite history", "[frecency]")
     REQUIRE(tracker.frecency("thumbsup").value() == 200);
 
     // A second overwrite replaces the map wholesale.
-    QHash<QString, FrecencyTracker::Entry> replacement;
-    replacement.insert("eyes", makeEntry(1, { NOW - DAY }));
+    std::unordered_map<std::string, FrecencyTracker::Entry> replacement;
+    replacement.emplace("eyes", makeEntry(1, { NOW - DAY }));
     tracker.overwriteHistory(replacement);
-    REQUIRE(tracker.frequently(NOW) == QStringList({ "eyes" }));
+    REQUIRE(tracker.frequently(NOW) == std::vector<std::string>({ "eyes" }));
 
     tracker.reset();
-    REQUIRE(tracker.usageHistory().isEmpty());
-    REQUIRE(tracker.frequently(NOW).isEmpty());
+    REQUIRE(tracker.usageHistory().empty());
+    REQUIRE(tracker.frequently(NOW).empty());
 }
