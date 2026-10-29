@@ -1,11 +1,13 @@
 #include "UI/Rml/RmlRender.hpp"
 #include "UI/Rml/RmlRuntime.hpp"
 #include "UI/Rml/RmlView.hpp"
+#include "UI/Rml/ContextMenu.hpp"
 
 #include <RmlUi/Core.h>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
+#include <QMouseEvent>
 #include <QTest>
 
 using namespace Styx::UI::Rml;
@@ -17,6 +19,8 @@ private slots:
     void textureReleaseWaitsForOwnerContext_data();
     void textureReleaseWaitsForOwnerContext();
     void backgroundDocumentRefreshKeepsRendering();
+    void contextMenuKeyboardAndPointerActions();
+    void contextMenuNestedNavigationAndViewportBounds();
 };
 
 void TestRmlRender::textureReleaseWaitsForOwnerContext_data()
@@ -111,6 +115,93 @@ void TestRmlRender::backgroundDocumentRefreshKeepsRendering()
         QCOMPARE(frame.pixelColor(frame.width() / 2, frame.height() / 2), expected);
         view.doneCurrent();
     }
+}
+
+void TestRmlRender::contextMenuKeyboardAndPointerActions()
+{
+    View view(QStringLiteral("menu-actions"));
+    view.resize(640, 480);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_VERIFY(view.context());
+    ContextMenu menu(view);
+    int selected = 0;
+    const std::vector<MenuItem> entries{
+        { QStringLiteral("Disabled"), [&] { selected = -1; }, false },
+        { {}, {}, false, false, true },
+        { QStringLiteral("First"), [&] { selected = 1; } },
+        { QStringLiteral("Second"), [&] { selected = 2; } }
+    };
+    menu.show(entries, QPoint(20, 20));
+    QTest::keyClick(&view, Qt::Key_Down);
+    QTest::keyClick(&view, Qt::Key_Return);
+    QCOMPARE(selected, 2);
+    QVERIFY(!menu.isVisible());
+
+    menu.show(entries, QPoint(20, 20));
+    view.context()->Update();
+    auto *doc = view.context()->GetDocument("context-menu-root");
+    QVERIFY(doc);
+    auto center = [&](const char *id) {
+        auto *element = doc->GetElementById(id);
+        const auto p = element->GetAbsoluteOffset(::Rml::BoxArea::Border);
+        return QPoint(int((p.x + element->GetOffsetWidth() / 2) / view.devicePixelRatioF()),
+                      int((p.y + element->GetOffsetHeight() / 2) / view.devicePixelRatioF()));
+    };
+    auto movePointer = [&](const QPoint &position) {
+        QMouseEvent move(QEvent::MouseMove, QPointF(position), QPointF(view.mapToGlobal(position)),
+                         Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(&view, &move);
+    };
+    movePointer(center("menu-item-0"));
+    QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, center("menu-item-0"));
+    QCOMPARE(selected, 2);
+    QVERIFY(menu.isVisible());
+    movePointer(center("menu-item-2"));
+    QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, center("menu-item-2"));
+    QCOMPARE(selected, 1);
+    QVERIFY(!menu.isVisible());
+
+    menu.show(entries, QPoint(20, 20));
+    QTest::keyClick(&view, Qt::Key_Escape);
+    QVERIFY(!menu.isVisible());
+    QCOMPARE(selected, 1);
+    menu.show(entries, QPoint(20, 20));
+    movePointer(QPoint(600, 450));
+    QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(600, 450));
+    QVERIFY(!menu.isVisible());
+    QCOMPARE(selected, 1);
+}
+
+void TestRmlRender::contextMenuNestedNavigationAndViewportBounds()
+{
+    View view(QStringLiteral("menu-nesting"));
+    view.resize(420, 260);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_VERIFY(view.context());
+    ContextMenu menu(view);
+    bool selected = false;
+    MenuItem submenu{ QStringLiteral("Settings") };
+    submenu.children.push_back({ QStringLiteral("Profile"), [&] { selected = true; } });
+    menu.show({ submenu }, QPoint(419, 259));
+    view.context()->Update();
+    auto *doc = view.context()->GetDocument("context-menu-root");
+    QVERIFY(doc);
+    auto *panel = doc->GetElementById("context-menu-panel");
+    const auto offset = panel->GetAbsoluteOffset(::Rml::BoxArea::Border);
+    const auto dimensions = view.context()->GetDimensions();
+    QVERIFY(offset.x >= 0 && offset.y >= 0);
+    QVERIFY(offset.x + panel->GetOffsetWidth() <= dimensions.x);
+    QVERIFY(offset.y + panel->GetOffsetHeight() <= dimensions.y);
+    QTest::keyClick(&view, Qt::Key_Right);
+    QVERIFY(doc->GetElementById("context-menu-back"));
+    QTest::keyClick(&view, Qt::Key_Left);
+    QVERIFY(!doc->GetElementById("context-menu-back"));
+    QTest::keyClick(&view, Qt::Key_Return);
+    QTest::keyClick(&view, Qt::Key_Return);
+    QVERIFY(selected);
+    QVERIFY(!menu.isVisible());
 }
 
 QTEST_MAIN(TestRmlRender)
