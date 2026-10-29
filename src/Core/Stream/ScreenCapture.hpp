@@ -1,10 +1,10 @@
 #pragma once
 
-#include <QImage>
-#include <QList>
-#include <QRect>
-#include <QSize>
-#include <QString>
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
+#include <cstdint>
+#include <string>
+#include <vector>
 
 #include <memory>
 
@@ -27,17 +27,17 @@ struct CaptureSource
     };
 
     Kind kind = Kind::Monitor;
-    quintptr handle = 0; // HMONITOR or HWND
-    QString title;
-    QRect geometry;
-    quint32 processId = 0; // owning process of a window, for per-app audio
+    uintptr_t handle = 0; // HMONITOR or HWND
+    std::string title;
+    Platform::Rect geometry;
+    uint32_t processId = 0; // owning process of a window, for per-app audio
     bool primary = false;
 };
 
 // Windows Graphics Capture needs Windows 10 1903; per-process loopback audio needs 2004.
 bool isScreenCaptureSupported();
-QList<CaptureSource> enumerateCaptureSources();
-QImage captureThumbnail(const CaptureSource &source, const QSize &maxSize);
+std::vector<CaptureSource> enumerateCaptureSources();
+Platform::ImageBuffer captureThumbnail(const CaptureSource &source, const Platform::Size &maxSize);
 
 #ifdef _WIN32
 
@@ -50,7 +50,7 @@ public:
     explicit ScreenCapture(std::shared_ptr<D3DDevice> device);
     ~ScreenCapture();
 
-    bool start(const CaptureSource &source, bool captureCursor, QString *error);
+    bool start(const CaptureSource &source, bool captureCursor, std::string *error);
     void stop();
 
     // The newest frame (BGRA), or null before the first one. Valid until the next call;
@@ -58,8 +58,8 @@ public:
     struct Frame
     {
         ID3D11Texture2D *texture = nullptr;
-        QSize size;
-        quint64 sequence = 0;
+        Platform::Size size;
+        uint64_t sequence = 0;
     };
     Frame latestFrame();
 

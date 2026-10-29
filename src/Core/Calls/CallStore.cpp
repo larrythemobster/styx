@@ -26,11 +26,8 @@ void CallStore::handleCallCreate(const Discord::CallCreate &event)
     record.channelId = event.channelId;
     if (event.messageId.hasValue())
         record.messageId = event.messageId.get();
-    if (event.region.has_value())
-        record.region = event.region->toStdString();
-    for (auto it = event.ongoingRings.cbegin(); it != event.ongoingRings.cend(); ++it) {
-        record.ongoingRings.emplace(it.key(), it.value());
-    }
+    record.region = event.region;
+    record.ongoingRings = event.ongoingRings;
 
     calls[record.channelId] = record;
     callChanged.publish(record.channelId);
@@ -39,16 +36,10 @@ void CallStore::handleCallCreate(const Discord::CallCreate &event)
 void CallStore::handleCallUpdate(const Discord::CallUpdate &event)
 {
     CallRecord &record = calls[event.channelId.get()];
-    record.channelId = event.channelId;
+    record.channelId = event.channelId.get();
     record.messageId = event.messageId.hasValue() ? event.messageId.get() : Snowflake::Invalid;
-    if (event.region.has_value())
-        record.region = event.region->toStdString();
-    else
-        record.region.reset();
-    record.ongoingRings.clear();
-    for (auto it = event.ongoingRings.cbegin(); it != event.ongoingRings.cend(); ++it) {
-        record.ongoingRings.emplace(it.key(), it.value());
-    }
+    record.region = event.region;
+    record.ongoingRings = event.ongoingRings;
 
     callChanged.publish(record.channelId);
 }

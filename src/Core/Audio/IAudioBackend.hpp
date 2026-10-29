@@ -1,12 +1,10 @@
 #pragma once
 
-#include <QObject>
-#include <QByteArray>
-#include <QString>
-#include <QList>
-
+#include "Platform/Trackable.hpp"
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace Styx {
 namespace Core {
@@ -23,27 +21,25 @@ inline constexpr int AUDIO_FRAME_SIZE = AUDIO_FRAME_SAMPLES * AUDIO_CHANNELS * A
 
 struct AudioDeviceInfo
 {
-    QByteArray id;
-    QString description;
+    std::string id;
+    std::string description;
     bool isDefault = false;
 };
 
-class IAudioBackend : public QObject
+class IAudioBackend : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    using QObject::QObject;
     ~IAudioBackend() override = default;
 
-    static std::unique_ptr<IAudioBackend> create(QObject *parent = nullptr);
+    static std::unique_ptr<IAudioBackend> create();
 
-    virtual QList<AudioDeviceInfo> availableInputDevices() const = 0;
-    virtual QList<AudioDeviceInfo> availableOutputDevices() const = 0;
+    virtual std::vector<AudioDeviceInfo> availableInputDevices() const = 0;
+    virtual std::vector<AudioDeviceInfo> availableOutputDevices() const = 0;
 
-    [[nodiscard]] virtual QByteArray currentInputDevice() const = 0;
-    [[nodiscard]] virtual QByteArray currentOutputDevice() const = 0;
-    virtual void setInputDevice(const QByteArray &deviceId) = 0;
-    virtual void setOutputDevice(const QByteArray &deviceId) = 0;
+    [[nodiscard]] virtual std::string currentInputDevice() const = 0;
+    [[nodiscard]] virtual std::string currentOutputDevice() const = 0;
+    virtual void setInputDevice(const std::string &deviceId) = 0;
+    virtual void setOutputDevice(const std::string &deviceId) = 0;
 
     virtual bool startCapture() = 0;
     virtual void stopCapture() = 0;
@@ -60,9 +56,8 @@ public:
 
     virtual bool pushPlaybackFrame(const int16_t *frame) = 0;
 
-signals:
-    void audioCaptured(const QByteArray &pcmData);
-    void devicesChanged(const QList<AudioDeviceInfo> &inputs, const QList<AudioDeviceInfo> &outputs);
+    Platform::Signal<std::string> audioCaptured;
+    Platform::Signal<std::vector<AudioDeviceInfo>, std::vector<AudioDeviceInfo>> devicesChanged;
 };
 
 } // namespace Audio

@@ -145,10 +145,10 @@ public:
             m_arr.size() >= 2 &&
             static_cast<uint8_t>(m_arr[m_arr.size() - 1]) == 0 &&
             static_cast<uint8_t>(m_arr[m_arr.size() - 2]) == 0) {
-            m_arr.append(static_cast<char>(3));
+            m_arr.push_back(static_cast<char>(3));
         }
 
-        m_arr.append(static_cast<char>(m_pendingByte));
+        m_arr.push_back(static_cast<char>(m_pendingByte));
         m_pendingByte = 0;
         m_bitOffset = 0;
     }
@@ -204,13 +204,13 @@ public:
         }
     }
 
-    QByteArray toByteArray() const
+    std::string toByteArray() const
     {
         return m_arr;
     }
 
 private:
-    QByteArray m_arr;
+    std::string m_arr;
     uint8_t m_pendingByte = 0;
     int m_bitOffset = 0;
 };
@@ -239,7 +239,7 @@ bool isHighProfile(uint32_t profileIdc)
 
 } // namespace
 
-QByteArray rewriteSpsVui(const QByteArray &spsNal)
+std::string rewriteSpsVui(const std::string &spsNal)
 {
     if (spsNal.size() < 4) {
         return {};
@@ -250,7 +250,7 @@ QByteArray rewriteSpsVui(const QByteArray &spsNal)
         return {};
     }
 
-    const auto *payloadData = reinterpret_cast<const uint8_t *>(spsNal.constData() + 1);
+    const auto *payloadData = reinterpret_cast<const uint8_t *>(spsNal.data() + 1);
     const size_t payloadSize = static_cast<size_t>(spsNal.size() - 1);
 
     AnnexBBitstreamReader reader(payloadData, payloadSize);
@@ -558,9 +558,9 @@ QByteArray rewriteSpsVui(const QByteArray &spsNal)
     return writer.toByteArray();
 }
 
-QByteArray rewriteAccessUnitSps(const QByteArray &annexB)
+std::string rewriteAccessUnitSps(const std::string &annexB)
 {
-    const auto *data = reinterpret_cast<const uint8_t *>(annexB.constData());
+    const auto *data = reinterpret_cast<const uint8_t *>(annexB.data());
     const size_t size = static_cast<size_t>(annexB.size());
     if (size < 3) {
         return annexB;
@@ -606,20 +606,20 @@ QByteArray rewriteAccessUnitSps(const QByteArray &annexB)
 
     sequences.back().payloadSize = size - sequences.back().payloadStartOffset;
 
-    QByteArray output;
+    std::string output;
     output.reserve(annexB.size() + 64);
 
     if (sequences[0].startOffset > 0) {
-        output.append(annexB.constData(), static_cast<qsizetype>(sequences[0].startOffset));
+        output.append(annexB.data(), sequences[0].startOffset);
     }
 
     static const char startCode4[4] = {0, 0, 0, 1};
 
     for (const auto &nalu : sequences) {
-        const qsizetype startCodeLen = static_cast<qsizetype>(nalu.payloadStartOffset - nalu.startOffset);
-        const char *startCodePtr = annexB.constData() + nalu.startOffset;
-        const char *payloadPtr = annexB.constData() + nalu.payloadStartOffset;
-        const qsizetype payloadLen = static_cast<qsizetype>(nalu.payloadSize);
+        const size_t startCodeLen = nalu.payloadStartOffset - nalu.startOffset;
+        const char *startCodePtr = annexB.data() + nalu.startOffset;
+        const char *payloadPtr = annexB.data() + nalu.payloadStartOffset;
+        const size_t payloadLen = nalu.payloadSize;
 
         if (payloadLen <= 0) {
             output.append(startCodePtr, startCodeLen);
@@ -628,9 +628,9 @@ QByteArray rewriteAccessUnitSps(const QByteArray &annexB)
 
         const uint8_t nalType = static_cast<uint8_t>(payloadPtr[0]) & 0x1F;
         if (nalType == 7) {
-            const QByteArray spsNal(payloadPtr, payloadLen);
-            const QByteArray rewritten = rewriteSpsVui(spsNal);
-            if (!rewritten.isEmpty()) {
+            const std::string spsNal(payloadPtr, payloadLen);
+            const std::string rewritten = rewriteSpsVui(spsNal);
+            if (!rewritten.empty()) {
                 output.append(startCode4, 4);
                 output.append(rewritten);
                 continue;

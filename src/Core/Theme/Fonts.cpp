@@ -1,41 +1,29 @@
 #include "Fonts.hpp"
 
-#include <QApplication>
-#include <QFontDatabase>
-
-namespace Styx {
-namespace Core {
-namespace Theme {
+namespace Styx::Core::Theme {
 
 const std::vector<FontDescriptor> &fontRegistry()
 {
     static const std::vector<FontDescriptor> reg = {
-        { FontRole::Ui, "font.ui", "Interface", QApplication::font() },
-        { FontRole::Message, "font.message", "Messages", QApplication::font() },
-        { FontRole::Code, "font.code", "Code",
-          QFontDatabase::systemFont(QFontDatabase::FixedFont) },
+        { FontRole::Ui, "font.ui", "Interface", { "Segoe UI", 10, 400, false } },
+        { FontRole::Message, "font.message", "Messages", { "Segoe UI", 10, 400, false } },
+        { FontRole::Code, "font.code", "Code", { "Consolas", 10, 400, false } },
     };
     return reg;
 }
 
-const FontDescriptor *findFontById(const QString &id)
+const FontDescriptor *findFontById(std::string_view id)
 {
-    for (const FontDescriptor &d : fontRegistry()) {
-        if (id == QLatin1String(d.id))
-            return &d;
-    }
+    for (const auto &d : fontRegistry())
+        if (id == d.id) return &d;
     return nullptr;
 }
 
 const FontDescriptor &fontDescriptor(FontRole role)
 {
-    for (const FontDescriptor &d : fontRegistry()) {
-        if (d.role == role)
-            return d;
-    }
-    return fontRegistry().front(); // just in case
+    for (const auto &d : fontRegistry())
+        if (d.role == role) return d;
+    return fontRegistry().front();
 }
 
-} // namespace Theme
-} // namespace Core
-} // namespace Styx
+}

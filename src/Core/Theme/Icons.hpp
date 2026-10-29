@@ -1,9 +1,7 @@
 #pragma once
 
-#include <QColor>
-#include <QIcon>
-#include <QPixmap>
-#include <QString>
+#include <string>
+#include <string_view>
 
 #include "Core/Theme/Tokens.hpp"
 
@@ -78,11 +76,8 @@ inline constexpr auto VolumeOn = "volume-2";
 inline constexpr auto X = "x";
 } // namespace Name
 
-QPixmap pixmap(const QString &name, int px, const QColor &color, qreal dpr = 1.0);
-QPixmap pixmap(const QString &name, int px, Token token, qreal dpr = 1.0);
-
-QIcon icon(const QString &name, const QColor &color);
-QIcon icon(const QString &name, Token token);
+std::string svg(std::string_view name, Platform::Color color);
+std::string svg(std::string_view name, Token token);
 
 } // namespace Icons
 } // namespace Theme

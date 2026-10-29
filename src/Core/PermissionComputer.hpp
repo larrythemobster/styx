@@ -1,6 +1,7 @@
 #pragma once
 
-#include <QHash>
+#include <unordered_map>
+#include <vector>
 
 #include "Snowflake.hpp"
 #include "Discord/Enums.hpp"
@@ -14,22 +15,21 @@ class PermissionComputer
 public:
     static Discord::Permissions computeBasePermissions(Snowflake guildOwnerId, Snowflake userId,
                                                        Snowflake guildId,
-                                                       const QList<Snowflake> &memberRoleIds,
-                                                       const QList<Discord::Role> &allRoles);
+                                                       const std::vector<Snowflake> &memberRoleIds,
+                                                       const std::vector<Discord::Role> &allRoles);
 
     static Discord::Permissions computeOverwrites(
             Discord::Permissions basePermissions, Snowflake userId, Snowflake guildId,
-            const QList<Snowflake> &memberRoleIds,
-            const QList<Discord::PermissionOverwrite> &overwrites);
+            const std::vector<Snowflake> &memberRoleIds,
+            const std::vector<Discord::PermissionOverwrite> &overwrites);
 
     static Discord::Permissions computeChannelPermissions(
             Snowflake guildOwnerId, Snowflake userId, Snowflake guildId, bool isDM,
-            const QList<Snowflake> &memberRoleIds, const QList<Discord::Role> &allRoles,
-            const QList<Discord::PermissionOverwrite> &overwrites);
+            const std::vector<Snowflake> &memberRoleIds, const std::vector<Discord::Role> &allRoles,
+            const std::vector<Discord::PermissionOverwrite> &overwrites);
 
 private:
-    // helper :3
-    static QHash<Snowflake, Discord::Role> buildRoleMap(const QList<Discord::Role> &roles);
+    static std::unordered_map<Snowflake, const Discord::Role *> buildRoleMap(const std::vector<Discord::Role> &roles);
 };
 
 } // namespace Core

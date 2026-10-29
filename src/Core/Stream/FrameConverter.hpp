@@ -2,7 +2,7 @@
 
 #ifdef _WIN32
 
-#include <QSize>
+#include "Platform/Native.hpp"
 
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -27,19 +27,19 @@ public:
 
     // Caller holds the device mutex. target is an NV12 texture (array slice targetIndex)
     // created with D3D11_BIND_RENDER_TARGET.
-    bool convert(ID3D11Texture2D *source, const QSize &sourceSize, ID3D11Texture2D *target, UINT targetIndex,
-                 const QSize &targetSize);
+    bool convert(ID3D11Texture2D *source, const Platform::Size &sourceSize, ID3D11Texture2D *target, UINT targetIndex,
+                 const Platform::Size &targetSize);
 
 private:
-    bool ensureProcessor(const QSize &sourceSize, const QSize &targetSize);
+    bool ensureProcessor(const Platform::Size &sourceSize, const Platform::Size &targetSize);
 
     std::shared_ptr<D3DDevice> device;
     Microsoft::WRL::ComPtr<ID3D11VideoDevice> videoDevice;
     Microsoft::WRL::ComPtr<ID3D11VideoContext> videoContext;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator> enumerator;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessor> processor;
-    QSize processorSource;
-    QSize processorTarget;
+    Platform::Size processorSource;
+    Platform::Size processorTarget;
 
     // views are cached per texture: the encoder pool cycles through a handful of slices
     struct OutputView

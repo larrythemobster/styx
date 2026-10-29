@@ -1,36 +1,39 @@
 #pragma once
 
-#include <QDateTime>
-#include <QLocale>
-#include <QString>
+#include "Platform/Native.hpp"
+
+#include <algorithm>
+#include <string>
 
 namespace Styx {
 namespace Core {
 namespace TimeUtils {
 
-static QString relativeTime(const QDateTime &dt)
+inline std::string relativeTime(const Platform::DateTime &dt)
 {
-    if (!dt.isValid())
+    if (!dt.valid())
         return {};
-    qint64 secs = (QDateTime::currentMSecsSinceEpoch() - dt.toMSecsSinceEpoch()) / 1000;
-    if (secs < 0)
-        secs = 0;
+    const auto secs = std::max<int64_t>(0, (Platform::DateTime::now().unixMillis() - dt.unixMillis()) / 1000);
     if (secs < 60)
-        return QStringLiteral("just now");
+        return "just now";
     if (secs < 3600)
-        return QString::number(secs / 60) + QStringLiteral("m ago");
+        return std::to_string(secs / 60) + "m ago";
     if (secs < 86400)
-        return QString::number(secs / 3600) + QStringLiteral("h ago");
+        return std::to_string(secs / 3600) + "h ago";
     if (secs < 2592000)
-        return QString::number(secs / 86400) + QStringLiteral("d ago");
-    return dt.toLocalTime().toString(QStringLiteral("MMM d"));
+        return std::to_string(secs / 86400) + "d ago";
+    auto month = dt.format("%b");
+    auto day = dt.format("%d");
+    if (day.size() == 2 && day[0] == '0')
+        day.erase(0, 1);
+    return month + " " + day;
 }
 
-static QString absoluteTime(const QDateTime &dt)
+inline std::string absoluteTime(const Platform::DateTime &dt)
 {
-    if (!dt.isValid())
+    if (!dt.valid())
         return {};
-    return QLocale::system().toString(dt.toLocalTime(), QLocale::ShortFormat);
+    return dt.format("%x %X");
 }
 
 } // namespace TimeUtils

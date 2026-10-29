@@ -2,13 +2,12 @@
 
 #if defined(_WIN32) && defined(STYX_HAVE_FFMPEG)
 
-#include <QByteArray>
-#include <QSize>
-#include <QString>
+#include "Platform/Native.hpp"
 
 #include <d3d11.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 extern "C" {
@@ -26,7 +25,7 @@ class D3DDevice;
 
 struct EncoderSettings
 {
-    QSize size;
+    Platform::Size size;
     int framerate = 30;
     int bitrate = 4'000'000;
     int maxBitrate = 6'000'000;
@@ -34,7 +33,7 @@ struct EncoderSettings
 
 struct EncodedPacket
 {
-    QByteArray data; // Annex B access unit; keyframes always carry SPS/PPS
+    std::string data; // Annex B access unit; keyframes always carry SPS/PPS
     int64_t ptsUs = 0;
     bool keyframe = false;
 };
@@ -52,10 +51,10 @@ public:
     VideoEncoder(const VideoEncoder &) = delete;
     VideoEncoder &operator=(const VideoEncoder &) = delete;
 
-    bool open(const EncoderSettings &settings, QString *error);
+    bool open(const EncoderSettings &settings, std::string *error);
     void close();
 
-    [[nodiscard]] const QString &name() const { return encoderName; }
+    [[nodiscard]] const std::string &name() const { return encoderName; }
     [[nodiscard]] bool takesGpuSurfaces() const { return gpuInput; }
     [[nodiscard]] const EncoderSettings &settings() const { return current; }
 
@@ -68,12 +67,12 @@ public:
     bool encode(AVFrame *frame, int64_t ptsUs, bool forceKeyframe, std::vector<EncodedPacket> &out);
 
 private:
-    bool tryOpen(const char *name, bool gpu, QString *error);
+    bool tryOpen(const char *name, bool gpu, std::string *error);
     bool drain(std::vector<EncodedPacket> &out);
 
     std::shared_ptr<D3DDevice> device;
     EncoderSettings current;
-    QString encoderName;
+    std::string encoderName;
     bool gpuInput = false;
 
     AVCodecContext *ctx = nullptr;
@@ -81,7 +80,7 @@ private:
     AVBufferRef *hwFrames = nullptr;
     AVPixelFormat cpuFormat = AV_PIX_FMT_NV12;
     SwsContext *sws = nullptr;
-    QByteArray parameterSets; // SPS+PPS from the latest keyframe, for keyframes that lack them
+    std::string parameterSets; // SPS+PPS from the latest keyframe, for keyframes that lack them
 };
 
 } // namespace Stream

@@ -1,19 +1,19 @@
 #pragma once
 
-#include <QObject>
-#include <QByteArray>
-#include <QElapsedTimer>
-#include <QHash>
-#include <QVector>
-
+#include "Platform/Trackable.hpp"
+#include "Platform/WorkerLoop.hpp"
+#include <atomic>
+#include <chrono>
+#include <deque>
 #include <memory>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <opus.h>
 
 #include "Core/Snowflake.hpp"
 
-class QTimer;
 
 namespace Styx {
 namespace Core {
@@ -29,31 +29,30 @@ struct SpeakerState
 {
     std::unique_ptr<OpusDecoder> decoder;
     std::unique_ptr<JitterBuffer> jitterBuffer;
-    QVector<QByteArray> pendingFrames; // overflow from multi-frame Opus packets
+    std::deque<std::string> pendingFrames; // overflow from multi-frame Opus packets
 };
 
-class AudioPipeline : public QObject
+class AudioPipeline : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit AudioPipeline(QObject *parent = nullptr);
+    explicit AudioPipeline(Platform::WorkerLoop &loop);
     ~AudioPipeline() override;
 
-public slots:
+public:
     void start(IAudioBackend *backend, bool capturing);
     void stop();
 
     void startCapture();
     void stopCapture();
 
-    void onAudioReceived(quint32 ssrc, uint16_t sequence, uint32_t timestamp, const QByteArray &opusData);
+    void onAudioReceived(uint32_t ssrc, uint16_t sequence, uint32_t timestamp, const std::string &opusData);
 
-    void setSsrcUserId(quint32 ssrc, Snowflake userId);
+    void setSsrcUserId(uint32_t ssrc, Snowflake userId);
     void removeUser(Snowflake userId);
     void setDeafened(bool deafened);
     void setUserVolume(Snowflake userId, float volume);
-    void setInputDevice(const QByteArray &deviceId);
-    void setOutputDevice(const QByteArray &deviceId);
+    void setInputDevice(const std::string &deviceId);
+    void setOutputDevice(const std::string &deviceId);
     void setInputGain(float gain);
     void setOutputVolume(float volume);
     void setVadThreshold(float threshold);
@@ -67,31 +66,33 @@ public slots:
     void setOpusFec(bool enabled);
     void setOpusPacketLossPercent(int percent);
 
-signals:
-    void encodedAudioReady(const QByteArray &opusData);
-    void speakingChanged(bool speaking);
-    void audioLevelChanged(float rms);
-    void userAudioLevelChanged(Snowflake userId, float rms);
+    Platform::Signal<std::string> encodedAudioReady;
+    Platform::Signal<bool> speakingChanged;
+    Platform::Signal<float> audioLevelChanged;
+    Platform::Signal<Snowflake, float> userAudioLevelChanged;
 
-private slots:
-    void onAudioCaptured(const QByteArray &pcmData);
+private:
+    void onAudioCaptured(const std::string &pcmData);
     void onMixTick();
 
 private:
-    bool detectVoiceActivity(const QByteArray &pcmFrame, float &outRms) const;
+    bool detectVoiceActivity(const std::string &pcmFrame, float &outRms) const;
     void sendTrailingSilence();
     void initializeEncoder();
     void reconfigureNoiseSuppressorChannels();
     static float computeRms(const int16_t *samples, int count);
 
+    Platform::WorkerLoop &loop;
+    Platform::TimerId mixTimer = 0;
+    Platform::Connection captureConnection;
+    std::shared_ptr<std::atomic<bool>> captureActive;
     IAudioBackend *audioBackend = nullptr;
-    QTimer *mixTimer = nullptr;
     std::unique_ptr<OpusEncoder> encoder;
     std::unique_ptr<NoiseSuppressor> noiseSuppressor;
-    std::unordered_map<quint32, SpeakerState> speakers;
+    std::unordered_map<uint32_t, SpeakerState> speakers;
 
-    QHash<quint32, Snowflake> ssrcToUser;
-    QHash<Snowflake, float> userVolumes;
+    std::unordered_map<uint32_t, Snowflake> ssrcToUser;
+    std::unordered_map<Snowflake, float> userVolumes;
 
     bool deafened = false;
     bool isSpeaking = false;
@@ -114,12 +115,12 @@ private:
     bool opusFec = true;
     int opusPacketLossPercent = 0;
 
-    QElapsedTimer rmsThrottleTimer;
-    QElapsedTimer userRmsThrottleTimer;
-    QHash<Snowflake, float> pendingUserRms;
+    std::chrono::steady_clock::time_point rmsThrottleTimer;
+    std::chrono::steady_clock::time_point userRmsThrottleTimer;
+    std::unordered_map<Snowflake, float> pendingUserRms;
 
     static constexpr int TRAILING_SILENCE_FRAMES = 5;
-    static constexpr qint64 RMS_EMIT_INTERVAL_MS = 60;
+    static constexpr int RMS_EMIT_INTERVAL_MS = 60;
 };
 
 } // namespace Audio

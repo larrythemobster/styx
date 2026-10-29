@@ -1,184 +1,138 @@
 #include "Logging.hpp"
+#include "Platform/Paths.hpp"
 
-#include <QDateTime>
-#include <QDir>
-#include <thread>
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
+#include <chrono>
+#include <condition_variable>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <iostream>
+#include <mutex>
+#include <thread>
+#include <vector>
 
-Q_LOGGING_CATEGORY(LogCore, "styx.core");
-Q_LOGGING_CATEGORY(LogNetwork, "styx.network");
-Q_LOGGING_CATEGORY(LogDiscord, "styx.discord");
-Q_LOGGING_CATEGORY(LogDB, "styx.db");
-Q_LOGGING_CATEGORY(LogUI, "styx.ui");
-Q_LOGGING_CATEGORY(LogProto, "styx.proto");
-#ifndef STYX_NO_VOICE
-Q_LOGGING_CATEGORY(LogDave, "styx.dave");
-#endif
-Q_LOGGING_CATEGORY(LogMiniaudio, "styx.miniaudio");
-Q_LOGGING_CATEGORY(LogVoice, "styx.voice");
-Q_LOGGING_CATEGORY(LogVideo, "styx.video");
-Q_LOGGING_CATEGORY(LogStream, "styx.stream");
+namespace Styx::Core {
+namespace {
+constexpr std::uintmax_t maxLogFileSize = 10 * 1024 * 1024;
+constexpr int maxBackupFiles = 3;
+struct LogState {
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::vector<std::string> queue;
+    std::thread writer;
+    std::ofstream file;
+    std::filesystem::path path;
+    bool stopping = false;
+    bool running = false;
+    ~LogState() {
+        {
+            std::lock_guard lock(mutex);
+            stopping = true;
+        }
+        ready.notify_one();
+        if (writer.joinable()) writer.join();
+    }
+};
+LogState &state() { static LogState value; return value; }
 
-namespace Styx {
-namespace Core {
+void rotate(LogState &s)
+{
+    s.file.close();
+    std::error_code error;
+    auto backup = [&](int number) { auto p = s.path; p += "." + std::to_string(number); return p; };
+    std::filesystem::remove(backup(maxBackupFiles), error);
+    for (int i = maxBackupFiles - 1; i > 0; --i) {
+        error.clear();
+        if (std::filesystem::exists(backup(i), error))
+            std::filesystem::rename(backup(i), backup(i + 1), error);
+    }
+    error.clear();
+    std::filesystem::rename(s.path, backup(1), error);
+    s.file.open(s.path, std::ios::binary | std::ios::app);
+}
+
+void writerLoop(LogState &s)
+{
+    std::vector<std::string> batch;
+    for (;;) {
+        {
+            std::unique_lock lock(s.mutex);
+            s.ready.wait(lock, [&] { return s.stopping || !s.queue.empty(); });
+            if (s.queue.empty() && s.stopping) break;
+            batch.swap(s.queue);
+        }
+        if (s.file) {
+            for (const auto &line : batch) {
+                s.file.write(line.data(), static_cast<std::streamsize>(line.size()));
+                s.file.put('\n');
+            }
+            s.file.flush();
+            const auto position = s.file.tellp();
+            if (position >= 0 && static_cast<std::uintmax_t>(position) >= maxLogFileSize) rotate(s);
+        }
+        batch.clear();
+    }
+}
+}
 
 void Logger::init()
 {
-    QString path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir dir(path);
-    if (!dir.exists())
-        dir.mkpath(".");
-
-    logFilePath = dir.filePath("styx.log");
-
-    logFile = new QFile(logFilePath);
-    if (logFile->open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Append)) {
-        if (logFile->size() >= maxLogFileSize)
-            rotateLogFile();
-
-        QTextStream stream(logFile);
-        stream << "\n=== Styx startup: " << QDateTime::currentDateTime().toString() << " ===\n";
+    auto &s = state();
+    std::lock_guard lock(s.mutex);
+    if (s.running) return;
+    s.path = Platform::Paths::dataDir() / "styx.log";
+    std::filesystem::create_directories(s.path.parent_path());
+    s.file.clear();
+    s.file.open(s.path, std::ios::binary | std::ios::app);
+    if (s.file) {
+        const auto position = s.file.tellp();
+        if (position >= 0 && static_cast<std::uintmax_t>(position) >= maxLogFileSize) rotate(s);
+        s.file << "\n=== Styx startup: "
+               << std::format("{:%F %T}", std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()))
+               << " ===\n";
+        s.file.flush();
+    } else {
+        std::cerr << "Cannot open Styx log file\n";
     }
-
-    stopping = false;
-    writerThread = new std::thread(&Logger::writerLoop);
-
-    qInstallMessageHandler(Logger::messageHandler);
-}
-
-void Logger::rotateLogFile()
-{
-    bool wasOpen = logFile && logFile->isOpen();
-    if (wasOpen)
-        logFile->close();
-
-    QFile::remove(QString("%1.%2").arg(logFilePath).arg(maxBackupFiles));
-
-    for (int i = maxBackupFiles - 1; i >= 1; i--) {
-        QString src = QString("%1.%2").arg(logFilePath).arg(i);
-        QString dst = QString("%1.%2").arg(logFilePath).arg(i + 1);
-        if (QFile::exists(src))
-            QFile::rename(src, dst);
-    }
-
-    if (QFile::exists(logFilePath))
-        QFile::rename(logFilePath, logFilePath + ".1");
-
-    if (wasOpen && logFile)
-        logFile->open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Append);
+    s.stopping = false;
+    s.writer = std::thread([&s] { writerLoop(s); });
+    s.running = true;
 }
 
 void Logger::cleanup()
 {
-    qInstallMessageHandler(nullptr);
-
+    auto &s = state();
     {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        stopping = true;
+        std::lock_guard lock(s.mutex);
+        if (!s.running) return;
+        s.stopping = true;
     }
-    queueCv.notify_one();
-
-    if (writerThread) {
-        if (writerThread->joinable())
-            writerThread->join();
-        delete writerThread;
-        writerThread = nullptr;
-    }
-
-    if (logFile) {
-        logFile->close();
-        delete logFile;
-        logFile = nullptr;
-    }
+    s.ready.notify_one();
+    s.writer.join();
+    std::lock_guard lock(s.mutex);
+    s.running = false;
+    s.file.close();
 }
 
-void Logger::writerLoop()
+void Logger::write(LogLevel level, std::string_view category, std::string message)
 {
-    std::vector<std::string> batch;
-
-    for (;;) {
-        {
-            std::unique_lock<std::mutex> lock(queueMutex);
-            queueCv.wait(lock, [] { return !queue.empty() || stopping; });
-            batch.swap(queue);
-        }
-
-        if (logFile && logFile->isOpen()) {
-            for (const auto &line : batch) {
-                logFile->write(line.data(), line.size());
-                logFile->write("\n", 1);
-            }
-            logFile->flush();
-
-            if (logFile->size() >= maxLogFileSize)
-                rotateLogFile();
-        }
-        batch.clear();
-
-        {
-            std::lock_guard<std::mutex> lock(queueMutex);
-            if (stopping && queue.empty())
-                break;
-        }
-    }
-}
-
-void Logger::messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
-{
-    const char *level;
-    switch (type) {
-    case QtDebugMsg:
-        level = "DBG";
-        break;
-    case QtInfoMsg:
-        level = "INF";
-        break;
-    case QtWarningMsg:
-        level = "WRN";
-        break;
-    case QtCriticalMsg:
-        level = "CRT";
-        break;
-    case QtFatalMsg:
-        level = "FTL";
-        break;
-    }
-
-    QString time = QDateTime::currentDateTime().toString("HH:mm:ss.zzz");
-#ifdef _WIN32
-    QString threadId = QString::number(static_cast<quint64>(::GetCurrentThreadId()), 16);
-#else
-    QString threadId = QString::number(static_cast<quint64>(std::hash<std::thread::id>{}(std::this_thread::get_id())), 16);
-#endif
-
-    QString formatted =
-            QString("[%1] [T:%2] [%3] [%4] %5").arg(time, threadId, level, context.category, msg);
-
-    std::cout << formatted.toStdString() << std::endl;
-
-    if (type == QtFatalMsg) {
-        if (logFile && logFile->isOpen()) {
-            auto utf8 = formatted.toUtf8();
-            logFile->write(utf8);
-            logFile->write("\n", 1);
-            logFile->flush();
-        }
-        abort();
-    }
-
+    constexpr std::string_view levels[] = { "DBG", "INF", "WRN", "ERR" };
+    auto now = std::chrono::floor<std::chrono::milliseconds>(std::chrono::system_clock::now());
+    auto formatted = std::format("[{:%F %T}] [T:{:x}] [{}] [{}] {}", now,
+        std::hash<std::thread::id>{}(std::this_thread::get_id()), levels[static_cast<unsigned>(level)], category, message);
+    auto &s = state();
     {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        queue.push_back(formatted.toUtf8().toStdString());
+        std::lock_guard lock(s.mutex);
+        std::clog << formatted << '\n';
+        if (!s.running || s.stopping) return;
+        s.queue.push_back(std::move(formatted));
     }
-    queueCv.notify_one();
+    s.ready.notify_one();
 }
 
-} // namespace Core
-} // namespace Styx
+LogLine::~LogLine() noexcept
+{
+    try { Logger::write(level_, category_, stream_.str()); }
+    catch (...) { std::fputs("Styx logging failed\n", stderr); }
+}
+}

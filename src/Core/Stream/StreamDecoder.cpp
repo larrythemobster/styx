@@ -3,6 +3,7 @@
 #ifdef STYX_HAVE_FFMPEG
 
 #include "Core/Logging.hpp"
+#include <algorithm>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -33,21 +34,17 @@ AVPixelFormat pickHardwareFormat(AVCodecContext *, const AVPixelFormat *formats)
 
 } // namespace
 
-StreamDecoder::StreamDecoder(QObject *parent) : QObject(parent)
-{
-}
-
 StreamDecoder::~StreamDecoder()
 {
     close();
 }
 
-void StreamDecoder::setTargetSize(const QSize &size)
+void StreamDecoder::setTargetSize(const Platform::Size &size)
 {
-    if (size.isEmpty())
+    if (size.empty())
         return;
-    targetWidth = size.width();
-    targetHeight = size.height();
+    targetWidth = size.width;
+    targetHeight = size.height;
 }
 
 void StreamDecoder::close()
@@ -91,11 +88,11 @@ bool StreamDecoder::openDecoder(bool useHardware)
     packet = av_packet_alloc();
     frame = av_frame_alloc();
     swFrame = av_frame_alloc();
-    qCInfo(LogStream) << "Stream decoder opened," << (hardware ? "D3D11VA" : "software");
+    log(LogLevel::Info, LogStream) << "Stream decoder opened," << (hardware ? "D3D11VA" : "software");
     return true;
 }
 
-void StreamDecoder::decode(const QByteArray &annexB, quint32, bool keyframe)
+void StreamDecoder::decode(const std::string &annexB, uint32_t, bool keyframe)
 {
     if (!keyframe && !haveKeyframe)
         return; // nothing to predict from yet
@@ -106,19 +103,19 @@ void StreamDecoder::decode(const QByteArray &annexB, quint32, bool keyframe)
     if (keyframe)
         haveKeyframe = true;
 
-    packet->data = reinterpret_cast<uint8_t *>(const_cast<char *>(annexB.constData()));
+    packet->data = reinterpret_cast<uint8_t *>(const_cast<char *>(annexB.data()));
     packet->size = static_cast<int>(annexB.size());
     int ret = avcodec_send_packet(ctx, packet);
     if (ret < 0) {
         if (++consecutiveErrors >= 3) {
             consecutiveErrors = 0;
             if (hardware) {
-                qCWarning(LogStream) << "Hardware decoding keeps failing, switching to software";
+                log(LogLevel::Warning, LogStream) << "Hardware decoding keeps failing, switching to software";
                 hardwareFailed = true;
                 close();
             }
             haveKeyframe = false;
-            emit needKeyframe();
+            needKeyframe.publish();
         }
         return;
     }
@@ -130,7 +127,7 @@ void StreamDecoder::decode(const QByteArray &annexB, quint32, bool keyframe)
     }
     if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
         haveKeyframe = false;
-        emit needKeyframe();
+        needKeyframe.publish();
     }
 }
 
@@ -144,23 +141,25 @@ void StreamDecoder::present(AVFrame *decoded)
         source = swFrame;
     }
 
-    const QSize sourceSize(source->width, source->height);
-    const QSize bounds(targetWidth.load(), targetHeight.load());
-    QSize outSize = sourceSize.scaled(bounds, Qt::KeepAspectRatio);
-    if (outSize.width() > sourceSize.width())
-        outSize = sourceSize; // never upscale on the CPU; the widget does that
-    outSize = outSize.expandedTo(QSize(2, 2));
+    const Platform::Size sourceSize{source->width, source->height};
+    const Platform::Size bounds{targetWidth.load(), targetHeight.load()};
+    Platform::Size outSize = Platform::fitWithin(sourceSize, bounds);
+    if (outSize.width > sourceSize.width)
+        outSize = sourceSize;
+    outSize.width = std::max(outSize.width, 2);
+    outSize.height = std::max(outSize.height, 2);
 
     sws = sws_getCachedContext(sws, source->width, source->height, static_cast<AVPixelFormat>(source->format),
-                               outSize.width(), outSize.height(), AV_PIX_FMT_BGRA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+                               outSize.width, outSize.height, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
     if (!sws)
         return;
 
-    QImage image(outSize, QImage::Format_ARGB32);
-    uint8_t *dst[4] = { image.bits(), nullptr, nullptr, nullptr };
-    int dstStride[4] = { static_cast<int>(image.bytesPerLine()), 0, 0, 0 };
+    Platform::ImageBuffer image{outSize.width, outSize.height, 4,
+                                std::vector<uint8_t>(static_cast<size_t>(outSize.width) * outSize.height * 4)};
+    uint8_t *dst[4] = { image.pixels.data(), nullptr, nullptr, nullptr };
+    int dstStride[4] = { static_cast<int>(image.stride()), 0, 0, 0 };
     sws_scale(sws, source->data, source->linesize, 0, source->height, dst, dstStride);
-    emit frameDecoded(image, sourceSize);
+    frameDecoded.publish(image, sourceSize);
 }
 
 } // namespace Stream

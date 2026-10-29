@@ -1,8 +1,7 @@
 #pragma once
 
-#include <QColor>
-#include <QHash>
-#include <QString>
+#include <string>
+#include <unordered_map>
 
 #include "Core/Theme/Tokens.hpp"
 
@@ -20,8 +19,8 @@ enum class Scheme {
 
 inline constexpr int schemeCount = 5;
 
-QString schemeName(Scheme scheme);
-QHash<Token, QColor> generate(const QColor &seed, Scheme scheme, bool dark);
+std::string schemeName(Scheme scheme);
+std::unordered_map<Token, Platform::Color> generate(const Platform::Color &seed, Scheme scheme, bool dark);
 
 } // namespace Theme
 } // namespace Core

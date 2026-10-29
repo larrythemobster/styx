@@ -1,9 +1,9 @@
 #pragma once
 
-#include <QObject>
-#include <QCache>
-#include <QPair>
+#include <map>
 #include <optional>
+#include <vector>
+#include "Platform/Signal.hpp"
 
 #include "Snowflake.hpp"
 #include "Discord/Enums.hpp"
@@ -17,11 +17,10 @@
 namespace Styx {
 namespace Core {
 
-class PermissionManager : public QObject
+class PermissionManager
 {
-    Q_OBJECT
 public:
-    explicit PermissionManager(Snowflake accountId, QObject *parent = nullptr);
+    explicit PermissionManager(Snowflake accountId);
 
     Discord::Permissions getChannelPermissions(Snowflake userId, Snowflake channelId);
     bool hasChannelPermission(Snowflake userId, Snowflake channelId,
@@ -31,17 +30,16 @@ public:
     bool hasGuildPermission(Snowflake userId, Snowflake guildId, Discord::Permissions permission);
 
     void precomputeGuildPermissions(const Discord::Guild &guild, const Discord::Member &member,
-                                    const QList<Discord::Role> &roles,
-                                    const QList<Discord::Channel> &channels, Snowflake userId);
+                                    const std::vector<Discord::Role> &roles,
+                                    const std::vector<Discord::Channel> &channels, Snowflake userId);
 
     void setSelfMfaEnabled(bool enabled);
 
     void invalidateChannelCache(Snowflake channelId);
     void invalidateUserGuildCache(Snowflake userId, Snowflake guildId);
 
-signals:
-    void channelPermissionsChanged(Snowflake channelId);
-    void guildPermissionsChanged(Snowflake guildId);
+    Platform::Signal<Snowflake> channelPermissionsChanged;
+    Platform::Signal<Snowflake> guildPermissionsChanged;
 
 private:
     Discord::Permissions computeChannelPermissions(Snowflake userId, Snowflake channelId);
@@ -56,9 +54,8 @@ private:
     Storage::ChannelRepository channelRepo;
     Storage::MemberRepository memberRepo;
 
-    QHash<QPair<Snowflake /* userId */, Snowflake /* channelId */>, Discord::Permissions>
-            permissionCache;
-    QHash<QPair<Snowflake, Snowflake>, Discord::Permissions> guildPermissionCache;
+    std::map<std::pair<Snowflake, Snowflake>, Discord::Permissions> permissionCache;
+    std::map<std::pair<Snowflake, Snowflake>, Discord::Permissions> guildPermissionCache;
 };
 
 } // namespace Core

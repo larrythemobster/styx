@@ -16,12 +16,6 @@ inline constexpr int LOOPBACK_SAMPLE_BYTES = 2;
 inline constexpr int LOOPBACK_FRAME_DURATION_MS = 20;
 inline constexpr int LOOPBACK_FRAME_SAMPLES = LOOPBACK_SAMPLE_RATE * LOOPBACK_FRAME_DURATION_MS / 1000;
 inline constexpr int LOOPBACK_FRAME_SIZE = LOOPBACK_FRAME_SAMPLES * LOOPBACK_CHANNELS * LOOPBACK_SAMPLE_BYTES;
-inline constexpr int AUDIO_SAMPLE_RATE = LOOPBACK_SAMPLE_RATE;
-inline constexpr int AUDIO_CHANNELS = LOOPBACK_CHANNELS;
-inline constexpr int AUDIO_SAMPLE_BYTES = LOOPBACK_SAMPLE_BYTES;
-inline constexpr int AUDIO_FRAME_DURATION_MS = LOOPBACK_FRAME_DURATION_MS;
-inline constexpr int AUDIO_FRAME_SAMPLES = LOOPBACK_FRAME_SAMPLES;
-inline constexpr int AUDIO_FRAME_SIZE = LOOPBACK_FRAME_SIZE;
 
 // Whether this machine can capture what one program is playing, or everything but one program.
 [[nodiscard]] bool processLoopbackAvailable();

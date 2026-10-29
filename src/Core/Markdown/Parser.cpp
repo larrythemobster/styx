@@ -3,679 +3,296 @@
 #include "Discord/ChannelLink.hpp"
 #include "Discord/CdnUrls.hpp"
 
-#include <QRegularExpression>
-#include <QStringList>
-#include <QUrl>
+#include <algorithm>
+#include <charconv>
+#include <cctype>
+#include <regex>
+#include <string_view>
+#include <utility>
 
-using Styx::Core::countUnicodeEmojisSegmented;
-
-namespace Styx {
-namespace Core {
-namespace Markdown {
-
+namespace Styx::Core::Markdown {
 namespace {
 constexpr int InlineEmojiCdnPx = 64;
 constexpr int JumboEmojiCdnPx = 128;
-} // namespace
 
-Parser::Parser()
+std::uint64_t number(std::string_view text)
 {
-    setupDefaultRules();
-    sortRules();
+    std::uint64_t value = 0;
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+    return result.ec == std::errc{} && result.ptr == text.data() + text.size() ? value : 0;
 }
 
-QList<AstNode> Parser::parse(QString source, ParseState state)
+std::uint64_t attributeId(const nlohmann::json &attributes, const char *key)
 {
-    QList<AstNode> result;
-
-    source.replace(QRegularExpression(R"(\r\n?)"), "\n");
-    source.replace("\t", "    ");
-
-    if (!state.isInline) {
-        source += "\n\n";
-    }
-
-    while (!source.isEmpty()) {
-        MarkdownRule *bestRule = nullptr;
-        Capture bestCapture;
-        double bestQuality = std::numeric_limits<double>::lowest();
-
-        int currentBestOrder = -1;
-        bool foundMatch = false;
-
-        for (auto &rule : rules) {
-            if (state.excludedRules.contains(rule.name))
-                continue;
-
-            if (foundMatch && rule.order > currentBestOrder)
-                break;
-
-            Capture capture;
-
-            if (rule.match) {
-                capture = rule.match(source, state);
-            } else {
-                capture = rule.regex.match(source, 0, QRegularExpression::NormalMatch,
-                                           QRegularExpression::AnchorAtOffsetMatchOption);
-            }
-
-            if (capture.hasMatch()) {
-                double quality = 0.0;
-                if (rule.quality) {
-                    quality = rule.quality(capture, state, state.prevCapture);
-                }
-
-                if (!foundMatch || quality >= bestQuality) {
-                    bestRule = &rule;
-                    bestCapture = capture;
-                    bestQuality = quality;
-                    currentBestOrder = rule.order;
-                    foundMatch = true;
-                }
-            }
-        }
-
-        if (!foundMatch) {
-            // bad! error!
-            AstNode node;
-            node.type = "text";
-            node.content = source.left(1);
-            result.append(node);
-
-            state.prevCapture = node.content;
-            source.remove(0, 1);
-            continue;
-        }
-
-        auto nestedParse = [this](QString source, ParseState state) -> QList<AstNode> {
-            return this->parse(source, state);
-        };
-
-        AstNode parsedNode = bestRule->parse(bestCapture, nestedParse, state);
-
-        if (parsedNode.type.isEmpty()) {
-            parsedNode.type = bestRule->name;
-        }
-
-        // maybe flatten here
-        result.append(parsedNode);
-
-        QString capturedStr = bestCapture.captured(0);
-        state.prevCapture = capturedStr;
-        source.remove(0, capturedStr.length());
-    }
-
-    return result;
+    auto it = attributes.find(key);
+    if (it == attributes.end() || it->is_null()) return 0;
+    if (it->is_number_unsigned()) return it->get<std::uint64_t>();
+    if (it->is_number_integer()) return static_cast<std::uint64_t>(it->get<std::int64_t>());
+    if (it->is_string()) return number(it->get_ref<const std::string &>());
+    return 0;
 }
 
-QString Parser::toHtml(const QList<AstNode> &nodes, bool jumboEmoji)
+std::string attributeString(const nlohmann::json &attributes, const char *key)
 {
-    return toHtmlInternal(nodes, jumboEmoji);
+    auto it = attributes.find(key);
+    return it != attributes.end() && it->is_string() ? it->get<std::string>() : std::string{};
 }
 
-bool Parser::isEmojiOnly(const QList<AstNode> &nodes, int maxEmojis)
+std::string escapeHtml(std::string_view text)
 {
-    int totalEmojis = 0;
-    for (const auto &node : nodes) {
-        if (node.type == "customEmoji") {
-            totalEmojis++;
-            if (totalEmojis > maxEmojis)
-                return false;
-            continue;
-        }
-        if (node.type == "br" || node.type == "newline")
-            continue;
-        if (node.type == "text" || node.type.isEmpty()) {
-            int unicodeCount = countUnicodeEmojisSegmented(node.content);
-            if (unicodeCount < 0)
-                return false;
-            totalEmojis += unicodeCount;
-            if (totalEmojis > maxEmojis)
-                return false;
-            continue;
-        }
-        // Any other node type (em, strong, url, link, code, etc.) disqualifies
-        return false;
-    }
-    return totalEmojis > 0;
-}
-
-bool Parser::isSingleLink(const QList<AstNode> &nodes)
-{
-    return nodes.size() == 1 && (nodes.first().type == "url" || nodes.first().type == "link");
-}
-
-QString Parser::toHtmlInternal(const QList<AstNode> &nodes, bool jumboEmoji)
-{
-    QString result;
-    for (const auto &node : nodes) {
-        // todo i dont really like this. i think this should still belong in MarkdownRule somehow. its ok for now
-        if (node.type == "user") {
-            QString displayName;
-            if (userResolver)
-                displayName = userResolver(Snowflake(node.content.toULongLong()),
-                                           Snowflake(node.attributes["sourceChannelId"].toULongLong()));
-            else
-                displayName = node.content;
-
-            result += QString("<span class=\"mention\">@%1</span>")
-                              .arg(displayName.toHtmlEscaped());
-            continue;
-        }
-
-        if (node.type == "channel") {
-            QString displayName;
-            if (channelResolver)
-                displayName = channelResolver(node.content);
-            else
-                displayName = node.content;
-
-            result += QString("<a href=\"styx://channel/%1\" class=\"mention\">#%2</a>")
-                              .arg(node.content.toHtmlEscaped())
-                              .arg(displayName.toHtmlEscaped());
-            continue;
-        }
-
-        if (node.type == "channelLink") {
-            QString href = node.attributes["href"].toString().toHtmlEscaped();
-
-            QList<ChannelLinkPart> parts;
-            if (channelLinkResolver) {
-                auto id = [&node](const char *key) { return Snowflake(node.attributes[key].toULongLong()); };
-                parts = channelLinkResolver({ id("guildId"), id("channelId"), id("messageId"), id("sourceChannelId") });
-            }
-
-            if (parts.isEmpty()) {
-                result += QString("<a href=\"%1\">%1</a>").arg(href);
-                continue;
-            }
-
-            auto iconHtml = [](const QString &icon) {
-                return QString("<img src=\"styx-icon:mention-%1\" width=\"14\" height=\"14\" style=\"vertical-align: middle\" />")
-                        .arg(icon);
-            };
-
-            QString inner;
-            for (int i = 0; i < parts.size(); ++i) {
-                if (i > 0)
-                    inner += iconHtml("chevron");
-                if (!parts[i].icon.isEmpty())
-                    inner += iconHtml(parts[i].icon);
-                QString text = parts[i].text.toHtmlEscaped();
-                inner += parts[i].italic ? "<i>" + text + "</i>" : text;
-            }
-            result += QString("<a href=\"%1\" class=\"mention\">%2</a>").arg(href, inner);
-            continue;
-        }
-
-        if (node.type == "customEmoji") {
-            Snowflake id(node.content.toULongLong());
-            QString name = node.attributes["name"].toString();
-            bool animated = node.attributes["animated"].toBool();
-            int emojiSize = jumboEmoji ? JumboEmojiPx : InlineEmojiPx;
-            int cdnSize = jumboEmoji ? JumboEmojiCdnPx : InlineEmojiCdnPx;
-            QString url = Discord::Cdn::emoji(id, cdnSize, animated).toString();
-            result += QString(R"(<img src="%1" alt=":%2:" width="%3" height="%3" style="vertical-align: middle;" />)")
-                              .arg(url.toHtmlEscaped())
-                              .arg(name.toHtmlEscaped())
-                              .arg(emojiSize);
-            continue;
-        }
-
-        if (jumboEmoji && node.type == "text") {
-            QString escaped = node.content.toHtmlEscaped();
-            if (!node.content.trimmed().isEmpty())
-                result += QString(R"(<span style="font-size: %1px;">%2</span>)").arg(JumboEmojiPx).arg(escaped);
-            else
-                result += escaped;
-            continue;
-        }
-
-        if (ruleMap.contains(node.type) && ruleMap[node.type]->html) {
-            auto renderChildren = [this, jumboEmoji](const QList<AstNode> &children) {
-                return this->toHtmlInternal(children, jumboEmoji);
-            };
-            result += ruleMap[node.type]->html(node, renderChildren);
-        } else {
-            result += node.content;
+    std::string result;
+    for (char c : text) {
+        switch (c) {
+        case '&': result += "&amp;"; break;
+        case '<': result += "&lt;"; break;
+        case '>': result += "&gt;"; break;
+        case '"': result += "&quot;"; break;
+        default: result += c; break;
         }
     }
     return result;
 }
 
-void Parser::setUserResolver(UserResolverFn resolver)
+std::string normalizeLinkUrl(std::string url)
 {
-    userResolver = std::move(resolver);
-}
-
-void Parser::setChannelResolver(ChannelResolverFn resolver)
-{
-    channelResolver = std::move(resolver);
-}
-
-void Parser::setChannelLinkResolver(ChannelLinkResolverFn resolver)
-{
-    channelLinkResolver = std::move(resolver);
-}
-
-static MatchFn inlineRegex(QRegularExpression regex)
-{
-    return [regex](const QString &source, const ParseState &state) -> Capture {
-        if (state.isInline)
-            return regex.match(source, 0, QRegularExpression::NormalMatch,
-                               QRegularExpression::AnchorAtOffsetMatchOption);
-        else
-            return Capture();
-    };
-}
-
-static MatchFn blockRegex(QRegularExpression regex)
-{
-    return [regex](const QString &source, const ParseState &state) -> Capture {
-        if (!state.isInline)
-            return regex.match(source, 0, QRegularExpression::NormalMatch,
-                               QRegularExpression::AnchorAtOffsetMatchOption);
-        else
-            return Capture();
-    };
-}
-
-static MatchFn anyScopeRegex(QRegularExpression regex)
-{
-    return [regex](const QString &source, const ParseState &state) -> Capture {
-        return regex.match(source, 0, QRegularExpression::NormalMatch,
-                           QRegularExpression::AnchorAtOffsetMatchOption);
-    };
-}
-
-static bool isAllowedAutolinkTarget(const QString &target)
-{
-    // this is what discord permits
-    static const QStringList allowedSchemes = { "http", "https", "discord", "tel", "sms", "mailto" };
-
-    QUrl url(target, QUrl::TolerantMode);
-    if (!url.isValid())
-        return false;
-
-    const QString scheme = url.scheme();
-    if (!allowedSchemes.contains(scheme))
-        return false;
-
-    if ((scheme == "http" || scheme == "https") && url.host().isEmpty())
-        return false;
-
-    return true;
-}
-
-static QString normalizeLinkUrl(const QString &url)
-{
-    int authStart;
-    if (url.startsWith(QLatin1String("http://"), Qt::CaseInsensitive))
-        authStart = 7;
-    else if (url.startsWith(QLatin1String("https://"), Qt::CaseInsensitive))
-        authStart = 8;
-    else
-        return url;
-
-    int i = authStart;
-    while (i < url.length()) {
-        const QChar c = url.at(i);
-        if (c == QLatin1Char('/') || c == QLatin1Char('?') || c == QLatin1Char('#'))
-            break;
-        ++i;
-    }
-    if (i == authStart) // no host present
-        return url;
-    if (i < url.length() && url.at(i) == QLatin1Char('/')) // path already present
-        return url;
-    return url.left(i) + QLatin1Char('/') + url.mid(i);
-}
-
-static QString trimUnbalancedTrailingParens(QString url)
-{
-    int searchFrom = 0;
-    for (int i = url.length() - 1; i >= 0 && url.at(i) == QLatin1Char(')'); --i) {
-        int open = url.indexOf(QLatin1Char('('), searchFrom);
-        if (open == -1) {
-            url.chop(1);
-            break;
-        }
-        searchFrom = open + 1;
-    }
+    std::string prefix = url.substr(0, 8);
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto start = prefix.starts_with("https://") ? 8u : prefix.starts_with("http://") ? 7u : 0u;
+    if (!start) return url;
+    const auto end = url.find_first_of("/?#", start);
+    if (end != start && (end == std::string::npos || url[end] != '/'))
+        url.insert(end == std::string::npos ? url.size() : end, 1, '/');
     return url;
 }
 
-static Capture wholeMatch(const QString &text)
+bool allowedAutolink(const std::string &target)
 {
-    static const QRegularExpression whole(R"(^([\s\S]*))");
-    return whole.match(text);
-}
-
-void Parser::setupDefaultRules()
-{
-    MarkdownRule newline;
-    newline.name = "newline";
-    newline.order = 10;
-    newline.regex = QRegularExpression(R"(^(?:\n *)*\n)");
-    newline.match = blockRegex(newline.regex);
-    newline.parse = [](const Capture &match, NestedParseFn nestedParse,
-                       ParseState state) -> AstNode { return {}; };
-    newline.html = [](const AstNode &node,
-                      std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return "\n";
-    };
-    rules.append(newline);
-
-    MarkdownRule escape;
-    escape.name = "escape";
-    escape.order = 12;
-    escape.regex = QRegularExpression(R"(^\\([^0-9A-Za-z\s]))");
-    escape.match = inlineRegex(escape.regex);
-    escape.parse = [](const Capture &match, NestedParseFn nestedParse,
-                      ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "text";
-        node.content = match.captured(1);
-        return node;
-    };
-    escape.html = [](const AstNode &node,
-                     std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return node.content.toHtmlEscaped();
-    };
-    rules.append(escape);
-
-    MarkdownRule autolink;
-    autolink.name = "autolink";
-    autolink.order = 15;
-    autolink.regex = QRegularExpression(R"(^<([^: >]+:\/[^ >]+)>)");
-    autolink.match = inlineRegex(autolink.regex);
-    autolink.parse = [](const Capture &match, NestedParseFn nestedParse,
-                        ParseState state) -> AstNode {
-        AstNode node;
-        QString target = match.captured(1);
-        if (!isAllowedAutolinkTarget(target)) {
-            node.type = "text";
-            node.content = target;
-            return node;
-        }
-
-        node.type = "url";
-        node.content = normalizeLinkUrl(target);
-        node.attributes["href"] = node.content;
-        return node;
-    };
-    rules.append(autolink);
-
-    MarkdownRule channelLink;
-    channelLink.name = "channelLink";
-    channelLink.order = 16;
-    channelLink.regex = Discord::ChannelLink::pattern(R"((?=$|[\s<.,:;"'!?)\]]))");
-    channelLink.match = inlineRegex(channelLink.regex);
-    channelLink.parse = [](const Capture &match, NestedParseFn, ParseState state) -> AstNode {
-        auto link = Discord::ChannelLink::fromMatch(match);
-        AstNode node;
-        node.type = "channelLink";
-        node.content = match.captured(0);
-        node.attributes["href"] = node.content;
-        node.attributes["guildId"] = quint64(link.guildId);
-        node.attributes["channelId"] = quint64(link.channelId);
-        node.attributes["messageId"] = quint64(link.messageId);
-        node.attributes["sourceChannelId"] = state.customState.value("channelId");
-        return node;
-    };
-    rules.append(channelLink);
-
-    MarkdownRule url;
-    url.name = "url";
-    url.order = 17;
-    url.regex = QRegularExpression(R"(^(https?:\/\/[^\s<]+[^<.,:;"'\]\s]))");
-    url.match = [regex = url.regex](const QString &source, const ParseState &state) -> Capture {
-        if (!state.isInline)
-            return Capture();
-        Capture m = regex.match(source, 0, QRegularExpression::NormalMatch, QRegularExpression::AnchorAtOffsetMatchOption);
-        if (!m.hasMatch())
-            return m;
-        QString trimmed = trimUnbalancedTrailingParens(m.captured(1));
-        if (trimmed.length() == m.captured(1).length())
-            return m;
-        return wholeMatch(trimmed);
-    };
-    url.parse = [](const Capture &match, NestedParseFn nestedParse, ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "url";
-        node.content = normalizeLinkUrl(match.captured(1));
-        node.attributes["href"] = node.content;
-        return node;
-    };
-    url.html = [](const AstNode &node,
-                  std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return QString("<a href=\"%1\">%2</a>")
-                .arg(node.attributes["href"].toString().toHtmlEscaped())
-                .arg(node.content.toHtmlEscaped());
-    };
-    rules.append(url);
-
-    MarkdownRule link;
-    link.name = "link";
-    link.order = 18;
-    link.regex = QRegularExpression(
-            R"(^\[((?:\[[^\]]*\]|[^\[\]]|\](?=[^\[]*\]))*)\]\(\s*<?((?:\([^)]*\)|[^\s\\]|\\.)*?)>?(?:\s+['"]([\s\S]*?)['"])?\s*\))");
-    link.match = inlineRegex(link.regex);
-    link.parse = [](const Capture &match, NestedParseFn nestedParse, ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "link";
-        node.children = nestedParse(match.captured(1), state);
-        node.attributes["href"] = match.captured(2);
-        node.attributes["title"] = match.captured(3);
-        return node;
-    };
-    link.html = [](const AstNode &node,
-                   std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return QString("<a href=\"%1\">%2</a>")
-                .arg(node.attributes["href"].toString().toHtmlEscaped())
-                .arg(renderChildren(node.children));
-    };
-    rules.append(link);
-
-    MarkdownRule em;
-    em.name = "em";
-    em.order = 20;
-    em.regex = QRegularExpression(
-            R"(^\b_((?:__|\\[\s\S]|[^\\_])+?)_\b|^\*(?=\S)((?:\*\*|\\[\s\S]|\s+(?:\\[\s\S]|[^\s\*\\]|\*\*)|[^\s\*\\])+?)\*(?!\*))");
-    em.match = inlineRegex(em.regex);
-    em.parse = [](const Capture &match, NestedParseFn nestedParse, ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "em";
-        QString innerContent = match.captured(2).isNull() ? match.captured(1) : match.captured(2);
-        ParseState childState = state;
-        childState.isInline = true;
-        node.children = nestedParse(innerContent, childState);
-        return node;
-    };
-    em.html = [](const AstNode &node,
-                 std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return QString("<em>%1</em>").arg(renderChildren(node.children));
-    };
-    em.quality = [](const Capture &match, const ParseState &state,
-                    const QString &prevCapture) -> double { return match.capturedLength() + 0.2; };
-    rules.append(em);
-
-    MarkdownRule user;
-    user.name = "user";
-    user.order = 21;
-    user.regex = QRegularExpression(R"(^<@!?([0-9]*)>)");
-    user.match = anyScopeRegex(user.regex);
-    user.parse = [](const Capture &match, NestedParseFn nestedParse, ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "user";
-        node.content = match.captured(1);
-        node.attributes["sourceChannelId"] = state.customState.value("channelId");
-        return node;
-    };
-    // .html handled in toHtml() because of user resolution
-    rules.append(user);
-
-    MarkdownRule channel;
-    channel.name = "channel";
-    channel.order = 21;
-    channel.regex = QRegularExpression(R"(^<#?([0-9]*)>)");
-    channel.match = anyScopeRegex(channel.regex);
-    channel.parse = [](const Capture &match, NestedParseFn nestedParse, ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "channel";
-        node.content = match.captured(1);
-        return node;
-    };
-    // .html handled in toHtml() because of channel resolution
-    rules.append(channel);
-
-    MarkdownRule customEmoji;
-    customEmoji.name = "customEmoji";
-    customEmoji.order = 21;
-    customEmoji.regex = QRegularExpression(R"(^<(a?):([a-zA-Z0-9_]{1,32}):(\d+)>)");
-    customEmoji.match = anyScopeRegex(customEmoji.regex);
-    customEmoji.parse = [](const Capture &match, NestedParseFn nestedParse,
-                           ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "customEmoji";
-        node.content = match.captured(3);
-        node.attributes["name"] = match.captured(2);
-        node.attributes["animated"] = !match.captured(1).isEmpty();
-        return node;
-    };
-    // .html handled in toHtmlInternal() for jumbo emoji support
-    rules.append(customEmoji);
-
-    MarkdownRule strong;
-    strong.name = "strong";
-    strong.order = 21;
-    strong.regex = QRegularExpression(R"(^\*\*((?:\\[\s\S]|[^\\])+?)\*\*(?!\*))");
-    strong.match = inlineRegex(strong.regex);
-    strong.parse = [](const Capture &match, NestedParseFn nestedParse,
-                      ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "strong";
-        QString innerContent = match.captured(1);
-        ParseState childState = state;
-        childState.isInline = true;
-        node.children = nestedParse(innerContent, childState);
-        return node;
-    };
-    strong.html = [](const AstNode &node,
-                     std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return QString("<strong>%1</strong>").arg(renderChildren(node.children));
-    };
-    strong.quality = [](const Capture &match, const ParseState &state,
-                        const QString &prevCapture) -> double {
-        return match.capturedLength() + 0.1;
-    };
-    rules.append(strong);
-
-    MarkdownRule u;
-    u.name = "u";
-    u.order = 21;
-    u.regex = QRegularExpression(R"(^__((?:\\[\s\S]|[^\\])+?)__(?!_))");
-    u.match = inlineRegex(u.regex);
-    u.parse = [](const Capture &match, NestedParseFn nestedParse, ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "u";
-        QString innerContent = match.captured(1);
-        ParseState childState = state;
-        childState.isInline = true;
-        node.children = nestedParse(innerContent, childState);
-        return node;
-    };
-    u.html = [](const AstNode &node,
-                std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return QString("<u>%1</u>").arg(renderChildren(node.children));
-    };
-    u.quality = [](const Capture &match, const ParseState &state,
-                   const QString &prevCapture) -> double { return match.capturedLength(); };
-    rules.append(u);
-
-    MarkdownRule strike;
-    strike.name = "strike";
-    strike.order = 22;
-    strike.regex = QRegularExpression(R"(~~([\s\S]+?)~~(?!_))");
-    strike.match = inlineRegex(strike.regex);
-    strike.parse = [](const Capture &match, NestedParseFn nestedParse,
-                      ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "strike";
-        QString innerContent = match.captured(1);
-        ParseState childState = state;
-        childState.isInline = true;
-        node.children = nestedParse(innerContent, childState);
-        return node;
-    };
-    strike.html = [](const AstNode &node,
-                     std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return QString("<s>%1</s>").arg(renderChildren(node.children));
-    };
-    rules.append(strike);
-
-    MarkdownRule inlineCode;
-    inlineCode.name = "inlineCode";
-    inlineCode.order = 23;
-    inlineCode.regex = QRegularExpression(R"(^(`+)([\s\S]*?[^`])\1(?!`))");
-    inlineCode.match = inlineRegex(inlineCode.regex);
-    inlineCode.parse = [](const Capture &match, NestedParseFn nestedParse,
-                          ParseState state) -> AstNode {
-        AstNode node;
-        node.type = "inlineCode";
-        node.content = match.captured(2);
-        static QRegularExpression re(R"(^ (?= *`)|(` *) $)");
-        node.content.replace(re, "\\1");
-        return node;
-    };
-    inlineCode.html = [](const AstNode &node,
-                         std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return QString("<code>%1</code>").arg(node.content.toHtmlEscaped());
-    };
-    rules.append(inlineCode);
-
-    MarkdownRule br;
-    br.name = "br";
-    br.order = 24;
-    br.regex = QRegularExpression(R"(^\n)");
-    br.match = anyScopeRegex(br.regex);
-    br.parse = [](const Capture &match, NestedParseFn nestedParse, ParseState state) -> AstNode {
-        return {};
-    };
-    br.html = [](const AstNode &node,
-                 std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return "<br>";
-    };
-    rules.append(br);
-
-    MarkdownRule text;
-    text.name = "text";
-    text.order = 25;
-    text.regex =
-            QRegularExpression(R"(^[\s\S]+?(?=[^0-9A-Za-z\s\x{00C0}-\x{ffff}-]|\n\n|\n|\w+:\S|$))");
-    text.match = anyScopeRegex(text.regex);
-    text.parse = [](const Capture &match, NestedParseFn nestedParse, ParseState state) -> AstNode {
-        AstNode node;
-        node.content = match.captured(0);
-        return node;
-    };
-    text.html = [](const AstNode &node,
-                   std::function<QString(const QList<AstNode> &)> renderChildren) -> QString {
-        return node.content.toHtmlEscaped();
-    };
-    rules.append(text);
-}
-
-void Parser::sortRules()
-{
-    std::sort(rules.begin(), rules.end(),
-              [](const MarkdownRule &a, const MarkdownRule &b) { return a.order < b.order; });
-
-    for (auto &rule : rules) {
-        ruleMap[rule.name] = &rule;
+    auto colon = target.find(':');
+    if (colon == std::string::npos) return false;
+    auto scheme = target.substr(0, colon);
+    std::transform(scheme.begin(), scheme.end(), scheme.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (scheme != "http" && scheme != "https" && scheme != "discord" && scheme != "tel" && scheme != "sms" && scheme != "mailto") return false;
+    if (scheme == "http" || scheme == "https") {
+        if (target.compare(colon + 1, 2, "//") != 0) return false;
+        const auto host = colon + 3;
+        if (host >= target.size() || target.find_first_of("/?#", host) == host) return false;
     }
+    return true;
 }
 
-} // namespace Markdown
-} // namespace Core
-} // namespace Styx
+struct Rule {
+    const char *name;
+    int order;
+    enum Scope { Any, Inline, Block } scope;
+    std::regex regex;
+};
+
+const std::vector<Rule> &rules()
+{
+    static const std::vector<Rule> value = {
+        {"newline", 10, Rule::Block, std::regex(R"(^(?:\n *)*\n)")},
+        {"escape", 12, Rule::Inline, std::regex(R"(^\\([^0-9A-Za-z\s]))")},
+        {"autolink", 15, Rule::Inline, std::regex(R"(^<([^: >]+:\/[^ >]+)>)")},
+        {"channelLink", 16, Rule::Inline, Discord::ChannelLink::pattern(R"((?=$|[\s<.,:;"'!?)\]]))")},
+        {"url", 17, Rule::Inline, std::regex(R"(^(https?:\/\/[^\s<]+[^<.,:;"'\]\s]))")},
+        {"link", 18, Rule::Inline, std::regex(R"(^\[((?:\[[^\]]*\]|[^\[\]]|\](?=[^\[]*\]))*)\]\(\s*<?((?:\([^)]*\)|[^\s\\]|\\.)*?)>?(?:\s+['"]([\s\S]*?)['"])?\s*\))")},
+        {"em", 20, Rule::Inline, std::regex(R"(^\b_((?:__|\\[\s\S]|[^\\_])+?)_\b|^\*(?=\S)((?:\*\*|\\[\s\S]|\s+(?:\\[\s\S]|[^\s\*\\]|\*\*)|[^\s\*\\])+?)\*(?!\*))")},
+        {"user", 21, Rule::Any, std::regex(R"(^<@!?([0-9]*)>)")},
+        {"channel", 21, Rule::Any, std::regex(R"(^<#?([0-9]*)>)")},
+        {"customEmoji", 21, Rule::Any, std::regex(R"(^<(a?):([a-zA-Z0-9_]{1,32}):(\d+)>)")},
+        {"strong", 21, Rule::Inline, std::regex(R"(^\*\*((?:\\[\s\S]|[^\\])+?)\*\*(?!\*))")},
+        {"u", 21, Rule::Inline, std::regex(R"(^__((?:\\[\s\S]|[^\\])+?)__(?!_))")},
+        {"strike", 22, Rule::Inline, std::regex(R"(^~~([\s\S]+?)~~(?!_))")},
+        {"inlineCode", 23, Rule::Inline, std::regex(R"(^(`+)([\s\S]*?[^`])\1(?!`))")},
+        {"br", 24, Rule::Any, std::regex(R"(^\n)")}
+    };
+    return value;
+}
+
+bool textBoundary(const std::string &source, std::size_t pos)
+{
+    const unsigned char c = static_cast<unsigned char>(source[pos]);
+    if (c == '\n') return true;
+    if (c < 128 && !std::isalnum(c) && !std::isspace(c) && c != '-') return true;
+    if (c < 128 && (std::isalnum(c) || c == '_')) {
+        auto end = pos;
+        while (end < source.size()) {
+            const unsigned char ch = static_cast<unsigned char>(source[end]);
+            if (ch >= 128 || (!std::isalnum(ch) && ch != '_')) break;
+            ++end;
+        }
+        if (end + 1 < source.size() && source[end] == ':' && !std::isspace(static_cast<unsigned char>(source[end + 1]))) return true;
+    }
+    return false;
+}
+} // namespace
+
+std::vector<AstNode> Parser::parse(std::string source, ParseState state)
+{
+    std::string normalized;
+    normalized.reserve(source.size());
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        if (source[i] == '\r') {
+            normalized += '\n';
+            if (i + 1 < source.size() && source[i + 1] == '\n') ++i;
+        } else if (source[i] == '\t') normalized += "    ";
+        else normalized += source[i];
+    }
+    source = std::move(normalized);
+    if (!state.isInline) source += "\n\n";
+
+    std::vector<AstNode> result;
+    while (!source.empty()) {
+        const Rule *best = nullptr;
+        std::smatch capture, match;
+        double quality = 0;
+        for (const auto &rule : rules()) {
+            if (state.excludedRules.contains(rule.name) || (rule.scope == Rule::Inline && !state.isInline) || (rule.scope == Rule::Block && state.isInline)) continue;
+            if (best && rule.order > best->order) break;
+            if (!std::regex_search(source, match, rule.regex, std::regex_constants::match_continuous) || match.length() == 0) continue;
+            double candidate = 0;
+            if (std::string_view(rule.name) == "strong") candidate = match.length() + 0.1;
+            else if (std::string_view(rule.name) == "u") candidate = static_cast<double>(match.length());
+            if (!best || candidate >= quality) { best = &rule; capture = match; quality = candidate; }
+        }
+        AstNode node;
+        std::size_t consumed = 0;
+        if (!best) {
+            // The text rule consumes at least one character before checking its lookahead.
+            consumed = 1;
+            while (consumed < source.size() && (static_cast<unsigned char>(source[consumed]) & 0xc0) == 0x80) ++consumed;
+            if (!state.excludedRules.contains("text")) {
+                while (consumed < source.size() && !textBoundary(source, consumed)) ++consumed;
+            }
+            node.type = "text";
+            node.content = source.substr(0, consumed);
+        } else {
+            node.type = best->name;
+            consumed = capture.length();
+            const std::string_view type = best->name;
+            if (type == "escape") { node.type = "text"; node.content = capture[1].str(); }
+            else if (type == "autolink") {
+                node.content = capture[1].str();
+                if (allowedAutolink(node.content)) { node.type = "url"; node.content = normalizeLinkUrl(node.content); node.attributes["href"] = node.content; }
+                else node.type = "text";
+            } else if (type == "channelLink") {
+                const auto link = Discord::ChannelLink::fromMatch(capture);
+                node.content = capture[0].str();
+                node.attributes["href"] = node.content;
+                node.attributes["guildId"] = static_cast<std::uint64_t>(link.guildId);
+                node.attributes["channelId"] = static_cast<std::uint64_t>(link.channelId);
+                node.attributes["messageId"] = static_cast<std::uint64_t>(link.messageId);
+                node.attributes["sourceChannelId"] = attributeId(state.customState, "channelId");
+            } else if (type == "url") {
+                auto target = capture[1].str();
+                std::size_t search = 0;
+                for (std::size_t i = target.size(); i > 0 && target[i - 1] == ')'; --i) {
+                    auto open = target.find('(', search);
+                    if (open == std::string::npos) { target.pop_back(); --consumed; break; }
+                    search = open + 1;
+                }
+                node.content = normalizeLinkUrl(target);
+                node.attributes["href"] = node.content;
+            } else if (type == "link") {
+                node.children = parse(capture[1].str(), state);
+                node.attributes["href"] = capture[2].str();
+                node.attributes["title"] = capture[3].str();
+            } else if (type == "em" || type == "strong" || type == "u" || type == "strike") {
+                state.isInline = true;
+                node.children = parse(type == "em" && capture[2].matched ? capture[2].str() : capture[1].str(), state);
+            } else if (type == "user" || type == "channel") {
+                node.content = capture[1].str();
+                if (type == "user") node.attributes["sourceChannelId"] = attributeId(state.customState, "channelId");
+            } else if (type == "customEmoji") {
+                node.content = capture[3].str();
+                node.attributes["name"] = capture[2].str();
+                node.attributes["animated"] = !capture[1].str().empty();
+            } else if (type == "inlineCode") {
+                node.content = capture[2].str();
+                static const std::regex spaces(R"(^ (?= *`)|(` *) $)");
+                node.content = std::regex_replace(node.content, spaces, "$1");
+            }
+        }
+        state.prevCapture = source.substr(0, consumed);
+        source.erase(0, consumed);
+        result.push_back(std::move(node));
+    }
+    return result;
+}
+
+std::string Parser::toHtml(const std::vector<AstNode> &nodes, bool jumboEmoji)
+{
+    std::string result;
+    for (const auto &node : nodes) {
+        const auto &type = node.type;
+        if (type == "user") {
+            auto name = userResolver ? userResolver(Snowflake(number(node.content)), Snowflake(attributeId(node.attributes, "sourceChannelId"))) : node.content;
+            result += "<span class=\"mention\">@" + escapeHtml(name) + "</span>";
+        } else if (type == "channel") {
+            auto name = channelResolver ? channelResolver(node.content) : node.content;
+            result += "<a href=\"styx://channel/" + escapeHtml(node.content) + "\" class=\"mention\">#" + escapeHtml(name) + "</a>";
+        } else if (type == "channelLink") {
+            auto href = escapeHtml(attributeString(node.attributes, "href"));
+            std::vector<ChannelLinkPart> parts;
+            if (channelLinkResolver) parts = channelLinkResolver({Snowflake(attributeId(node.attributes, "guildId")), Snowflake(attributeId(node.attributes, "channelId")), Snowflake(attributeId(node.attributes, "messageId")), Snowflake(attributeId(node.attributes, "sourceChannelId"))});
+            if (parts.empty()) result += "<a href=\"" + href + "\">" + href + "</a>";
+            else {
+                auto icon = [](const std::string &name) { return "<img src=\"styx-icon:mention-" + name + "\" width=\"14\" height=\"14\" style=\"vertical-align: middle\" />"; };
+                std::string inner;
+                for (std::size_t i = 0; i < parts.size(); ++i) {
+                    if (i) inner += icon("chevron");
+                    if (!parts[i].icon.empty()) inner += icon(parts[i].icon);
+                    auto text = escapeHtml(parts[i].text);
+                    inner += parts[i].italic ? "<i>" + text + "</i>" : text;
+                }
+                result += "<a href=\"" + href + "\" class=\"mention\">" + inner + "</a>";
+            }
+        } else if (type == "customEmoji") {
+            const auto size = jumboEmoji ? JumboEmojiPx : InlineEmojiPx;
+            const auto cdnSize = jumboEmoji ? JumboEmojiCdnPx : InlineEmojiCdnPx;
+            auto animated = node.attributes.value("animated", false);
+            auto url = Discord::Cdn::emoji(Snowflake(number(node.content)), cdnSize, animated);
+            result += "<img src=\"" + escapeHtml(url) + "\" alt=\":" + escapeHtml(attributeString(node.attributes, "name")) + ":\" width=\"" + std::to_string(size) + "\" height=\"" + std::to_string(size) + "\" style=\"vertical-align: middle;\" />";
+        } else if (type == "text" || type == "escape") {
+            auto text = escapeHtml(node.content);
+            if (jumboEmoji && type == "text" && node.content.find_first_not_of(" \t\r\n\f\v") != std::string::npos) result += "<span style=\"font-size: " + std::to_string(JumboEmojiPx) + "px;\">" + text + "</span>";
+            else result += text;
+        } else if (type == "url" || type == "link") {
+            result += "<a href=\"" + escapeHtml(attributeString(node.attributes, "href")) + "\">" + (type == "link" ? toHtml(node.children, jumboEmoji) : escapeHtml(node.content)) + "</a>";
+        } else if (type == "em" || type == "strong" || type == "u" || type == "strike") {
+            const auto tag = type == "strike" ? "s" : type.c_str();
+            result += "<" + std::string(tag) + ">" + toHtml(node.children, jumboEmoji) + "</" + tag + ">";
+        } else if (type == "inlineCode") result += "<code>" + escapeHtml(node.content) + "</code>";
+        else if (type == "br") result += "<br>";
+        else if (type == "newline") result += '\n';
+        else result += node.content;
+    }
+    return result;
+}
+
+bool Parser::isEmojiOnly(const std::vector<AstNode> &nodes, int maxEmojis)
+{
+    int total = 0;
+    for (const auto &node : nodes) {
+        if (node.type == "customEmoji") ++total;
+        else if (node.type == "br" || node.type == "newline") continue;
+        else if (node.type == "text" || node.type.empty()) {
+            const int count = countUnicodeEmojisSegmented(node.content);
+            if (count < 0) return false;
+            total += count;
+        } else return false;
+        if (total > maxEmojis) return false;
+    }
+    return total > 0;
+}
+
+bool Parser::isSingleLink(const std::vector<AstNode> &nodes)
+{
+    return nodes.size() == 1 && (nodes.front().type == "url" || nodes.front().type == "link");
+}
+
+void Parser::setUserResolver(UserResolverFn resolver) { userResolver = std::move(resolver); }
+void Parser::setChannelResolver(ChannelResolverFn resolver) { channelResolver = std::move(resolver); }
+void Parser::setChannelLinkResolver(ChannelLinkResolverFn resolver) { channelLinkResolver = std::move(resolver); }
+
+} // namespace Styx::Core::Markdown

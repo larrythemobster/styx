@@ -1,14 +1,14 @@
 #include "RoleHierarchy.hpp"
 
-#include <QSet>
+#include <unordered_set>
 
 #include <algorithm>
 
 namespace Styx {
 namespace Core {
 
-RoleHierarchy::RoleHierarchy(Snowflake guildId, Snowflake ownerId, Snowflake selfId, const QList<Discord::Role> &roles,
-                             const QList<Snowflake> &selfRoleIds)
+RoleHierarchy::RoleHierarchy(Snowflake guildId, Snowflake ownerId, Snowflake selfId, const std::vector<Discord::Role> &roles,
+                             const std::vector<Snowflake> &selfRoleIds)
     : guildId(guildId), ownerId(ownerId), selfId(selfId), roles(sorted(roles, guildId)), selfRoleIds(selfRoleIds)
 {
 }
@@ -24,15 +24,15 @@ bool RoleHierarchy::sortsBefore(const Discord::Role &a, const Discord::Role &b, 
     return a.id.get() < b.id.get();
 }
 
-QList<Discord::Role> RoleHierarchy::sorted(QList<Discord::Role> roles, Snowflake guildId)
+std::vector<Discord::Role> RoleHierarchy::sorted(std::vector<Discord::Role> roles, Snowflake guildId)
 {
     std::stable_sort(roles.begin(), roles.end(), [guildId](const Discord::Role &a, const Discord::Role &b) { return sortsBefore(a, b, guildId); });
     return roles;
 }
 
-std::optional<Discord::Role> RoleHierarchy::highestRole(const QList<Snowflake> &roleIds) const
+std::optional<Discord::Role> RoleHierarchy::highestRole(const std::vector<Snowflake> &roleIds) const
 {
-    const QSet<Snowflake> held(roleIds.cbegin(), roleIds.cend());
+    const std::unordered_set<Snowflake> held(roleIds.cbegin(), roleIds.cend());
     for (const Discord::Role &role : roles)
         if (role.id.get() != guildId && held.contains(role.id.get()))
             return role;
@@ -52,7 +52,7 @@ bool RoleHierarchy::outranksRole(const Discord::Role &role) const
     return highest && sortsBefore(*highest, role, guildId);
 }
 
-bool RoleHierarchy::outranksMember(Snowflake userId, const QList<Snowflake> &roleIds) const
+bool RoleHierarchy::outranksMember(Snowflake userId, const std::vector<Snowflake> &roleIds) const
 {
     if (userId == ownerId)
         return false;

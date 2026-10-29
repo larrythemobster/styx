@@ -8,8 +8,6 @@
 
 #include "Core/Logging.hpp"
 
-#include <QTimer>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -18,13 +16,14 @@ namespace Styx {
 namespace Core {
 namespace Audio {
 
-AudioPipeline::AudioPipeline(QObject *parent)
-    : QObject(parent)
+AudioPipeline::AudioPipeline(Platform::WorkerLoop &loop)
+    : loop(loop)
 {
 }
 
 AudioPipeline::~AudioPipeline()
 {
+    stop();
 }
 
 void AudioPipeline::start(IAudioBackend *backend, bool capturing)
@@ -33,7 +32,16 @@ void AudioPipeline::start(IAudioBackend *backend, bool capturing)
         return;
 
     audioBackend = backend;
-    connect(audioBackend, &IAudioBackend::audioCaptured, this, &AudioPipeline::onAudioCaptured, Qt::QueuedConnection);
+    captureActive = std::make_shared<std::atomic<bool>>(true);
+    auto active = captureActive;
+    auto weak = lifetime();
+    auto *worker = &loop;
+    captureConnection = audioBackend->audioCaptured.connect([this, worker, active, weak](std::string frame) {
+        worker->post([this, active, weak, frame = std::move(frame)] {
+            if (active->load() && !weak.expired())
+                onAudioCaptured(frame);
+        });
+    });
 
     initializeEncoder();
 
@@ -41,8 +49,8 @@ void AudioPipeline::start(IAudioBackend *backend, bool capturing)
     if (!noiseSuppressor->init())
         noiseSuppressor.reset();
 
-    rmsThrottleTimer.start();
-    userRmsThrottleTimer.start();
+    rmsThrottleTimer = std::chrono::steady_clock::now();
+    userRmsThrottleTimer = rmsThrottleTimer;
 
     if (capturing)
         audioBackend->startCapture();
@@ -50,22 +58,21 @@ void AudioPipeline::start(IAudioBackend *backend, bool capturing)
 
     audioBackend->startPlayback();
 
-    mixTimer = new QTimer(this);
-    mixTimer->setTimerType(Qt::PreciseTimer);
-    mixTimer->setInterval(AUDIO_FRAME_DURATION_MS);
-    connect(mixTimer, &QTimer::timeout, this, &AudioPipeline::onMixTick);
-    mixTimer->start();
+    mixTimer = loop.setTimer(AUDIO_FRAME_DURATION_MS, true, [this] { onMixTick(); });
 
-    qCInfo(LogVoice) << "Audio pipeline started";
+    log(LogLevel::Info, LogVoice) << "Audio pipeline started";
 }
 
 void AudioPipeline::stop()
 {
-    delete mixTimer;
-    mixTimer = nullptr;
+    if (mixTimer)
+        loop.cancelTimer(std::exchange(mixTimer, 0));
+    if (captureActive)
+        captureActive->store(false);
+    captureConnection.disconnect();
+    captureActive.reset();
 
     if (audioBackend) {
-        disconnect(audioBackend, &IAudioBackend::audioCaptured, this, &AudioPipeline::onAudioCaptured);
         audioBackend->stopCapture();
         audioBackend->stopPlayback();
     }
@@ -82,7 +89,7 @@ void AudioPipeline::stop()
     isSpeaking = false;
     vadHoldoffCounter = 0;
 
-    qCDebug(LogVoice) << "Audio pipeline stopped";
+    log(LogLevel::Debug, LogVoice) << "Audio pipeline stopped";
 }
 
 void AudioPipeline::startCapture()
@@ -105,18 +112,18 @@ void AudioPipeline::stopCapture()
         sendTrailingSilence();
         isSpeaking = false;
         vadHoldoffCounter = 0;
-        emit speakingChanged(false);
+        speakingChanged.publish(false);
     }
 }
 
-void AudioPipeline::onAudioReceived(quint32 ssrc, uint16_t sequence, uint32_t /*timestamp*/, const QByteArray &opusData)
+void AudioPipeline::onAudioReceived(uint32_t ssrc, uint16_t sequence, uint32_t /*timestamp*/, const std::string &opusData)
 {
     auto it = speakers.find(ssrc);
     if (it == speakers.end()) {
         SpeakerState state;
         state.decoder = std::make_unique<OpusDecoder>();
         if (!state.decoder->init(AUDIO_SAMPLE_RATE, AUDIO_CHANNELS)) {
-            qCWarning(LogVoice) << "Failed to init decoder for SSRC" << ssrc;
+            log(LogLevel::Warning, LogVoice) << "Failed to init decoder for SSRC" << ssrc;
             return;
         }
         state.jitterBuffer = std::make_unique<JitterBuffer>();
@@ -133,7 +140,7 @@ void AudioPipeline::setDeafened(bool deafened)
     this->deafened = deafened;
 }
 
-void AudioPipeline::setSsrcUserId(quint32 ssrc, Snowflake userId)
+void AudioPipeline::setSsrcUserId(uint32_t ssrc, Snowflake userId)
 {
     ssrcToUser[ssrc] = userId;
 }
@@ -141,26 +148,26 @@ void AudioPipeline::setSsrcUserId(quint32 ssrc, Snowflake userId)
 void AudioPipeline::removeUser(Snowflake userId)
 {
     for (auto it = ssrcToUser.begin(); it != ssrcToUser.end();) {
-        if (it.value() == userId) {
-            speakers.erase(it.key());
+        if (it->second == userId) {
+            speakers.erase(it->first);
             it = ssrcToUser.erase(it);
         } else {
             ++it;
         }
     }
-    userVolumes.remove(userId);
-    pendingUserRms.remove(userId);
+    userVolumes.erase(userId);
+    pendingUserRms.erase(userId);
 }
 
 void AudioPipeline::setUserVolume(Snowflake userId, float volume)
 {
     if (volume == 1.0f)
-        userVolumes.remove(userId);
+        userVolumes.erase(userId);
     else
-        userVolumes.insert(userId, volume);
+        userVolumes[userId] = volume;
 }
 
-void AudioPipeline::setInputDevice(const QByteArray &deviceId)
+void AudioPipeline::setInputDevice(const std::string &deviceId)
 {
     if (!audioBackend)
         return;
@@ -175,7 +182,7 @@ void AudioPipeline::reconfigureNoiseSuppressorChannels()
         noiseSuppressor->reconfigure(audioBackend->nativeCaptureChannels());
 }
 
-void AudioPipeline::setOutputDevice(const QByteArray &deviceId)
+void AudioPipeline::setOutputDevice(const std::string &deviceId)
 {
     if (audioBackend)
         audioBackend->setOutputDevice(deviceId);
@@ -212,7 +219,7 @@ void AudioPipeline::initializeEncoder()
 {
     encoder = std::make_unique<OpusEncoder>();
     if (!encoder->init(AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, opusApplication)) {
-        qCCritical(LogVoice) << "Failed to initialize Opus encoder";
+        log(LogLevel::Error, LogVoice) << "Failed to initialize Opus encoder";
         encoder.reset();
         return;
     }
@@ -274,17 +281,17 @@ void AudioPipeline::setOpusPacketLossPercent(int percent)
         encoder->setPacketLossPercent(percent);
 }
 
-void AudioPipeline::onAudioCaptured(const QByteArray &pcmData)
+void AudioPipeline::onAudioCaptured(const std::string &pcmData)
 {
     if (!encoder)
         return;
 
-    QByteArray frame = pcmData;
+    std::string frame = pcmData;
     float voiceProb = -1.0f;
     if (noiseSuppressor && (noiseSuppressionEnabled || useRnnoiseVad)) {
-        QByteArray denoised = noiseSuppressor->process(pcmData, voiceProb);
+        std::string denoised = noiseSuppressor->process(pcmData, voiceProb);
         if (noiseSuppressionEnabled)
-            frame = denoised;
+            frame = std::move(denoised);
     }
 
     float rms = 0.0f;
@@ -296,32 +303,33 @@ void AudioPipeline::onAudioCaptured(const QByteArray &pcmData)
     else
         voiceDetected = rmsVoice;
 
-    if (rmsThrottleTimer.elapsed() >= RMS_EMIT_INTERVAL_MS) {
-        emit audioLevelChanged(rms);
-        rmsThrottleTimer.restart();
+    auto now = std::chrono::steady_clock::now();
+    if (now - rmsThrottleTimer >= std::chrono::milliseconds(RMS_EMIT_INTERVAL_MS)) {
+        audioLevelChanged.publish(rms);
+        rmsThrottleTimer = now;
     }
 
     if (voiceDetected) {
         vadHoldoffCounter = vadHoldoffFrames;
         if (!isSpeaking) {
             isSpeaking = true;
-            emit speakingChanged(true);
+            speakingChanged.publish(true);
         }
     } else if (vadHoldoffCounter > 0) {
         vadHoldoffCounter--;
     } else if (isSpeaking) {
         sendTrailingSilence();
         isSpeaking = false;
-        emit speakingChanged(false);
+        speakingChanged.publish(false);
         return;
     }
 
     if (!isSpeaking)
         return;
 
-    QByteArray encoded = encoder->encode(frame);
-    if (!encoded.isEmpty())
-        emit encodedAudioReady(encoded);
+    std::string encoded = encoder->encode(frame);
+    if (!encoded.empty())
+        encodedAudioReady.publish(std::move(encoded));
 }
 
 void AudioPipeline::onMixTick()
@@ -329,85 +337,90 @@ void AudioPipeline::onMixTick()
     if (deafened || !audioBackend)
         return;
 
-    QVector<std::pair<QByteArray, float>> streams;
+    std::vector<std::pair<std::string, float>> streams;
 
     for (auto it = speakers.begin(); it != speakers.end(); ++it) {
-        quint32 ssrc = it->first;
+        uint32_t ssrc = it->first;
         SpeakerState &state = it->second;
 
-        QByteArray pcm;
+        std::string pcm;
 
-        if (!state.pendingFrames.isEmpty()) {
-            pcm = state.pendingFrames.takeFirst();
+        if (!state.pendingFrames.empty()) {
+            pcm = std::move(state.pendingFrames.front());
+            state.pendingFrames.pop_front();
         } else {
             if (!state.jitterBuffer->isReady())
                 continue;
 
-            QByteArray opusData = state.jitterBuffer->pop();
+            std::string opusData = state.jitterBuffer->pop();
 
-            if (opusData.isEmpty()) {
+            if (opusData.empty()) {
                 pcm = state.decoder->decodePlc();
             } else {
-                QVector<QByteArray> frames = state.decoder->decode(opusData);
-                if (frames.isEmpty())
+                std::vector<std::string> frames = state.decoder->decode(opusData);
+                if (frames.empty())
                     continue;
-                pcm = frames.first();
-                for (int i = 1; i < frames.size(); i++)
-                    state.pendingFrames.append(frames[i]);
+                pcm = std::move(frames.front());
+                for (size_t i = 1; i < frames.size(); i++)
+                    state.pendingFrames.push_back(std::move(frames[i]));
             }
         }
 
-        if (pcm.isEmpty())
+        if (pcm.empty())
             continue;
 
         // rms before gain
-        auto userIt = ssrcToUser.constFind(ssrc);
+        auto userIt = ssrcToUser.find(ssrc);
         Snowflake userId;
-        if (userIt != ssrcToUser.constEnd())
-            userId = userIt.value();
+        if (userIt != ssrcToUser.end())
+            userId = userIt->second;
 
         if (userId.isValid()) {
-            const auto *samples = reinterpret_cast<const int16_t *>(pcm.constData());
+            const auto *samples = reinterpret_cast<const int16_t *>(pcm.data());
             int count = pcm.size() / static_cast<int>(sizeof(int16_t));
             if (count > 0) {
                 float rms = computeRms(samples, count);
 
                 auto rmsIt = pendingUserRms.find(userId);
                 if (rmsIt == pendingUserRms.end())
-                    pendingUserRms.insert(userId, rms);
-                else if (rms > rmsIt.value())
-                    rmsIt.value() = rms;
+                    pendingUserRms.emplace(userId, rms);
+                else if (rms > rmsIt->second)
+                    rmsIt->second = rms;
             }
         }
 
         float gain = 1.0f;
-        if (userId.isValid())
-            gain = userVolumes.value(userId, 1.0f);
+        if (userId.isValid()) {
+            auto volume = userVolumes.find(userId);
+            if (volume != userVolumes.end())
+                gain = volume->second;
+        }
 
-        streams.append({ pcm, gain });
+        streams.emplace_back(std::move(pcm), gain);
     }
 
     // emit periodically
-    if (userRmsThrottleTimer.elapsed() >= RMS_EMIT_INTERVAL_MS) {
-        for (auto it = pendingUserRms.constBegin(); it != pendingUserRms.constEnd(); ++it)
-            emit userAudioLevelChanged(it.key(), it.value());
+    auto now = std::chrono::steady_clock::now();
+    if (now - userRmsThrottleTimer >= std::chrono::milliseconds(RMS_EMIT_INTERVAL_MS)) {
+        for (const auto &[userId, rms] : pendingUserRms)
+            userAudioLevelChanged.publish(userId, rms);
         pendingUserRms.clear();
-        userRmsThrottleTimer.restart();
+        userRmsThrottleTimer = now;
     }
 
-    if (streams.isEmpty())
+    if (streams.empty())
         return;
 
-    QByteArray mixed = AudioMixer::mix(streams);
-    if (mixed.isEmpty())
+    std::string mixed = AudioMixer::mix(streams);
+    if (mixed.empty())
         return;
 
-    audioBackend->pushPlaybackFrame(reinterpret_cast<const int16_t *>(mixed.constData()));
+    audioBackend->pushPlaybackFrame(reinterpret_cast<const int16_t *>(mixed.data()));
 }
 
-bool AudioPipeline::detectVoiceActivity(const QByteArray &pcmFrame, float &outRms) const
+bool AudioPipeline::detectVoiceActivity(const std::string &pcmFrame, float &outRms) const
 {
-    const auto *samples = reinterpret_cast<const int16_t *>(pcmFrame.constData());
+    const auto *samples = reinterpret_cast<const int16_t *>(pcmFrame.data());
     int count = pcmFrame.size() / static_cast<int>(sizeof(int16_t));
     if (count == 0) {
         outRms = 0.0f;
@@ -428,9 +441,9 @@ float AudioPipeline::computeRms(const int16_t *samples, int count)
 
 void AudioPipeline::sendTrailingSilence()
 {
-    QByteArray silence(reinterpret_cast<const char *>(OPUS_SILENCE), sizeof(OPUS_SILENCE));
+    std::string silence(reinterpret_cast<const char *>(OPUS_SILENCE), sizeof(OPUS_SILENCE));
     for (int i = 0; i < TRAILING_SILENCE_FRAMES; i++)
-        emit encodedAudioReady(silence);
+        encodedAudioReady.publish(silence);
 }
 
 } // namespace Audio

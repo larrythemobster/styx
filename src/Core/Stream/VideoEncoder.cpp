@@ -7,6 +7,8 @@
 
 #include "Core/Logging.hpp"
 
+#include <string_view>
+
 extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_d3d11va.h>
@@ -21,11 +23,11 @@ namespace Stream {
 
 namespace {
 
-QString averror(int code)
+std::string averror(int code)
 {
     char buffer[AV_ERROR_MAX_STRING_SIZE]{};
     av_strerror(code, buffer, sizeof(buffer));
-    return QString::fromUtf8(buffer);
+    return buffer;
 }
 
 // NAL types present in an Annex B buffer
@@ -36,12 +38,12 @@ struct NalScan
     bool idr = false;
 };
 
-NalScan scanNals(const QByteArray &data)
+NalScan scanNals(const std::string &data)
 {
     NalScan scan;
-    const auto *p = reinterpret_cast<const uint8_t *>(data.constData());
-    const qsizetype size = data.size();
-    for (qsizetype i = 0; i + 3 < size; ++i) {
+    const auto *p = reinterpret_cast<const uint8_t *>(data.data());
+    const size_t size = data.size();
+    for (size_t i = 0; i + 3 < size; ++i) {
         if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1) {
             const uint8_t type = p[i + 3] & 0x1F;
             scan.sps |= type == 7;
@@ -54,17 +56,17 @@ NalScan scanNals(const QByteArray &data)
 }
 
 // Leading SPS/PPS NALs of a keyframe, start codes included.
-QByteArray extractParameterSets(const QByteArray &data)
+std::string extractParameterSets(const std::string &data)
 {
-    const auto *p = reinterpret_cast<const uint8_t *>(data.constData());
-    const qsizetype size = data.size();
-    qsizetype i = 0;
+    const auto *p = reinterpret_cast<const uint8_t *>(data.data());
+    const size_t size = data.size();
+    size_t i = 0;
     while (i + 3 < size) {
         if (p[i] == 0 && p[i + 1] == 0 && (p[i + 2] == 1 || (p[i + 2] == 0 && i + 4 < size && p[i + 3] == 1))) {
-            const qsizetype header = p[i + 2] == 1 ? i + 3 : i + 4;
+            const size_t header = p[i + 2] == 1 ? i + 3 : i + 4;
             const uint8_t type = p[header] & 0x1F;
             if (type != 7 && type != 8 && type != 9)
-                return data.left(i);
+                return data.substr(0, i);
             i = header;
         } else {
             ++i;
@@ -77,7 +79,7 @@ void setOption(AVCodecContext *ctx, const char *key, const char *value)
 {
     // Options differ per encoder and between FFmpeg versions; an unknown one is not fatal.
     if (av_opt_set(ctx->priv_data, key, value, 0) < 0)
-        qCDebug(LogStream) << "Encoder option not supported:" << key << "=" << value;
+        log(LogLevel::Debug, LogStream) << "Encoder option not supported:" << key << "=" << value;
 }
 
 void lockDevice(void *ctx)
@@ -113,12 +115,12 @@ void VideoEncoder::close()
     parameterSets.clear();
 }
 
-bool VideoEncoder::open(const EncoderSettings &settings, QString *error)
+bool VideoEncoder::open(const EncoderSettings &settings, std::string *error)
 {
     close();
     current = settings;
     // H264 needs even dimensions for 4:2:0
-    current.size = QSize(current.size.width() & ~1, current.size.height() & ~1);
+    current.size = {current.size.width & ~1, current.size.height & ~1};
 
     struct Candidate
     {
@@ -134,35 +136,37 @@ bool VideoEncoder::open(const EncoderSettings &settings, QString *error)
         { "libx264", false },
     };
 
-    QStringList failures;
+    std::string failures;
     for (const auto &candidate : candidates) {
         if (!avcodec_find_encoder_by_name(candidate.name))
             continue;
-        QString reason;
+        std::string reason;
         if (tryOpen(candidate.name, candidate.gpu, &reason)) {
-            qCInfo(LogStream) << "Video encoder:" << encoderName << (gpuInput ? "(GPU surfaces)" : "(CPU frames)")
-                              << current.size << "@" << current.framerate << "fps" << current.bitrate / 1000 << "kbps";
+            log(LogLevel::Info, LogStream) << "Video encoder:" << encoderName << (gpuInput ? "(GPU surfaces)" : "(CPU frames)")
+                << current.size.width << "x" << current.size.height << "@" << current.framerate << "fps" << current.bitrate / 1000 << "kbps";
             return true;
         }
-        failures << QStringLiteral("%1: %2").arg(QString::fromLatin1(candidate.name), reason);
+        if (!failures.empty())
+            failures += "; ";
+        failures += std::string(candidate.name) + ": " + reason;
         close();
     }
     if (error)
-        *error = failures.isEmpty() ? QStringLiteral("no H264 encoder in this FFmpeg build") : failures.join(QStringLiteral("; "));
+        *error = failures.empty() ? "no H264 encoder in this FFmpeg build" : failures;
     return false;
 }
 
-bool VideoEncoder::tryOpen(const char *name, bool gpu, QString *error)
+bool VideoEncoder::tryOpen(const char *name, bool gpu, std::string *error)
 {
     const AVCodec *codec = avcodec_find_encoder_by_name(name);
     ctx = avcodec_alloc_context3(codec);
     if (!ctx) {
-        *error = QStringLiteral("out of memory");
+        *error = "out of memory";
         return false;
     }
 
-    ctx->width = current.size.width();
-    ctx->height = current.size.height();
+    ctx->width = current.size.width;
+    ctx->height = current.size.height;
     ctx->time_base = AVRational{ 1, current.framerate };
     ctx->framerate = AVRational{ current.framerate, 1 };
     ctx->gop_size = current.framerate * 5;
@@ -177,7 +181,7 @@ bool VideoEncoder::tryOpen(const char *name, bool gpu, QString *error)
     ctx->color_trc = AVCOL_TRC_BT709;
     ctx->profile = AV_PROFILE_H264_MAIN;
 
-    const QByteArray encoder(name);
+    const std::string_view encoder(name);
     if (encoder == "h264_amf") {
         setOption(ctx, "usage", "ultralowlatency");
         setOption(ctx, "rc", "cbr");
@@ -222,7 +226,7 @@ bool VideoEncoder::tryOpen(const char *name, bool gpu, QString *error)
         d3d->lock_ctx = &device->mutex();
         int ret = av_hwdevice_ctx_init(hwDevice);
         if (ret < 0) {
-            *error = QStringLiteral("hw device: ") + averror(ret);
+            *error = "hw device: " + averror(ret);
             return false;
         }
 
@@ -238,7 +242,7 @@ bool VideoEncoder::tryOpen(const char *name, bool gpu, QString *error)
         static_cast<AVD3D11VAFramesContext *>(framesCtx->hwctx)->BindFlags = D3D11_BIND_RENDER_TARGET;
         ret = av_hwframe_ctx_init(hwFrames);
         if (ret < 0) {
-            *error = QStringLiteral("hw frames: ") + averror(ret);
+            *error = "hw frames: " + averror(ret);
             return false;
         }
 
@@ -264,7 +268,7 @@ bool VideoEncoder::tryOpen(const char *name, bool gpu, QString *error)
             cpuFormat = AV_PIX_FMT_NV12;
         }
         if (cpuFormat == AV_PIX_FMT_NONE) {
-            *error = QStringLiteral("takes neither NV12 nor YUV420P");
+            *error = "takes neither NV12 nor YUV420P";
             return false;
         }
         ctx->pix_fmt = cpuFormat;
@@ -272,7 +276,7 @@ bool VideoEncoder::tryOpen(const char *name, bool gpu, QString *error)
             sws = sws_getContext(ctx->width, ctx->height, AV_PIX_FMT_NV12, ctx->width, ctx->height, cpuFormat,
                                  SWS_POINT, nullptr, nullptr, nullptr);
             if (!sws) {
-                *error = QStringLiteral("no NV12 converter");
+                *error = "no NV12 converter";
                 return false;
             }
         }
@@ -284,7 +288,7 @@ bool VideoEncoder::tryOpen(const char *name, bool gpu, QString *error)
         return false;
     }
 
-    encoderName = QString::fromLatin1(name);
+    encoderName = name;
     gpuInput = gpu;
     return true;
 }
@@ -307,8 +311,8 @@ AVFrame *VideoEncoder::acquireCpuFrame()
 {
     AVFrame *frame = av_frame_alloc();
     frame->format = AV_PIX_FMT_NV12;
-    frame->width = current.size.width();
-    frame->height = current.size.height();
+    frame->width = current.size.width;
+    frame->height = current.size.height;
     if (av_frame_get_buffer(frame, 32) < 0) {
         av_frame_free(&frame);
         return nullptr;
@@ -353,7 +357,7 @@ bool VideoEncoder::encode(AVFrame *frame, int64_t ptsUs, bool forceKeyframe, std
     const int ret = avcodec_send_frame(ctx, frame);
     av_frame_free(&frame);
     if (ret < 0 && ret != AVERROR(EAGAIN)) {
-        qCWarning(LogStream) << "avcodec_send_frame:" << averror(ret);
+        log(LogLevel::Warning, LogStream) << "avcodec_send_frame:" << averror(ret);
         return false;
     }
     return drain(out);
@@ -367,13 +371,13 @@ bool VideoEncoder::drain(std::vector<EncodedPacket> &out)
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
             break;
         if (ret < 0) {
-            qCWarning(LogStream) << "avcodec_receive_packet:" << averror(ret);
+            log(LogLevel::Warning, LogStream) << "avcodec_receive_packet:" << averror(ret);
             av_packet_free(&packet);
             return false;
         }
 
         EncodedPacket encoded;
-        encoded.data = QByteArray(reinterpret_cast<const char *>(packet->data), packet->size);
+        encoded.data.assign(reinterpret_cast<const char *>(packet->data), packet->size);
         encoded.ptsUs = av_rescale_q(packet->pts, ctx->time_base, AVRational{ 1, 1000000 });
 
         const NalScan scan = scanNals(encoded.data);
@@ -381,10 +385,10 @@ bool VideoEncoder::drain(std::vector<EncodedPacket> &out)
         if (encoded.keyframe) {
             if (scan.sps && scan.pps) {
                 parameterSets = extractParameterSets(encoded.data);
-            } else if (!parameterSets.isEmpty()) {
-                encoded.data.prepend(parameterSets);
+            } else if (!parameterSets.empty()) {
+                encoded.data.insert(0, parameterSets);
             } else if (ctx->extradata_size > 0) {
-                encoded.data.prepend(QByteArray(reinterpret_cast<const char *>(ctx->extradata), ctx->extradata_size));
+                encoded.data.insert(0, reinterpret_cast<const char *>(ctx->extradata), ctx->extradata_size);
             }
             // viewers' decoders must not hold frames back for reordering; libwebrtc does the same
             encoded.data = rewriteAccessUnitSps(encoded.data);

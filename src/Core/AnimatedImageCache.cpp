@@ -21,7 +21,7 @@ constexpr double MinBudgetScale = 0.5;
 
 std::optional<Platform::Size> frameSizeWithinBudget(Platform::Size wanted, int frameCount, size_t byteBudget)
 {
-    if (frameCount > MaxFrames || wanted.empty())
+    if (frameCount <= 0 || frameCount > MaxFrames || wanted.empty())
         return std::nullopt;
     const double wantedBytes = double(frameCount) * wanted.width * wanted.height * 4;
     if (wantedBytes <= double(byteBudget))
@@ -32,7 +32,7 @@ std::optional<Platform::Size> frameSizeWithinBudget(Platform::Size wanted, int f
     return Platform::Size{std::max(1, int(wanted.width * scale)), std::max(1, int(wanted.height * scale))};
 }
 
-Platform::ImageBuffer scaledFrame(Platform::ImageBuffer source, Platform::Size size)
+Platform::ImageBuffer scaledFrame(const Platform::ImageBuffer &source, Platform::Size size)
 {
     if (source.width == size.width && source.height == size.height)
         return source;
@@ -136,7 +136,9 @@ void AnimatedImageCache::decode(const ImageRequestKey &key, const std::string &p
 {
     auto discarded = std::make_shared<std::atomic_bool>(false);
     decoding.emplace(key, discarded);
-    const DecodeTarget target{key.size, size_t(animationLimitMiB) * BytesPerMiB};
+    const float dpr = Platform::primaryDevicePixelRatio();
+    const DecodeTarget target{{int(std::lround(key.size.width * dpr)), int(std::lround(key.size.height * dpr))},
+                              size_t(animationLimitMiB) * BytesPerMiB};
     decodePool.post([this, alive = alive, key, path, target, discarded]() {
         if (discarded->load()) {
             Platform::Dispatcher::main().post([this, alive, key]() {
@@ -159,7 +161,9 @@ void AnimatedImageCache::onDecodeSkipped(const ImageRequestKey &key)
 
 AnimatedImageCache::Decoded AnimatedImageCache::decodeFrames(const std::string &path, const DecodeTarget &target)
 {
-    const std::string data = Platform::Resources::readFile(std::filesystem::u8path(path));
+    std::string data;
+    try { data = Platform::Resources::readFile(std::filesystem::u8path(path)); }
+    catch (const std::exception &) { return {}; }
     if (data.empty()) return {};
     if (Lottie::looksLikeLottie(data)) return decodeLottie(data, target);
     if (auto apng = Apng::Reader::open(data)) return decodeApng(*apng, target);

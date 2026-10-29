@@ -3,9 +3,15 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <QCache>
-#include <QPair>
-#include <QSet>
+#include <cstdint>
+#include <list>
+#include <map>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include "Platform/Trackable.hpp"
 
 #include "MessageReactors.hpp"
 #include "MessageSegments.hpp"
@@ -29,63 +35,59 @@ struct MessageRequestResult
     bool success;
     Discord::Client::MessageLoadType type;
     Snowflake channelId;
-    QList<Discord::Message> messages;
+    std::vector<Discord::Message> messages;
     bool reachedLatest = false;
     Snowflake anchorId = Snowflake::Invalid;
 };
 
-class MessageManager : public QObject
+class MessageManager : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     explicit MessageManager(Snowflake accountId, Discord::Client *client,
-                            UserManager *userManager, QObject *parent = nullptr);
+                            UserManager *userManager);
     ~MessageManager() override;
 
-    void setChannelResolver(std::function<QString(Snowflake)> resolver);
+    void setChannelResolver(std::function<std::string(Snowflake)> resolver);
     void setChannelLinkResolver(Markdown::ChannelLinkResolverFn resolver);
     void setEmojiManager(EmojiManager *manager);
 
-    [[nodiscard]] QString channelTopicHtml(const QString &topic, Snowflake channelId) const;
-    [[nodiscard]] QString profileBioHtml(const QString &bio) const;
+    [[nodiscard]] std::string channelTopicHtml(const std::string &topic, Snowflake channelId) const;
+    [[nodiscard]] std::string profileBioHtml(const std::string &bio) const;
 
     void requestLoadChannel(Snowflake channelId);
     void requestLoadHistory(Snowflake channelId, Snowflake beforeId);
     void requestLoadFuture(Snowflake channelId, Snowflake afterId);
     void requestLoadAround(Snowflake channelId, Snowflake messageId);
-    void sendMessage(Snowflake channelId, const QString &content,
+    void sendMessage(Snowflake channelId, const std::string &content,
                      Snowflake replyToMessageId = Snowflake::Invalid,
-                     const QList<PendingAttachment> &attachments = {});
-    void cancelSend(Snowflake channelId, const QString &nonce);
+                     const std::vector<PendingAttachment> &attachments = {});
+    void cancelSend(Snowflake channelId, const std::string &nonce);
 
     using ReactionLocation = Discord::Client::ReactionLocation;
     void addReaction(Snowflake channelId, Snowflake messageId, const Discord::Emoji &emoji, bool isBurst, ReactionLocation location);
     void removeReaction(Snowflake channelId, Snowflake messageId, const Discord::Emoji &emoji, bool isBurst, ReactionLocation location);
     void removeReactionOf(Snowflake reactorId, Snowflake channelId, const ReactionRef &reaction);
 
-    [[nodiscard]] MessageReactors *reactors() const { return reactorStore; }
-    [[nodiscard]] QList<Discord::Reaction> reactionsOf(Snowflake messageId);
+    [[nodiscard]] MessageReactors *reactors() const { return reactorStore.get(); }
+    [[nodiscard]] std::vector<Discord::Reaction> reactionsOf(Snowflake messageId);
 
     enum class ReactionRejection {
         TooManyReactions,
         AlreadyReactedWithOtherType,
     };
-    Q_ENUM(ReactionRejection)
 
-signals:
-    void reactionRejected(Styx::Core::MessageManager::ReactionRejection reason);
-    void reactionsChanged(Core::Snowflake messageId);
-    void messagesReceived(const MessageRequestResult &result);
-    void messageErrored(const QString &nonce);
-    void messageDeleted(Core::Snowflake channelId, Core::Snowflake messageId);
-    void membersLearnedFromMessage(Core::Snowflake guildId, const QList<Core::Snowflake> &userIds);
-    void attachmentUploadProgress(const QString &nonce, int fileIndex, qint64 sent, qint64 total);
+    Platform::Signal<ReactionRejection> reactionRejected;
+    Platform::Signal<Snowflake> reactionsChanged;
+    Platform::Signal<const MessageRequestResult &> messagesReceived;
+    Platform::Signal<const std::string &> messageErrored;
+    Platform::Signal<Snowflake, Snowflake> messageDeleted;
+    Platform::Signal<Snowflake, const std::vector<Snowflake> &> membersLearnedFromMessage;
+    Platform::Signal<const std::string &, int, std::int64_t, std::int64_t> attachmentUploadProgress;
 
-public slots:
     void onMessageCreated(const Discord::Message &message);
     void onMessageUpdated(const Discord::Message &message);
     void onMessageDeleted(const Discord::MessageDelete &event);
-    void onMessageSendFailed(const QString &nonce, const QString &error);
+    void onMessageSendFailed(const std::string &nonce, const std::string &error);
     void onReactionAdd(const Discord::MessageReactionAdd &event);
     void onReactionAddMany(const Discord::MessageReactionAddMany &event);
     void onReactionRemove(const Discord::MessageReactionRemove &event);
@@ -99,9 +101,9 @@ private:
 
     using PageFetcher = std::function<void(Discord::Client::MessagesCallback)>;
     void fetchPage(LoadType type, Snowflake channelId, Snowflake anchorId, const PageFetcher &fetch);
-    void onApiMessagesReceived(const QList<Discord::Message> &messages, LoadType type,
+    void onApiMessagesReceived(const std::vector<Discord::Message> &messages, LoadType type,
                                Snowflake channelId, Snowflake anchorId = Snowflake::Invalid);
-    [[nodiscard]] std::optional<QList<Discord::Message>> cachedSlice(Snowflake channelId,
+    [[nodiscard]] std::optional<std::vector<Discord::Message>> cachedSlice(Snowflake channelId,
                                                                      const MessageSegments::Run &run,
                                                                      int from, int to);
     void emitReactionUpdate(Discord::Message &msg);
@@ -123,27 +125,35 @@ private:
         First,
         Retry,
     };
-    void updateReactions(Snowflake messageId, const std::function<bool(QList<Discord::Reaction> &)> &mutate);
+    void updateReactions(Snowflake messageId, const std::function<bool(std::vector<Discord::Reaction> &)> &mutate);
     void applyOptimistically(ReactionOp op, const ReactionChange &change);
     void sendReactionChange(ReactionOp op, const ReactionChange &change, ReactionAttempt attempt);
     void onReactionChangeFailed(ReactionOp op, const ReactionChange &change, ReactionAttempt attempt, const Discord::Client::ReactionResult &result);
     void cacheGatewayMembers(const Discord::Message &msg);
     void parseMessageContent(Discord::Message &msg);
-    void cacheParsedContent(Discord::Message &msg, const QString &content, Snowflake channelId) const;
+    void cacheParsedContent(Discord::Message &msg, const std::string &content, Snowflake channelId) const;
 
     Storage::MessageRepository repo;
 
     Discord::Client *client;
     UserManager *userManager;
-    MessageReactors *reactorStore;
+    std::unique_ptr<MessageReactors> reactorStore;
     EmojiManager *emojiManager = nullptr;
     std::unique_ptr<Markdown::Parser> parser;
 
-    QCache<Snowflake, Discord::Message> messageCache;
-    QHash<Snowflake, MessageSegments> segments;
-    QSet<Snowflake> fetchedChannels;
-    QHash<Snowflake, Snowflake> channelStartId; // nothing exists before this message
-    QSet<QPair<Snowflake, LoadType>> pagesInFlight;
+    struct MessageCache {
+        static constexpr std::size_t Capacity = 1000;
+        using Entry = std::pair<Snowflake, Discord::Message>;
+        std::list<Entry> entries;
+        std::unordered_map<Snowflake, std::list<Entry>::iterator> index;
+        Discord::Message *object(Snowflake id);
+        void insert(Snowflake id, const Discord::Message &message);
+        void remove(Snowflake id);
+    } messageCache;
+    std::unordered_map<Snowflake, MessageSegments> segments;
+    std::unordered_set<Snowflake> fetchedChannels;
+    std::unordered_map<Snowflake, Snowflake> channelStartId;
+    std::set<std::pair<Snowflake, LoadType>> pagesInFlight;
 };
 
 } // namespace Core

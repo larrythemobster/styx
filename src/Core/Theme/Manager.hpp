@@ -1,87 +1,52 @@
 #pragma once
 
-#include <QColor>
-#include <QFont>
-#include <QHash>
-#include <QObject>
-#include <QPalette>
-#include <QString>
-
+#include <filesystem>
 #include <optional>
-
+#include <unordered_map>
+#include <nlohmann/json.hpp>
 #include "Core/Theme/Fonts.hpp"
 #include "Core/Theme/Tokens.hpp"
+#include "Platform/Signal.hpp"
 
-class QJsonObject;
+namespace Styx::Core::Theme {
 
-namespace Styx {
-namespace Core {
-namespace Theme {
-
-class Manager : public QObject
-{
-    Q_OBJECT
+class Manager {
 public:
     static Manager &instance();
-
-    QColor color(Token token) const;
-    QFont font(FontRole role) const;
-
+    Platform::Color color(Token token) const;
+    Font font(FontRole role) const;
     bool hasOverride(Token token) const;
-    void setOverride(Token token, const QColor &color);
+    void setOverride(Token token, const Platform::Color &color);
     void clearOverride(Token token);
     void resetAll();
-    void setOverrides(const QHash<Token, QColor> &overrides);
-
+    void setOverrides(const std::unordered_map<Token, Platform::Color> &overrides);
     bool usesSystemColors() const;
     void setUseSystemColors(bool enabled);
     bool isSystemControlled(Token token) const;
-
     static bool systemStyleEnabled();
     static void setSystemStyleEnabled(bool enabled);
     static bool startsWithSystemStyle();
-
     bool hasFontOverride(FontRole role) const;
-    void setFontOverride(FontRole role, const QFont &font);
+    void setFontOverride(FontRole role, const Font &font);
     void clearFontOverride(FontRole role);
-
-    QPalette buildPalette() const;
     void apply();
     void applyFonts();
-
-    // load/save only does overrides, export does everything as resolved
     bool load();
     bool save() const;
-    bool exportTo(const QString &path) const;
-    bool importFrom(const QString &path);
-
-signals:
-    void themeChanged();
-    void metricsChanged();
-
-protected:
-    bool eventFilter(QObject *watched, QEvent *event) override;
-
+    bool exportTo(const std::filesystem::path &path) const;
+    bool importFrom(const std::filesystem::path &path);
+    Platform::Signal<> themeChanged;
+    Platform::Signal<> metricsChanged;
 private:
     Manager() = default;
-    Q_DISABLE_COPY(Manager)
-
-    static QString defaultThemePath();
-    QJsonObject toObject(bool includeDefaults) const;
-    void loadFromObject(const QJsonObject &obj);
-    QColor customColor(Token token) const;
-    std::optional<QColor> systemColor(Token token) const;
-    void restyle();
-
-    QHash<Token, QColor> overrides;
-    QHash<FontRole, QFont> fontOverrides;
-
+    static std::filesystem::path defaultThemePath();
+    nlohmann::json toObject(bool includeDefaults) const;
+    void loadFromObject(const nlohmann::json &obj);
+    Platform::Color customColor(Token token) const;
+    std::optional<Platform::Color> systemColor(Token token) const;
+    std::unordered_map<Token, Platform::Color> overrides;
+    std::unordered_map<FontRole, Font> fontOverrides;
     bool systemColors = false;
-    bool watchingApplication = false;
-    bool applying = false;
-    QPalette styledPalette;
 };
 
-} // namespace Theme
-} // namespace Core
-} // namespace Styx
+}

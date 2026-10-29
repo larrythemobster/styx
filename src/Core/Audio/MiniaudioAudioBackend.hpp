@@ -15,18 +15,17 @@ struct MiniaudioState;
 
 class MiniaudioAudioBackend : public IAudioBackend
 {
-    Q_OBJECT
 public:
-    explicit MiniaudioAudioBackend(QObject *parent = nullptr);
+    MiniaudioAudioBackend();
     ~MiniaudioAudioBackend() override;
 
-    QList<AudioDeviceInfo> availableInputDevices() const override;
-    QList<AudioDeviceInfo> availableOutputDevices() const override;
+    std::vector<AudioDeviceInfo> availableInputDevices() const override;
+    std::vector<AudioDeviceInfo> availableOutputDevices() const override;
 
-    [[nodiscard]] QByteArray currentInputDevice() const override { return selectedInputId; }
-    [[nodiscard]] QByteArray currentOutputDevice() const override { return selectedOutputId; }
-    void setInputDevice(const QByteArray &deviceId) override;
-    void setOutputDevice(const QByteArray &deviceId) override;
+    [[nodiscard]] std::string currentInputDevice() const override { return selectedInputId; }
+    [[nodiscard]] std::string currentOutputDevice() const override { return selectedOutputId; }
+    void setInputDevice(const std::string &deviceId) override;
+    void setOutputDevice(const std::string &deviceId) override;
 
     bool startCapture() override;
     void stopCapture() override;
@@ -53,10 +52,10 @@ private:
 private:
     std::unique_ptr<MiniaudioState> ma;
 
-    QByteArray captureBuffer;
+    std::string captureBuffer;
 
-    QByteArray selectedInputId;
-    QByteArray selectedOutputId;
+    std::string selectedInputId;
+    std::string selectedOutputId;
 
     std::atomic<float> inputGain{ 1.0f };
     std::atomic<float> outputVolume{ 1.0f };

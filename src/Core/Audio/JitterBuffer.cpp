@@ -14,7 +14,7 @@ JitterBuffer::JitterBuffer(int capacity)
 {
 }
 
-void JitterBuffer::push(uint16_t sequence, const QByteArray &data)
+void JitterBuffer::push(uint16_t sequence, const std::string &data)
 {
     if (!initialized) {
         nextSequence = sequence;
@@ -33,22 +33,21 @@ void JitterBuffer::push(uint16_t sequence, const QByteArray &data)
     if (seqNewer(nextSequence, sequence))
         return;
 
-    frames.insert(sequence, data);
+    frames[sequence] = data;
 
-    // Evict frames that are too far behind the playback pointer
-    QList<uint16_t> stale;
-    for (auto it = frames.begin(); it != frames.end(); ++it) {
-        if (seqNewer(nextSequence, static_cast<uint16_t>(it.key() + capacity)))
-            stale.append(it.key());
+    // Evict frames that are too far behind the playback pointer.
+    for (auto it = frames.begin(); it != frames.end();) {
+        if (seqNewer(nextSequence, static_cast<uint16_t>(it->first + capacity)))
+            it = frames.erase(it);
+        else
+            ++it;
     }
-    for (uint16_t seq : stale)
-        frames.remove(seq);
 
     if (prebuffering && frames.size() >= targetDelay)
         prebuffering = false;
 }
 
-QByteArray JitterBuffer::pop()
+std::string JitterBuffer::pop()
 {
     if (!initialized)
         return {};
@@ -56,10 +55,15 @@ QByteArray JitterBuffer::pop()
     if (prebuffering)
         return {};
 
-    QByteArray data = frames.take(nextSequence);
+    std::string data;
+    auto it = frames.find(nextSequence);
+    if (it != frames.end()) {
+        data = std::move(it->second);
+        frames.erase(it);
+    }
     nextSequence++;
 
-    if (!data.isEmpty()) {
+    if (!data.empty()) {
         consecutiveHits++;
         consecutiveMisses = 0;
 

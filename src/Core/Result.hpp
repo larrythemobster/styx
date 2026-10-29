@@ -1,7 +1,8 @@
 #pragma once
 
-#include <QString>
+#include <string>
 #include <optional>
+#include <utility>
 
 namespace Styx {
 namespace Core {
@@ -10,21 +11,19 @@ template <typename T>
 struct Result
 {
     std::optional<T> value;
-    QString error;
+    std::string error;
     int code = 0;
 
     bool success() const { return value.has_value(); }
 
-    static Result<T> makeOk(const T &value)
+    static Result<T> makeOk(T value)
     {
-        Result<T> result{ value, "" };
-        return result;
+        return { std::move(value), {} };
     }
 
-    static Result<T> makeError(const QString &error, int code = 0)
+    static Result<T> makeError(std::string error, int code = 0)
     {
-        Result<T> result{ {}, error, code };
-        return result;
+        return { {}, std::move(error), code };
     }
 };
 
@@ -32,14 +31,14 @@ template <>
 struct Result<void>
 {
     bool ok = false;
-    QString error;
+    std::string error;
     int code = 0;
 
     bool success() const { return ok; }
 
     static Result<void> makeOk() { return { true, {} }; }
 
-    static Result<void> makeError(const QString &error, int code = 0) { return { false, error, code }; }
+    static Result<void> makeError(std::string error, int code = 0) { return { false, std::move(error), code }; }
 };
 
 } // namespace Core

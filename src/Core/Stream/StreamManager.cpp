@@ -2,89 +2,85 @@
 
 #include "StreamDecoder.hpp"
 #include "StreamSender.hpp"
-
 #include "Core/Audio/VoiceManager.hpp"
 #include "Core/Logging.hpp"
 #include "Discord/Client.hpp"
 #include "Discord/Stream/StreamConnection.hpp"
 #include "Platform/Dispatcher.hpp"
-#include <future>
 
-namespace Styx {
-namespace Core {
-namespace Stream {
+#include <chrono>
+#include <future>
+#include <utility>
+#include <vector>
+
+namespace Styx::Core::Stream {
 
 using Discord::Stream::StreamConnection;
 
 StreamManager::StreamManager(Snowflake accountId, const ProxyConfig &proxy, Discord::Client *client,
-                             Audio::VoiceManager *voice, QObject *parent)
-    : QObject(parent), accountId(accountId), proxy(proxy), client(client), voice(voice)
+                             Audio::VoiceManager *voice)
+    : accountId(accountId), proxy(proxy), client(client), voice(voice)
 {
 }
 
 StreamManager::~StreamManager()
 {
     stopAll();
-    if (sender) {
-        if (senderLoop) {
-            senderLoop->post([s = sender] { s->stop(); });
-        }
-        delete sender;
-        sender = nullptr;
+    if (sender && senderLoop && senderLoop->isRunning()) {
+        auto done = std::make_shared<std::promise<void>>();
+        auto finished = done->get_future();
+        senderLoop->post([sender = std::move(sender), done]() mutable {
+            sender->stop();
+            sender.reset();
+            done->set_value();
+        });
+        finished.wait();
     }
-    if (senderLoop) {
+    if (senderLoop)
         senderLoop->stopAndWait();
-        senderLoop.reset();
-    }
-    if (streamLoop) {
+    if (streamLoop)
         streamLoop->stopAndWait();
-        streamLoop.reset();
-    }
 }
 
-bool StreamManager::canWatch(QString *reason) const
+bool StreamManager::canWatch(std::string *reason) const
 {
-    auto fail = [reason](const QString &text) {
+    auto fail = [reason](const char *text) {
         if (reason)
             *reason = text;
         return false;
     };
-    if (!voice || !voice->isConnected() || voice->sessionId().isEmpty())
-        return fail(tr("Join a voice channel first."));
-    // the WebRTC transport has no way through a proxy; refusing beats leaking the real address
+    if (!voice || !voice->isConnected() || voice->sessionId().empty())
+        return fail("Join a voice channel first.");
     if (proxy.enabled())
-        return fail(tr("Go Live does not work through a proxy: the stream would bypass it."));
+        return fail("Go Live does not work through a proxy: the stream would bypass it.");
     return true;
 }
 
-bool StreamManager::canStream(QString *reason) const
+bool StreamManager::canStream(std::string *reason) const
 {
     if (!canWatch(reason))
         return false;
     if (!isScreenCaptureSupported()) {
         if (reason)
-            *reason = tr("Screen capture needs Windows 10 version 1903 or later.");
+            *reason = "Screen capture needs Windows 10 version 1903 or later.";
         return false;
     }
     return true;
 }
 
-QString StreamManager::streamKeyFor(Snowflake userId) const
+std::string StreamManager::streamKeyFor(Snowflake userId) const
 {
     const Snowflake guild = voice ? voice->currentGuildId() : Snowflake::Invalid;
     const Snowflake channel = voice ? voice->currentChannelId() : Snowflake::Invalid;
     if (guild.isValid())
-        return QStringLiteral("guild:%1:%2:%3").arg(QString::number(guild), QString::number(channel), QString::number(userId));
-    return QStringLiteral("call:%1:%2").arg(QString::number(channel), QString::number(userId));
+        return "guild:" + guild.toString() + ":" + channel.toString() + ":" + userId.toString();
+    return "call:" + channel.toString() + ":" + userId.toString();
 }
 
 void StreamManager::ensureStreamLoop()
 {
-    if (streamLoop)
-        return;
-    Platform::WorkerOptions opts;
-    opts.name = "StreamThread";
-    streamLoop = std::make_unique<Platform::WorkerLoop>(opts);
+    if (!streamLoop)
+        streamLoop = std::make_unique<Platform::WorkerLoop>("StreamThread");
 }
 
 void StreamManager::ensureSenderLoop()
@@ -95,181 +91,168 @@ void StreamManager::ensureSenderLoop()
     opts.name = "StreamCaptureThread";
     opts.initComMta = true;
     senderLoop = std::make_unique<Platform::WorkerLoop>(opts);
-
-    sender = new StreamSender;
-
-    connect(sender, &StreamSender::started, this,
-            [this](int width, int height, int framerate, int maxBitrate, bool audio, const QString &encoderName) {
-                Platform::Dispatcher::main().post([this, width, height, framerate, maxBitrate, audio, encoderName]() {
-                    if (!outgoing.active)
-                        return;
-                    senderStarted = true;
-                    outgoing.width = width;
-                    outgoing.height = height;
-                    outgoing.framerate = framerate;
-                    outgoing.maxBitrate = maxBitrate;
-                    outgoing.audio = audio;
-                    outgoing.description = tr("%1×%2 at %3 fps, %4%5")
-                                                   .arg(width)
-                                                   .arg(height)
-                                                   .arg(framerate)
-                                                   .arg(encoderName, audio ? tr(", with audio") : QString());
-                    qCInfo(LogStream) << "Capture running:" << outgoing.description << "- creating stream" << outgoing.key;
-
-                    if (client) {
-                        client->sendStreamCreate(voice->currentGuildId(), voice->currentChannelId());
-                        client->sendStreamSetPaused(outgoing.key, false);
-                    }
-                    emit streamingStatus(tr("Connecting…"));
-                });
-            }, Qt::DirectConnection);
-    connect(sender, &StreamSender::failed, this, [this](const QString &reason) {
-        Platform::Dispatcher::main().post([this, reason]() {
-            qCWarning(LogStream) << "Stream sender failed:" << reason;
-            stopStreaming();
-            emit streamingFailed(reason);
+    sender = std::make_shared<StreamSender>(*senderLoop);
+    Platform::Guard<StreamManager> self(this);
+    track(sender->started.connect([self](int width, int height, int framerate, int bitrate, bool audio,
+                                        const std::string &encoderName) {
+        Platform::Dispatcher::main().post([self, width, height, framerate, bitrate, audio, encoderName] {
+            auto *manager = self.get();
+            if (!manager || !manager->outgoing.active)
+                return;
+            manager->senderStarted = true;
+            auto &outgoing = manager->outgoing;
+            outgoing.width = width;
+            outgoing.height = height;
+            outgoing.framerate = framerate;
+            outgoing.maxBitrate = bitrate;
+            outgoing.audio = audio;
+            outgoing.description = std::to_string(width) + "×" + std::to_string(height) + " at "
+                + std::to_string(framerate) + " fps, " + encoderName + (audio ? ", with audio" : "");
+            log(LogLevel::Info, LogStream) << "Capture running:" << outgoing.description << "- creating stream" << outgoing.key;
+            if (manager->client && manager->voice) {
+                manager->client->sendStreamCreate(manager->voice->currentGuildId(), manager->voice->currentChannelId());
+                manager->client->sendStreamSetPaused(outgoing.key, false);
+            }
+            manager->streamingStatus.publish("Connecting…");
         });
-    }, Qt::DirectConnection);
-    connect(sender, &StreamSender::sourceClosed, this, [this] {
-        Platform::Dispatcher::main().post([this]() {
-            qCInfo(LogStream) << "Shared window closed, ending stream";
-            stopStreaming();
-            emit streamingFailed(tr("The shared window was closed."));
+    }));
+    track(sender->failed.connect([self](const std::string &reason) {
+        Platform::Dispatcher::main().post([self, reason] {
+            if (auto *manager = self.get()) {
+                log(LogLevel::Warning, LogStream) << "Stream sender failed:" << reason;
+                manager->stopStreaming();
+                manager->streamingFailed.publish(reason);
+            }
         });
-    }, Qt::DirectConnection);
+    }));
+    track(sender->sourceClosed.connect([self] {
+        Platform::Dispatcher::main().post([self] {
+            if (auto *manager = self.get()) {
+                log(LogLevel::Info, LogStream) << "Shared window closed, ending stream";
+                manager->stopStreaming();
+                manager->streamingFailed.publish("The shared window was closed.");
+            }
+        });
+    }));
 }
 
 void StreamManager::startStreaming(const CaptureSource &source, const StreamQuality &quality, bool includeAudio)
 {
-    QString reason;
+    std::string reason;
     if (!canStream(&reason)) {
-        emit streamingFailed(reason);
+        streamingFailed.publish(reason);
         return;
     }
     if (outgoing.active)
         stopStreaming();
-
     ensureStreamLoop();
     ensureSenderLoop();
-
     outgoing = Session{};
     outgoing.key = streamKeyFor(accountId);
     outgoing.userId = accountId;
     outgoing.active = true;
     senderStarted = false;
-
-    emit streamingChanged(true);
-    emit streamingStatus(tr("Starting capture…"));
-
-    if (sender && senderLoop)
-        senderLoop->post([s = sender, source, quality, includeAudio] { s->start(source, quality, includeAudio); });
+    streamingChanged.publish(true);
+    streamingStatus.publish("Starting capture…");
+    senderLoop->post([sender = sender, source, quality, includeAudio] { sender->start(source, quality, includeAudio); });
 }
 
 void StreamManager::stopStreaming()
 {
     if (!outgoing.active)
         return;
-
-    qCInfo(LogStream) << "Stopping stream" << outgoing.key;
+    log(LogLevel::Info, LogStream) << "Stopping stream" << outgoing.key;
     if (senderStarted && client)
         client->sendStreamDelete(outgoing.key);
-
     destroyConnection(outgoing);
     if (sender && senderLoop)
-        senderLoop->post([s = sender] { s->stop(); });
-
+        senderLoop->post([sender = sender] { sender->stop(); });
     outgoing = Session{};
     senderStarted = false;
-    emit streamingChanged(false);
+    streamingChanged.publish(false);
 }
 
 void StreamManager::watchStream(Snowflake userId)
 {
-    QString reason;
+    std::string reason;
     if (!canWatch(&reason)) {
-        emit watchEnded(userId, reason);
+        watchEnded.publish(userId, reason);
         return;
     }
     if (watched.contains(userId) || userId == accountId)
         return;
-
     ensureStreamLoop();
-
     Session session;
     session.key = streamKeyFor(userId);
     session.userId = userId;
     session.active = true;
-    watched.insert(userId, session);
-
-    qCInfo(LogStream) << "Watching stream" << session.key;
+    log(LogLevel::Info, LogStream) << "Watching stream" << session.key;
     if (client)
         client->sendStreamWatch(session.key);
-    emit watchStarted(userId);
+    watched.emplace(userId, std::move(session));
+    watchStarted.publish(userId);
 }
 
 void StreamManager::stopWatching(Snowflake userId)
 {
-    endWatch(userId, QString(), true);
+    endWatch(userId, {}, true);
 }
 
-void StreamManager::endWatch(Snowflake userId, const QString &reason, bool notifyServer)
+void StreamManager::endWatch(Snowflake userId, const std::string &reason, bool notifyServer)
 {
     auto it = watched.find(userId);
     if (it == watched.end())
         return;
-    Session session = it.value();
+    Session session = std::move(it->second);
     watched.erase(it);
-
-    qCInfo(LogStream) << "Leaving stream" << session.key << reason;
+    log(LogLevel::Info, LogStream) << "Leaving stream" << session.key << reason;
     if (notifyServer && client)
         client->sendStreamDelete(session.key);
     destroyConnection(session);
-    emit watchEnded(userId, reason);
+    watchEnded.publish(userId, reason);
 }
 
-void StreamManager::setViewerSize(Snowflake userId, const QSize &size)
+void StreamManager::setViewerSize(Snowflake userId, const Platform::Size &size)
 {
+#ifdef STYX_HAVE_FFMPEG
     auto it = watched.find(userId);
-    if (it != watched.end() && it->decoder)
-        it->decoder->setTargetSize(size);
+    if (it != watched.end() && it->second.decoder)
+        it->second.decoder->setTargetSize(size);
+#endif
 }
 
 void StreamManager::requestViewerKeyframe(Snowflake userId)
 {
     auto it = watched.find(userId);
-    if (it != watched.end() && it->connection)
-        if (streamLoop)
-            streamLoop->post([c = it->connection] { if (c) c->requestKeyframe(); });
+    if (it != watched.end() && it->second.connection && streamLoop) {
+        std::weak_ptr<StreamConnection> connection = it->second.connection;
+        streamLoop->post([connection] { if (auto c = connection.lock()) c->requestKeyframe(); });
+    }
 }
 
 void StreamManager::stopAll()
 {
     stopStreaming();
-    const auto users = watched.keys();
-    for (Snowflake userId : users)
-        endWatch(userId, tr("You left the voice channel."), false);
+    while (!watched.empty())
+        endWatch(watched.begin()->first, "You left the voice channel.", false);
 }
 
 void StreamManager::handleStreamCreate(const Discord::StreamCreate &event)
 {
-    const QString key = event.streamKey.get();
+    const auto &key = event.streamKey.get();
     Session *session = nullptr;
     bool isSender = false;
     if (outgoing.active && outgoing.key == key) {
         session = &outgoing;
         isSender = true;
     } else {
-        for (auto &candidate : watched) {
-            if (candidate.key == key) {
-                session = &candidate;
-                break;
-            }
+        for (auto &[user, candidate] : watched) {
+            if (candidate.key == key) { session = &candidate; break; }
         }
     }
     if (!session)
         return;
-
-    qCInfo(LogStream) << "STREAM_CREATE" << key << "rtc server" << event.rtcServerId.get();
+    log(LogLevel::Info, LogStream) << "STREAM_CREATE" << key << "rtc server" << event.rtcServerId.get().toString();
     if (session->connection && session->rtcServerId != event.rtcServerId.get())
         destroyConnection(*session);
     session->rtcServerId = event.rtcServerId.get();
@@ -278,30 +261,24 @@ void StreamManager::handleStreamCreate(const Discord::StreamCreate &event)
 
 void StreamManager::handleStreamServerUpdate(const Discord::StreamServerUpdate &event)
 {
-    const QString key = event.streamKey.get();
+    const auto &key = event.streamKey.get();
     Session *session = nullptr;
     bool isSender = false;
     if (outgoing.active && outgoing.key == key) {
         session = &outgoing;
         isSender = true;
     } else {
-        for (auto &candidate : watched) {
-            if (candidate.key == key) {
-                session = &candidate;
-                break;
-            }
+        for (auto &[user, candidate] : watched) {
+            if (candidate.key == key) { session = &candidate; break; }
         }
     }
     if (!session)
         return;
-
-    if (event.endpoint.isNull() || event.endpoint.get().isEmpty()) {
-        qCInfo(LogStream) << "STREAM_SERVER_UPDATE without endpoint for" << key << "- waiting";
+    if (event.endpoint.isNull() || event.endpoint.get().empty()) {
+        log(LogLevel::Info, LogStream) << "STREAM_SERVER_UPDATE without endpoint for" << key << "- waiting";
         return;
     }
-
-    qCInfo(LogStream) << "STREAM_SERVER_UPDATE" << key << "endpoint" << event.endpoint.get();
-    // a second update means the media server moved; reconnect there
+    log(LogLevel::Info, LogStream) << "STREAM_SERVER_UPDATE" << key << "endpoint" << event.endpoint.get();
     if (session->connection)
         destroyConnection(*session);
     session->endpoint = event.endpoint.get();
@@ -311,23 +288,21 @@ void StreamManager::handleStreamServerUpdate(const Discord::StreamServerUpdate &
 
 void StreamManager::handleStreamDelete(const Discord::StreamDelete &event)
 {
-    const QString key = event.streamKey.get();
-    const QString reason = event.reason.hasValue() && !event.reason.isNull() ? event.reason.get() : QString();
-    qCInfo(LogStream) << "STREAM_DELETE" << key << reason;
-
+    const auto &key = event.streamKey.get();
+    const std::string reason = event.reason.hasValue() && !event.reason.isNull() ? event.reason.get() : std::string{};
+    log(LogLevel::Info, LogStream) << "STREAM_DELETE" << key << reason;
     if (outgoing.active && outgoing.key == key) {
-        senderStarted = false; // the server already dropped it
+        senderStarted = false;
         stopStreaming();
-        if (!reason.isEmpty() && reason != QLatin1String("user_requested"))
-            emit streamingFailed(tr("Discord ended the stream (%1).").arg(reason));
+        if (!reason.empty() && reason != "user_requested")
+            streamingFailed.publish("Discord ended the stream (" + reason + ").");
         return;
     }
     for (auto it = watched.begin(); it != watched.end(); ++it) {
-        if (it->key == key) {
-            const Snowflake userId = it.key();
-            endWatch(userId, reason == QLatin1String("stream_ended") || reason.isEmpty() ? tr("The stream ended.")
-                                                                                          : tr("Stream closed (%1).").arg(reason),
-                     false);
+        if (it->second.key == key) {
+            const auto userId = it->first;
+            endWatch(userId, reason == "stream_ended" || reason.empty() ? "The stream ended."
+                     : "Stream closed (" + reason + ").", false);
             return;
         }
     }
@@ -335,8 +310,7 @@ void StreamManager::handleStreamDelete(const Discord::StreamDelete &event)
 
 void StreamManager::maybeConnect(Session &session, bool isSender)
 {
-    if (session.connection || !session.rtcServerId.isValid() || session.endpoint.isEmpty() || !voice
-        || voice->sessionId().isEmpty())
+    if (session.connection || !session.rtcServerId.isValid() || session.endpoint.empty() || !voice || voice->sessionId().empty())
         return;
     if (isSender)
         connectSender(session);
@@ -355,51 +329,58 @@ void StreamManager::connectSender(Session &session)
     info.streamerUserId = accountId;
     info.voiceSessionId = voice->sessionId();
     info.maxBitrate = session.maxBitrate;
-
-    auto *connection = new StreamConnection(StreamConnection::Role::Sender, info, proxy);
+    auto connection = std::make_shared<StreamConnection>(StreamConnection::Role::Sender, info, proxy, streamLoop.get());
     session.connection = connection;
+    std::weak_ptr<StreamConnection> weakConnection = connection;
+    std::weak_ptr<StreamSender> weakSender = sender;
+    auto *streamWorker = streamLoop.get();
+    auto *senderWorker = senderLoop.get();
+    Platform::Guard<StreamManager> self(this);
 
-    // encoder output goes straight to the stream thread
-    connect(sender, &StreamSender::encodedVideo, connection, [connection](const QByteArray &frame, qint64 ptsUs, bool) {
-        connection->sendVideoFrame(frame, std::chrono::microseconds(ptsUs));
-    });
-    connect(sender, &StreamSender::encodedAudio, connection, [connection](const QByteArray &opus, qint64 ptsUs) {
-        connection->sendAudioFrame(opus, std::chrono::microseconds(ptsUs));
-    });
-    connect(connection, &StreamConnection::keyframeRequested, sender, &StreamSender::requestKeyframe);
-    connect(connection, &StreamConnection::bandwidthEstimate, sender, &StreamSender::onBandwidthEstimate);
-
-    connect(connection, &StreamConnection::readyChanged, this, [this, connection](bool ready) {
-        if (outgoing.connection != connection || !ready)
-            return;
-        Discord::Stream::VideoAttributes attributes;
-        attributes.width = outgoing.width;
-        attributes.height = outgoing.height;
-        attributes.framerate = outgoing.framerate;
-        attributes.maxBitrate = outgoing.maxBitrate;
-        // Discord clients always flag the stream's audio SSRC as speaking (soundshare),
-        // with or without captured audio
-        if (streamLoop) {
-            streamLoop->post([connection, attributes] {
-                connection->setVideoAttributes(true, attributes);
-                connection->setSoundshare(true);
+    connection->track(sender->encodedVideo.connect([weakConnection, streamWorker](const std::string &frame, int64_t pts, bool) {
+        streamWorker->post([weakConnection, frame, pts] { if (auto c = weakConnection.lock()) c->sendVideoFrame(frame, std::chrono::microseconds(pts)); });
+    }));
+    connection->track(sender->encodedAudio.connect([weakConnection, streamWorker](const std::string &opus, int64_t pts) {
+        streamWorker->post([weakConnection, opus, pts] { if (auto c = weakConnection.lock()) c->sendAudioFrame(opus, std::chrono::microseconds(pts)); });
+    }));
+    connection->track(connection->keyframeRequested.connect([weakSender, senderWorker] {
+        senderWorker->post([weakSender] { if (auto s = weakSender.lock()) s->requestKeyframe(); });
+    }));
+    connection->track(connection->bandwidthEstimate.connect([weakSender, senderWorker](unsigned int bitrate) {
+        senderWorker->post([weakSender, bitrate] { if (auto s = weakSender.lock()) s->onBandwidthEstimate(bitrate); });
+    }));
+    connection->track(connection->readyChanged.connect([self, weakConnection](bool ready) {
+        Platform::Dispatcher::main().post([self, weakConnection, ready] {
+            auto *manager = self.get();
+            if (!manager || !manager->outgoing.connection
+                || manager->outgoing.connection != weakConnection.lock() || !ready)
+                return;
+            Discord::Stream::VideoAttributes attributes;
+            attributes.width = manager->outgoing.width;
+            attributes.height = manager->outgoing.height;
+            attributes.framerate = manager->outgoing.framerate;
+            attributes.maxBitrate = manager->outgoing.maxBitrate;
+            manager->streamLoop->post([weakConnection, attributes] {
+                if (auto c = weakConnection.lock()) { c->setVideoAttributes(true, attributes); c->setSoundshare(true); }
             });
-        }
-        if (sender && senderLoop)
-            senderLoop->post([s = sender] { s->requestKeyframe(); });
-        qCInfo(LogStream) << "Live:" << outgoing.key;
-        emit streamingStatus(tr("Live: %1").arg(outgoing.description));
-    });
-    connect(connection, &StreamConnection::closed, this, [this, connection](const QString &reason) {
-        if (outgoing.connection != connection)
-            return;
-        qCWarning(LogStream) << "Stream connection closed:" << reason;
-        stopStreaming();
-        emit streamingFailed(tr("Stream connection lost: %1").arg(reason));
-    });
-
-    if (streamLoop)
-        streamLoop->post([connection] { connection->start(); });
+            if (manager->sender && manager->senderLoop)
+                manager->senderLoop->post([sender = manager->sender] { sender->requestKeyframe(); });
+            log(LogLevel::Info, LogStream) << "Live:" << manager->outgoing.key;
+            manager->streamingStatus.publish("Live: " + manager->outgoing.description);
+        });
+    }));
+    connection->track(connection->closed.connect([self, weakConnection](const std::string &reason) {
+        Platform::Dispatcher::main().post([self, weakConnection, reason] {
+            auto *manager = self.get();
+            if (!manager || !manager->outgoing.connection
+                || manager->outgoing.connection != weakConnection.lock())
+                return;
+            log(LogLevel::Warning, LogStream) << "Stream connection closed:" << reason;
+            manager->stopStreaming();
+            manager->streamingFailed.publish("Stream connection lost: " + reason);
+        });
+    }));
+    streamLoop->post([weakConnection] { if (auto c = weakConnection.lock()) c->start(); });
 }
 
 void StreamManager::connectViewer(Session &session)
@@ -412,92 +393,85 @@ void StreamManager::connectViewer(Session &session)
     info.selfUserId = accountId;
     info.streamerUserId = session.userId;
     info.voiceSessionId = voice->sessionId();
-
-    auto *connection = new StreamConnection(StreamConnection::Role::Viewer, info, proxy);
+    auto connection = std::make_shared<StreamConnection>(StreamConnection::Role::Viewer, info, proxy, streamLoop.get());
     session.connection = connection;
-
-#ifdef STYX_HAVE_FFMPEG
-    Platform::WorkerOptions opts;
-    opts.name = "StreamDecodeThread";
-    session.decoderLoop = std::make_shared<Platform::WorkerLoop>(opts);
-    auto *decoder = new StreamDecoder;
-    session.decoder = decoder;
-
-    auto *decLoop = session.decoderLoop.get();
-    connect(connection, &StreamConnection::videoFrame, decoder, [decoder, decLoop](const QByteArray &annexB, quint32 ssrc, bool keyframe) {
-        decLoop->post([decoder, annexB, ssrc, keyframe] {
-            decoder->decode(annexB, ssrc, keyframe);
-        });
-    }, Qt::DirectConnection);
-    auto *strLoop = streamLoop.get();
-    connect(decoder, &StreamDecoder::needKeyframe, connection, [connection, strLoop] {
-        if (strLoop) {
-            strLoop->post([connection] {
-                connection->requestKeyframe();
-            });
-        }
-    }, Qt::DirectConnection);
-    const Snowflake userId = session.userId;
-    connect(decoder, &StreamDecoder::frameDecoded, this, [this, userId](const QImage &image, const QSize &sourceSize) {
-        Platform::Dispatcher::main().post([this, userId, image, sourceSize]() {
-            if (watched.contains(userId))
-                emit viewerFrame(userId, image, sourceSize);
-        });
-    }, Qt::DirectConnection);
-#endif
-
-    connect(connection, &StreamConnection::audioPacket, this,
-            [this](quint32 ssrc, quint16 sequence, quint32 timestamp, const QByteArray &opus) {
-                Platform::Dispatcher::main().post([this, ssrc, sequence, timestamp, opus]() {
-                    if (voice)
-                        voice->playStreamAudio(ssrc, sequence, timestamp, opus);
-                });
-            }, Qt::DirectConnection);
-
+    std::weak_ptr<StreamConnection> weakConnection = connection;
+    Platform::Guard<StreamManager> self(this);
     const Snowflake streamer = session.userId;
-    connect(connection, &StreamConnection::readyChanged, this, [this, streamer](bool ready) {
-        Platform::Dispatcher::main().post([this, streamer, ready]() {
-            if (ready)
-                emit watchConnected(streamer);
+#ifdef STYX_HAVE_FFMPEG
+    session.decoderLoop = std::make_shared<Platform::WorkerLoop>("StreamDecodeThread");
+    session.decoder = std::make_shared<StreamDecoder>();
+    std::weak_ptr<StreamDecoder> weakDecoder = session.decoder;
+    auto decoderLoop = session.decoderLoop;
+    auto *streamWorker = streamLoop.get();
+    connection->track(connection->videoFrame.connect([weakDecoder, decoderLoop](const std::string &frame, uint32_t timestamp, bool keyframe) {
+        decoderLoop->post([weakDecoder, frame, timestamp, keyframe] { if (auto decoder = weakDecoder.lock()) decoder->decode(frame, timestamp, keyframe); });
+    }));
+    connection->track(session.decoder->needKeyframe.connect([weakConnection, streamWorker] {
+        streamWorker->post([weakConnection] { if (auto c = weakConnection.lock()) c->requestKeyframe(); });
+    }));
+    connection->track(session.decoder->frameDecoded.connect([self, streamer, weakConnection](const Platform::ImageBuffer &image, const Platform::Size &size) {
+        Platform::Dispatcher::main().post([self, streamer, weakConnection, image, size] {
+            if (auto *manager = self.get()) {
+                auto it = manager->watched.find(streamer);
+                if (it != manager->watched.end() && it->second.connection == weakConnection.lock())
+                    manager->viewerFrame.publish(streamer, image, size);
+            }
         });
-    }, Qt::DirectConnection);
-    connect(connection, &StreamConnection::closed, this, [this, streamer, connection](const QString &reason) {
-        Platform::Dispatcher::main().post([this, streamer, connection, reason]() {
-            auto it = watched.find(streamer);
-            if (it == watched.end() || it->connection != connection)
-                return;
-            endWatch(streamer, tr("Connection lost: %1").arg(reason), true);
+    }));
+#endif
+    connection->track(connection->audioPacket.connect([self, streamer, weakConnection](uint32_t ssrc, uint16_t sequence, uint32_t timestamp, const std::string &opus) {
+        Platform::Dispatcher::main().post([self, streamer, weakConnection, ssrc, sequence, timestamp, opus] {
+            if (auto *manager = self.get()) {
+                auto it = manager->watched.find(streamer);
+                if (it != manager->watched.end() && it->second.connection == weakConnection.lock() && manager->voice)
+                    manager->voice->playStreamAudio(ssrc, sequence, timestamp, opus);
+            }
         });
-    }, Qt::DirectConnection);
-
-    if (streamLoop)
-        streamLoop->post([connection] { connection->start(); });
+    }));
+    connection->track(connection->readyChanged.connect([self, streamer, weakConnection](bool ready) {
+        Platform::Dispatcher::main().post([self, streamer, weakConnection, ready] {
+            if (auto *manager = self.get()) {
+                auto it = manager->watched.find(streamer);
+                if (ready && it != manager->watched.end() && it->second.connection == weakConnection.lock())
+                    manager->watchConnected.publish(streamer);
+            }
+        });
+    }));
+    connection->track(connection->closed.connect([self, streamer, weakConnection](const std::string &reason) {
+        Platform::Dispatcher::main().post([self, streamer, weakConnection, reason] {
+            if (auto *manager = self.get()) {
+                auto it = manager->watched.find(streamer);
+                if (it != manager->watched.end() && it->second.connection == weakConnection.lock())
+                    manager->endWatch(streamer, "Connection lost: " + reason, true);
+            }
+        });
+    }));
+    streamLoop->post([weakConnection] { if (auto c = weakConnection.lock()) c->start(); });
 }
 
 void StreamManager::destroyConnection(Session &session)
 {
     if (session.connection) {
-        StreamConnection *connection = session.connection;
+        auto connection = std::move(session.connection);
         if (streamLoop && streamLoop->isRunning()) {
-            std::promise<void> p;
-            auto f = p.get_future();
-            streamLoop->post([connection, &p] {
+            auto done = std::make_shared<std::promise<void>>();
+            auto finished = done->get_future();
+            streamLoop->post([connection = std::move(connection), done]() mutable {
                 connection->stop();
-                p.set_value();
+                connection.reset();
+                done->set_value();
             });
-            f.wait_for(std::chrono::seconds(2));
+            finished.wait();
+        } else {
+            connection->stop();
         }
-        delete connection;
-        session.connection = nullptr;
     }
     if (session.decoderLoop) {
         session.decoderLoop->stopAndWait();
-        delete session.decoder.data();
-        session.decoder = nullptr;
+        session.decoder.reset();
         session.decoderLoop.reset();
     }
 }
 
-} // namespace Stream
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core::Stream

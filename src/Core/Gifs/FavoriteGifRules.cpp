@@ -42,14 +42,14 @@ bool isHostedByDiscord(const std::string &url)
     const auto host = Platform::urlHost(url);
     return hasScheme(url) && (isAttachmentOnDiscord(url) ||
         (host.starts_with("images-ext-") && host.ends_with(".discordapp.net") && Platform::urlPath(url).starts_with("/external/")));
+}
+
 struct QueryItem {
     std::string name;
     std::string value;
     bool hasEquals = false;
 };
 using QueryItems = std::vector<QueryItem>;
-
-using QueryItems = std::vector<std::pair<std::string, std::string>>;
 
 std::string editQuery(const std::string &url, std::initializer_list<std::string_view> remove,
                       const QueryItems &set = {})
@@ -68,29 +68,28 @@ std::string editQuery(const std::string &url, std::initializer_list<std::string_
             const bool hasEquals = equals < stop;
             auto name = url.substr(start, (hasEquals ? equals : stop) - start);
             auto value = hasEquals ? url.substr(equals + 1, stop - equals - 1) : std::string{};
+            if (std::find(remove.begin(), remove.end(), name) == remove.end())
                 items.push_back({std::move(name), std::move(value), hasEquals});
-                std::find(remove.begin(), remove.end(), name) == remove.end())
-                items.emplace_back(std::move(name), std::move(value));
             start = stop + 1;
+        }
+    }
     for (const auto &[name, value, unused] : set) {
         auto first = std::find_if(items.begin(), items.end(), [&](const auto &item) { return item.name == name; });
-    for (const auto &[name, value] : set) {
-            items.push_back({name, value, true});
         if (first == items.end()) {
+            items.push_back({name, value, true});
+        } else {
             first->value = value;
             first->hasEquals = true;
             items.erase(std::remove_if(first + 1, items.end(), [&](const auto &item) { return item.name == name; }), items.end());
-            first->second = value;
-            items.erase(std::remove_if(first + 1, items.end(), [&](const auto &item) { return item.first == name; }), items.end());
         }
     }
-    for (const auto &[name, value, hasEquals] : items) {
+    std::string result = url.substr(0, hasQuery ? question : end);
     bool first = true;
-    for (const auto &[name, value] : items) {
+    for (const auto &[name, value, hasEquals] : items) {
         result += first ? '?' : '&';
-        if (hasEquals) {
+        first = false;
         result += name;
-        if (!value.empty()) {
+        if (hasEquals) {
             result += '=';
             result += value;
         }

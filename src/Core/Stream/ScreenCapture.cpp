@@ -1,4 +1,3 @@
-// WinRT headers first: Qt's keyword macros (emit, signals, slots) must not reach them.
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Metadata.h>
 #include <winrt/Windows.Graphics.Capture.h>
@@ -16,12 +15,11 @@
 
 #include "Core/Logging.hpp"
 
-#include <QCoreApplication>
-#include <QGuiApplication>
-#include <QScreen>
-
+#include "Platform/Utf8.hpp"
+#include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <stdexcept>
 
 namespace Styx {
 namespace Core {
@@ -44,7 +42,7 @@ namespace {
 
 BOOL CALLBACK collectMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM param)
 {
-    auto *sources = reinterpret_cast<QList<CaptureSource> *>(param);
+    auto *sources = reinterpret_cast<std::vector<CaptureSource> *>(param);
     MONITORINFOEXW info{};
     info.cbSize = sizeof(info);
     if (!GetMonitorInfoW(monitor, &info))
@@ -52,15 +50,15 @@ BOOL CALLBACK collectMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM param)
 
     CaptureSource source;
     source.kind = CaptureSource::Kind::Monitor;
-    source.handle = reinterpret_cast<quintptr>(monitor);
-    source.geometry = QRect(info.rcMonitor.left, info.rcMonitor.top, info.rcMonitor.right - info.rcMonitor.left,
-                            info.rcMonitor.bottom - info.rcMonitor.top);
+    source.handle = reinterpret_cast<uintptr_t>(monitor);
+    source.geometry = {static_cast<float>(info.rcMonitor.left), static_cast<float>(info.rcMonitor.top),
+                       static_cast<float>(info.rcMonitor.right - info.rcMonitor.left),
+                       static_cast<float>(info.rcMonitor.bottom - info.rcMonitor.top)};
     source.primary = info.dwFlags & MONITORINFOF_PRIMARY;
-    source.title = QCoreApplication::translate("ScreenCapture", "Screen %1 (%2 × %3)")
-                           .arg(sources->size() + 1)
-                           .arg(source.geometry.width())
-                           .arg(source.geometry.height());
-    sources->append(source);
+    source.title = "Screen " + std::to_string(sources->size() + 1) + " (" +
+                   std::to_string(static_cast<int>(source.geometry.width)) + " × " +
+                   std::to_string(static_cast<int>(source.geometry.height)) + ")";
+    sources->push_back(std::move(source));
     return TRUE;
 }
 
@@ -80,8 +78,8 @@ bool isCapturableWindow(HWND hwnd)
 
     wchar_t className[64]{};
     GetClassNameW(hwnd, className, 64);
-    const QString cls = QString::fromWCharArray(className);
-    if (cls == QLatin1String("Progman") || cls == QLatin1String("WorkerW") || cls == QLatin1String("Shell_TrayWnd"))
+    const std::wstring_view cls(className);
+    if (cls == L"Progman" || cls == L"WorkerW" || cls == L"Shell_TrayWnd")
         return false;
     return true;
 }
@@ -90,7 +88,7 @@ BOOL CALLBACK collectWindow(HWND hwnd, LPARAM param)
 {
     if (!isCapturableWindow(hwnd))
         return TRUE;
-    auto *sources = reinterpret_cast<QList<CaptureSource> *>(param);
+    auto *sources = reinterpret_cast<std::vector<CaptureSource> *>(param);
 
     const int length = GetWindowTextLengthW(hwnd);
     std::wstring title(static_cast<size_t>(length) + 1, L'\0');
@@ -105,22 +103,23 @@ BOOL CALLBACK collectWindow(HWND hwnd, LPARAM param)
 
     CaptureSource source;
     source.kind = CaptureSource::Kind::Window;
-    source.handle = reinterpret_cast<quintptr>(hwnd);
-    source.title = QString::fromWCharArray(title.c_str(), length);
-    source.geometry = QRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    source.handle = reinterpret_cast<uintptr_t>(hwnd);
+    source.title = Platform::fromUtf16(std::wstring_view(title.data(), length));
+    source.geometry = {static_cast<float>(rect.left), static_cast<float>(rect.top),
+                       static_cast<float>(rect.right - rect.left), static_cast<float>(rect.bottom - rect.top)};
     source.processId = pid;
-    if (source.geometry.width() > 1 && source.geometry.height() > 1)
-        sources->append(source);
+    if (source.geometry.width > 1 && source.geometry.height > 1)
+        sources->push_back(std::move(source));
     return TRUE;
 }
 
-QImage imageFromDc(HDC sourceDc, int srcX, int srcY, int srcW, int srcH, const QSize &target, bool stretch)
+Platform::ImageBuffer imageFromDc(HDC sourceDc, int srcX, int srcY, int srcW, int srcH, const Platform::Size &target, bool stretch)
 {
     HDC memDc = CreateCompatibleDC(sourceDc);
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = target.width();
-    bmi.bmiHeader.biHeight = -target.height();
+    bmi.bmiHeader.biWidth = target.width;
+    bmi.bmiHeader.biHeight = -target.height;
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
@@ -133,12 +132,19 @@ QImage imageFromDc(HDC sourceDc, int srcX, int srcY, int srcW, int srcH, const Q
     HGDIOBJ old = SelectObject(memDc, bitmap);
     if (stretch) {
         SetStretchBltMode(memDc, HALFTONE);
-        StretchBlt(memDc, 0, 0, target.width(), target.height(), sourceDc, srcX, srcY, srcW, srcH, SRCCOPY);
+        StretchBlt(memDc, 0, 0, target.width, target.height, sourceDc, srcX, srcY, srcW, srcH, SRCCOPY);
     } else {
-        BitBlt(memDc, 0, 0, target.width(), target.height(), sourceDc, srcX, srcY, SRCCOPY);
+        BitBlt(memDc, 0, 0, target.width, target.height, sourceDc, srcX, srcY, SRCCOPY);
     }
-    QImage image(static_cast<const uchar *>(bits), target.width(), target.height(), QImage::Format_RGB32);
-    image = image.copy();
+    Platform::ImageBuffer image{target.width, target.height, 4,
+        std::vector<uint8_t>(static_cast<size_t>(target.width) * target.height * 4)};
+    const auto *src = static_cast<const uint8_t *>(bits);
+    for (size_t i = 0; i < image.pixels.size(); i += 4) {
+        image.pixels[i] = src[i + 2];
+        image.pixels[i + 1] = src[i + 1];
+        image.pixels[i + 2] = src[i];
+        image.pixels[i + 3] = 255;
+    }
     SelectObject(memDc, old);
     DeleteObject(bitmap);
     DeleteDC(memDc);
@@ -147,25 +153,24 @@ QImage imageFromDc(HDC sourceDc, int srcX, int srcY, int srcW, int srcH, const Q
 
 } // namespace
 
-QList<CaptureSource> enumerateCaptureSources()
+std::vector<CaptureSource> enumerateCaptureSources()
 {
-    QList<CaptureSource> monitors;
-    EnumDisplayMonitors(nullptr, nullptr, collectMonitor, reinterpret_cast<LPARAM>(&monitors));
-
-    QList<CaptureSource> windows;
-    EnumWindows(collectWindow, reinterpret_cast<LPARAM>(&windows));
-
-    return monitors + windows;
+    std::vector<CaptureSource> sources;
+    EnumDisplayMonitors(nullptr, nullptr, collectMonitor, reinterpret_cast<LPARAM>(&sources));
+    EnumWindows(collectWindow, reinterpret_cast<LPARAM>(&sources));
+    return sources;
 }
 
-QImage captureThumbnail(const CaptureSource &source, const QSize &maxSize)
+Platform::ImageBuffer captureThumbnail(const CaptureSource &source, const Platform::Size &maxSize)
 {
-    const QSize scaled = source.geometry.size().scaled(maxSize, Qt::KeepAspectRatio).expandedTo(QSize(1, 1));
+    auto scaled = Platform::fitWithin({static_cast<int>(source.geometry.width), static_cast<int>(source.geometry.height)}, maxSize);
+    scaled.width = std::max(1, scaled.width);
+    scaled.height = std::max(1, scaled.height);
 
     if (source.kind == CaptureSource::Kind::Monitor) {
         HDC screen = GetDC(nullptr);
-        QImage image = imageFromDc(screen, source.geometry.x(), source.geometry.y(), source.geometry.width(),
-                                   source.geometry.height(), scaled, true);
+        auto image = imageFromDc(screen, static_cast<int>(source.geometry.x), static_cast<int>(source.geometry.y),
+                                 static_cast<int>(source.geometry.width), static_cast<int>(source.geometry.height), scaled, true);
         ReleaseDC(nullptr, screen);
         return image;
     }
@@ -174,17 +179,20 @@ QImage captureThumbnail(const CaptureSource &source, const QSize &maxSize)
     auto hwnd = reinterpret_cast<HWND>(source.handle);
     RECT client{};
     GetWindowRect(hwnd, &client);
-    const QSize full(client.right - client.left, client.bottom - client.top);
-    if (full.isEmpty())
+    const Platform::Size full{client.right - client.left, client.bottom - client.top};
+    if (full.empty())
         return {};
 
     HDC windowDc = GetDC(hwnd);
     HDC fullDc = CreateCompatibleDC(windowDc);
-    HBITMAP fullBitmap = CreateCompatibleBitmap(windowDc, full.width(), full.height());
+    HBITMAP fullBitmap = CreateCompatibleBitmap(windowDc, full.width, full.height);
     HGDIOBJ old = SelectObject(fullDc, fullBitmap);
     constexpr UINT PW_RENDERFULLCONTENT_FLAG = 0x00000002;
     PrintWindow(hwnd, fullDc, PW_RENDERFULLCONTENT_FLAG);
-    QImage image = imageFromDc(fullDc, 0, 0, full.width(), full.height(), full.scaled(maxSize, Qt::KeepAspectRatio).expandedTo(QSize(1, 1)), true);
+    auto fitted = Platform::fitWithin(full, maxSize);
+    fitted.width = std::max(1, fitted.width);
+    fitted.height = std::max(1, fitted.height);
+    auto image = imageFromDc(fullDc, 0, 0, full.width, full.height, fitted, true);
     SelectObject(fullDc, old);
     DeleteObject(fullBitmap);
     DeleteDC(fullDc);
@@ -205,8 +213,8 @@ struct ScreenCapture::Impl
 
     std::mutex frameMutex;
     ComPtr<ID3D11Texture2D> latest;
-    QSize latestSize;
-    quint64 sequence = 0;
+    Platform::Size latestSize;
+    uint64_t sequence = 0;
     std::atomic<bool> closed{ false };
 
     void onFrameArrived(const wgc::Direct3D11CaptureFramePool &sender);
@@ -234,7 +242,7 @@ void ScreenCapture::Impl::onFrameArrived(const wgc::Direct3D11CaptureFramePool &
     {
         std::lock_guard deviceLock(device->mutex());
         std::lock_guard lock(frameMutex);
-        if (!latest || latestSize != QSize(width, height)) {
+        if (!latest || latestSize != Platform::Size{width, height}) {
             D3D11_TEXTURE2D_DESC desc{};
             desc.Width = static_cast<UINT>(width);
             desc.Height = static_cast<UINT>(height);
@@ -247,7 +255,7 @@ void ScreenCapture::Impl::onFrameArrived(const wgc::Direct3D11CaptureFramePool &
             latest.Reset();
             if (FAILED(device->device()->CreateTexture2D(&desc, nullptr, &latest)))
                 return;
-            latestSize = QSize(width, height);
+            latestSize = {width, height};
         }
         D3D11_BOX box{ 0, 0, 0, static_cast<UINT>(width), static_cast<UINT>(height), 1 };
         device->context()->CopySubresourceRegion(latest.Get(), 0, 0, 0, 0, surface.Get(), 0, &box);
@@ -272,7 +280,7 @@ ScreenCapture::~ScreenCapture()
     stop();
 }
 
-bool ScreenCapture::start(const CaptureSource &source, bool captureCursor, QString *error)
+bool ScreenCapture::start(const CaptureSource &source, bool captureCursor, std::string *error)
 {
     try {
         ComPtr<IDXGIDevice> dxgiDevice;
@@ -319,23 +327,23 @@ bool ScreenCapture::start(const CaptureSource &source, bool captureCursor, QStri
             try {
                 raw->onFrameArrived(sender);
             } catch (const winrt::hresult_error &e) {
-                qCWarning(LogStream) << "Capture frame failed:" << QString::fromWCharArray(e.message().c_str());
+                log(LogLevel::Warning, LogStream) << "Capture frame failed:" << winrt::to_string(e.message());
             }
         });
         impl->closedRevoker = impl->item.Closed(winrt::auto_revoke, [raw](auto &&, auto &&) {
-            qCInfo(LogStream) << "Capture source closed";
+            log(LogLevel::Info, LogStream) << "Capture source closed";
             raw->closed = true;
         });
 
         impl->session.StartCapture();
-        qCInfo(LogStream) << "Capturing" << source.title << impl->poolSize.Width << "x" << impl->poolSize.Height;
+        log(LogLevel::Info, LogStream) << "Capturing" << source.title << impl->poolSize.Width << "x" << impl->poolSize.Height;
         return true;
     } catch (const winrt::hresult_error &e) {
         if (error)
-            *error = QString::fromWCharArray(e.message().c_str());
+            *error = winrt::to_string(e.message());
     } catch (const std::exception &e) {
         if (error)
-            *error = QString::fromUtf8(e.what());
+            *error = e.what();
     }
     stop();
     return false;

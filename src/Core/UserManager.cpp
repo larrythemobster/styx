@@ -7,23 +7,21 @@
 namespace Styx {
 namespace Core {
 
-UserManager::UserManager(Snowflake accountId, QObject *parent)
-    : QObject(parent), userRepo(accountId), memberRepo(accountId)
+UserManager::UserManager(Snowflake accountId)
+    : userRepo(accountId), memberRepo(accountId)
 {
 }
 
-UserManager::~UserManager() {}
-
 std::optional<Discord::User> UserManager::getUser(Snowflake userId)
 {
-    if (auto *user = userCache.object(userId))
+    if (auto *user = userCache.get(userId))
         return *user;
 
     auto dbUser = userRepo.getUser(userId);
     if (!dbUser.has_value())
         return std::nullopt;
 
-    userCache.insert(userId, new Discord::User(dbUser.value()));
+    userCache.put(userId, dbUser.value());
     return dbUser;
 }
 
@@ -31,7 +29,7 @@ std::optional<Discord::Member> UserManager::getMember(Snowflake guildId, Snowfla
 {
     MemberKey key{ guildId, userId };
 
-    if (auto *member = memberCache.object(key))
+    if (auto *member = memberCache.get(key))
         return *member;
 
     auto dbMember = memberRepo.getMember(guildId, userId);
@@ -40,22 +38,22 @@ std::optional<Discord::Member> UserManager::getMember(Snowflake guildId, Snowfla
         return std::nullopt;
 
     dbMember->user = dbUser.value();
-    memberCache.insert(key, new Discord::Member(dbMember.value()));
+    memberCache.put(key, dbMember.value());
     return dbMember;
 }
 
-std::optional<QList<Snowflake>> UserManager::getMemberRoles(Snowflake guildId, Snowflake userId)
+std::optional<std::vector<Snowflake>> UserManager::getMemberRoles(Snowflake guildId, Snowflake userId)
 {
-    if (auto *member = memberCache.object(MemberKey{ guildId, userId }))
-        return member->roles.hasValue() ? member->roles.get() : QList<Snowflake>{};
+    if (auto *member = memberCache.get(MemberKey{ guildId, userId }))
+        return member->roles.hasValue() ? member->roles.get() : std::vector<Snowflake>{};
 
     auto dbMember = memberRepo.getMember(guildId, userId);
     if (!dbMember.has_value())
         return std::nullopt;
-    return dbMember->roles.hasValue() ? dbMember->roles.get() : QList<Snowflake>{};
+    return dbMember->roles.hasValue() ? dbMember->roles.get() : std::vector<Snowflake>{};
 }
 
-QList<Discord::Member> UserManager::getKnownMembers(Snowflake guildId)
+std::vector<Discord::Member> UserManager::getKnownMembers(Snowflake guildId)
 {
     return memberRepo.getMembersWithUsers(guildId);
 }
@@ -65,30 +63,30 @@ void UserManager::setRelationshipManager(RelationshipManager *manager)
     relationshipManager = manager;
 }
 
-QString UserManager::getNickname(Snowflake userId, Snowflake guildId)
+std::string UserManager::getNickname(Snowflake userId, Snowflake guildId)
 {
     if (!guildId.isValid())
-        return relationshipManager ? relationshipManager->getNickname(userId) : QString();
+        return relationshipManager ? relationshipManager->getNickname(userId) : std::string();
 
     auto member = getMember(guildId, userId);
-    return member ? member->nick.valueOr() : QString();
+    return member ? member->nick.valueOr() : std::string();
 }
 
-QString UserManager::getDisplayName(Snowflake userId, Snowflake guildId)
+std::string UserManager::getDisplayName(Snowflake userId, Snowflake guildId)
 {
     auto user = getUser(userId);
     if (!user)
-        return tr("Unknown User");
+        return "Unknown User";
 
-    QString nick = getNickname(userId, guildId);
-    return nick.isEmpty() ? user->getDisplayName() : nick;
+    std::string nick = getNickname(userId, guildId);
+    return nick.empty() ? user->getDisplayName() : nick;
 }
 
-QString UserManager::getAuthorDisplayName(const Discord::User &author, Snowflake guildId)
+std::string UserManager::getAuthorDisplayName(const Discord::User &author, Snowflake guildId)
 {
     Snowflake authorId = author.id.get();
-    QString nick = getNickname(authorId, guildId);
-    if (!nick.isEmpty())
+    std::string nick = getNickname(authorId, guildId);
+    if (!nick.empty())
         return nick;
 
     if (!author.bot.valueOr(false)) {
@@ -98,10 +96,10 @@ QString UserManager::getAuthorDisplayName(const Discord::User &author, Snowflake
     return author.getDisplayName();
 }
 
-QUrl UserManager::getAvatarUrl(const Discord::User &user, Snowflake guildId, int size)
+std::string UserManager::getAvatarUrl(const Discord::User &user, Snowflake guildId, int size)
 {
     Snowflake userId = user.id.get();
-    QString memberHash;
+    std::string memberHash;
     if (guildId.isValid()) {
         if (auto member = getMember(guildId, userId))
             memberHash = member->avatar.valueOr();
@@ -111,14 +109,14 @@ QUrl UserManager::getAvatarUrl(const Discord::User &user, Snowflake guildId, int
 
 void UserManager::saveUser(const Discord::User &user)
 {
-    userCache.insert(user.id, new Discord::User(user));
+    userCache.put(user.id.get(), user);
     userRepo.saveUser(user);
 }
 
-void UserManager::saveUsers(const QList<Discord::User> &users)
+void UserManager::saveUsers(const std::vector<Discord::User> &users)
 {
     for (const auto &user : users)
-        userCache.insert(user.id, new Discord::User(user));
+        userCache.put(user.id.get(), user);
 
     userRepo.saveUsers(users);
 }
@@ -127,64 +125,61 @@ void UserManager::saveMember(Snowflake guildId, Snowflake userId, const Discord:
 {
     MemberKey key{ guildId, userId };
 
-    memberCache.insert(key, new Discord::Member(member));
+    memberCache.put(key, member);
     memberRepo.saveMember(guildId, userId, member);
 }
 
-void UserManager::saveMembers(Snowflake guildId, const QList<Discord::Member> &members)
+void UserManager::saveMembers(Snowflake guildId, const std::vector<Discord::Member> &members)
 {
     for (const auto &member : members) {
         if (!member.user.hasValue() || !member.user->id.hasValue())
             continue;
         Snowflake userId = member.user->id.get();
-        memberCache.insert(MemberKey{ guildId, userId }, new Discord::Member(member));
+        memberCache.put(MemberKey{ guildId, userId }, member);
     }
     memberRepo.saveMembers(guildId, members);
 }
 
 void UserManager::removeGuildMembers(Snowflake guildId)
 {
-    const QList<MemberKey> keys = memberCache.keys();
-    for (const MemberKey &key : keys)
-        if (key.guildId == guildId)
-            memberCache.remove(key);
+    memberCache.eraseIf([guildId](const MemberKey &key) { return key.guildId == guildId; });
 }
 
 void UserManager::saveMemberWithUser(Snowflake guildId, const Discord::Member &member)
 {
     if (member.user.hasValue()) {
         saveUser(member.user.get());
-        saveMember(guildId, member.user->id, member);
+        saveMember(guildId, member.user->id.get(), member);
     }
 }
 
 void UserManager::removeMember(Snowflake guildId, Snowflake userId)
 {
-    memberCache.remove(MemberKey{ guildId, userId });
+    memberCache.erase(MemberKey{ guildId, userId });
     memberRepo.deleteMember(guildId, userId);
 }
 
-void UserManager::loadNotesFromReady(const QHash<Snowflake, QString> &readyNotes)
+void UserManager::loadNotesFromReady(const std::unordered_map<Snowflake, std::string> &readyNotes)
 {
     notes = readyNotes;
-    qCInfo(LogCore) << "Loaded" << notes.size() << "user notes from READY";
+    log(LogLevel::Info, LogCore) << "Loaded" << notes.size() << "user notes from READY";
 }
 
-void UserManager::setCachedNote(Snowflake userId, const QString &note)
+void UserManager::setCachedNote(Snowflake userId, const std::string &note)
 {
-    if (note.isEmpty())
-        notes.remove(userId);
+    if (note.empty())
+        notes.erase(userId);
     else
-        notes.insert(userId, note);
-    emit noteChanged(userId);
+        notes.insert_or_assign(userId, note);
+    noteChanged.publish(userId);
 }
 
-std::optional<QString> UserManager::getCachedNote(Snowflake userId) const
+std::optional<std::string> UserManager::getCachedNote(Snowflake userId) const
 {
-    auto it = notes.constFind(userId);
-    if (it == notes.constEnd())
+    auto it = notes.find(userId);
+    if (it == notes.end())
         return std::nullopt;
-    return it.value();
+    return it->second;
 }
 
 } // namespace Core

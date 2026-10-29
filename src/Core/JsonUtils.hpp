@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <concepts>
+#include <charconv>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -41,6 +42,12 @@ template <class T> concept Map = requires(T t) {
     t.end();
     t.insert(std::declval<typename T::value_type>());
 };
+inline Snowflake snowflake(std::string_view text)
+{
+    std::uint64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    return error == std::errc{} && end == text.data() + text.size() ? Snowflake(value) : Snowflake::Invalid;
+}
 }
 
 template <class T>
@@ -151,7 +158,7 @@ protected:
     template <class T> static T fromJsonValue(const nlohmann::json &value)
     {
         if constexpr (Deserializable<T>) return T::fromJson(value);
-        else if constexpr (std::same_as<T, Snowflake>) return Snowflake(value.get<uint64_t>());
+        else if constexpr (std::same_as<T, Snowflake>) return value.is_string() ? detail::snowflake(value.get_ref<const std::string &>()) : Snowflake(value.get<uint64_t>());
         else if constexpr (std::same_as<T, std::string>) return value.get<std::string>();
         else if constexpr (std::same_as<T, Platform::DateTime>) return Platform::DateTime::parse(value.get<std::string>());
         else if constexpr (std::same_as<T, Platform::Color>) return Platform::Color::parse(value.is_number() ? std::to_string(value.get<uint32_t>()) : value.get<std::string>());
@@ -172,7 +179,7 @@ protected:
             T map;
             for (auto it = value.begin(); it != value.end(); ++it) {
                 if constexpr (std::same_as<typename T::key_type, Snowflake>)
-                    map.emplace(Snowflake(it.key()), fromJsonValue<typename T::mapped_type>(it.value()));
+                    map.emplace(detail::snowflake(it.key()), fromJsonValue<typename T::mapped_type>(it.value()));
                 else
                     map.emplace(it.key(), fromJsonValue<typename T::mapped_type>(it.value()));
             }

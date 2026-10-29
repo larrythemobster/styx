@@ -5,9 +5,9 @@ namespace Styx {
 namespace Core {
 namespace Audio {
 
-std::unique_ptr<IAudioBackend> IAudioBackend::create(QObject *parent)
+std::unique_ptr<IAudioBackend> IAudioBackend::create()
 {
-    return std::make_unique<MiniaudioAudioBackend>(parent);
+    return std::make_unique<MiniaudioAudioBackend>();
 }
 
 } // namespace Audio

@@ -84,6 +84,8 @@ private:
     std::unordered_map<Snowflake, ProxyConfig> accountProxies;
     std::unordered_map<ImageRequestKey, uint64_t, ImageRequestKeyHash> activeHttpRequests;
     std::filesystem::path tempDir;
+    mutable std::unordered_map<ImageRequestKey, std::filesystem::path, ImageRequestKeyHash> cachePaths;
+    mutable size_t nextCachePath = 0;
     std::unordered_set<ImageRequestKey, ImageRequestKeyHash> requests, downloadOnlyRequests, undecodable, refusedByServer;
     std::unordered_map<ImageRequestKey, std::chrono::steady_clock::time_point, ImageRequestKeyHash> failedAt;
     std::unordered_map<ImageRequestKey, PinGroup, ImageRequestKeyHash> pendingPins;

@@ -1,534 +1,381 @@
 #include "ImageManager.hpp"
 
-#include "Platform/Http.hpp"
-#include <QCryptographicHash>
-#include <QFile>
-#include <QPointer>
-#include <QTimer>
-#include <QUrlQuery>
-#include <QApplication>
-
-#include <memory>
-
-#include "Logging.hpp"
-
 #include "Discord/CdnUrls.hpp"
+#include "Logging.hpp"
+#include "Platform/Dispatcher.hpp"
+#include "Platform/Http.hpp"
 
-namespace Styx {
-namespace Core {
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <utility>
 
+namespace Styx::Core {
 namespace {
 constexpr int MaxMemoizedPlaceholderPx = 64;
-constexpr auto PartialDownloadSuffix = ".part";
 constexpr int MaxFetchAttempts = 2;
 constexpr int RetryBrokenTransferAfterMs = 500;
-constexpr int HttpRequestTimeout = 408;
-constexpr int HttpTooManyRequests = 429;
+constexpr size_t MaxCachedImages = 300;
 
-bool isErrorAnswer(int httpStatus)
+bool isErrorAnswer(int status) { return status >= 400; }
+bool refusesForGood(int status)
 {
-    return httpStatus >= 400;
+    return isErrorAnswer(status) && status < 500 && status != 408 && status != 429;
 }
 
-bool refusesForGood(int httpStatus)
+std::string pathString(const std::filesystem::path &path)
 {
-    return isErrorAnswer(httpStatus) && httpStatus < 500 && httpStatus != HttpRequestTimeout && httpStatus != HttpTooManyRequests;
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
 }
 
-QByteArray fileContents(const QString &path)
+Platform::ImageBuffer scaleImage(Platform::ImageBuffer image, Platform::Size bounds)
 {
-    QFile file(path);
-    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    if (bounds.empty()) return image;
+    const auto size = Platform::fitWithin({image.width, image.height}, bounds);
+    if (size.empty() || (size.width == image.width && size.height == image.height)) return image;
+    return Platform::Image::scale(image, size.width, size.height);
+}
 }
 
-} // namespace
-
-ImageManager::ImageManager(QObject *parent) : QObject(parent)
+ImageManager::ImageManager()
 {
-    cache.setMaxCost(300);
-    uptime.start();
-
-    if (!tempDir.isValid())
-        qCWarning(LogCore) << "Failed to create temp directory for image cache";
+    std::error_code error;
+    auto base = std::filesystem::temp_directory_path(error);
+    if (!error) {
+        tempDir = base / ("styx-images-" + Platform::randomUuid());
+        std::filesystem::create_directories(tempDir, error);
+    }
+    if (error) {
+        tempDir.clear();
+        Core::log(Core::LogLevel::Warning, LogCore) << "Failed to create temp directory for image cache";
+    }
 }
 
 ImageManager::~ImageManager()
 {
-    for (uint64_t reqId : activeHttpRequests) {
-        Platform::HttpClient::instance().cancel(reqId);
+    for (const auto &[key, id] : activeHttpRequests)
+        Platform::HttpClient::instance().cancel(id);
+    if (!tempDir.empty()) {
+        std::error_code error;
+        std::filesystem::remove_all(tempDir, error);
     }
 }
 
-bool ImageManager::isCached(const QUrl &url, const QSize &size)
-{
-    ImageRequestKey k{ url, size };
-    if (pinnedImages.contains(k) || cache.contains(k))
-        return true;
-
-    return !undecodable.contains(k) && !rawDownloadPath(url, size).isEmpty();
-}
-
-bool ImageManager::isUnavailable(const ImageRequestKey &key) const
-{
-    return willNeverLoad(key) || recentlyFailed(key);
-}
-
-bool ImageManager::willNeverLoad(const ImageRequestKey &key) const
-{
-    return undecodable.contains(key) || refusedByServer.contains(key);
-}
-
-QString ImageManager::rawDownloadPath(const QUrl &url, const QSize &size) const
-{
-    const QString path = getCachePath(url, size);
-    return QFile::exists(path) ? path : QString();
-}
-
-void ImageManager::setAccountProxy(Snowflake accountId, const ProxyConfig &proxy)
-{
-    accountProxies.insert(accountId, proxy);
-}
-
-bool ImageManager::hasRouteFor(Snowflake accountId) const
-{
-    return accountProxies.contains(accountId);
-}
-
+void ImageManager::setAccountProxy(Snowflake accountId, const ProxyConfig &proxy) { accountProxies[accountId] = proxy; }
+bool ImageManager::hasRouteFor(Snowflake accountId) const { return accountProxies.contains(accountId); }
 ProxyConfig ImageManager::accountProxy(Snowflake accountId) const
 {
-    return accountProxies.value(accountId);
+    auto it = accountProxies.find(accountId);
+    return it == accountProxies.end() ? ProxyConfig{} : it->second;
 }
+std::string ImageManager::curlProxyFor(Snowflake accountId) const { return accountProxy(accountId).toCurlProxyString(); }
 
-QString ImageManager::curlProxyFor(Snowflake accountId) const
+bool ImageManager::isCached(const std::string &url, const Platform::Size &size)
 {
-    auto it = accountProxies.constFind(accountId);
-    if (it == accountProxies.constEnd())
-        return {};
-    return it.value().toCurlProxyString();
+    ImageRequestKey key{url, size};
+    return pinnedImages.contains(key) || cache.contains(key) || (!undecodable.contains(key) && !rawDownloadPath(url, size).empty());
 }
-
-void ImageManager::assign(QLabel *label, const QUrl &url, const QSize &size, Snowflake accountId)
+bool ImageManager::isUnavailable(const ImageRequestKey &key) const { return willNeverLoad(key) || recentlyFailed(key); }
+bool ImageManager::willNeverLoad(const ImageRequestKey &key) const { return undecodable.contains(key) || refusedByServer.contains(key); }
+std::string ImageManager::rawDownloadPath(const std::string &url, const Platform::Size &size) const
 {
-    if (!label)
-        return;
-
-    // just in case
-    disconnect(this, &ImageManager::imageFetched, label, nullptr);
-
-    QPixmap pixmap = get(url, size, accountId);
-    label->setPixmap(pixmap);
-
-    if (!isCached(url, size)) {
-        connect(this, &ImageManager::imageFetched, label,
-                [=](const QUrl &u, const QSize &s, const QPixmap &p) {
-                    if (u == url && s == size)
-                        label->setPixmap(p);
-                });
-    }
+    auto path = getCachePath(url, size);
+    std::error_code error;
+    return !path.empty() && std::filesystem::exists(path, error) ? pathString(path) : std::string{};
 }
 
-QPixmap ImageManager::get(const QUrl &url, const QSize &size, Snowflake accountId, PinGroup pin)
+Platform::ImageBuffer ImageManager::get(const std::string &url, const Platform::Size &size, Snowflake accountId, PinGroup pin)
 {
     return getImpl(url, size, pin, true, accountId);
 }
-
-QPixmap ImageManager::getIfCached(const QUrl &url, const QSize &size)
+Platform::ImageBuffer ImageManager::getIfCached(const std::string &url, const Platform::Size &size)
 {
-    return getImpl(url, size, PinGroup::None, false, Snowflake());
+    return getImpl(url, size, PinGroup::None, false, Snowflake{});
 }
 
-QPixmap ImageManager::getImpl(const QUrl &url, const QSize &size, PinGroup pin, bool fetchIfNeeded, Snowflake accountId)
+void ImageManager::cacheImage(const ImageRequestKey &key, Platform::ImageBuffer image)
 {
-    ImageRequestKey k{ url, size };
-
-    auto pinnedIt = pinnedImages.constFind(k);
-    if (pinnedIt != pinnedImages.constEnd()) {
-        if (pin != PinGroup::None && !pinGroupKeys.contains(pin, k))
-            pinGroupKeys.insert(pin, k);
-        return pinnedIt.value();
+    if (auto it = lruPositions.find(key); it != lruPositions.end()) {
+        lru.erase(it->second);
+        lruPositions.erase(it);
     }
+    cache.insert_or_assign(key, std::move(image));
+    lru.push_front(key);
+    lruPositions[key] = lru.begin();
+    while (cache.size() > MaxCachedImages) {
+        auto oldest = lru.back();
+        lru.pop_back();
+        lruPositions.erase(oldest);
+        cache.erase(oldest);
+    }
+}
 
-    if (const QPixmap *cached = cache.object(k)) {
-        QPixmap pixmap = *cached;
+void ImageManager::pinImage(const ImageRequestKey &key, PinGroup group)
+{
+    if (group == PinGroup::None) return;
+    pinGroupKeys[group].insert(key);
+    auto it = cache.find(key);
+    if (it != cache.end()) {
+        pinnedImages.insert_or_assign(key, std::move(it->second));
+        cache.erase(it);
+        auto pos = lruPositions.find(key);
+        if (pos != lruPositions.end()) {
+            lru.erase(pos->second);
+            lruPositions.erase(pos);
+        }
+    }
+}
+
+Platform::ImageBuffer ImageManager::getImpl(const std::string &url, const Platform::Size &size, PinGroup pin, bool fetchIfNeeded, Snowflake accountId)
+{
+    ImageRequestKey key{url, size};
+    if (auto it = pinnedImages.find(key); it != pinnedImages.end()) {
+        if (pin != PinGroup::None) pinGroupKeys[pin].insert(key);
+        return it->second;
+    }
+    if (auto it = cache.find(key); it != cache.end()) {
         if (pin != PinGroup::None) {
-            pinnedImages.insert(k, pixmap);
-            pinGroupKeys.insert(pin, k);
-            cache.remove(k);
+            pinImage(key, pin);
+            return pinnedImages.at(key);
         }
-        return pixmap;
+        lru.splice(lru.begin(), lru, lruPositions.at(key));
+        return it->second;
     }
-
-    if (willNeverLoad(k))
-        return placeholder(size);
-
-    if (requests.contains(k) || recentlyFailed(k)) {
-        if (fetchIfNeeded)
-            request(url, size, pin, accountId);
+    if (willNeverLoad(key)) return placeholder(size);
+    if (requests.contains(key) || recentlyFailed(key)) {
+        if (fetchIfNeeded) request(url, size, pin, accountId);
         return placeholder(size);
     }
-
-    // check disk cache
-    QString path = getCachePath(url, size);
-    if (QFile::exists(path)) {
-        QPixmap pixmap = QPixmap::fromImage(QImage(path));
-        if (!pixmap.isNull()) {
-            qreal dpr = qApp->devicePixelRatio();
-
-            if (scalesToDevicePixels(url)) {
-                QSize physicalSize(qRound(size.width() * dpr), qRound(size.height() * dpr));
-                if (pixmap.size() != physicalSize)
-                    pixmap = pixmap.scaled(physicalSize, Qt::KeepAspectRatio,
-                                           Qt::SmoothTransformation);
-                pixmap.setDevicePixelRatio(dpr);
-            } else {
-                if (pixmap.size() != size)
-                    pixmap = pixmap.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            }
-
-            if (pin != PinGroup::None) {
-                pinnedImages.insert(k, pixmap);
-                pinGroupKeys.insert(pin, k);
-            } else {
-                cache.insert(k, new QPixmap(pixmap));
-            }
-            return pixmap;
+    const auto path = getCachePath(url, size);
+    std::error_code error;
+    if (!path.empty() && std::filesystem::exists(path, error)) {
+        auto image = Platform::Image::decodeFile(path);
+        if (image) {
+            const float dpr = scalesToDevicePixels(url) ? Platform::primaryDevicePixelRatio() : 1.0f;
+            *image = scaleImage(std::move(*image), {int(std::lround(size.width * dpr)), int(std::lround(size.height * dpr))});
+            cacheImage(key, std::move(*image));
+            if (pin != PinGroup::None) { pinImage(key, pin); return pinnedImages.at(key); }
+            return cache.at(key);
         }
-
-        qCWarning(LogCore) << "Cached download is not a decodable image:" << url;
-        undecodable.insert(k);
+        Core::log(Core::LogLevel::Warning, LogCore) << "Cached download is not a decodable image: " << url;
+        undecodable.insert(key);
         return placeholder(size);
     }
-
-    if (fetchIfNeeded) {
-        request(url, size, pin, accountId);
-    }
-
+    if (fetchIfNeeded) request(url, size, pin, accountId);
     return placeholder(size);
 }
 
-QPixmap ImageManager::placeholder(const QSize &size)
+Platform::ImageBuffer ImageManager::placeholder(const Platform::Size &size)
 {
-    const bool memoize = size.width() <= MaxMemoizedPlaceholderPx && size.height() <= MaxMemoizedPlaceholderPx;
+    ImageRequestKey key{"", size};
+    const bool memoize = size.width <= MaxMemoizedPlaceholderPx && size.height <= MaxMemoizedPlaceholderPx;
     if (memoize) {
-        auto it = placeholders.constFind(size);
-        if (it != placeholders.constEnd())
-            return it.value();
+        auto it = placeholders.find(key);
+        if (it != placeholders.end()) return it->second;
     }
-
-    qreal dpr = qApp->devicePixelRatio();
-    QSize physicalSize(qRound(size.width() * dpr), qRound(size.height() * dpr));
-    QPixmap pixmap(physicalSize);
-    pixmap.setDevicePixelRatio(dpr);
-    pixmap.fill(QColor(60, 60, 60));
-    if (memoize)
-        placeholders.insert(size, pixmap);
-    return pixmap;
+    const float dpr = Platform::primaryDevicePixelRatio();
+    Platform::ImageBuffer image;
+    image.width = std::max(0, int(std::lround(size.width * dpr)));
+    image.height = std::max(0, int(std::lround(size.height * dpr)));
+    image.pixels.resize(size_t(image.width) * image.height * 4);
+    for (size_t i = 0; i < image.pixels.size(); i += 4) {
+        image.pixels[i] = image.pixels[i + 1] = image.pixels[i + 2] = 60;
+        image.pixels[i + 3] = 255;
+    }
+    if (memoize) placeholders.emplace(key, image);
+    return image;
 }
 
 bool ImageManager::recentlyFailed(const ImageRequestKey &key) const
 {
-    const auto it = failedAtMs.constFind(key);
-    return it != failedAtMs.constEnd() && uptime.elapsed() - it.value() < FailedFetchRetryMs;
+    auto it = failedAt.find(key);
+    return it != failedAt.end() && std::chrono::steady_clock::now() - it->second < std::chrono::milliseconds(FailedFetchRetryMs);
 }
-
-void ImageManager::downloadToCache(const QUrl &url, const QSize &size, Snowflake accountId)
+void ImageManager::downloadToCache(const std::string &url, const Platform::Size &size, Snowflake accountId)
 {
     request(url, size, PinGroup::None, accountId, FetchPurpose::DownloadOnly);
 }
-
-void ImageManager::request(const QUrl &url, const QSize &size, PinGroup pin, Snowflake accountId, FetchPurpose purpose)
+void ImageManager::request(const std::string &url, const Platform::Size &size, PinGroup pin, Snowflake accountId, FetchPurpose purpose)
 {
     if (!hasRouteFor(accountId)) {
-        qCWarning(LogCore) << "Refusing to fetch image with no proxied route for the account:" << url;
+        Core::log(Core::LogLevel::Warning, LogCore) << "Refusing to fetch image with no proxied route for the account: " << url;
         return;
     }
-
-    ImageRequestKey k{ url, size };
-    if (isUnavailable(k))
-        return;
-
-    if (requests.contains(k)) {
-        if (purpose == FetchPurpose::Pixmap)
-            downloadOnlyRequests.remove(k);
-
-        // promote
-        if (pin != PinGroup::None) {
-            auto it = pendingPins.find(k);
-            if (it == pendingPins.end() || it.value() == PinGroup::None)
-                pendingPins.insert(k, pin);
-        }
+    ImageRequestKey key{url, size};
+    if (isUnavailable(key)) return;
+    if (requests.contains(key)) {
+        if (purpose == FetchPurpose::Image) downloadOnlyRequests.erase(key);
+        if (pin != PinGroup::None && !pendingPins.contains(key)) pendingPins[key] = pin;
         return;
     }
-
-    requests.insert(k);
-    if (purpose == FetchPurpose::DownloadOnly)
-        downloadOnlyRequests.insert(k);
-    if (pin != PinGroup::None)
-        pendingPins.insert(k, pin);
-
-    const QString proxyStr = curlProxyFor(accountId);
-    fetchFromNetwork(url, size, proxyStr, purpose);
+    requests.insert(key);
+    if (purpose == FetchPurpose::DownloadOnly) downloadOnlyRequests.insert(key);
+    if (pin != PinGroup::None) pendingPins[key] = pin;
+    fetchFromNetwork(url, size, curlProxyFor(accountId), purpose);
 }
-
 void ImageManager::giveUpOn(const ImageRequestKey &key, int httpStatus)
 {
-    pendingPins.remove(key);
-    requests.remove(key);
-    downloadOnlyRequests.remove(key);
-    if (refusesForGood(httpStatus))
-        refusedByServer.insert(key);
-    else
-        failedAtMs.insert(key, uptime.elapsed());
-    emit imageUnavailable(key.url, key.size);
+    pendingPins.erase(key);
+    requests.erase(key);
+    downloadOnlyRequests.erase(key);
+    if (refusesForGood(httpStatus)) refusedByServer.insert(key);
+    else failedAt[key] = std::chrono::steady_clock::now();
+    imageUnavailable.publish(key.url, key.size);
 }
 
-void ImageManager::fetchFromNetwork(const QUrl &url, const QSize &size, const QString &proxyStr, FetchPurpose purpose, int attempt)
+void ImageManager::fetchFromNetwork(const std::string &url, const Platform::Size &size, const std::string &proxy, FetchPurpose purpose, int attempt)
 {
-    qreal dpr = qApp->devicePixelRatio();
+    const float dpr = Platform::primaryDevicePixelRatio();
     const bool deviceScaled = scalesToDevicePixels(url);
-
-    // the format override in the optimized query would break an animated sticker
-    const bool optimizable = purpose == FetchPurpose::Pixmap && isDiscordProxyUrl(url) && !Discord::Cdn::isStickerUrl(url);
-    QUrl fetchUrl = optimizable ? buildOptimizedUrl(url, size, dpr) : url;
-
+    const bool optimize = purpose == FetchPurpose::Image && isDiscordProxyUrl(url) && !Discord::Cdn::isStickerUrl(url);
     Platform::HttpRequest req;
-    req.url = fetchUrl.toString().toStdString();
-    if (!proxyStr.isEmpty()) {
-        req.proxy = proxyStr.toStdString();
-    }
-    req.timeout = std::chrono::milliseconds(30000);
-
-    const QString path = getCachePath(url, size);
-    ImageRequestKey k{ url, size };
-
-    uint64_t reqId = Platform::HttpClient::instance().request(std::move(req), [this, url, size, deviceScaled, dpr, path, purpose, attempt, proxyStr](const Platform::HttpResponse &resp) {
-        ImageRequestKey k{ url, size };
-        activeHttpRequests.remove(k);
-
+    req.url = optimize ? buildOptimizedUrl(url, size, dpr) : url;
+    req.proxy = proxy;
+    const auto path = getCachePath(url, size);
+    const ImageRequestKey key{url, size};
+    auto guard = Platform::Guard<ImageManager>(this);
+    auto id = Platform::HttpClient::instance().request(std::move(req), [guard, key, proxy, purpose, attempt, path, dpr, deviceScaled](const Platform::HttpResponse &resp) {
+        if (!guard) return;
+        auto &self = *guard;
+        self.activeHttpRequests.erase(key);
         bool fetched = resp.ok();
+        auto part = path;
+        part += ".part";
         if (fetched && purpose == FetchPurpose::DownloadOnly) {
-            const QString partPath = path + PartialDownloadSuffix;
-            QFile partFile(partPath);
-            if (partFile.open(QIODevice::WriteOnly)) {
-                partFile.write(resp.body.data(), static_cast<qint64>(resp.body.size()));
-                partFile.close();
-                QFile::remove(path);
-                fetched = partFile.rename(path);
-            } else {
-                fetched = false;
+            fetched = !path.empty() && Platform::Resources::writeFile(part, resp.body);
+            if (fetched) {
+                std::error_code error;
+                std::filesystem::remove(path, error);
+                error.clear();
+                std::filesystem::rename(part, path, error);
+                fetched = !error;
             }
         }
-
         if (!fetched) {
-            const int httpStatus = resp.statusCode;
-            qCWarning(LogCore) << "Failed to fetch image:" << url << QString::fromStdString(resp.error);
-            if (purpose == FetchPurpose::DownloadOnly) {
-                QFile::remove(path + PartialDownloadSuffix);
+            Core::log(Core::LogLevel::Warning, LogCore) << "Failed to fetch image: " << key.url << " " << resp.error;
+            if (purpose == FetchPurpose::DownloadOnly) { std::error_code error; std::filesystem::remove(part, error); }
+            if (resp.ok() || isErrorAnswer(resp.statusCode) || attempt >= MaxFetchAttempts) {
+                self.giveUpOn(key, resp.statusCode);
+            } else {
+                Platform::Dispatcher::main().setTimer(RetryBrokenTransferAfterMs, false, [guard, key, proxy, purpose, attempt] {
+                    if (guard) guard->fetchFromNetwork(key.url, key.size, proxy, purpose, attempt + 1);
+                });
             }
-
-            const bool transferBroke = !resp.ok() && !isErrorAnswer(httpStatus);
-            if (!transferBroke || attempt >= MaxFetchAttempts) {
-                giveUpOn(k, httpStatus);
-                return;
-            }
-
-            QTimer::singleShot(RetryBrokenTransferAfterMs, this, [this, k, proxyStr, purpose, attempt]() {
-                fetchFromNetwork(k.url, k.size, proxyStr, purpose, attempt + 1);
-            });
             return;
         }
-
-        PinGroup pin = pendingPins.value(k, PinGroup::None);
-        pendingPins.remove(k);
-        failedAtMs.remove(k);
-
-        const bool pixmapWanted = !downloadOnlyRequests.remove(k);
-
-        QByteArray data;
+        PinGroup pin = PinGroup::None;
+        if (auto it = self.pendingPins.find(key); it != self.pendingPins.end()) { pin = it->second; self.pendingPins.erase(it); }
+        self.failedAt.erase(key);
+        const bool imageWanted = self.downloadOnlyRequests.erase(key) == 0;
+        std::string downloaded;
+        const std::string *data = &resp.body;
         if (purpose == FetchPurpose::DownloadOnly) {
-            if (pixmapWanted)
-                data = fileContents(path);
-        } else {
-            data = QByteArray(resp.body.data(), static_cast<int>(resp.body.size()));
-            QFile file(path);
-            if (file.open(QIODevice::WriteOnly)) {
-                file.write(data);
-                file.close();
+            if (imageWanted) {
+                try { downloaded = Platform::Resources::readFile(path); }
+                catch (const std::exception &) {}
             }
+            data = &downloaded;
+        } else if (!path.empty()) {
+            Platform::Resources::writeFile(path, resp.body);
         }
-
-        QPixmap pixmap;
-        if (pixmapWanted && pixmap.loadFromData(data)) {
-            if (deviceScaled) {
-                QSize physicalSize(qRound(size.width() * dpr), qRound(size.height() * dpr));
-                if (pixmap.size() != physicalSize)
-                    pixmap = pixmap.scaled(physicalSize, Qt::KeepAspectRatio,
-                                           Qt::SmoothTransformation);
-                pixmap.setDevicePixelRatio(dpr);
-            } else {
-                pixmap = pixmap.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            }
-
-            if (pin != PinGroup::None) {
-                pinnedImages.insert(k, pixmap);
-                pinGroupKeys.insert(pin, k);
-            } else {
-                cache.insert(k, new QPixmap(pixmap));
-            }
-
-            requests.remove(k);
-            emit imageFetched(url, size, pixmap);
-        } else {
-            requests.remove(k);
-            if (pixmapWanted) {
-                qCWarning(LogCore) << "Fetched image is not decodable:" << url;
-                undecodable.insert(k);
-                emit imageUnavailable(url, size);
-            }
+        auto image = imageWanted ? Platform::Image::decode(reinterpret_cast<const uint8_t *>(data->data()), data->size()) : std::nullopt;
+        self.requests.erase(key);
+        if (image) {
+            const float scale = deviceScaled ? dpr : 1.0f;
+            *image = scaleImage(std::move(*image), {int(std::lround(key.size.width * scale)), int(std::lround(key.size.height * scale))});
+            self.cacheImage(key, std::move(*image));
+            if (pin != PinGroup::None) self.pinImage(key, pin);
+            const auto &stored = pin != PinGroup::None ? self.pinnedImages.at(key) : self.cache.at(key);
+            self.imageFetched.publish(key.url, key.size, stored);
+        } else if (imageWanted) {
+            self.undecodable.insert(key);
+            self.imageUnavailable.publish(key.url, key.size);
         }
-        emit rawDownloadReady(url, size);
+        if (guard) guard->rawDownloadReady.publish(key.url, key.size);
     });
-
-    activeHttpRequests.insert(k, reqId);
+    activeHttpRequests[key] = id;
 }
 
 void ImageManager::unpinGroup(PinGroup group)
 {
-    if (group == PinGroup::None)
-        return;
-
-    QList<ImageRequestKey> keys = pinGroupKeys.values(group);
-    pinGroupKeys.remove(group);
-
-    for (const auto &k : keys) {
-        // the same url could be pinned by multiple groups
+    if (group == PinGroup::None) return;
+    auto groupIt = pinGroupKeys.find(group);
+    if (groupIt == pinGroupKeys.end()) return;
+    auto keys = std::move(groupIt->second);
+    pinGroupKeys.erase(groupIt);
+    for (const auto &key : keys) {
         bool stillPinned = false;
-        for (auto it = pinGroupKeys.cbegin(); it != pinGroupKeys.cend(); ++it) {
-            if (it.value() == k) {
-                stillPinned = true;
-                break;
-            }
+        for (const auto &[other, members] : pinGroupKeys) {
+            if (members.contains(key)) { stillPinned = true; break; }
         }
-
         if (!stillPinned) {
-            auto it = pinnedImages.find(k);
+            auto it = pinnedImages.find(key);
             if (it != pinnedImages.end()) {
-                // send it back to the lru
-                cache.insert(k, new QPixmap(it.value()));
+                auto image = std::move(it->second);
                 pinnedImages.erase(it);
+                cacheImage(key, std::move(image));
             }
         }
     }
 }
 
-QSize ImageManager::calculateDisplaySize(const QSize &original)
+Platform::Size ImageManager::calculateDisplaySize(const Platform::Size &original)
 {
-    if (!original.isValid() || original.isEmpty())
-        return QSize(MaxDisplayWidth, MaxDisplayHeight);
-
-    if (original.width() <= MaxDisplayWidth && original.height() <= MaxDisplayHeight)
-        return original;
-
-    return original.scaled(MaxDisplayWidth, MaxDisplayHeight, Qt::KeepAspectRatio);
+    if (original.empty()) return {MaxDisplayWidth, MaxDisplayHeight};
+    if (original.width <= MaxDisplayWidth && original.height <= MaxDisplayHeight) return original;
+    return Platform::fitWithin(original, {MaxDisplayWidth, MaxDisplayHeight});
 }
-
-QString ImageManager::getCachePath(const QUrl &url, const QSize &size) const
+std::filesystem::path ImageManager::getCachePath(const std::string &url, const Platform::Size &size) const
 {
-    QString compound = url.toString() + QStringLiteral(":%1x%2").arg(size.width()).arg(size.height());
-    QByteArray hash =
-            QCryptographicHash::hash(compound.toUtf8(), QCryptographicHash::Sha1);
-    QString filename = QString::fromLatin1(hash.toHex());
-    return tempDir.filePath(filename);
+    if (tempDir.empty()) return {};
+    ImageRequestKey key{url, size};
+    auto it = cachePaths.find(key);
+    if (it != cachePaths.end()) return it->second;
+    return cachePaths.emplace(std::move(key), tempDir / std::to_string(nextCachePath++)).first->second;
 }
-
-bool ImageManager::scalesToDevicePixels(const QUrl &url)
+bool ImageManager::scalesToDevicePixels(const std::string &url) { return isDiscordProxyUrl(url) || Discord::Cdn::isEmojiUrl(url); }
+bool ImageManager::isDiscordProxyUrl(const std::string &url)
 {
-    return isDiscordProxyUrl(url) || Discord::Cdn::isEmojiUrl(url);
+    const auto host = Platform::urlHost(url);
+    return host == "media.discordapp.net" || host.starts_with("images-ext-");
 }
-
-bool ImageManager::isDiscordProxyUrl(const QUrl &url)
+std::string ImageManager::buildOptimizedUrl(const std::string &url, const Platform::Size &size, float dpr)
 {
-    QString host = url.host();
-    return host == u"media.discordapp.net" || host.startsWith(u"images-ext-");
+    auto fragment = url.find('#');
+    std::string result = url.substr(0, fragment);
+    result += result.find('?') == std::string::npos ? '?' : '&';
+    result += "format=webp&quality=lossless";
+    if (!size.empty()) result += "&width=" + std::to_string(int(std::lround(size.width * dpr))) + "&height=" + std::to_string(int(std::lround(size.height * dpr)));
+    if (fragment != std::string::npos) result += url.substr(fragment);
+    return result;
 }
-
-QUrl ImageManager::buildOptimizedUrl(const QUrl &proxyUrl, const QSize &displaySize, qreal dpr)
+std::string ImageManager::fullQualityUrl(const std::string &url)
 {
-    QUrl optimized = proxyUrl;
-    QUrlQuery query(optimized);
-
-    query.addQueryItem("format", "webp");
-    query.addQueryItem("quality", "lossless");
-
-    if (displaySize.isValid() && !displaySize.isEmpty()) {
-        int physicalWidth = qRound(displaySize.width() * dpr);
-        int physicalHeight = qRound(displaySize.height() * dpr);
-        query.addQueryItem("width", QString::number(physicalWidth));
-        query.addQueryItem("height", QString::number(physicalHeight));
-    }
-
-    optimized.setQuery(query);
-    return optimized;
+    return isDiscordProxyUrl(url) ? buildOptimizedUrl(url, {}, 1.0f) : url;
 }
-
-QUrl ImageManager::fullQualityUrl(const QUrl &proxyUrl)
+void ImageManager::fetch(const std::string &url, Snowflake accountId, Platform::Trackable *context, std::function<void(const std::string &)> done)
 {
-    return isDiscordProxyUrl(proxyUrl) ? buildOptimizedUrl(proxyUrl, QSize(), 1.0) : proxyUrl;
-}
-
-void ImageManager::fetch(const QUrl &url, Snowflake accountId, QObject *context, std::function<void(const QByteArray &)> done)
-{
-    if (!hasRouteFor(accountId)) {
-        qCWarning(LogCore) << "Refusing to fetch with no proxied route for the account:" << url;
-        done({});
-        return;
-    }
-
+    if (!hasRouteFor(accountId)) { done({}); return; }
     Platform::HttpRequest req;
-    req.url = url.toString().toStdString();
-    QString proxyStr = curlProxyFor(accountId);
-    if (!proxyStr.isEmpty()) {
-        req.proxy = proxyStr.toStdString();
-    }
-    req.timeout = std::chrono::milliseconds(30000);
-
-    QPointer<QObject> ctx(context);
-    Platform::HttpClient::instance().request(std::move(req), [ctx, done = std::move(done)](const Platform::HttpResponse &resp) {
-        if (!ctx && !done)
-            return;
-        done(resp.ok() ? QByteArray(resp.body.data(), static_cast<int>(resp.body.size())) : QByteArray());
+    req.url = url;
+    req.proxy = curlProxyFor(accountId);
+    const bool hasContext = context != nullptr;
+    auto lifetime = context ? context->lifetime() : std::weak_ptr<void>{};
+    Platform::HttpClient::instance().request(std::move(req), [hasContext, lifetime, done = std::move(done)](const Platform::HttpResponse &resp) {
+        if (hasContext && lifetime.expired()) return;
+        if (done) done(resp.ok() ? resp.body : std::string{});
     });
 }
-
-void ImageManager::download(const QUrl &url, Snowflake accountId, const QString &path)
+void ImageManager::download(const std::string &url, Snowflake accountId, const std::string &path)
 {
-    if (!hasRouteFor(accountId)) {
-        qCWarning(LogCore) << "Refusing to download with no proxied route for the account:" << url;
-        return;
-    }
-
+    if (!hasRouteFor(accountId)) return;
     Platform::HttpRequest req;
-    req.url = url.toString().toStdString();
-    QString proxyStr = curlProxyFor(accountId);
-    if (!proxyStr.isEmpty()) {
-        req.proxy = proxyStr.toStdString();
-    }
-    req.timeout = std::chrono::milliseconds(30000);
-
-    Platform::HttpClient::instance().request(std::move(req), [path, url](const Platform::HttpResponse &resp) {
-        if (!resp.ok()) {
-            qCWarning(LogCore) << "Download failed:" << url << QString::fromStdString(resp.error);
-            return;
-        }
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            qCWarning(LogCore) << "Failed to open" << path << "for writing:" << file.errorString();
-            return;
-        }
-        file.write(resp.body.data(), static_cast<qint64>(resp.body.size()));
-        file.close();
+    req.url = url;
+    req.proxy = curlProxyFor(accountId);
+    Platform::HttpClient::instance().request(std::move(req), [url, path](const Platform::HttpResponse &resp) {
+        if (!resp.ok() || !Platform::Resources::writeFile(std::filesystem::u8path(path), resp.body))
+            Core::log(Core::LogLevel::Warning, LogCore) << "Download failed: " << url << " " << resp.error;
     });
 }
-
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

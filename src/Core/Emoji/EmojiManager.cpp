@@ -703,7 +703,7 @@ void EmojiManager::onUserSettingsProtoUpdated(const Discord::UserSettingsProtoUp
     if (!decoded || decoded->empty())
         return;
 
-    Proto::ProtoReader reader(std::span<const uint8_t>(*decoded));
+    Proto::ProtoReader reader{*decoded};
     const Proto::FrecencyUserSettings settings = Proto::FrecencyUserSettings::fromProto(reader);
 
     const bool partial = event.partial.hasValue() && event.partial.get();

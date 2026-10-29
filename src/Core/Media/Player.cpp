@@ -3,8 +3,12 @@
 #include "Core/Logging.hpp"
 #include "Discord/CdnUrls.hpp"
 
-#include <QFileInfo>
-#include <QSettings>
+#include "Platform/Settings.hpp"
+#include "Platform/Timer.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 
 #include <initializer_list>
 #include <utility>
@@ -15,8 +19,6 @@
 #include "Core/Media/MediaDecoder.hpp"
 #include "Core/Media/PacketQueue.hpp"
 
-#include <QElapsedTimer>
-#include <QTimer>
 
 #include <atomic>
 #include <chrono>
@@ -37,23 +39,30 @@ namespace {
 constexpr auto VolumeKey = "media/volume";
 constexpr auto MutedKey = "media/muted";
 
-bool listContains(const QString &value, std::initializer_list<const char *> list)
+bool listContains(const std::string &value, std::initializer_list<const char *> list)
 {
-    for (const char *item : list) {
-        if (value == QLatin1String(item))
-            return true;
-    }
-    return false;
+    return std::any_of(list.begin(), list.end(), [&](const char *item) { return value == item; });
 }
 
-QString normalizedContentType(const QString &contentType)
+std::string normalizedContentType(const std::string &contentType)
 {
-    return contentType.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
+    std::string value = contentType.substr(0, contentType.find(';'));
+    const auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), notSpace));
+    value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(), value.end());
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
 }
 
-bool hasSuffixIn(const QUrl &url, std::initializer_list<const char *> suffixes)
+bool hasSuffixIn(const std::string &url, std::initializer_list<const char *> suffixes)
 {
-    return listContains(QFileInfo(url.path()).suffix().toLower(), suffixes);
+    const std::string path = Platform::urlPath(url);
+    const auto dot = path.find_last_of('.');
+    if (dot == std::string::npos || path.find('/', dot) != std::string::npos)
+        return false;
+    std::string suffix = path.substr(dot + 1);
+    std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return listContains(suffix, suffixes);
 }
 
 } // namespace
@@ -67,7 +76,7 @@ bool isSupported()
 #endif
 }
 
-bool canPlay(const QString &contentType, const QUrl &url)
+bool canPlay(const std::string &contentType, const std::string &url)
 {
     if (!isSupported() || !Discord::Cdn::isDiscordMediaUrl(url))
         return false;
@@ -78,12 +87,12 @@ bool canPlay(const QString &contentType, const QUrl &url)
     return hasSuffixIn(url, { "mp4", "webm", "mov", "m4v" });
 }
 
-bool canPlayAudio(const QString &contentType, const QUrl &url)
+bool canPlayAudio(const std::string &contentType, const std::string &url)
 {
     if (!isSupported() || !Discord::Cdn::isDiscordMediaUrl(url))
         return false;
 
-    if (normalizedContentType(contentType).startsWith(QLatin1String("audio/")))
+    if (normalizedContentType(contentType).starts_with("audio/"))
         return true;
 
     return hasSuffixIn(url, { "mp3", "ogg", "oga", "opus", "wav", "flac", "m4a", "aac" });
@@ -91,23 +100,22 @@ bool canPlayAudio(const QString &contentType, const QUrl &url)
 
 float storedVolume()
 {
-    const QVariant stored = QSettings().value(VolumeKey);
-    return stored.isValid() ? qBound(0.0f, stored.toFloat(), 1.0f) : 1.0f;
+    return std::clamp(static_cast<float>(Platform::Settings::instance().getDouble(VolumeKey, 1.0)), 0.0f, 1.0f);
 }
 
 void setStoredVolume(float volume)
 {
-    QSettings().setValue(VolumeKey, qBound(0.0f, volume, 1.0f));
+    Platform::Settings::instance().setDouble(VolumeKey, std::clamp(volume, 0.0f, 1.0f));
 }
 
 bool storedMuted()
 {
-    return QSettings().value(MutedKey, false).toBool();
+    return Platform::Settings::instance().getBool(MutedKey, false);
 }
 
 void setStoredMuted(bool muted)
 {
-    QSettings().setValue(MutedKey, muted);
+    Platform::Settings::instance().setBool(MutedKey, muted);
 }
 
 struct OwnerThreadState
@@ -115,13 +123,13 @@ struct OwnerThreadState
     Player *owner = nullptr;
 
     Player::State state = Player::State::Idle;
-    qint64 durationMs = 0;
-    qint64 positionMs = 0;
-    QSize native;
+    int64_t durationMs = 0;
+    int64_t positionMs = 0;
+    Platform::Size native;
     bool audioAvailable = false;
     bool videoAvailable = false;
     bool seekable = false;
-    QImage frame;
+    Platform::ImageBuffer frame;
 
     float userVolume = storedVolume();
     bool userMuted = storedMuted();
@@ -131,7 +139,7 @@ struct OwnerThreadState
         if (state == next)
             return;
         state = next;
-        emit owner->stateChanged(next);
+        owner->stateChanged.publish(next);
     }
 };
 
@@ -142,24 +150,19 @@ namespace {
 constexpr int MaxQueuedFrames = 4;
 constexpr int AudioChunkFrames = 2048;
 
-constexpr qint64 MinPresentDelayMs = 1;
-constexpr qint64 MaxPresentDelayMs = 40;
+constexpr int64_t MinPresentDelayMs = 1;
+constexpr int64_t MaxPresentDelayMs = 40;
 
 constexpr int AudioOnlyPresentDelayMs = 100;
 
-QSize effectiveTarget(const QSize &native, const QSize &want)
+Platform::Size effectiveTarget(const Platform::Size &native, const Platform::Size &want)
 {
-    if (native.isEmpty())
+    if (native.empty() || want.empty())
         return native;
-    if (want.isEmpty())
+    const auto scaled = Platform::fitWithin(native, want);
+    if (scaled.width >= native.width || scaled.height >= native.height || scaled.empty())
         return native;
-
-    QSize scaled = native;
-    scaled.scale(want, Qt::KeepAspectRatio);
-    if (scaled.width() >= native.width() || scaled.height() >= native.height())
-        return native;
-
-    return scaled.isEmpty() ? native : scaled;
+    return scaled;
 }
 
 } // namespace
@@ -169,26 +172,22 @@ struct Player::Impl : OwnerThreadState
     explicit Impl(Player *player)
     {
         owner = player;
-        presentTimer.setSingleShot(true);
-        presentTimer.setTimerType(Qt::PreciseTimer);
-        QObject::connect(&presentTimer, &QTimer::timeout, player, [this] { present(); });
     }
 
     struct DecodedFrame
     {
-        QImage image;
-        qint64 ptsMs = 0;
+        Platform::ImageBuffer image;
+        int64_t ptsMs = 0;
     };
 
     // owner thread
-    QTimer presentTimer;
-    QElapsedTimer wallTimer;
-    qint64 wallBaseMs = 0;
+    Platform::Timer presentTimer;
+    std::chrono::steady_clock::time_point wallTimer = std::chrono::steady_clock::now();
+    int64_t wallBaseMs = 0;
     bool seeking = false;
     bool audioClockStalled = false;
     bool autoPlayOnReady = false;
-    // deleting this cancels whatever the worker threads have already posted
-    QObject *sessionContext = nullptr;
+    std::shared_ptr<void> sessionContext;
     std::thread worker;
     std::thread demuxer;
 
@@ -204,7 +203,7 @@ struct Player::Impl : OwnerThreadState
     std::condition_variable cv;
     PacketQueue packets;
     std::deque<DecodedFrame> frames;
-    QSize targetSize;
+    Platform::Size targetSize;
 
     // shared, lock free
     std::atomic<bool> running{ false };
@@ -212,48 +211,48 @@ struct Player::Impl : OwnerThreadState
     std::atomic<bool> reachedEnd{ false };
     std::atomic<bool> audioSinkBroken{ false };
     std::atomic<bool> primed{ false };
-    std::atomic<qint64> pendingSeek{ -1 };
-    std::atomic<qint64> seekTargetMs{ -1 };
+    std::atomic<int64_t> pendingSeek{ -1 };
+    std::atomic<int64_t> seekTargetMs{ -1 };
     std::atomic<bool> awaitingSeekFrame{ false };
-    std::atomic<qint64> demuxedMs{ 0 };
+    std::atomic<int64_t> demuxedMs{ 0 };
     std::atomic<bool> demuxEof{ false };
     std::atomic<bool> flushPending{ false };
 
     AudioOutput audio;
 
-    void open(const QUrl &url, const ProxyConfig &proxy);
+    void open(const std::string &url, const ProxyConfig &proxy);
     void close();
     void play();
     void pause();
-    void seek(qint64 positionMs);
+    void seek(int64_t positionMs);
     void setVolume(float volume);
     void setMuted(bool muted);
-    void setTargetSize(const QSize &size);
-    [[nodiscard]] qint64 bufferedPosition() const { return demuxedMs.load(std::memory_order_relaxed); }
+    void setTargetSize(const Platform::Size &size);
+    [[nodiscard]] int64_t bufferedPosition() const { return demuxedMs.load(std::memory_order_relaxed); }
 
-    void startWorker(const QString &input);
+    void startWorker(const std::string &input);
     void stopWorker();
     void present();
-    void scheduleNextPresent(qint64 clock);
-    [[nodiscard]] qint64 clockMs() const;
-    void fail(const QString &message);
+    void scheduleNextPresent(int64_t clock);
+    [[nodiscard]] int64_t clockMs() const;
+    void fail(const std::string &message);
 
     // decode/demux threads
     static int interruptThunk(void *opaque);
-    void decodeLoop(QString input);
+    void decodeLoop(std::string input);
     void demuxLoop();
-    bool openSource(const QString &input);
-    void demuxSeek(qint64 targetMs);
-    void applyFlush(qint64 targetMs);
+    bool openSource(const std::string &input);
+    void demuxSeek(int64_t targetMs);
+    void applyFlush(int64_t targetMs);
     void drainAtEnd(AVFrame *avFrame);
     void decodePacket(AVPacket *pkt, AVFrame *avFrame);
     bool pushVideoFrame(AVFrame *avFrame);
     void pushAudioFrame(AVFrame *avFrame);
     void drainPendingAudio();
 
-    [[nodiscard]] bool beforeSeekTarget(qint64 ptsMs) const
+    [[nodiscard]] bool beforeSeekTarget(int64_t ptsMs) const
     {
-        const qint64 target = seekTargetMs.load(std::memory_order_relaxed);
+        const int64_t target = seekTargetMs.load(std::memory_order_relaxed);
         return target >= 0 && ptsMs < target;
     }
 
@@ -274,10 +273,10 @@ struct Player::Impl : OwnerThreadState
 
     [[nodiscard]] bool audioPendingEmpty() const { return audioPendingOffset >= audioPending.size(); }
 
-    [[nodiscard]] qint64 audioDrainWaitMs() const
+    [[nodiscard]] int64_t audioDrainWaitMs() const
     {
-        const qint64 buffered = qint64(audio.bufferedFrames()) * 1000 / AudioOutput::SampleRate;
-        return qBound(qint64(5), buffered / 2, qint64(250));
+        const int64_t buffered = int64_t(audio.bufferedFrames()) * 1000 / AudioOutput::SampleRate;
+        return std::clamp(buffered / 2, int64_t(5), int64_t(250));
     }
 
     [[nodiscard]] bool audioSinkDrained() const
@@ -310,7 +309,10 @@ struct Player::Impl : OwnerThreadState
     template <typename F>
     void postToOwner(F &&fn)
     {
-        QMetaObject::invokeMethod(sessionContext, std::forward<F>(fn));
+        std::weak_ptr<void> lifetime = sessionContext;
+        Platform::postToMain([lifetime, fn = std::forward<F>(fn)]() mutable {
+            if (lifetime.lock()) fn();
+        });
     }
 };
 
@@ -320,20 +322,20 @@ struct Player::Impl : OwnerThreadState
 {
     explicit Impl(Player *player) { owner = player; }
 
-    void open(const QUrl &, const ProxyConfig &) {}
+    void open(const std::string &, const ProxyConfig &) {}
     void close() {}
     void play() {}
     void pause() {}
-    void seek(qint64) {}
-    void setVolume(float value) { userVolume = qBound(0.0f, value, 1.0f); }
+    void seek(int64_t) {}
+    void setVolume(float value) { userVolume = std::clamp(value, 0.0f, 1.0f); }
     void setMuted(bool value) { userMuted = value; }
-    void setTargetSize(const QSize &) {}
-    [[nodiscard]] qint64 bufferedPosition() const { return 0; }
+    void setTargetSize(const Platform::Size &) {}
+    [[nodiscard]] int64_t bufferedPosition() const { return 0; }
 };
 
 #endif // STYX_HAVE_FFMPEG
 
-Player::Player(QObject *parent) : QObject(parent), d(std::make_unique<Impl>(this)) {}
+Player::Player() : d(std::make_unique<Impl>(this)) {}
 
 Player::~Player()
 {
@@ -341,7 +343,7 @@ Player::~Player()
     d->close();
 }
 
-void Player::open(const QUrl &url, const ProxyConfig &proxy)
+void Player::open(const std::string &url, const ProxyConfig &proxy)
 {
     d->open(url, proxy);
 }
@@ -369,7 +371,7 @@ void Player::togglePlayPause()
         play();
 }
 
-void Player::seek(qint64 positionMs)
+void Player::seek(int64_t positionMs)
 {
     d->seek(positionMs);
 }
@@ -394,32 +396,32 @@ bool Player::isMuted() const
     return d->userMuted;
 }
 
-void Player::setTargetSize(const QSize &size)
+void Player::setTargetSize(const Platform::Size &size)
 {
     d->setTargetSize(size);
 }
 
-QImage Player::currentFrame() const
+Platform::ImageBuffer Player::currentFrame() const
 {
     return d->frame;
 }
 
-qint64 Player::position() const
+int64_t Player::position() const
 {
     return d->positionMs;
 }
 
-qint64 Player::duration() const
+int64_t Player::duration() const
 {
     return d->durationMs;
 }
 
-qint64 Player::bufferedPosition() const
+int64_t Player::bufferedPosition() const
 {
     return d->bufferedPosition();
 }
 
-QSize Player::nativeSize() const
+Platform::Size Player::nativeSize() const
 {
     return d->native;
 }
@@ -441,22 +443,21 @@ bool Player::isSeekable() const
 
 #ifdef STYX_HAVE_FFMPEG
 
-void Player::Impl::open(const QUrl &url, const ProxyConfig &proxyConfig)
+void Player::Impl::open(const std::string &url, const ProxyConfig &proxyConfig)
 {
     close();
 
     setState(Player::State::Opening);
 
     proxy = proxyConfig;
-    startWorker(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    startWorker(url.starts_with("file:") ? Platform::localFilePath(url).string() : url);
 }
 
 void Player::Impl::close()
 {
     stopWorker();
 
-    delete sessionContext;
-    sessionContext = nullptr;
+    sessionContext.reset();
 
     presentTimer.stop();
     audio.stop();
@@ -469,7 +470,7 @@ void Player::Impl::close()
     positionMs = 0;
     durationMs = 0;
     demuxedMs.store(0, std::memory_order_relaxed);
-    frame = QImage();
+    frame = Platform::ImageBuffer();
     audioAvailable = false;
     videoAvailable = false;
     seeking = false;
@@ -500,7 +501,7 @@ void Player::Impl::play()
     }
 
     wallBaseMs = positionMs;
-    wallTimer.restart();
+    wallTimer = std::chrono::steady_clock::now();
 
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -530,7 +531,7 @@ void Player::Impl::pause()
     setState(Player::State::Paused);
 }
 
-void Player::Impl::seek(qint64 requestedMs)
+void Player::Impl::seek(int64_t requestedMs)
 {
     if (!running.load(std::memory_order_relaxed))
         return;
@@ -538,13 +539,13 @@ void Player::Impl::seek(qint64 requestedMs)
     if (state == Player::State::Opening)
         return;
 
-    const qint64 upper = durationMs > 0 ? durationMs : requestedMs;
-    const qint64 target = qBound(qint64(0), requestedMs, upper);
+    const int64_t upper = durationMs > 0 ? durationMs : requestedMs;
+    const int64_t target = std::clamp(requestedMs, int64_t(0), upper);
 
     seeking = true;
     positionMs = target;
     wallBaseMs = target;
-    wallTimer.restart();
+    wallTimer = std::chrono::steady_clock::now();
     audioClockStalled = false;
     reachedEnd.store(false, std::memory_order_relaxed);
 
@@ -554,7 +555,7 @@ void Player::Impl::seek(qint64 requestedMs)
     }
     cv.notify_all();
 
-    emit owner->positionChanged(target);
+    owner->positionChanged.publish(target);
 
     if (state == Player::State::Ended)
         setState(Player::State::Paused);
@@ -562,8 +563,8 @@ void Player::Impl::seek(qint64 requestedMs)
 
 void Player::Impl::setVolume(float value)
 {
-    const float bounded = qBound(0.0f, value, 1.0f);
-    if (qFuzzyCompare(bounded + 1.0f, userVolume + 1.0f))
+    const float bounded = std::clamp(value, 0.0f, 1.0f);
+    if (std::abs(bounded - userVolume) <= 0.00001f)
         return;
 
     userVolume = bounded;
@@ -581,28 +582,27 @@ void Player::Impl::setMuted(bool value)
     audio.setMuted(value);
 }
 
-void Player::Impl::setTargetSize(const QSize &size)
+void Player::Impl::setTargetSize(const Platform::Size &size)
 {
     std::lock_guard<std::mutex> lock(mutex);
     targetSize = size;
 }
 
-void Player::Impl::fail(const QString &message)
+void Player::Impl::fail(const std::string &message)
 {
-    qCWarning(LogVideo) << "playback failed:" << message;
+    Core::log(Core::LogLevel::Warning, LogVideo) << "playback failed:" << message;
     setState(Player::State::Error);
-    emit owner->errorOccurred(message);
+    owner->errorOccurred.publish(message);
 }
 
-void Player::Impl::startWorker(const QString &input)
+void Player::Impl::startWorker(const std::string &input)
 {
     stopWorker();
 
     audio.setVolume(userVolume);
     audio.setMuted(userMuted);
 
-    delete sessionContext;
-    sessionContext = new QObject(owner);
+    sessionContext = std::make_shared<int>(0);
     running.store(true, std::memory_order_relaxed);
     paused.store(true, std::memory_order_relaxed);
     reachedEnd.store(false, std::memory_order_relaxed);
@@ -637,11 +637,11 @@ int Player::Impl::interruptThunk(void *opaque)
     return impl && impl->demuxInterrupted() ? 1 : 0;
 }
 
-bool Player::Impl::openSource(const QString &input)
+bool Player::Impl::openSource(const std::string &input)
 {
     decoder.setInterrupt(&Player::Impl::interruptThunk, this);
 
-    QString openError;
+    std::string openError;
     if (!decoder.open(input, proxy, &openError)) {
         postToOwner([this, openError] { fail(openError); });
         return false;
@@ -657,7 +657,7 @@ bool Player::Impl::openSource(const QString &input)
         seekable = info.seekable;
         audioAvailable = info.hasAudio;
         videoAvailable = info.hasVideo;
-        emit owner->durationChanged(info.durationMs);
+        owner->durationChanged.publish(info.durationMs);
     });
 
     return true;
@@ -678,11 +678,11 @@ void Player::Impl::decodePacket(AVPacket *pkt, AVFrame *avFrame)
     }
 }
 
-void Player::Impl::demuxSeek(qint64 targetMs)
+void Player::Impl::demuxSeek(int64_t targetMs)
 {
-    QString seekError;
+    std::string seekError;
     if (!decoder.seek(targetMs, &seekError))
-        qCWarning(LogVideo) << "seek failed:" << seekError;
+        Core::log(Core::LogLevel::Warning, LogVideo) << "seek failed:" << seekError;
 
     demuxEof.store(false, std::memory_order_relaxed);
     demuxedMs.store(targetMs, std::memory_order_relaxed);
@@ -696,7 +696,7 @@ void Player::Impl::demuxSeek(qint64 targetMs)
     cv.notify_all();
 }
 
-void Player::Impl::applyFlush(qint64 targetMs)
+void Player::Impl::applyFlush(int64_t targetMs)
 {
     decoder.flush();
 
@@ -721,7 +721,7 @@ void Player::Impl::applyFlush(qint64 targetMs)
         seeking = false;
         audioClockStalled = false;
         wallBaseMs = targetMs;
-        wallTimer.restart();
+        wallTimer = std::chrono::steady_clock::now();
         if (state == Player::State::Playing)
             scheduleNextPresent(targetMs);
     });
@@ -732,7 +732,7 @@ void Player::Impl::demuxLoop()
     AVPacket *packet = av_packet_alloc();
 
     while (running.load(std::memory_order_relaxed)) {
-        const qint64 seekTarget = pendingSeek.exchange(-1, std::memory_order_relaxed);
+        const int64_t seekTarget = pendingSeek.exchange(-1, std::memory_order_relaxed);
         if (seekTarget >= 0) {
             demuxSeek(seekTarget);
             continue;
@@ -761,9 +761,9 @@ void Player::Impl::demuxLoop()
             }
 
             if (ret != AVERROR_EOF)
-                qCWarning(LogVideo) << "read failed:" << MediaDecoder::errorString(ret);
+                Core::log(Core::LogLevel::Warning, LogVideo) << "read failed:" << MediaDecoder::errorString(ret);
 
-            const qint64 total = decoder.containerDurationMs();
+            const int64_t total = decoder.containerDurationMs();
             if (total > 0)
                 demuxedMs.store(total, std::memory_order_relaxed);
             demuxEof.store(true, std::memory_order_relaxed);
@@ -776,7 +776,7 @@ void Player::Impl::demuxLoop()
             continue;
         }
 
-        const qint64 tsMs = decoder.packetTimestampMs(packet);
+        const int64_t tsMs = decoder.packetTimestampMs(packet);
         if (tsMs >= 0 && tsMs > demuxedMs.load(std::memory_order_relaxed))
             demuxedMs.store(tsMs, std::memory_order_relaxed);
 
@@ -799,19 +799,19 @@ void Player::Impl::demuxLoop()
 
 bool Player::Impl::pushVideoFrame(AVFrame *avFrame)
 {
-    const qint64 ptsMs = decoder.frameTimestampMs(avFrame, MediaDecoder::Stream::Video);
+    const int64_t ptsMs = decoder.frameTimestampMs(avFrame, MediaDecoder::Stream::Video);
 
     if (beforeSeekTarget(ptsMs))
         return false;
 
-    QSize want;
+    Platform::Size want;
     {
         std::lock_guard<std::mutex> lock(mutex);
         want = targetSize;
     }
 
-    const QImage image = decoder.scaleToImage(avFrame, effectiveTarget(QSize(avFrame->width, avFrame->height), want));
-    if (image.isNull())
+    const Platform::ImageBuffer image = decoder.scaleToImage(avFrame, effectiveTarget(Platform::Size{avFrame->width, avFrame->height}, want));
+    if (image.empty())
         return false;
 
     bool wasEmpty;
@@ -832,24 +832,24 @@ bool Player::Impl::pushVideoFrame(AVFrame *avFrame)
             seeking = false;
             audioClockStalled = false;
             wallBaseMs = ptsMs;
-            wallTimer.restart();
+            wallTimer = std::chrono::steady_clock::now();
         }
 
         if (state == Player::State::Playing) {
-            if (!presentTimer.isActive())
+            if (!presentTimer.active())
                 present();
             return;
         }
 
-        if (!frame.isNull() && !resolvedSeek)
+        if (!frame.empty() && !resolvedSeek)
             return;
 
         frame = image;
         if (resolvedSeek && positionMs != ptsMs) {
             positionMs = ptsMs;
-            emit owner->positionChanged(positionMs);
+            owner->positionChanged.publish(positionMs);
         }
-        emit owner->frameReady();
+        owner->frameReady.publish();
     });
 
     return true;
@@ -890,7 +890,7 @@ void Player::Impl::drainPendingAudio()
         clearPendingAudio();
 }
 
-void Player::Impl::decodeLoop(QString input)
+void Player::Impl::decodeLoop(std::string input)
 {
     if (!openSource(input)) {
         decoder.close();
@@ -915,7 +915,7 @@ void Player::Impl::decodeLoop(QString input)
         drainPendingAudio();
 
         AVPacket *next = nullptr;
-        qint64 flushTarget = -1;
+        int64_t flushTarget = -1;
         bool starved = false;
         bool queueWasFull = false;
         {
@@ -1033,7 +1033,7 @@ void Player::Impl::drainAtEnd(AVFrame *avFrame)
                 audioClockStalled = true;
                 if (state == Player::State::Playing) {
                     wallBaseMs = audio.clockMs();
-                    wallTimer.restart();
+                    wallTimer = std::chrono::steady_clock::now();
                 }
             });
         }
@@ -1060,7 +1060,7 @@ void Player::Impl::drainAtEnd(AVFrame *avFrame)
         seeking = false;
         if (state == Player::State::Playing) {
             positionMs = durationMs;
-            emit owner->positionChanged(positionMs);
+            owner->positionChanged.publish(positionMs);
             setState(Player::State::Ended);
             presentTimer.stop();
             audio.stop();
@@ -1068,33 +1068,33 @@ void Player::Impl::drainAtEnd(AVFrame *avFrame)
     });
 }
 
-qint64 Player::Impl::clockMs() const
+int64_t Player::Impl::clockMs() const
 {
     if (audioAvailable && !audioClockStalled)
         return audio.clockMs();
     if (paused.load(std::memory_order_relaxed))
         return wallBaseMs;
-    return wallBaseMs + wallTimer.elapsed();
+    return wallBaseMs + std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - wallTimer).count();
 }
 
-void Player::Impl::scheduleNextPresent(qint64 clock)
+void Player::Impl::scheduleNextPresent(int64_t clock)
 {
     if (state != Player::State::Playing)
         return;
 
     if (!videoAvailable) {
-        presentTimer.start(AudioOnlyPresentDelayMs);
+        presentTimer.start(std::chrono::milliseconds(AudioOnlyPresentDelayMs), false, [this] { present(); });
         return;
     }
 
-    qint64 delay = 16;
+    int64_t delay = 16;
     {
         std::lock_guard<std::mutex> lock(mutex);
         if (!frames.empty())
             delay = frames.front().ptsMs - clock;
     }
 
-    presentTimer.start(static_cast<int>(qBound(MinPresentDelayMs, delay, MaxPresentDelayMs)));
+    presentTimer.start(std::chrono::milliseconds(std::clamp(delay, MinPresentDelayMs, MaxPresentDelayMs)), false, [this] { present(); });
 }
 
 void Player::Impl::present()
@@ -1104,9 +1104,9 @@ void Player::Impl::present()
         return;
     }
 
-    const qint64 clock = clockMs();
+    const int64_t clock = clockMs();
 
-    QImage latest;
+    Platform::ImageBuffer latest;
     bool popped = false;
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -1121,14 +1121,14 @@ void Player::Impl::present()
 
     if (popped) {
         frame = latest;
-        emit owner->frameReady();
+        owner->frameReady.publish();
     }
 
-    const qint64 bounded = durationMs > 0 ? qBound(qint64(0), clock, durationMs)
-                                          : qMax(qint64(0), clock);
+    const int64_t bounded = durationMs > 0 ? std::clamp(clock, int64_t(0), durationMs)
+                                          : std::max(int64_t(0), clock);
     if (positionMs != bounded) {
         positionMs = bounded;
-        emit owner->positionChanged(positionMs);
+        owner->positionChanged.publish(positionMs);
     }
 
     scheduleNextPresent(clock);

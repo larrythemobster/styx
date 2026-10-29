@@ -5,50 +5,48 @@
 namespace Styx {
 namespace Core {
 
-RelationshipManager::RelationshipManager(QObject *parent) : QObject(parent) {}
-
-void RelationshipManager::loadFromReady(const QList<Discord::Relationship> &relationships)
+void RelationshipManager::loadFromReady(const std::vector<Discord::Relationship> &relationships)
 {
     store.clear();
     store.reserve(relationships.size());
     for (const auto &r : relationships) {
         if (r.id.hasValue())
-            store.insert(r.id.get(), r);
+            store.insert_or_assign(r.id.get(), r);
     }
-    qCInfo(LogCore) << "Loaded" << store.size() << "relationships from READY";
-    emit relationshipsReset();
+    log(LogLevel::Info, LogCore) << "Loaded" << store.size() << "relationships from READY";
+    relationshipsReset.publish();
 }
 
 std::optional<Discord::Relationship> RelationshipManager::getRelationship(Snowflake userId) const
 {
-    auto it = store.constFind(userId);
-    if (it == store.constEnd())
+    auto it = store.find(userId);
+    if (it == store.end())
         return std::nullopt;
-    return it.value();
+    return it->second;
 }
 
-QString RelationshipManager::getNickname(Snowflake userId) const
+std::string RelationshipManager::getNickname(Snowflake userId) const
 {
-    auto it = store.constFind(userId);
-    return it != store.constEnd() ? it.value().nickname.valueOr() : QString();
+    auto it = store.find(userId);
+    return it != store.end() ? it->second.nickname.valueOr() : std::string();
 }
 
 bool RelationshipManager::isFriend(Snowflake userId) const
 {
-    auto it = store.constFind(userId);
-    if (it == store.constEnd())
+    auto it = store.find(userId);
+    if (it == store.end())
         return false;
-    if (!it.value().type.hasValue())
+    if (!it->second.type.hasValue())
         return false;
-    return it.value().type.get() == Discord::RelationshipType::FRIEND;
+    return it->second.type.get() == Discord::RelationshipType::FRIEND;
 }
 
 bool RelationshipManager::isBlockedOrIgnored(Snowflake userId) const
 {
-    auto it = store.constFind(userId);
-    if (it == store.constEnd())
+    auto it = store.find(userId);
+    if (it == store.end())
         return false;
-    const auto &rel = it.value();
+    const auto &rel = it->second;
     return (rel.type.hasValue() && rel.type.get() == Discord::RelationshipType::BLOCKED) ||
            (rel.userIgnored.hasValue() && rel.userIgnored.get());
 }
@@ -58,8 +56,8 @@ void RelationshipManager::onRelationshipAdded(const Discord::Relationship &rel)
     if (!rel.id.hasValue())
         return;
     Snowflake id = rel.id.get();
-    store.insert(id, rel);
-    emit relationshipChanged(id);
+    store.insert_or_assign(id, rel);
+    relationshipChanged.publish(id);
 }
 
 void RelationshipManager::onRelationshipUpdated(const Discord::RelationshipPartial &rel)
@@ -70,17 +68,17 @@ void RelationshipManager::onRelationshipUpdated(const Discord::RelationshipParti
     auto it = store.find(id);
     if (it == store.end())
         return;
-    it.value().type = rel.type.get();
+    it->second.type = rel.type.get();
     if (rel.nickname.hasValue())
-        it.value().nickname = rel.nickname.get();
+        it->second.nickname = rel.nickname.get();
     else if (rel.nickname.isNull())
-        it.value().nickname = nullptr;
+        it->second.nickname = nullptr;
     if (rel.since.hasValue())
-        it.value().since = rel.since.get();
+        it->second.since = rel.since.get();
     if (rel.strangerRequest.hasValue())
-        it.value().strangerRequest = rel.strangerRequest.get();
-    it.value().userIgnored = rel.userIgnored.get();
-    emit relationshipChanged(id);
+        it->second.strangerRequest = rel.strangerRequest.get();
+    it->second.userIgnored = rel.userIgnored.get();
+    relationshipChanged.publish(id);
 }
 
 void RelationshipManager::onRelationshipRemoved(const Discord::RelationshipPartial &rel)
@@ -88,8 +86,8 @@ void RelationshipManager::onRelationshipRemoved(const Discord::RelationshipParti
     if (!rel.id.hasValue())
         return;
     Snowflake id = rel.id.get();
-    if (store.remove(id))
-        emit relationshipChanged(id);
+    if (store.erase(id))
+        relationshipChanged.publish(id);
 }
 
 } // namespace Core

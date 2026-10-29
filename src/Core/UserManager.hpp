@@ -1,10 +1,12 @@
 #pragma once
 
-#include <QCache>
-#include <QObject>
-#include <QHash>
-#include <QUrl>
+#include <list>
+#include <map>
 #include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include "Platform/Signal.hpp"
 
 #include "Snowflake.hpp"
 #include "Discord/Entities.hpp"
@@ -21,58 +23,93 @@ struct MemberKey
     Snowflake guildId;
     Snowflake userId;
 
-    bool operator==(const MemberKey &other) const
-    {
-        return guildId == other.guildId && userId == other.userId;
-    }
+    auto operator<=>(const MemberKey &) const = default;
 };
 
-inline size_t qHash(const MemberKey &key, size_t seed = 0)
+template <typename Key, typename Value>
+class ManagerCache
 {
-    return qHashMulti(seed, key.guildId, key.userId);
-}
-
-class UserManager : public QObject
-{
-    Q_OBJECT
 public:
-    explicit UserManager(Snowflake accountId, QObject *parent = nullptr);
-    ~UserManager() override;
+    const Value *get(const Key &key)
+    {
+        auto it = index.find(key);
+        if (it == index.end())
+            return nullptr;
+        entries.splice(entries.begin(), entries, it->second);
+        return &it->second->second;
+    }
+    void put(const Key &key, const Value &value)
+    {
+        erase(key);
+        entries.emplace_front(key, value);
+        index.emplace(key, entries.begin());
+        if (entries.size() > 100) {
+            index.erase(entries.back().first);
+            entries.pop_back();
+        }
+    }
+    void erase(const Key &key)
+    {
+        auto it = index.find(key);
+        if (it == index.end())
+            return;
+        entries.erase(it->second);
+        index.erase(it);
+    }
+    template <typename Predicate> void eraseIf(Predicate predicate)
+    {
+        for (auto it = entries.begin(); it != entries.end();) {
+            if (predicate(it->first)) {
+                index.erase(it->first);
+                it = entries.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+private:
+    std::list<std::pair<Key, Value>> entries;
+    std::map<Key, typename std::list<std::pair<Key, Value>>::iterator> index;
+};
+
+class UserManager
+{
+public:
+    explicit UserManager(Snowflake accountId);
 
     [[nodiscard]] std::optional<Discord::User> getUser(Snowflake userId);
     [[nodiscard]] std::optional<Discord::Member> getMember(Snowflake guildId, Snowflake userId);
 
-    [[nodiscard]] std::optional<QList<Snowflake>> getMemberRoles(Snowflake guildId, Snowflake userId);
-    [[nodiscard]] QList<Discord::Member> getKnownMembers(Snowflake guildId);
+    [[nodiscard]] std::optional<std::vector<Snowflake>> getMemberRoles(Snowflake guildId, Snowflake userId);
+    [[nodiscard]] std::vector<Discord::Member> getKnownMembers(Snowflake guildId);
 
     void setRelationshipManager(RelationshipManager *manager);
 
-    [[nodiscard]] QString getNickname(Snowflake userId, Snowflake guildId);
-    [[nodiscard]] QString getDisplayName(Snowflake userId, Snowflake guildId = Snowflake::Invalid);
-    [[nodiscard]] QString getAuthorDisplayName(const Discord::User &author, Snowflake guildId);
-    [[nodiscard]] QUrl getAvatarUrl(const Discord::User &user, Snowflake guildId, int size);
+    [[nodiscard]] std::string getNickname(Snowflake userId, Snowflake guildId);
+    [[nodiscard]] std::string getDisplayName(Snowflake userId, Snowflake guildId = Snowflake::Invalid);
+    [[nodiscard]] std::string getAuthorDisplayName(const Discord::User &author, Snowflake guildId);
+    [[nodiscard]] std::string getAvatarUrl(const Discord::User &user, Snowflake guildId, int size);
 
     void saveUser(const Discord::User &user);
-    void saveUsers(const QList<Discord::User> &users);
+    void saveUsers(const std::vector<Discord::User> &users);
     void saveMember(Snowflake guildId, Snowflake userId, const Discord::Member &member);
-    void saveMembers(Snowflake guildId, const QList<Discord::Member> &members);
+    void saveMembers(Snowflake guildId, const std::vector<Discord::Member> &members);
     void removeGuildMembers(Snowflake guildId);
 
     void saveMemberWithUser(Snowflake guildId, const Discord::Member &member);
     void removeMember(Snowflake guildId, Snowflake userId);
 
-    void loadNotesFromReady(const QHash<Snowflake, QString> &notes);
-    void setCachedNote(Snowflake userId, const QString &note);
-    [[nodiscard]] std::optional<QString> getCachedNote(Snowflake userId) const;
+    void loadNotesFromReady(const std::unordered_map<Snowflake, std::string> &notes);
+    void setCachedNote(Snowflake userId, const std::string &note);
+    [[nodiscard]] std::optional<std::string> getCachedNote(Snowflake userId) const;
 
-signals:
-    void noteChanged(Snowflake userId);
+    Platform::Signal<Snowflake> noteChanged;
 
 private:
-    QCache<Snowflake, Discord::User> userCache;
-    QCache<MemberKey, Discord::Member> memberCache;
+    ManagerCache<Snowflake, Discord::User> userCache;
+    ManagerCache<MemberKey, Discord::Member> memberCache;
 
-    QHash<Snowflake, QString> notes;
+    std::unordered_map<Snowflake, std::string> notes;
 
     RelationshipManager *relationshipManager = nullptr;
 

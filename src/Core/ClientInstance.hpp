@@ -1,9 +1,13 @@
 #pragma once
 
-#include <QHash>
-#include <QObject>
-#include <QSet>
-#include <QString>
+#include "Platform/Trackable.hpp"
+#include <map>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include <functional>
 #include <memory>
@@ -42,13 +46,11 @@ class ForumManager;
 class CallStore;
 
 
-class ClientInstance : public QObject
+class ClientInstance : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     explicit ClientInstance(const AccountInfo &info,
-                            Discord::CaptchaResolver *captchaResolver = nullptr,
-                            QObject *parent = nullptr);
+                            Discord::CaptchaResolver *captchaResolver = nullptr);
     ~ClientInstance() override;
 
     void start();
@@ -73,11 +75,11 @@ public:
     [[nodiscard]] Stream::StreamManager *streams() const;
 #endif
 
-    [[nodiscard]] QList<Discord::Role> getRolesForGuild(Snowflake guildId);
-    [[nodiscard]] QList<Discord::Role> getMemberRolesSorted(Snowflake guildId, Snowflake userId);
+    [[nodiscard]] std::vector<Discord::Role> getRolesForGuild(Snowflake guildId);
+    [[nodiscard]] std::vector<Discord::Role> getMemberRolesSorted(Snowflake guildId, Snowflake userId);
     [[nodiscard]] std::optional<Discord::Guild> getGuild(Snowflake guildId);
     [[nodiscard]] std::optional<Discord::Channel> getChannel(Snowflake channelId);
-    [[nodiscard]] QList<Discord::Channel> getGuildChannels(Snowflake guildId);
+    [[nodiscard]] std::vector<Discord::Channel> getGuildChannels(Snowflake guildId);
     [[nodiscard]] std::optional<Snowflake> findDmChannelWithUser(Snowflake userId);
     using DmChannelCallback = std::function<void(const Result<Snowflake> &)>;
     void noteChannelSelected(Snowflake channelId);
@@ -86,16 +88,16 @@ public:
 
     [[nodiscard]] bool isThreadJoined(Snowflake threadId) const;
 
-    [[nodiscard]] QList<Discord::Ban> observedBans(Snowflake guildId) const;
-    [[nodiscard]] QList<Discord::Invite> createdInvites(Snowflake guildId) const;
+    [[nodiscard]] std::vector<Discord::Ban> observedBans(Snowflake guildId) const;
+    [[nodiscard]] std::vector<Discord::Invite> createdInvites(Snowflake guildId) const;
     [[nodiscard]] std::optional<RoleHierarchy> selfRoleHierarchy(Snowflake guildId);
 
-    void markGuildsAsRead(const QList<Snowflake> &guildIds);
+    void markGuildsAsRead(const std::vector<Snowflake> &guildIds);
     void markCategoryAsRead(Snowflake guildId, Snowflake categoryId);
 
     struct ThreadListPage
     {
-        QList<Discord::Channel> threads;
+        std::vector<Discord::Channel> threads;
         bool hasMore = false;
     };
     using ThreadListPageCallback = std::function<void(const Result<ThreadListPage> &)>;
@@ -110,37 +112,36 @@ public:
     Snowflake accountId() const;
     const AccountInfo &accountInfo() const;
 
-signals:
-    void stateChanged(ConnectionState state);
-    void reconnecting(int attempt, int maxAttempts);
-    void detailsUpdated(const AccountInfo &info);
+    Platform::Signal<ConnectionState> stateChanged;
+    Platform::Signal<int, int> reconnecting;
+    Platform::Signal<const AccountInfo &> detailsUpdated;
 
-    void ready(const Discord::Ready &ready);
-    void guildCreated(const Discord::GatewayGuild &guild);
-    void guildUpdated(const Discord::Guild &guild);
-    void guildRemoved(Snowflake guildId);
-    void channelCreated(const Discord::ChannelCreate &event);
-    void channelUpdated(const Discord::ChannelUpdate &update);
-    void channelDeleted(const Discord::ChannelDelete &event);
-    void threadCreated(const Discord::Channel &thread);
-    void threadUpdated(const Discord::Channel &thread);
-    void threadDeleted(Snowflake threadId, Snowflake parentId, Snowflake guildId);
-    void threadListSynced(Snowflake guildId, const QList<Snowflake> &parentIds, const QList<Discord::Channel> &threads);
-    void threadMembershipChanged(Snowflake threadId);
-    void guildRoleCreated(const Discord::GuildRoleCreate &event);
-    void guildRoleUpdated(const Discord::GuildRoleUpdate &event);
-    void guildRoleDeleted(const Discord::GuildRoleDelete &event);
-    void membersUpdated(Snowflake guildId, const QList<Snowflake> &userIds);
-    void memberRemoved(Snowflake guildId, Snowflake userId);
-    void readStateChanged(Snowflake channelId);
-    void forumBadgeChanged(Snowflake forumId);
-    void forumJoinedPostsChanged(Snowflake forumId);
-    void guildSettingsChanged(Snowflake guildId);
-    void channelLastMessageUpdated(Snowflake channelId, Snowflake messageId);
-    void voiceStateChanged(Snowflake channelId, Snowflake guildId);
-    void authenticationFailed(const AccountInfo &info);
+    Platform::Signal<const Discord::Ready &> ready;
+    Platform::Signal<const Discord::GatewayGuild &> guildCreated;
+    Platform::Signal<const Discord::Guild &> guildUpdated;
+    Platform::Signal<Snowflake> guildRemoved;
+    Platform::Signal<const Discord::ChannelCreate &> channelCreated;
+    Platform::Signal<const Discord::ChannelUpdate &> channelUpdated;
+    Platform::Signal<const Discord::ChannelDelete &> channelDeleted;
+    Platform::Signal<const Discord::Channel &> threadCreated;
+    Platform::Signal<const Discord::Channel &> threadUpdated;
+    Platform::Signal<Snowflake, Snowflake, Snowflake> threadDeleted;
+    Platform::Signal<Snowflake, const std::vector<Snowflake> &, const std::vector<Discord::Channel> &> threadListSynced;
+    Platform::Signal<Snowflake> threadMembershipChanged;
+    Platform::Signal<const Discord::GuildRoleCreate &> guildRoleCreated;
+    Platform::Signal<const Discord::GuildRoleUpdate &> guildRoleUpdated;
+    Platform::Signal<const Discord::GuildRoleDelete &> guildRoleDeleted;
+    Platform::Signal<Snowflake, const std::vector<Snowflake> &> membersUpdated;
+    Platform::Signal<Snowflake, Snowflake> memberRemoved;
+    Platform::Signal<Snowflake> readStateChanged;
+    Platform::Signal<Snowflake> forumBadgeChanged;
+    Platform::Signal<Snowflake> forumJoinedPostsChanged;
+    Platform::Signal<Snowflake> guildSettingsChanged;
+    Platform::Signal<Snowflake, Snowflake> channelLastMessageUpdated;
+    Platform::Signal<Snowflake, Snowflake> voiceStateChanged;
+    Platform::Signal<const AccountInfo &> authenticationFailed;
 
-private slots:
+private:
     void onGuildCreated(const Discord::GatewayGuild &guild);
     void onGuildUpdated(const Discord::Guild &guild);
     void onGuildDeleted(const Discord::GuildDelete &event);
@@ -164,11 +165,11 @@ private slots:
     void onGuildBanAdded(const Discord::GuildBanEvent &event);
     void onGuildBanRemoved(const Discord::GuildBanEvent &event);
     void onInviteCreated(const Discord::Invite &invite);
-    void onInviteRevoked(const QString &code);
+    void onInviteRevoked(const std::string &code);
     void onMessagesReceived(const MessageRequestResult &result);
     void onMessageCreated(const Discord::Message &msg);
     void handleAckRequest(Snowflake channelId, Snowflake messageId);
-    void handleBulkAckRequest(const QList<QPair<Snowflake, Snowflake>> &pairs);
+    void handleBulkAckRequest(const std::vector<std::pair<Snowflake, Snowflake>> &pairs);
     void onVoiceConnected();
     void onVoiceDisconnected();
     void onCallCreated(const Discord::CallCreate &event);
@@ -180,9 +181,9 @@ private slots:
 
 private:
     bool runInCacheTransaction(const char *what, const std::function<void(Platform::Database &)> &op);
-    QList<Markdown::ChannelLinkPart> channelLinkParts(const Markdown::ChannelLinkRef &ref);
+    std::vector<Markdown::ChannelLinkPart> channelLinkParts(const Markdown::ChannelLinkRef &ref);
 
-    void saveGuild(const Discord::GatewayGuild &guild, const QList<Discord::Member> *members, Snowflake myId, Platform::Database &db);
+    void saveGuild(const Discord::GatewayGuild &guild, const std::vector<Discord::Member> *members, Snowflake myId, Platform::Database &db);
     void initGuildReadState(const Discord::GatewayGuild &guild);
 
     [[nodiscard]] bool isForumParent(Snowflake parentId);
@@ -190,31 +191,31 @@ private:
     void cacheThread(const Discord::Channel &thread, Snowflake guildId);
     void ingestThread(const Discord::Channel &thread, Snowflake guildId);
     void fetchThreadListAttempt(Snowflake channelId, bool archived, int offset, int attempt, const ThreadListPageCallback &callback);
-    [[nodiscard]] QList<Snowflake> markableChannelIds(Snowflake guildId, Snowflake categoryId);
+    [[nodiscard]] std::vector<Snowflake> markableChannelIds(Snowflake guildId, Snowflake categoryId);
     void sendNextBulkAckBatch();
 
     AccountInfo account;
 
-    MessageManager *messageManager;
-    ForumManager *forumManager;
-    UserManager *userManager;
-    Discord::Client *client;
-    PermissionManager *permissionManager;
-    ReadStateManager *readStateManager;
-    MemberListManager *memberListManager;
-    RelationshipManager *relationshipManager;
-    PresenceManager *presenceManager;
-    EmojiManager *emojiManager;
-    FavoriteGifs *favoriteGifManager;
+    std::unique_ptr<MessageManager> messageManager;
+    std::unique_ptr<ForumManager> forumManager;
+    std::unique_ptr<UserManager> userManager;
+    std::unique_ptr<Discord::Client> client;
+    std::unique_ptr<PermissionManager> permissionManager;
+    std::unique_ptr<ReadStateManager> readStateManager;
+    std::unique_ptr<MemberListManager> memberListManager;
+    std::unique_ptr<RelationshipManager> relationshipManager;
+    std::unique_ptr<PresenceManager> presenceManager;
+    std::unique_ptr<EmojiManager> emojiManager;
+    std::unique_ptr<FavoriteGifs> favoriteGifManager;
 #ifndef STYX_NO_VOICE
-    Audio::VoiceManager *voiceManager;
+    std::unique_ptr<Audio::VoiceManager> voiceManager;
 #endif
 #ifdef STYX_HAVE_SCREENSHARE
-    Stream::StreamManager *streamManager;
+    std::unique_ptr<Stream::StreamManager> streamManager;
 #endif
     std::unique_ptr<CallStore> callStore;
     Snowflake selectedChannelId;
-    QString gatewaySessionId;
+    std::string gatewaySessionId;
 
     Storage::RoleRepository roleRepo;
     Storage::AccountRepository accountRepo;
@@ -222,22 +223,22 @@ private:
     Storage::ChannelRepository channelRepo;
     Storage::MemberRepository memberRepo;
 
-    QHash<Snowflake, QList<Discord::Role>> rolesCacheByGuild;
+    std::unordered_map<Snowflake, std::vector<Discord::Role>> rolesCacheByGuild;
 
     Snowflake currentVoiceChannelId;
     Snowflake currentVoiceGuildId;
 
     // notFound members are kept in here so we dont ask for them again
-    QSet<QPair<Snowflake /*guildId*/, Snowflake /*userId*/>> pendingMemberRequests;
+    std::set<std::pair<Snowflake /*guildId*/, Snowflake /*userId*/>> pendingMemberRequests;
 
-    QSet<Snowflake> joinedThreads;
-    QHash<Snowflake, Discord::Channel> threadCache;
-    QHash<Snowflake, bool> forumParentCache;
+    std::unordered_set<Snowflake> joinedThreads;
+    std::unordered_map<Snowflake, Discord::Channel> threadCache;
+    std::unordered_map<Snowflake, bool> forumParentCache;
 
-    QHash<Snowflake, QList<Discord::Ban>> observedBansByGuild;
-    QHash<Snowflake, QList<Discord::Invite>> createdInvitesByGuild;
+    std::unordered_map<Snowflake, std::vector<Discord::Ban>> observedBansByGuild;
+    std::unordered_map<Snowflake, std::vector<Discord::Invite>> createdInvitesByGuild;
 
-    QList<Discord::Client::AckEntry> queuedBulkAcks;
+    std::vector<Discord::Client::AckEntry> queuedBulkAcks;
     bool bulkAckInFlight = false;
 };
 

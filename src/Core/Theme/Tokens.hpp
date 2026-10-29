@@ -1,12 +1,8 @@
 #pragma once
 
-#include <QColor>
-#include <QHashFunctions>
-#include <QPalette>
-#include <QString>
-
+#include "Platform/Native.hpp"
 #include <optional>
-#include <type_traits>
+#include <string_view>
 #include <vector>
 
 namespace Styx {
@@ -46,25 +42,25 @@ enum class Token {
     StatusStreaming,
 };
 
+enum class PaletteRole { Window, Base, AlternateBase, Button, ToolTipBase, WindowText,
+    Text, ButtonText, ToolTipText, PlaceholderText, BrightText, Highlight,
+    HighlightedText, Link, Mid };
+
 struct TokenDescriptor
 {
     Token token;
     const char *id;
     const char *label;
     const char *group;
-    QColor defaultColor;
-    std::optional<QPalette::ColorRole> role; // nullopt = extended
+    Platform::Color defaultColor;
+    std::optional<PaletteRole> role;
     bool supportsAlpha = false;
 };
 
 const std::vector<TokenDescriptor> &registry();
-const TokenDescriptor *findById(const QString &id);
+const TokenDescriptor *findById(std::string_view id);
 const TokenDescriptor &descriptor(Token token);
 
-inline size_t qHash(Token key, size_t seed = 0) noexcept
-{
-    return ::qHash(static_cast<std::underlying_type_t<Token>>(key), seed);
-}
 
 } // namespace Theme
 } // namespace Core

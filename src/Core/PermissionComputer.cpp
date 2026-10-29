@@ -3,18 +3,18 @@
 namespace Styx {
 namespace Core {
 
-QHash<Snowflake, Discord::Role> PermissionComputer::buildRoleMap(const QList<Discord::Role> &roles)
+std::unordered_map<Snowflake, const Discord::Role *> PermissionComputer::buildRoleMap(const std::vector<Discord::Role> &roles)
 {
-    QHash<Snowflake, Discord::Role> roleMap;
+    std::unordered_map<Snowflake, const Discord::Role *> roleMap;
     roleMap.reserve(roles.size());
     for (const auto &role : roles)
-        roleMap.insert(role.id.get(), role);
+        roleMap.insert_or_assign(role.id.get(), &role);
     return roleMap;
 }
 
 Discord::Permissions PermissionComputer::computeBasePermissions(
         Snowflake guildOwnerId, Snowflake userId, Snowflake guildId,
-        const QList<Snowflake> &memberRoleIds, const QList<Discord::Role> &allRoles)
+        const std::vector<Snowflake> &memberRoleIds, const std::vector<Discord::Role> &allRoles)
 {
     if (guildOwnerId == userId)
         return Discord::ALL_PERMISSIONS;
@@ -22,12 +22,12 @@ Discord::Permissions PermissionComputer::computeBasePermissions(
     auto roleMap = buildRoleMap(allRoles);
 
     Discord::Permissions permissions = Discord::NO_PERMISSIONS;
-    if (auto everyoneRole = roleMap.value(guildId); everyoneRole.id.hasValue())
-        permissions = everyoneRole.permissions.get();
+    if (auto it = roleMap.find(guildId); it != roleMap.end() && it->second->id.hasValue())
+        permissions = it->second->permissions.get();
 
     for (const auto &roleId : memberRoleIds) {
-        if (auto role = roleMap.value(roleId); role.id.hasValue())
-            permissions |= role.permissions.get();
+        if (auto it = roleMap.find(roleId); it != roleMap.end() && it->second->id.hasValue())
+            permissions |= it->second->permissions.get();
     }
 
     if (permissions & Discord::Permission::ADMINISTRATOR)
@@ -38,8 +38,8 @@ Discord::Permissions PermissionComputer::computeBasePermissions(
 
 Discord::Permissions PermissionComputer::computeOverwrites(
         Discord::Permissions basePermissions, Snowflake userId, Snowflake guildId,
-        const QList<Snowflake> &memberRoleIds,
-        const QList<Discord::PermissionOverwrite> &overwrites)
+        const std::vector<Snowflake> &memberRoleIds,
+        const std::vector<Discord::PermissionOverwrite> &overwrites)
 {
     if (basePermissions & Discord::Permission::ADMINISTRATOR)
         return Discord::ALL_PERMISSIONS;
@@ -85,8 +85,8 @@ Discord::Permissions PermissionComputer::computeOverwrites(
 
 Discord::Permissions PermissionComputer::computeChannelPermissions(
         Snowflake guildOwnerId, Snowflake userId, Snowflake guildId, bool isDM,
-        const QList<Snowflake> &memberRoleIds, const QList<Discord::Role> &allRoles,
-        const QList<Discord::PermissionOverwrite> &overwrites)
+        const std::vector<Snowflake> &memberRoleIds, const std::vector<Discord::Role> &allRoles,
+        const std::vector<Discord::PermissionOverwrite> &overwrites)
 {
     if (isDM) {
         // clang-format off

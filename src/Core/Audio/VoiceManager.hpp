@@ -1,10 +1,11 @@
 #pragma once
 
-#include <QObject>
+#include "Platform/Trackable.hpp"
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include "Platform/WorkerLoop.hpp"
-#include <QHash>
-#include <QList>
-#include <QSet>
 
 #include <functional>
 #include <memory>
@@ -37,11 +38,10 @@ struct VoiceParticipant
     bool streaming = false; // Go Live
 };
 
-class VoiceManager : public QObject
+class VoiceManager : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit VoiceManager(Snowflake accountId, const ProxyConfig &proxy, QObject *parent = nullptr);
+    explicit VoiceManager(Snowflake accountId, const ProxyConfig &proxy);
     ~VoiceManager() override;
 
     void handleVoiceStateUpdate(const Discord::VoiceState &state);
@@ -53,10 +53,10 @@ public:
     [[nodiscard]] Discord::Voice::VoiceClient::State clientState() const;
     [[nodiscard]] Snowflake currentChannelId() const { return channelId; }
     [[nodiscard]] Snowflake currentGuildId() const { return guildId; }
-    [[nodiscard]] const QString &sessionId() const { return voiceSessionId; }
+    [[nodiscard]] const std::string &sessionId() const { return voiceSessionId; }
 
     // Mixes a watched Go Live stream's audio into the call output.
-    void playStreamAudio(quint32 ssrc, quint16 sequence, quint32 timestamp, const QByteArray &opus);
+    void playStreamAudio(std::uint32_t ssrc, std::uint16_t sequence, std::uint32_t timestamp, const std::string &opus);
 
     void setInputGain(float gain);
     void setOutputVolume(float volume);
@@ -84,52 +84,47 @@ public:
     [[nodiscard]] bool noiseSuppression() const { return cachedNoiseSuppression; }
     [[nodiscard]] bool rnnoiseVad() const { return cachedUseRnnoiseVad; }
 
-    [[nodiscard]] QList<AudioDeviceInfo> availableInputDevices() const;
-    [[nodiscard]] QList<AudioDeviceInfo> availableOutputDevices() const;
-    [[nodiscard]] QByteArray currentInputDevice() const { return currentInputDeviceId; }
-    [[nodiscard]] QByteArray currentOutputDevice() const { return currentOutputDeviceId; }
-    void setInputDevice(const QByteArray &deviceId);
-    void setOutputDevice(const QByteArray &deviceId);
+    [[nodiscard]] std::vector<AudioDeviceInfo> availableInputDevices() const;
+    [[nodiscard]] std::vector<AudioDeviceInfo> availableOutputDevices() const;
+    [[nodiscard]] std::string currentInputDevice() const { return currentInputDeviceId; }
+    [[nodiscard]] std::string currentOutputDevice() const { return currentOutputDeviceId; }
+    void setInputDevice(const std::string &deviceId);
+    void setOutputDevice(const std::string &deviceId);
 
-    [[nodiscard]] QList<VoiceParticipant> currentParticipants() const;
+    [[nodiscard]] std::vector<VoiceParticipant> currentParticipants() const;
     [[nodiscard]] const VoiceParticipant *participant(Snowflake userId) const;
     [[nodiscard]] int channelVoiceUserCount(Snowflake channelId) const;
-    [[nodiscard]] QList<Snowflake> channelVoiceUsers(Snowflake channelId) const;
+    [[nodiscard]] std::vector<Snowflake> channelVoiceUsers(Snowflake channelId) const;
     [[nodiscard]] std::optional<Discord::VoiceState> voiceStateForUser(Snowflake userId) const;
 
     void setUserMuted(Snowflake userId, bool muted);
     [[nodiscard]] bool isUserMuted(Snowflake userId) const;
 
     [[nodiscard]] bool isDaveEnabled() const;
-    [[nodiscard]] const QString &privacyCode() const { return cachedPrivacyCode; }
-    void requestVerificationCode(Snowflake targetUserId, std::function<void(const QString &)> callback);
+    [[nodiscard]] const std::string &privacyCode() const { return cachedPrivacyCode; }
+    void requestVerificationCode(Snowflake targetUserId, std::function<void(const std::string &)> callback);
 
-signals:
-    void voiceConnected();
-    void voiceDisconnected();
-    void voiceStateChanged();
-    void audioLevelChanged(float rms);
-    void speakingChanged(bool speaking);
-    void devicesChanged();
+public:
+    Platform::Signal<> voiceConnected, voiceDisconnected, voiceStateChanged;
+    Platform::Signal<float> audioLevelChanged;
+    Platform::Signal<bool> speakingChanged;
+    Platform::Signal<> devicesChanged;
+    Platform::Signal<Snowflake> participantJoined, participantLeft, participantUpdated;
+    Platform::Signal<Snowflake, bool> participantSpeakingChanged;
+    Platform::Signal<Snowflake, Snowflake, bool> channelVoiceMemberChanged;
+    Platform::Signal<Snowflake, Snowflake> participantVoiceStateChanged;
+    Platform::Signal<> participantsCleared;
+    Platform::Signal<Snowflake, float> userAudioLevelChanged;
+    Platform::Signal<std::string> privacyCodeChanged;
 
-    void participantJoined(Snowflake userId);
-    void participantLeft(Snowflake userId);
-    void participantUpdated(Snowflake userId);
-    void participantSpeakingChanged(Snowflake userId, bool speaking);
-    void channelVoiceMemberChanged(Snowflake channelId, Snowflake userId, bool joined);
-    void participantVoiceStateChanged(Snowflake channelId, Snowflake userId);
-    void participantsCleared();
-    void userAudioLevelChanged(Snowflake userId, float rms);
-    void privacyCodeChanged(const QString &code);
-
-private slots:
+private:
     void onVoiceClientConnected();
     void onVoiceClientDisconnected();
     void onVoiceClientStateChanged(Discord::Voice::VoiceClient::State state);
-    void onDevicesChanged(const QList<AudioDeviceInfo> &inputs, const QList<AudioDeviceInfo> &outputs);
+    void onDevicesChanged(const std::vector<AudioDeviceInfo> &inputs, const std::vector<AudioDeviceInfo> &outputs);
 
 private:
-    void connectToVoiceServer(const QString &endpoint, const QString &token);
+    void connectToVoiceServer(const std::string &endpoint, const std::string &token);
     void stopVoiceThread();
     void populateParticipantsFromCache();
     IAudioBackend *backend() const;
@@ -138,7 +133,7 @@ private:
     Snowflake accountId;
     ProxyConfig proxy;
 
-    QString voiceSessionId;
+    std::string voiceSessionId;
     Snowflake guildId;
     Snowflake channelId;
     bool selfMute = false;
@@ -148,16 +143,16 @@ private:
     // both are needed to connect
     struct PendingConnection
     {
-        QString token;
-        QString endpoint;
+        std::string token;
+        std::string endpoint;
         Snowflake guildId;
         bool hasServerUpdate = false;
         bool hasStateUpdate = false;
     };
     PendingConnection pending;
 
-    QByteArray currentInputDeviceId;
-    QByteArray currentOutputDeviceId;
+    std::string currentInputDeviceId;
+    std::string currentOutputDeviceId;
 
     int cachedOpusApplication = OPUS_APPLICATION_VOIP;
     int cachedOpusBitrate = 64000;
@@ -171,18 +166,18 @@ private:
 #else
     bool cachedUseRnnoiseVad = false;
 #endif
-    QList<AudioDeviceInfo> cachedInputDevices;
-    QList<AudioDeviceInfo> cachedOutputDevices;
+    std::vector<AudioDeviceInfo> cachedInputDevices;
+    std::vector<AudioDeviceInfo> cachedOutputDevices;
     float cachedInputGain = 1.0f;
     float cachedOutputVolume = 1.0f;
 
-    QHash<Snowflake, VoiceParticipant> participants;
-    QSet<Snowflake> mutedUsers;
-    QHash<Snowflake, Discord::VoiceState> knownVoiceStates;
-    QString cachedPrivacyCode;
+    std::unordered_map<Snowflake, VoiceParticipant> participants;
+    std::unordered_set<Snowflake> mutedUsers;
+    std::unordered_map<Snowflake, Discord::VoiceState> knownVoiceStates;
+    std::string cachedPrivacyCode;
 
     std::unique_ptr<Platform::WorkerLoop> voiceLoop;
-    std::shared_ptr<bool> m_voiceAlive = std::make_shared<bool>(true);
+    std::shared_ptr<std::atomic<bool>> m_voiceAlive = std::make_shared<std::atomic<bool>>(true);
     Discord::Voice::VoiceClient *voiceClient = nullptr;
     AudioPipeline *audioPipeline = nullptr;
     unsigned int voiceGeneration = 0;

@@ -1,14 +1,14 @@
 #include "MessageManager.hpp"
 
-#include <QDateTime>
-#include <QImageReader>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QPointer>
-#include <QTimer>
-#include <QUrl>
-
+#include <algorithm>
+#include <charconv>
+#include <chrono>
+#include <filesystem>
 #include <functional>
+#include <nlohmann/json.hpp>
+#include "Platform/Dispatcher.hpp"
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
 
 #include "Discord/ApiError.hpp"
 #include "Discord/Client.hpp"
@@ -20,46 +20,53 @@
 namespace Styx {
 namespace Core {
 
-static QString resolveUserJoinMessage(const Discord::Message &msg, const QString &author)
+static std::uint64_t parseSnowflake(const std::string &text)
 {
-    qint64 ms = msg.timestamp->toMSecsSinceEpoch();
+    std::uint64_t value = 0;
+    auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+    return result.ec == std::errc{} && result.ptr == text.data() + text.size() ? value : 0;
+}
+
+static std::string resolveUserJoinMessage(const Discord::Message &msg, const std::string &author)
+{
+    std::int64_t ms = msg.timestamp->unixMillis();
     switch (ms % 13) {
     case 0:
-        return author + QStringLiteral(" joined the party.");
+        return author + " joined the party.";
     case 1:
-        return author + QStringLiteral(" is here.");
+        return author + " is here.";
     case 2:
-        return QStringLiteral("Welcome, ") + author + QStringLiteral(". We hope you brought pizza.");
+        return "Welcome, " + author + ". We hope you brought pizza.";
     case 3:
-        return QStringLiteral("A wild ") + author + QStringLiteral(" appeared.");
+        return "A wild " + author + " appeared.";
     case 4:
-        return author + QStringLiteral(" just landed.");
+        return author + " just landed.";
     case 5:
-        return author + QStringLiteral(" just slid into the server.");
+        return author + " just slid into the server.";
     case 6:
-        return author + QStringLiteral(" just showed up!");
+        return author + " just showed up!";
     case 7:
-        return QStringLiteral("Welcome ") + author + QStringLiteral(". Say hi!");
+        return "Welcome " + author + ". Say hi!";
     case 8:
-        return author + QStringLiteral(" hopped into the server.");
+        return author + " hopped into the server.";
     case 9:
-        return QStringLiteral("Everyone welcome ") + author + QStringLiteral("!");
+        return "Everyone welcome " + author + "!";
     case 10:
-        return QStringLiteral("Glad you're here, ") + author + QStringLiteral(".");
+        return "Glad you're here, " + author + ".";
     case 11:
-        return QStringLiteral("Good to see you, ") + author + QStringLiteral(".");
+        return "Good to see you, " + author + ".";
     case 12:
-        return QStringLiteral("Yay you made it, ") + author + QStringLiteral("!");
+        return "Yay you made it, " + author + "!";
     default:
-        return author + QStringLiteral(" joined the party.");
+        return author + " joined the party.";
     }
 }
 
-static QString resolveSystemMessageContent(const Discord::Message &msg, const std::function<QString()> &authorName)
+static std::string resolveSystemMessageContent(const Discord::Message &msg, const std::function<std::string()> &authorName)
 {
     switch (static_cast<Discord::MessageType>(msg.type.get())) {
     case Discord::MessageType::CALL:
-        return authorName() + QStringLiteral(" started a call.");
+        return authorName() + " started a call.";
     case Discord::MessageType::USER_JOIN:
         return resolveUserJoinMessage(msg, authorName());
     default:
@@ -68,20 +75,43 @@ static QString resolveSystemMessageContent(const Discord::Message &msg, const st
 }
 
 MessageManager::MessageManager(Snowflake accountId, Discord::Client *client,
-                               UserManager *userManager, QObject *parent)
-    : QObject(parent), client(client), userManager(userManager), reactorStore(new MessageReactors(client, userManager, this)), repo(accountId), parser(std::make_unique<Markdown::Parser>())
+                               UserManager *userManager)
+    : repo(accountId), client(client), userManager(userManager), reactorStore(std::make_unique<MessageReactors>(client, userManager)), parser(std::make_unique<Markdown::Parser>())
 {
-    messageCache.setMaxCost(1'000);
-
     parser->setUserResolver([this](Snowflake userId, Snowflake sourceChannelId) {
         return this->userManager->getDisplayName(userId, this->client->getGuildIdForChannel(sourceChannelId));
     });
 
-    // connect(client, &Discord::Client::messagesReceived, this, &MessageManager::onApiMessagesReceived);
-    // connect(client, &Discord::Client::messagesFailed, this, &MessageManager::onMessagesFailed);
 }
 
-MessageManager::~MessageManager() {}
+MessageManager::~MessageManager() = default;
+
+Discord::Message *MessageManager::MessageCache::object(Snowflake id)
+{
+    auto it = index.find(id);
+    if (it == index.end()) return nullptr;
+    entries.splice(entries.begin(), entries, it->second);
+    return &it->second->second;
+}
+
+void MessageManager::MessageCache::insert(Snowflake id, const Discord::Message &message)
+{
+    remove(id);
+    entries.emplace_front(id, message);
+    index[id] = entries.begin();
+    if (entries.size() > Capacity) {
+        index.erase(entries.back().first);
+        entries.pop_back();
+    }
+}
+
+void MessageManager::MessageCache::remove(Snowflake id)
+{
+    auto it = index.find(id);
+    if (it == index.end()) return;
+    entries.erase(it->second);
+    index.erase(it);
+}
 
 void MessageManager::parseMessageContent(Discord::Message &msg)
 {
@@ -92,40 +122,40 @@ void MessageManager::parseMessageContent(Discord::Message &msg)
 
     if (msg.type.hasValue() && msg.type.get() == Discord::MessageType::THREAD_STARTER_MESSAGE &&
         msg.referencedMessage && msg.referencedMessage->content.hasValue() &&
-        msg.referencedMessage->parsedContentCached.isEmpty())
+        msg.referencedMessage->parsedContentCached.empty())
         cacheParsedContent(*msg.referencedMessage, msg.referencedMessage->content.get(), msg.referencedMessage->channelId);
 
     if (msg.snapshotMessage && msg.snapshotMessage->content.hasValue() &&
-        msg.snapshotMessage->parsedContentCached.isEmpty())
+        msg.snapshotMessage->parsedContentCached.empty())
         cacheParsedContent(*msg.snapshotMessage, msg.snapshotMessage->content.get(), msg.channelId);
 }
 
-static const QSet<QString> OfficialTopicExcludedRules = { QStringLiteral("inlineCode"), QStringLiteral("br") };
-static const QSet<QString> OfficialBioExcludedRules = { QStringLiteral("br"), QStringLiteral("user"), QStringLiteral("link") };
+static const std::unordered_set<std::string> OfficialTopicExcludedRules = { "inlineCode", "br" };
+static const std::unordered_set<std::string> OfficialBioExcludedRules = { "br", "user", "link" };
 
 static Markdown::ParseState inlineParseState(Snowflake channelId)
 {
     Markdown::ParseState state;
     state.isInline = true;
-    state.customState["channelId"] = quint64(channelId);
+    state.customState["channelId"] = std::uint64_t(channelId);
     return state;
 }
 
-void MessageManager::cacheParsedContent(Discord::Message &msg, const QString &content, Snowflake channelId) const
+void MessageManager::cacheParsedContent(Discord::Message &msg, const std::string &content, Snowflake channelId) const
 {
     auto ast = parser->parse(content, inlineParseState(channelId));
     msg.parsedContentCached = parser->toHtml(ast, Markdown::Parser::isEmojiOnly(ast));
     msg.contentIsSingleLink = Markdown::Parser::isSingleLink(ast);
 }
 
-QString MessageManager::channelTopicHtml(const QString &topic, Snowflake channelId) const
+std::string MessageManager::channelTopicHtml(const std::string &topic, Snowflake channelId) const
 {
     Markdown::ParseState state = inlineParseState(channelId);
     state.excludedRules = OfficialTopicExcludedRules;
     return parser->toHtml(parser->parse(topic, state));
 }
 
-QString MessageManager::profileBioHtml(const QString &bio) const
+std::string MessageManager::profileBioHtml(const std::string &bio) const
 {
     Markdown::ParseState state = inlineParseState(Snowflake::Invalid);
     state.excludedRules = OfficialBioExcludedRules;
@@ -137,10 +167,10 @@ void MessageManager::setChannelLinkResolver(Markdown::ChannelLinkResolverFn reso
     parser->setChannelLinkResolver(std::move(resolver));
 }
 
-void MessageManager::setChannelResolver(std::function<QString(Snowflake)> resolver)
+void MessageManager::setChannelResolver(std::function<std::string(Snowflake)> resolver)
 {
-    parser->setChannelResolver([resolver](const QString &channelId) {
-        Snowflake id(channelId.toULongLong());
+    parser->setChannelResolver([resolver](const std::string &channelId) {
+        Snowflake id(parseSnowflake(channelId));
         return resolver(id);
     });
 }
@@ -159,7 +189,7 @@ void MessageManager::requestLoadChannel(Snowflake channelId)
         if (const auto *tail = segments[channelId].tail()) {
             int count = static_cast<int>(tail->ids.size());
             if (auto slice = cachedSlice(channelId, *tail, std::max(0, count - PageSize), count)) {
-                emit messagesReceived({ .success = true,
+                messagesReceived.publish(MessageRequestResult{ .success = true,
                                         .type = LoadType::Latest,
                                         .channelId = channelId,
                                         .messages = *slice,
@@ -179,9 +209,9 @@ void MessageManager::requestLoadHistory(Snowflake channelId, Snowflake beforeId)
     if (pagesInFlight.contains({ channelId, LoadType::History }))
         return;
 
-    auto start = channelStartId.constFind(channelId);
-    if (start != channelStartId.constEnd() && start.value() >= beforeId) {
-        emit messagesReceived({ .success = true,
+    auto start = channelStartId.find(channelId);
+    if (start != channelStartId.end() && start->second >= beforeId) {
+        messagesReceived.publish(MessageRequestResult{ .success = true,
                                 .type = LoadType::History,
                                 .channelId = channelId,
                                 .anchorId = beforeId });
@@ -190,7 +220,7 @@ void MessageManager::requestLoadHistory(Snowflake channelId, Snowflake beforeId)
 
     if (auto pos = segments[channelId].find(beforeId); pos.run && pos.index > 0) {
         if (auto slice = cachedSlice(channelId, *pos.run, std::max(0, pos.index - PageSize), pos.index)) {
-            emit messagesReceived({ .success = true,
+            messagesReceived.publish(MessageRequestResult{ .success = true,
                                     .type = LoadType::History,
                                     .channelId = channelId,
                                     .messages = *slice,
@@ -215,7 +245,7 @@ void MessageManager::requestLoadFuture(Snowflake channelId, Snowflake afterId)
         if (knowsWhatFollows) {
             int end = std::min(count, pos.index + 1 + PageSize);
             if (auto slice = cachedSlice(channelId, *pos.run, pos.index + 1, end)) {
-                emit messagesReceived({ .success = true,
+                messagesReceived.publish(MessageRequestResult{ .success = true,
                                         .type = LoadType::Future,
                                         .channelId = channelId,
                                         .messages = *slice,
@@ -241,7 +271,7 @@ void MessageManager::requestLoadAround(Snowflake channelId, Snowflake messageId)
         int from = std::max(0, pos.index - JumpWindow / 2);
         int to = std::min(count, from + JumpWindow);
         if (auto slice = cachedSlice(channelId, *pos.run, from, to)) {
-            emit messagesReceived({ .success = true,
+            messagesReceived.publish(MessageRequestResult{ .success = true,
                                     .type = LoadType::Jump,
                                     .channelId = channelId,
                                     .messages = *slice,
@@ -259,16 +289,16 @@ void MessageManager::fetchPage(LoadType type, Snowflake channelId, Snowflake anc
 {
     pagesInFlight.insert({ channelId, type });
 
-    QPointer<MessageManager> guard = this;
-    fetch([this, guard, type, channelId, anchorId](const Result<QList<Discord::Message>> &result) {
+    Platform::Guard<MessageManager> guard(this);
+    fetch([this, guard, type, channelId, anchorId](const Result<std::vector<Discord::Message>> &result) {
         if (!guard)
             return;
 
-        pagesInFlight.remove({ channelId, type });
+        pagesInFlight.erase({ channelId, type });
 
         if (!result.success()) {
-            qCWarning(LogCore) << "Failed to load" << type << "page in" << channelId << result.error;
-            emit messagesReceived({ .success = false,
+            log(LogLevel::Warning, LogCore) << "Failed to load" << type << "page in" << channelId << result.error;
+            messagesReceived.publish(MessageRequestResult{ .success = false,
                                     .type = type,
                                     .channelId = channelId,
                                     .anchorId = anchorId });
@@ -278,11 +308,11 @@ void MessageManager::fetchPage(LoadType type, Snowflake channelId, Snowflake anc
     });
 }
 
-std::optional<QList<Discord::Message>> MessageManager::cachedSlice(Snowflake channelId,
+std::optional<std::vector<Discord::Message>> MessageManager::cachedSlice(Snowflake channelId,
                                                                    const MessageSegments::Run &run,
                                                                    int from, int to)
 {
-    QList<Discord::Message> result;
+    std::vector<Discord::Message> result;
     if (from >= to)
         return result;
 
@@ -293,13 +323,13 @@ std::optional<QList<Discord::Message>> MessageManager::cachedSlice(Snowflake cha
             result.clear();
             break;
         }
-        result.append(*msg);
+        result.push_back(*msg);
     }
-    if (!result.isEmpty())
+    if (!result.empty())
         return result;
 
-    QList<Discord::Message> fromDisk = repo.getMessagesInRange(channelId, run.ids[from], run.ids[to - 1]);
-    if (fromDisk.isEmpty())
+    std::vector<Discord::Message> fromDisk = repo.getMessagesInRange(channelId, run.ids[from], run.ids[to - 1]);
+    if (fromDisk.empty())
         return std::nullopt;
 
     for (auto &msg : fromDisk)
@@ -307,12 +337,12 @@ std::optional<QList<Discord::Message>> MessageManager::cachedSlice(Snowflake cha
     return fromDisk;
 }
 
-static QList<Snowflake> idsOf(const QList<Discord::Message> &messages)
+static std::vector<Snowflake> idsOf(const std::vector<Discord::Message> &messages)
 {
-    QList<Snowflake> ids;
+    std::vector<Snowflake> ids;
     ids.reserve(messages.size());
     for (const auto &msg : messages)
-        ids.append(msg.id.get());
+        ids.push_back(msg.id.get());
     return ids;
 }
 
@@ -328,7 +358,7 @@ void MessageManager::cacheGatewayMembers(const Discord::Message &msg)
     if (!msg.guildId.hasValue())
         return;
     Snowflake guildId = msg.guildId.get();
-    QList<Snowflake> changedUserIds;
+    std::vector<Snowflake> changedUserIds;
 
     auto cache = [&](const Discord::User &user, Discord::Member member) {
         Snowflake userId = user.id.get();
@@ -337,7 +367,7 @@ void MessageManager::cacheGatewayMembers(const Discord::Message &msg)
             return;
         member.user = user;
         userManager->saveMemberWithUser(guildId, member);
-        changedUserIds.append(userId);
+        changedUserIds.push_back(userId);
     };
 
     if (msg.member.hasValue() && msg.author.hasValue())
@@ -349,8 +379,8 @@ void MessageManager::cacheGatewayMembers(const Discord::Message &msg)
                 cache(mentioned, mentioned.member.get());
     }
 
-    if (!changedUserIds.isEmpty())
-        emit membersLearnedFromMessage(guildId, changedUserIds);
+    if (!changedUserIds.empty())
+        membersLearnedFromMessage.publish(guildId, changedUserIds);
 }
 
 void MessageManager::onMessageCreated(const Discord::Message &message)
@@ -381,7 +411,7 @@ void MessageManager::onMessageUpdated(const Discord::Message &message)
     if (haveBaseline) {
         merged.applyUpdate(message);
     } else {
-        if (!message.presentKeys.contains(QStringLiteral("content"))) {
+        if (!message.presentKeys.contains("content")) {
             return;
         }
         merged = message;
@@ -389,13 +419,13 @@ void MessageManager::onMessageUpdated(const Discord::Message &message)
 
     parseMessageContent(merged);
 
-    messageCache.insert(merged.id, new Discord::Message(merged));
+    messageCache.insert(merged.id, merged);
     repo.updateMessageContent(merged);
 
-    if (message.presentKeys.contains(QStringLiteral("reactions")))
+    if (message.presentKeys.contains("reactions"))
         repo.updateReactionsJson(merged.id, merged.reactionsJson);
 
-    emit messagesReceived({ true, Discord::Client::MessageLoadType::Created, merged.channelId, { merged } });
+    messagesReceived.publish(MessageRequestResult{ true, Discord::Client::MessageLoadType::Created, merged.channelId, { merged } });
 }
 
 void MessageManager::onMessageDeleted(const Discord::MessageDelete &event)
@@ -410,14 +440,14 @@ void MessageManager::onMessageDeleted(const Discord::MessageDelete &event)
 
     repo.markMessageDeleted(messageId);
 
-    emit messageDeleted(channelId, messageId);
+    messageDeleted.publish(channelId, messageId);
 }
 
-void MessageManager::onMessageSendFailed(const QString &nonce, const QString &error)
+void MessageManager::onMessageSendFailed(const std::string &nonce, const std::string &error)
 {
-    qCWarning(LogCore) << "Message send failed for nonce" << nonce << ":" << error;
+    log(LogLevel::Warning, LogCore) << "Message send failed for nonce" << nonce << ":" << error;
 
-    emit messageErrored(nonce);
+    messageErrored.publish(nonce);
 }
 
 static bool hasOwnReactionOfOtherType(const Discord::Message &msg, const Discord::Emoji &emoji, bool isBurst)
@@ -436,7 +466,7 @@ void MessageManager::addReaction(Snowflake channelId, Snowflake messageId, const
 {
     const Discord::Message *cached = messageCache.object(messageId);
     if (cached && hasOwnReactionOfOtherType(*cached, emoji, isBurst)) {
-        emit reactionRejected(ReactionRejection::AlreadyReactedWithOtherType);
+        reactionRejected.publish(ReactionRejection::AlreadyReactedWithOtherType);
         return;
     }
 
@@ -455,7 +485,7 @@ void MessageManager::removeReactionOf(Snowflake reactorId, Snowflake channelId, 
 
 void MessageManager::sendReactionChange(ReactionOp op, const ReactionChange &change, ReactionAttempt attempt)
 {
-    const QPointer<MessageManager> self(this);
+    const Platform::Guard<MessageManager> self(this);
     const auto onFinished = [self, op, change, attempt](const Discord::Client::ReactionResult &result) {
         if (self && !result.success)
             self->onReactionChangeFailed(op, change, attempt, result);
@@ -463,7 +493,7 @@ void MessageManager::sendReactionChange(ReactionOp op, const ReactionChange &cha
 
     applyOptimistically(op, change);
 
-    const QString reactionKey = change.emoji.reactionKey();
+    const std::string reactionKey = change.emoji.reactionKey();
     if (op == ReactionOp::Add) {
         if (emojiManager)
             emojiManager->trackReaction(reactionKey);
@@ -483,12 +513,12 @@ void MessageManager::onReactionChangeFailed(ReactionOp op, const ReactionChange 
 
     if (result.statusCode == TooManyRequests) {
         if (canRetry) {
-            QTimer::singleShot(result.retryAfterSeconds * 1000, this, retry);
+            Platform::Dispatcher::main().setTimer(std::chrono::seconds(result.retryAfterSeconds), false, [guard = Platform::Guard<MessageManager>(this), retry] { if (guard) retry(); });
             return;
         }
     } else if (result.statusCode == Forbidden) {
         if (result.errorCode == Discord::ApiError::TooManyReactions)
-            emit reactionRejected(ReactionRejection::TooManyReactions);
+            reactionRejected.publish(ReactionRejection::TooManyReactions);
     } else if (canRetry) {
         retry();
         return;
@@ -498,54 +528,55 @@ void MessageManager::onReactionChangeFailed(ReactionOp op, const ReactionChange 
     applyOptimistically(undo, change);
 }
 
-void MessageManager::sendMessage(Snowflake channelId, const QString &content,
+void MessageManager::sendMessage(Snowflake channelId, const std::string &content,
                                  Snowflake replyToMessageId,
-                                 const QList<PendingAttachment> &attachments)
+                                 const std::vector<PendingAttachment> &attachments)
 {
     if (emojiManager)
         emojiManager->trackMessageEmojis(content);
 
     Snowflake nonceId = Snowflake::generateNonce();
-    QString nonce = QString::number(nonceId);
+    std::string nonce = nonceId.toString();
 
-    auto outgoing = attachments;
+    const auto &outgoing = attachments;
 
     Discord::Message preview;
     preview.id = nonceId; // temporary id, will be overwritten
     preview.nonce = nonce;
     preview.channelId = channelId;
     preview.content = content;
-    preview.timestamp = QDateTime::currentDateTimeUtc();
+    preview.timestamp = Platform::DateTime::now();
     preview.author = client->getMe();
     preview.flags = Discord::MessageFlags(0);
     preview.isPendingOutbound = true;
 
-    if (!outgoing.isEmpty()) {
-        QList<Discord::Attachment> previewAttachments;
-        for (int i = 0; i < outgoing.size(); i++) {
+    if (!outgoing.empty()) {
+        std::vector<Discord::Attachment> previewAttachments;
+        previewAttachments.reserve(outgoing.size());
+        for (std::size_t i = 0; i < outgoing.size(); i++) {
             const auto &att = outgoing[i];
             Discord::Attachment a;
             a.id = Snowflake(nonceId + i + 1);
             a.filename = att.filename;
             a.size = att.size;
             a.contentType = att.mimeType;
-            if (!att.image.isNull()) {
+            if (!att.image.empty()) {
                 a.localPreview = att.image;
-                a.width = att.image.width();
-                a.height = att.image.height();
-            } else if (att.mimeType.startsWith("image/") && !att.filePath.isEmpty()) {
-                QString localUrl = QUrl::fromLocalFile(att.filePath).toString();
+                a.width = att.image.width;
+                a.height = att.image.height;
+            } else if (att.mimeType.starts_with("image/") && !att.filePath.empty()) {
+                std::string localUrl = Platform::fileUrl(std::filesystem::u8path(att.filePath));
                 a.url = localUrl;
                 a.proxyUrl = localUrl;
-                QSize dims = QImageReader(att.filePath).size();
-                if (dims.isValid()) {
-                    a.width = dims.width();
-                    a.height = dims.height();
+                auto image = Platform::Image::sizeFile(std::filesystem::u8path(att.filePath));
+                if (image) {
+                    a.width = image->width;
+                    a.height = image->height;
                 }
             }
             if (att.isSpoiler)
                 a.flags = Discord::AttachmentFlags(Discord::AttachmentFlag::IS_SPOILER);
-            previewAttachments.append(a);
+            previewAttachments.push_back(std::move(a));
         }
         preview.attachments = previewAttachments;
     }
@@ -565,12 +596,12 @@ void MessageManager::sendMessage(Snowflake channelId, const QString &content,
     preview.parsedContentCached = parser->toHtml(ast, jumbo);
 
     // get our fake preview in
-    emit messagesReceived(
-            { true, Discord::Client::MessageLoadType::Created, channelId, { preview } });
+    messagesReceived.publish(
+            MessageRequestResult{ true, Discord::Client::MessageLoadType::Created, channelId, { preview } });
 
     for (const auto &att : outgoing) {
-        if (att.data.isEmpty() && att.filePath.isEmpty()) {
-            emit messageErrored(nonce);
+        if (att.data.empty() && att.filePath.empty()) {
+            messageErrored.publish(nonce);
             return;
         }
     }
@@ -578,64 +609,33 @@ void MessageManager::sendMessage(Snowflake channelId, const QString &content,
     client->sendMessage(channelId, content, nonce, replyToMessageId, outgoing);
 }
 
-void MessageManager::cancelSend(Snowflake channelId, const QString &nonce)
+void MessageManager::cancelSend(Snowflake channelId, const std::string &nonce)
 {
     if (!client->cancelMessageSend(nonce))
         return;
 
-    Snowflake nonceId(nonce.toULongLong());
+    Snowflake nonceId(parseSnowflake(nonce));
     messageCache.remove(nonceId);
     if (segments.contains(channelId))
         segments[channelId].remove(nonceId);
-    emit messageDeleted(channelId, nonceId);
+    messageDeleted.publish(channelId, nonceId);
 }
 
-// todo i dont like this here
-static QString reactionsToJson(const QList<Discord::Reaction> &reactions)
+static std::string reactionsToJson(const std::vector<Discord::Reaction> &reactions)
 {
-    if (reactions.isEmpty())
-        return {};
-
-    QJsonArray arr;
+    if (reactions.empty()) return {};
+    auto arr = nlohmann::json::array();
     for (const auto &r : reactions) {
-        QJsonObject emojiObj;
-        if (!r.emoji->isUnicode())
-            emojiObj["id"] = r.emoji->id->toString();
-        else
-            emojiObj["id"] = QJsonValue::Null;
-        emojiObj["name"] = *r.emoji->name;
-        if (r.emoji->animated.hasValue())
-            emojiObj["animated"] = *r.emoji->animated;
-
-        QJsonObject obj;
-        obj["emoji"] = emojiObj;
-        obj["count"] = *r.count;
-        obj["me"] = *r.me;
-
-        if (r.countDetails.hasValue()) {
-            QJsonObject details;
-            details["burst"] = *r.countDetails->burst;
-            details["normal"] = *r.countDetails->normal;
-            obj["count_details"] = details;
-        }
-
-        if (r.meBurst.hasValue())
-            obj["me_burst"] = *r.meBurst;
-        if (r.burstCount.hasValue())
-            obj["burst_count"] = *r.burstCount;
-
-        if (r.burstColors.hasValue()) {
-            QJsonArray colors;
-            for (const auto &c : *r.burstColors)
-                colors.append(c);
-            obj["burst_colors"] = colors;
-        }
-
-        arr.append(obj);
+        nlohmann::json emoji = {{"id", r.emoji->isUnicode() ? nlohmann::json(nullptr) : nlohmann::json(r.emoji->id->toString())}, {"name", *r.emoji->name}};
+        if (r.emoji->animated.hasValue()) emoji["animated"] = *r.emoji->animated;
+        nlohmann::json obj = {{"emoji", emoji}, {"count", *r.count}, {"me", *r.me}};
+        if (r.countDetails.hasValue()) obj["count_details"] = {{"burst", *r.countDetails->burst}, {"normal", *r.countDetails->normal}};
+        if (r.meBurst.hasValue()) obj["me_burst"] = *r.meBurst;
+        if (r.burstCount.hasValue()) obj["burst_count"] = *r.burstCount;
+        if (r.burstColors.hasValue()) obj["burst_colors"] = *r.burstColors;
+        arr.push_back(std::move(obj));
     }
-
-    QJsonDocument doc(arr);
-    return QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+    return arr.dump();
 }
 
 static void rebuildReactionsJson(Discord::Message &msg)
@@ -647,21 +647,17 @@ static void rebuildReactionsJson(Discord::Message &msg)
     msg.reactionsJson = reactionsToJson(*msg.reactions);
 }
 
-static QList<Discord::Reaction> reactionsFromJson(const QString &json)
+static std::vector<Discord::Reaction> reactionsFromJson(const std::string &json)
 {
-    QList<Discord::Reaction> reactions;
-    if (json.isEmpty())
-        return reactions;
-
-    QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
-    if (doc.isArray()) {
-        for (const QJsonValue &val : doc.array())
-            reactions.append(Discord::Reaction::fromJson(val.toObject()));
-    }
+    std::vector<Discord::Reaction> reactions;
+    auto doc = nlohmann::json::parse(json, nullptr, false);
+    if (doc.is_array())
+        for (const auto &value : doc)
+            if (value.is_object()) reactions.push_back(Discord::Reaction::fromJson(value));
     return reactions;
 }
 
-QList<Discord::Reaction> MessageManager::reactionsOf(Snowflake messageId)
+std::vector<Discord::Reaction> MessageManager::reactionsOf(Snowflake messageId)
 {
     if (const Discord::Message *cached = messageCache.object(messageId))
         return cached->reactions.valueOr();
@@ -671,15 +667,15 @@ QList<Discord::Reaction> MessageManager::reactionsOf(Snowflake messageId)
 void MessageManager::emitReactionUpdate(Discord::Message &msg)
 {
     rebuildReactionsJson(msg);
-    messageCache.insert(msg.id, new Discord::Message(msg));
+    messageCache.insert(msg.id, msg);
     repo.saveMessages({ msg });
-    emit messagesReceived({ true, Discord::Client::MessageLoadType::Created, msg.channelId, { msg } });
-    emit reactionsChanged(msg.id);
+    messagesReceived.publish(MessageRequestResult{ true, Discord::Client::MessageLoadType::Created, msg.channelId, { msg } });
+    reactionsChanged.publish(msg.id);
 }
 
-static bool addToReactions(QList<Discord::Reaction> &reactions,
+static bool addToReactions(std::vector<Discord::Reaction> &reactions,
                            const Discord::Emoji &emoji, bool isBurst, bool isMe,
-                           const QList<QString> &burstColors = {})
+                           const std::vector<std::string> &burstColors = {})
 {
     bool found = false;
     for (auto &r : reactions) {
@@ -699,7 +695,7 @@ static bool addToReactions(QList<Discord::Reaction> &reactions,
                 else
                     r.me = true;
             }
-            if (isBurst && !burstColors.isEmpty())
+            if (isBurst && !burstColors.empty())
                 r.burstColors = burstColors;
             found = true;
             break;
@@ -719,22 +715,22 @@ static bool addToReactions(QList<Discord::Reaction> &reactions,
         details.normal = isBurst ? 0 : 1;
         newReaction.countDetails = details;
 
-        if (isBurst && !burstColors.isEmpty())
+        if (isBurst && !burstColors.empty())
             newReaction.burstColors = burstColors;
 
-        reactions.append(newReaction);
+        reactions.push_back(newReaction);
     }
     return true;
 }
 
-void MessageManager::updateReactions(Snowflake messageId, const std::function<bool(QList<Discord::Reaction> &)> &mutate)
+void MessageManager::updateReactions(Snowflake messageId, const std::function<bool(std::vector<Discord::Reaction> &)> &mutate)
 {
     auto *cached = messageCache.object(messageId);
     if (!cached) {
-        QList<Discord::Reaction> reactions = reactionsFromJson(repo.getReactionsJson(messageId));
+        std::vector<Discord::Reaction> reactions = reactionsFromJson(repo.getReactionsJson(messageId));
         if (mutate(reactions)) {
             repo.updateReactionsJson(messageId, reactionsToJson(reactions));
-            emit reactionsChanged(messageId);
+            reactionsChanged.publish(messageId);
         }
         return;
     }
@@ -742,7 +738,7 @@ void MessageManager::updateReactions(Snowflake messageId, const std::function<bo
     Discord::Message msg = *cached;
 
     if (!msg.reactions.hasValue())
-        msg.reactions = QList<Discord::Reaction>();
+        msg.reactions = std::vector<Discord::Reaction>();
 
     if (mutate(*msg.reactions))
         emitReactionUpdate(msg);
@@ -753,12 +749,12 @@ void MessageManager::onReactionAdd(const Discord::MessageReactionAdd &event)
     bool isBurst = event.type.hasValue() && *event.type == 1;
     bool isMe = event.userId.get() == client->getMe().id.get();
     reactorStore->add({ event.messageId, event.emoji, isBurst }, event.userId);
-    updateReactions(event.messageId, [&](QList<Discord::Reaction> &reactions) {
+    updateReactions(event.messageId, [&](std::vector<Discord::Reaction> &reactions) {
         return addToReactions(reactions, event.emoji, isBurst, isMe, event.burstColors.valueOr({}));
     });
 }
 
-static void applyReactionAddMany(QList<Discord::Reaction> &reactions,
+static void applyReactionAddMany(std::vector<Discord::Reaction> &reactions,
                                  const Discord::MessageReactionAddMany &event, Snowflake myId)
 {
     for (const auto &debounced : *event.reactions) {
@@ -800,7 +796,7 @@ static void applyReactionAddMany(QList<Discord::Reaction> &reactions,
             details.normal = addCount;
             newReaction.countDetails = details;
 
-            reactions.append(newReaction);
+            reactions.push_back(newReaction);
         }
     }
 }
@@ -808,13 +804,13 @@ static void applyReactionAddMany(QList<Discord::Reaction> &reactions,
 void MessageManager::onReactionAddMany(const Discord::MessageReactionAddMany &event)
 {
     Snowflake myId = client->getMe().id;
-    updateReactions(event.messageId, [&](QList<Discord::Reaction> &reactions) {
+    updateReactions(event.messageId, [&](std::vector<Discord::Reaction> &reactions) {
         applyReactionAddMany(reactions, event, myId);
         return true;
     });
 }
 
-static bool removeFromReactions(QList<Discord::Reaction> &reactions,
+static bool removeFromReactions(std::vector<Discord::Reaction> &reactions,
                                 const Discord::Emoji &emoji, bool isBurst, bool isMe)
 {
     for (int i = 0; i < reactions.size(); ++i) {
@@ -825,9 +821,9 @@ static bool removeFromReactions(QList<Discord::Reaction> &reactions,
             r.count = *r.count - 1;
             if (r.countDetails.hasValue()) {
                 if (isBurst)
-                    r.countDetails->burst = qMax(0, *r.countDetails->burst - 1);
+                    r.countDetails->burst = std::max(0, *r.countDetails->burst - 1);
                 else
-                    r.countDetails->normal = qMax(0, *r.countDetails->normal - 1);
+                    r.countDetails->normal = std::max(0, *r.countDetails->normal - 1);
             }
             if (isMe) {
                 if (isBurst)
@@ -837,7 +833,7 @@ static bool removeFromReactions(QList<Discord::Reaction> &reactions,
             }
 
             if (*r.count <= 0)
-                reactions.removeAt(i);
+                reactions.erase(reactions.begin() + i);
 
             return true;
         }
@@ -850,7 +846,7 @@ void MessageManager::onReactionRemove(const Discord::MessageReactionRemove &even
     bool isBurst = event.type.hasValue() && *event.type == 1;
     bool isMe = event.userId.get() == client->getMe().id.get();
     reactorStore->remove({ event.messageId, event.emoji, isBurst }, event.userId);
-    updateReactions(event.messageId, [&](QList<Discord::Reaction> &reactions) {
+    updateReactions(event.messageId, [&](std::vector<Discord::Reaction> &reactions) {
         return removeFromReactions(reactions, event.emoji, isBurst, isMe);
     });
 }
@@ -870,7 +866,7 @@ void MessageManager::applyOptimistically(ReactionOp op, const ReactionChange &ch
         return;
 
     constexpr bool isMe = true;
-    updateReactions(change.messageId, [&](QList<Discord::Reaction> &reactions) {
+    updateReactions(change.messageId, [&](std::vector<Discord::Reaction> &reactions) {
         return op == ReactionOp::Add ? addToReactions(reactions, change.emoji, change.isBurst, isMe) : removeFromReactions(reactions, change.emoji, change.isBurst, isMe);
     });
 }
@@ -882,12 +878,12 @@ void MessageManager::onReactionRemoveAll(const Discord::MessageReactionRemoveAll
     auto *cached = messageCache.object(event.messageId);
     if (!cached) {
         repo.updateReactionsJson(event.messageId, {});
-        emit reactionsChanged(event.messageId);
+        reactionsChanged.publish(event.messageId);
         return;
     }
 
     Discord::Message msg = *cached;
-    msg.reactions = QList<Discord::Reaction>();
+    msg.reactions = std::vector<Discord::Reaction>();
 
     emitReactionUpdate(msg);
 }
@@ -898,16 +894,16 @@ void MessageManager::onReactionRemoveEmoji(const Discord::MessageReactionRemoveE
 
     auto *cached = messageCache.object(event.messageId);
     if (!cached) {
-        QList<Discord::Reaction> reactions =
+        std::vector<Discord::Reaction> reactions =
                 reactionsFromJson(repo.getReactionsJson(event.messageId));
         for (int i = 0; i < reactions.size(); ++i) {
             if (reactions[i].emoji->sameEmoji(event.emoji)) {
-                reactions.removeAt(i);
+                reactions.erase(reactions.begin() + i);
                 break;
             }
         }
         repo.updateReactionsJson(event.messageId, reactionsToJson(reactions));
-        emit reactionsChanged(event.messageId);
+        reactionsChanged.publish(event.messageId);
         return;
     }
 
@@ -918,7 +914,7 @@ void MessageManager::onReactionRemoveEmoji(const Discord::MessageReactionRemoveE
 
     for (int i = 0; i < msg.reactions->size(); ++i) {
         if ((*msg.reactions)[i].emoji->sameEmoji(event.emoji)) {
-            msg.reactions->removeAt(i);
+            msg.reactions->erase(msg.reactions->begin() + i);
             break;
         }
     }
@@ -926,7 +922,7 @@ void MessageManager::onReactionRemoveEmoji(const Discord::MessageReactionRemoveE
     emitReactionUpdate(msg);
 }
 
-void MessageManager::onApiMessagesReceived(const QList<Discord::Message> &messages, LoadType type,
+void MessageManager::onApiMessagesReceived(const std::vector<Discord::Message> &messages, LoadType type,
                                            Snowflake channelId, Snowflake anchorId)
 {
     repo.saveMessages(messages);
@@ -937,21 +933,19 @@ void MessageManager::onApiMessagesReceived(const QList<Discord::Message> &messag
 
     bool shortPage = sortedMessages.size() < PageSize;
     if (type == LoadType::History && shortPage)
-        channelStartId[channelId] = sortedMessages.isEmpty() ? anchorId : sortedMessages.first().id.get();
-    else if (type == LoadType::Latest && shortPage && !sortedMessages.isEmpty())
-        channelStartId[channelId] = sortedMessages.first().id.get();
+        channelStartId[channelId] = sortedMessages.empty() ? anchorId : sortedMessages.front().id.get();
+    else if (type == LoadType::Latest && shortPage && !sortedMessages.empty())
+        channelStartId[channelId] = sortedMessages.front().id.get();
 
     for (auto &msg : sortedMessages)
         parseMessageContent(msg);
 
     for (const auto &msg : sortedMessages) {
-        // cache owns its own copy
-        Discord::Message *toCache = new Discord::Message(msg);
-        messageCache.insert(toCache->id, toCache); // should remove old copies
+        messageCache.insert(msg.id, msg);
     }
 
     auto &segs = segments[channelId];
-    QList<Snowflake> ids = idsOf(sortedMessages);
+    std::vector<Snowflake> ids = idsOf(sortedMessages);
     bool reachedLatest = false;
 
     switch (type) {
@@ -978,11 +972,11 @@ void MessageManager::onApiMessagesReceived(const QList<Discord::Message> &messag
         }
         segs.merge(ids, anchorId, coversPresent);
 
-        Snowflake newestLoaded = ids.isEmpty() ? anchorId : ids.last();
+        Snowflake newestLoaded = ids.empty() ? anchorId : ids.back();
         auto pos = segs.find(newestLoaded);
 
         reachedLatest = pos.run ? pos.run->isTail : coversPresent;
-        qCDebug(LogCore) << "Loaded" << ids.size() << "messages around/after" << anchorId << "in"
+        log(LogLevel::Debug, LogCore) << "Loaded" << ids.size() << "messages around/after" << anchorId << "in"
                          << channelId << "coversPresent" << coversPresent << "reachedLatest" << reachedLatest;
 
         if (pos.run && reachedLatest) {
@@ -990,14 +984,14 @@ void MessageManager::onApiMessagesReceived(const QList<Discord::Message> &messag
                 auto *cached = messageCache.object(pos.run->ids[i]);
                 if (!cached)
                     break;
-                sortedMessages.append(*cached);
+                sortedMessages.push_back(*cached);
             }
         }
         break;
     }
     }
 
-    emit messagesReceived({ .success = true,
+    messagesReceived.publish(MessageRequestResult{ .success = true,
                             .type = type,
                             .channelId = channelId,
                             .messages = sortedMessages,

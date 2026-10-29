@@ -1,10 +1,7 @@
 #pragma once
 
-#include <QFont>
-#include <QHashFunctions>
-#include <QString>
-
-#include <type_traits>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace Styx {
@@ -17,22 +14,25 @@ enum class FontRole {
     Code,
 };
 
+struct Font {
+    std::string family;
+    double pointSize = 10;
+    int weight = 400;
+    bool italic = false;
+};
+
 struct FontDescriptor
 {
     FontRole role;
     const char *id;
     const char *label;
-    QFont defaultFont;
+    Font defaultFont;
 };
 
 const std::vector<FontDescriptor> &fontRegistry();
-const FontDescriptor *findFontById(const QString &id);
+const FontDescriptor *findFontById(std::string_view id);
 const FontDescriptor &fontDescriptor(FontRole role);
 
-inline size_t qHash(FontRole key, size_t seed = 0) noexcept
-{
-    return ::qHash(static_cast<std::underlying_type_t<FontRole>>(key), seed);
-}
 
 } // namespace Theme
 } // namespace Core

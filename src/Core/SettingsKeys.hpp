@@ -1,8 +1,9 @@
 #pragma once
 
-#include <QSettings>
-#include <QString>
-#include <QVariant>
+#include "Platform/Settings.hpp"
+
+#include <string>
+#include <string_view>
 
 namespace Styx::Core::Settings {
 
@@ -68,46 +69,44 @@ inline constexpr const char *StreamQuality = "720p30";
 inline constexpr bool StreamAudio = true;
 } // namespace Defaults
 
-// Storage wrapper: reads and writes persistent configuration.
-// Swapping QSettings to Platform::Settings in the future will be done in this wrapper.
-inline QVariant get(const QString &key, const QVariant &defaultValue = {})
+inline nlohmann::json get(std::string_view key, const nlohmann::json &defaultValue = {})
 {
-    return QSettings().value(key, defaultValue);
+    return Platform::Settings::instance().getJson(key, defaultValue);
 }
 
-inline bool getBool(const QString &key, bool defaultValue)
+inline bool getBool(std::string_view key, bool defaultValue)
 {
-    return QSettings().value(key, defaultValue).toBool();
+    return Platform::Settings::instance().getBool(key, defaultValue);
 }
 
-inline int getInt(const QString &key, int defaultValue)
+inline int getInt(std::string_view key, int defaultValue)
 {
-    return QSettings().value(key, defaultValue).toInt();
+    return Platform::Settings::instance().getInt(key, defaultValue);
 }
 
-inline QString getString(const QString &key, const QString &defaultValue = {})
+inline std::string getString(std::string_view key, std::string_view defaultValue = {})
 {
-    return QSettings().value(key, defaultValue).toString();
+    return Platform::Settings::instance().getString(key, defaultValue);
 }
 
-inline void set(const QString &key, const QVariant &value)
+inline void set(std::string_view key, const nlohmann::json &value)
 {
-    QSettings().setValue(key, value);
+    Platform::Settings::instance().setJson(key, value);
 }
 
-inline void setBool(const QString &key, bool value)
+inline void setBool(std::string_view key, bool value)
 {
-    QSettings().setValue(key, value);
+    Platform::Settings::instance().setBool(key, value);
 }
 
-inline void setInt(const QString &key, int value)
+inline void setInt(std::string_view key, int value)
 {
-    QSettings().setValue(key, value);
+    Platform::Settings::instance().setInt(key, value);
 }
 
-inline void setString(const QString &key, const QString &value)
+inline void setString(std::string_view key, std::string_view value)
 {
-    QSettings().setValue(key, value);
+    Platform::Settings::instance().setString(key, value);
 }
 
 } // namespace Styx::Core::Settings

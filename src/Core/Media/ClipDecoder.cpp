@@ -2,12 +2,17 @@
 
 #include "Core/AnimationTiming.hpp"
 
-#include <QFile>
-#include <QImageReader>
-#include <QPainter>
+#include <stb_image.h>
+#include <webp/demux.h>
 
 #include <algorithm>
+#include <cstring>
+#include <climits>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
+#include <vector>
 
 #ifdef STYX_HAVE_FFMPEG
 
@@ -37,109 +42,124 @@ enum class Container {
 
 constexpr int SniffedBytes = 12;
 
-Container sniffContainer(const QString &path)
+std::vector<uint8_t> readFile(const std::string &path)
 {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return Container::Unknown;
+    std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
 
-    const QByteArray head = file.read(SniffedBytes);
-    if (head.startsWith("GIF8"))
+Container sniffContainer(const std::string &path)
+{
+    std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
+    char head[SniffedBytes]{};
+    file.read(head, sizeof(head));
+    const auto size = file.gcount();
+    if (size >= 4 && std::memcmp(head, "GIF8", 4) == 0)
         return Container::Gif;
-    if (head.startsWith("RIFF") && head.mid(8, 4) == "WEBP")
+    if (size >= 12 && std::memcmp(head, "RIFF", 4) == 0 && std::memcmp(head + 8, "WEBP", 4) == 0)
         return Container::WebP;
-    if (head.mid(4, 4) == "ftyp")
+    if (size >= 8 && std::memcmp(head + 4, "ftyp", 4) == 0)
         return Container::Mp4;
-    if (head.startsWith("\x1a\x45\xdf\xa3"))
+    if (size >= 4 && std::memcmp(head, "\x1a\x45\xdf\xa3", 4) == 0)
         return Container::WebM;
     return Container::Unknown;
 }
 
-void premultiplyInto(QImage &reused, const QImage &source)
-{
-    const bool reusable = reused.size() == source.size() && reused.format() == QImage::Format_ARGB32_Premultiplied && reused.isDetached();
-    if (!reusable)
-        reused = QImage(source.size(), QImage::Format_ARGB32_Premultiplied);
-
-    QPainter painter(&reused);
-    painter.setCompositionMode(QPainter::CompositionMode_Source);
-    painter.drawImage(0, 0, source);
-}
-
-class ImageReaderClipDecoder final : public ClipDecoder
+class GifClipDecoder final : public ClipDecoder
 {
 public:
-    static std::unique_ptr<ClipDecoder> open(const QString &path)
+    static std::unique_ptr<ClipDecoder> open(const std::string &path)
     {
-        auto decoder = std::unique_ptr<ImageReaderClipDecoder>(new ImageReaderClipDecoder(path));
-        if (!decoder->file.open(QIODevice::ReadOnly) || !decoder->rewind() || !decoder->reader->supportsAnimation())
+        auto bytes = readFile(path);
+        if (bytes.empty() || bytes.size() > static_cast<size_t>(INT_MAX))
+            return nullptr;
+        auto decoder = std::unique_ptr<GifClipDecoder>(new GifClipDecoder);
+        int channels = 0;
+        decoder->pixels = stbi_load_gif_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                                    &decoder->delays, &decoder->size.width,
+                                                    &decoder->size.height, &decoder->count, &channels, 4);
+        if (!decoder->pixels || decoder->count <= 0)
             return nullptr;
         return decoder;
     }
-
-    QSize nativeSize() const override { return reader->size(); }
-
-    bool nextFrameOfLoop(QImage &frame, qint64 &startMs, const QSize &frameSize) override
+    ~GifClipDecoder() override { stbi_image_free(pixels); stbi_image_free(delays); }
+    Platform::Size nativeSize() const override { return size; }
+    bool nextFrameOfLoop(Platform::ImageBuffer &frame, int64_t &startMs, Platform::Size frameSize) override
     {
-        QImage image = reader->read();
-        if (image.isNull())
+        if (index >= count)
             return false;
-
+        storeFrame(frame, pixels + bytes(size) * index, size, frameSize);
         startMs = elapsedMs;
-        elapsedMs += normalizedFrameDelayMs(reader->nextImageDelay());
-
-        if (image.size() != frameSize)
-            image = image.scaled(frameSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        premultiplyInto(frame, image);
-        return !frame.isNull();
+        elapsedMs += normalizedFrameDelayMs(delays ? delays[index] : 0);
+        ++index;
+        return !frame.empty();
     }
-
-    qint64 finishedLoopMs() const override { return elapsedMs; }
-
-    bool rewind() override
-    {
-        elapsedMs = 0;
-        file.seek(0);
-        reader = std::make_unique<QImageReader>(&file);
-        return reader->canRead();
-    }
-
+    int64_t finishedLoopMs() const override { return elapsedMs; }
+    bool rewind() override { index = 0; elapsedMs = 0; return true; }
 private:
-    explicit ImageReaderClipDecoder(const QString &path) : file(path) {}
+    stbi_uc *pixels = nullptr;
+    int *delays = nullptr;
+    Platform::Size size;
+    int count = 0;
+    int index = 0;
+    int64_t elapsedMs = 0;
+};
 
-    QFile file;
-    std::unique_ptr<QImageReader> reader;
-    qint64 elapsedMs = 0;
+class WebpClipDecoder final : public ClipDecoder
+{
+public:
+    static std::unique_ptr<ClipDecoder> open(const std::string &path)
+    {
+        auto decoder = std::unique_ptr<WebpClipDecoder>(new WebpClipDecoder);
+        decoder->bytes = readFile(path);
+        if (decoder->bytes.empty())
+            return nullptr;
+        WebPData data{decoder->bytes.data(), decoder->bytes.size()};
+        WebPAnimDecoderOptions options;
+        if (!WebPAnimDecoderOptionsInit(&options))
+            return nullptr;
+        options.color_mode = MODE_RGBA;
+        decoder->animation = WebPAnimDecoderNew(&data, &options);
+        WebPAnimInfo info{};
+        if (!decoder->animation || !WebPAnimDecoderGetInfo(decoder->animation, &info) || info.frame_count < 2)
+            return nullptr;
+        decoder->size = {static_cast<int>(info.canvas_width), static_cast<int>(info.canvas_height)};
+        return decoder;
+    }
+    ~WebpClipDecoder() override { if (animation) WebPAnimDecoderDelete(animation); }
+    Platform::Size nativeSize() const override { return size; }
+    bool nextFrameOfLoop(Platform::ImageBuffer &frame, int64_t &startMs, Platform::Size frameSize) override
+    {
+        uint8_t *pixels = nullptr;
+        int timestamp = 0;
+        if (!WebPAnimDecoderHasMoreFrames(animation) || !WebPAnimDecoderGetNext(animation, &pixels, &timestamp))
+            return false;
+        storeFrame(frame, pixels, size, frameSize);
+        startMs = elapsedMs;
+        elapsedMs += normalizedFrameDelayMs(timestamp - lastTimestamp);
+        lastTimestamp = timestamp;
+        return !frame.empty();
+    }
+    int64_t finishedLoopMs() const override { return elapsedMs; }
+    bool rewind() override { WebPAnimDecoderReset(animation); elapsedMs = 0; lastTimestamp = 0; return true; }
+private:
+    std::vector<uint8_t> bytes;
+    WebPAnimDecoder *animation = nullptr;
+    Platform::Size size;
+    int lastTimestamp = 0;
+    int64_t elapsedMs = 0;
 };
 
 #ifdef STYX_HAVE_FFMPEG
 
 constexpr int SwscaleOverrunBytes = 64;
-constexpr qint64 UnknownLastFrameMs = 100;
+constexpr int64_t UnknownLastFrameMs = 100;
 constexpr int FramesReadAheadToGuessFrameRate = 0;
-
-QImage imageWithSwscaleOverrunRoom(const QSize &size, QImage::Format format)
-{
-    const int stride = size.width() * 4;
-    auto *pixels = static_cast<uchar *>(av_malloc(size_t(stride) * size_t(size.height()) + SwscaleOverrunBytes));
-    if (!pixels)
-        return {};
-    return QImage(pixels, size.width(), size.height(), stride, format, [](void *owned) { av_free(owned); }, pixels);
-}
-
-void premultiply(QImage &straightAlpha)
-{
-    auto *pixel = reinterpret_cast<QRgb *>(straightAlpha.bits());
-    for (const QRgb *end = pixel + qsizetype(straightAlpha.width()) * straightAlpha.height(); pixel != end; ++pixel) {
-        if (qAlpha(*pixel) != 255)
-            *pixel = qPremultiply(*pixel);
-    }
-}
 
 class FfmpegClipDecoder final : public ClipDecoder
 {
 public:
-    static std::unique_ptr<ClipDecoder> open(const QString &path, const char *demuxer)
+    static std::unique_ptr<ClipDecoder> open(const std::string &path, const char *demuxer)
     {
         auto decoder = std::unique_ptr<FfmpegClipDecoder>(new FfmpegClipDecoder(path, demuxer));
         if (!decoder->decoded || !decoder->packet || !decoder->openInput())
@@ -155,9 +175,9 @@ public:
         av_packet_free(&packet);
     }
 
-    QSize nativeSize() const override { return QSize(codec->width, codec->height); }
+    Platform::Size nativeSize() const override { return {codec->width, codec->height}; }
 
-    bool nextFrameOfLoop(QImage &frame, qint64 &startMs, const QSize &frameSize) override
+    bool nextFrameOfLoop(Platform::ImageBuffer &frame, int64_t &startMs, Platform::Size frameSize) override
     {
         if (!receiveFrame())
             return false;
@@ -178,9 +198,9 @@ public:
         return converted;
     }
 
-    qint64 finishedLoopMs() const override
+    int64_t finishedLoopMs() const override
     {
-        const qint64 demuxedMs = firstPts && streamEndPts ? toMs(*streamEndPts - *firstPts) : 0;
+        const int64_t demuxedMs = firstPts && streamEndPts ? toMs(*streamEndPts - *firstPts) : 0;
         if (demuxedMs > lastStartMs)
             return demuxedMs;
         return lastStartMs + (lastGapMs > 0 ? lastGapMs : UnknownLastFrameMs);
@@ -201,8 +221,8 @@ public:
     }
 
 private:
-    FfmpegClipDecoder(const QString &path, const char *demuxer)
-        : path(path.toUtf8()), demuxer(demuxer), decoded(av_frame_alloc()), packet(av_packet_alloc())
+    FfmpegClipDecoder(const std::string &path, const char *demuxer)
+        : path(path), demuxer(demuxer), decoded(av_frame_alloc()), packet(av_packet_alloc())
     {
     }
 
@@ -210,7 +230,7 @@ private:
     {
         AVDictionary *options = nullptr;
         av_dict_set(&options, "protocol_whitelist", "file", 0);
-        const int opened = avformat_open_input(&format, path.constData(), av_find_input_format(demuxer), &options);
+        const int opened = avformat_open_input(&format, path.c_str(), av_find_input_format(demuxer), &options);
         av_dict_free(&options);
         if (opened < 0)
             return false;
@@ -250,7 +270,7 @@ private:
         videoStream = -1;
     }
 
-    [[nodiscard]] qint64 toMs(int64_t streamTicks) const { return av_rescale_q(streamTicks, timeBase, AVRational{ 1, 1000 }); }
+    [[nodiscard]] int64_t toMs(int64_t streamTicks) const { return av_rescale_q(streamTicks, timeBase, AVRational{ 1, 1000 }); }
 
     void feedDecoder()
     {
@@ -284,33 +304,28 @@ private:
         }
     }
 
-    bool convert(QImage &frame, const QSize &frameSize)
+    bool convert(Platform::ImageBuffer &frame, Platform::Size frameSize)
     {
-        const AVPixFmtDescriptor *layout = av_pix_fmt_desc_get(AVPixelFormat(decoded->format));
-        const bool hasAlpha = layout && (layout->flags & AV_PIX_FMT_FLAG_ALPHA);
-        const QImage::Format wanted = hasAlpha ? QImage::Format_ARGB32_Premultiplied : QImage::Format_RGB32;
-
-        const bool reusable = frame.size() == frameSize && frame.format() == wanted && frame.isDetached();
-        if (!reusable)
-            frame = imageWithSwscaleOverrunRoom(frameSize, wanted);
-        if (frame.isNull())
+        if (frameSize.empty())
             return false;
-
-        scaler = sws_getCachedContext(scaler, decoded->width, decoded->height, AVPixelFormat(decoded->format), frameSize.width(),
-                                      frameSize.height(), AV_PIX_FMT_RGB32, SWS_BILINEAR, nullptr, nullptr, nullptr);
+        const size_t bytes = static_cast<size_t>(frameSize.width) * frameSize.height * 4;
+        frame.width = frameSize.width;
+        frame.height = frameSize.height;
+        frame.channels = 4;
+        frame.pixels.resize(bytes + SwscaleOverrunBytes);
+        scaler = sws_getCachedContext(scaler, decoded->width, decoded->height, AVPixelFormat(decoded->format),
+                                      frameSize.width, frameSize.height, AV_PIX_FMT_RGBA,
+                                      SWS_BILINEAR, nullptr, nullptr, nullptr);
         if (!scaler)
             return false;
-
-        uint8_t *planes[4] = { frame.bits(), nullptr, nullptr, nullptr };
-        int strides[4] = { int(frame.bytesPerLine()), 0, 0, 0 };
+        uint8_t *planes[4] = {frame.pixels.data(), nullptr, nullptr, nullptr};
+        int strides[4] = {frameSize.width * 4, 0, 0, 0};
         sws_scale(scaler, decoded->data, decoded->linesize, 0, decoded->height, planes, strides);
-
-        if (hasAlpha)
-            premultiply(frame);
+        frame.pixels.resize(bytes);
         return true;
     }
 
-    QByteArray path;
+    std::string path;
     const char *demuxer;
 
     AVFormatContext *format = nullptr;
@@ -323,12 +338,12 @@ private:
 
     std::optional<int64_t> firstPts;
     std::optional<int64_t> streamEndPts;
-    qint64 lastStartMs = 0;
-    qint64 lastGapMs = 0;
+    int64_t lastStartMs = 0;
+    int64_t lastGapMs = 0;
     bool draining = false;
 };
 
-std::unique_ptr<ClipDecoder> openWithFfmpeg(const QString &path, Container container)
+std::unique_ptr<ClipDecoder> openWithFfmpeg(const std::string &path, Container container)
 {
     switch (container) {
     case Container::Gif:
@@ -346,7 +361,7 @@ std::unique_ptr<ClipDecoder> openWithFfmpeg(const QString &path, Container conta
 
 #else // STYX_HAVE_FFMPEG
 
-std::unique_ptr<ClipDecoder> openWithFfmpeg(const QString &, Container)
+std::unique_ptr<ClipDecoder> openWithFfmpeg(const std::string &, Container)
 {
     return nullptr;
 }
@@ -355,14 +370,17 @@ std::unique_ptr<ClipDecoder> openWithFfmpeg(const QString &, Container)
 
 } // namespace
 
-std::unique_ptr<ClipDecoder> ClipDecoder::open(const QString &path)
+std::unique_ptr<ClipDecoder> ClipDecoder::open(const std::string &path)
 {
     const Container container = sniffContainer(path);
     if (auto decoder = openWithFfmpeg(path, container))
         return decoder;
 
-    const bool qtCanAnimate = container == Container::WebP || container == Container::Gif;
-    return qtCanAnimate ? ImageReaderClipDecoder::open(path) : nullptr;
+    if (container == Container::Gif)
+        return GifClipDecoder::open(path);
+    if (container == Container::WebP)
+        return WebpClipDecoder::open(path);
+    return nullptr;
 }
 
 } // namespace Media

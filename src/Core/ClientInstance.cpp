@@ -10,8 +10,9 @@
 
 #include <algorithm>
 
-#include <QSet>
-#include <QTimer>
+#include <chrono>
+#include <cstdint>
+#include "Platform/Dispatcher.hpp"
 
 #include "Core/Logging.hpp"
 #include "ForumManager.hpp"
@@ -28,12 +29,12 @@ namespace Core {
 
 namespace {
 
-void removeBanOf(QList<Discord::Ban> &bans, Snowflake userId)
+void removeBanOf(std::vector<Discord::Ban> &bans, Snowflake userId)
 {
     bans.erase(std::remove_if(bans.begin(), bans.end(), [userId](const Discord::Ban &ban) { return ban.user->id.get() == userId; }), bans.end());
 }
 
-void removeInvite(QList<Discord::Invite> &invites, const QString &code)
+void removeInvite(std::vector<Discord::Invite> &invites, const std::string &code)
 {
     invites.erase(std::remove_if(invites.begin(), invites.end(), [&code](const Discord::Invite &invite) { return invite.code.get() == code; }), invites.end());
 }
@@ -41,76 +42,73 @@ void removeInvite(QList<Discord::Invite> &invites, const QString &code)
 } // namespace
 
 ClientInstance::ClientInstance(const AccountInfo &info,
-                               Discord::CaptchaResolver *captchaResolver,
-                               QObject *parent)
-    : QObject(parent),
-      account(info),
+                               Discord::CaptchaResolver *captchaResolver)
+    : account(info),
       roleRepo(info.id),
       guildRepo(info.id),
       channelRepo(info.id),
       memberRepo(info.id)
 {
-    client = new Discord::Client(info.token, info.gatewayUrl, info.restUrl, info.proxy, captchaResolver, this);
-    connect(client, &Discord::Client::heartbeatSessionChanged, this, &ClientInstance::onHeartbeatSessionChanged);
+    client = std::make_unique<Discord::Client>(info.token, info.gatewayUrl, info.restUrl, info.proxy, captchaResolver);
+    track(client->heartbeatSessionChanged.connect([this](auto &&...args) { onHeartbeatSessionChanged(args...); }));
     client->restoreHeartbeatSession(accountRepo.getHeartbeatSession(info.id));
 
     Storage::DatabaseManager::instance().openCacheDatabase(info.id);
 
-    userManager = new UserManager(info.id, this);
-    messageManager = new MessageManager(info.id, client, userManager, this);
-    messageManager->setChannelResolver([this](Snowflake channelId) -> QString {
+    userManager = std::make_unique<UserManager>(info.id);
+    messageManager = std::make_unique<MessageManager>(info.id, client.get(), userManager.get());
+    messageManager->setChannelResolver([this](Snowflake channelId) -> std::string {
         auto ch = channelRepo.getChannel(channelId);
         if (ch && ch->name.hasValue())
             return ch->name.get();
-        return QString::number(channelId);
+        return channelId.toString();
     });
     messageManager->setChannelLinkResolver([this](const Markdown::ChannelLinkRef &ref) {
         return channelLinkParts(ref);
     });
 
-    permissionManager = new PermissionManager(info.id, this);
-    readStateManager = new ReadStateManager(info.id, permissionManager, this);
-    forumManager = new ForumManager(client, channelRepo, readStateManager, this);
-    memberListManager = new MemberListManager(channelRepo, roleRepo, this);
-    relationshipManager = new RelationshipManager(this);
-    userManager->setRelationshipManager(relationshipManager);
-    presenceManager = new PresenceManager(this);
-    emojiManager = new EmojiManager(client, this, this);
-    favoriteGifManager = new FavoriteGifs(client, this);
-    messageManager->setEmojiManager(emojiManager);
+    permissionManager = std::make_unique<PermissionManager>(info.id);
+    readStateManager = std::make_unique<ReadStateManager>(info.id, permissionManager.get());
+    forumManager = std::make_unique<ForumManager>(client.get(), channelRepo, readStateManager.get());
+    memberListManager = std::make_unique<MemberListManager>(channelRepo, roleRepo);
+    relationshipManager = std::make_unique<RelationshipManager>();
+    userManager->setRelationshipManager(relationshipManager.get());
+    presenceManager = std::make_unique<PresenceManager>();
+    emojiManager = std::make_unique<EmojiManager>(client.get(), this);
+    favoriteGifManager = std::make_unique<FavoriteGifs>(client.get());
+    messageManager->setEmojiManager(emojiManager.get());
 
     callStore = std::make_unique<CallStore>();
-    connect(client, &Discord::Client::callCreated, this, &ClientInstance::onCallCreated);
-    connect(client, &Discord::Client::callUpdated, this, [this](const Discord::CallUpdate &event) {
+    track(client->callCreated.connect([this](auto &&...args) { onCallCreated(args...); }));
+    track(client->callUpdated.connect([this](const Discord::CallUpdate &event) {
         callStore->handleCallUpdate(event);
-    });
-    connect(client, &Discord::Client::callDeleted, this, &ClientInstance::onCallDeleted);
+    }));
+    track(client->callDeleted.connect([this](auto &&...args) { onCallDeleted(args...); }));
 #ifndef STYX_NO_VOICE
-    voiceManager = new Audio::VoiceManager(info.id, info.proxy, this);
-    connect(voiceManager, &Audio::VoiceManager::voiceConnected, this, &ClientInstance::onVoiceConnected);
-    connect(voiceManager, &Audio::VoiceManager::voiceDisconnected, this, &ClientInstance::onVoiceDisconnected);
+    voiceManager = std::make_unique<Audio::VoiceManager>(info.id, info.proxy);
+    track(voiceManager->voiceConnected.connect([this](auto &&...args) { onVoiceConnected(args...); }));
+    track(voiceManager->voiceDisconnected.connect([this](auto &&...args) { onVoiceDisconnected(args...); }));
 #endif
 #ifdef STYX_HAVE_SCREENSHARE
-    streamManager = new Stream::StreamManager(info.id, info.proxy, client, voiceManager, this);
-    connect(client, &Discord::Client::streamCreated, streamManager, &Stream::StreamManager::handleStreamCreate);
-    connect(client, &Discord::Client::streamServerUpdated, streamManager, &Stream::StreamManager::handleStreamServerUpdate);
-    connect(client, &Discord::Client::streamDeleted, streamManager, &Stream::StreamManager::handleStreamDelete);
-    connect(voiceManager, &Audio::VoiceManager::voiceDisconnected, streamManager, &Stream::StreamManager::stopAll);
+    streamManager = std::make_unique<Stream::StreamManager>(info.id, info.proxy, client.get(), voiceManager.get());
+    track(client->streamCreated.connect([this](auto &&...args) { streamManager->handleStreamCreate(args...); }));
+    track(client->streamServerUpdated.connect([this](auto &&...args) { streamManager->handleStreamServerUpdate(args...); }));
+    track(client->streamDeleted.connect([this](auto &&...args) { streamManager->handleStreamDelete(args...); }));
+    track(voiceManager->voiceDisconnected.connect([this](auto &&...args) { streamManager->stopAll(args...); }));
     // a watched streamer who stops sharing leaves the call or flips self_stream off
-    connect(voiceManager, &Audio::VoiceManager::participantLeft, streamManager, [this](Snowflake userId) {
+    track(voiceManager->participantLeft.connect([this](Snowflake userId) {
         if (streamManager->isWatching(userId))
             streamManager->stopWatching(userId);
-    });
+    }));
 #endif
 
-    connect(client, &Discord::Client::stateChanged, this, &ClientInstance::stateChanged);
-    connect(client, &Discord::Client::reconnecting, this, &ClientInstance::reconnecting);
-    connect(client, &Discord::Client::authenticationFailed, this,
-            [this]() { emit authenticationFailed(account); });
+    track(client->stateChanged.connect([this](auto &&...args) { stateChanged.publish(args...); }));
+    track(client->reconnecting.connect([this](auto &&...args) { reconnecting.publish(args...); }));
+    track(client->authenticationFailed.connect([this]() { authenticationFailed.publish(account); }));
 
-    connect(client, &Discord::Client::ready, this, [this](const Discord::Ready &ready) {
+    track(client->ready.connect([this](const Discord::Ready &ready) {
         auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
-        gatewaySessionId = ready.sessionId.valueOr(QString());
+        gatewaySessionId = ready.sessionId.valueOr(std::string());
         callStore->reset();
         connectSelectedCall(true);
 
@@ -118,7 +116,7 @@ ClientInstance::ClientInstance(const AccountInfo &info,
         account.displayName = ready.user->globalName;
         account.avatar = ready.user->avatar;
 
-        QList<Snowflake> guildIds;
+        std::vector<Snowflake> guildIds;
         guildIds.reserve(ready.guilds->size());
 
         permissionManager->setSelfMfaEnabled(ready.user->mfaEnabled.valueOr(true));
@@ -126,9 +124,9 @@ ClientInstance::ClientInstance(const AccountInfo &info,
         Storage::Transaction txn(db);
         for (size_t i = 0; i < ready.guilds->size(); i++) {
             const auto &guild = ready.guilds->at(i);
-            const QList<Discord::Member> *members = ready.mergedMembers.hasValue() ? &ready.mergedMembers->at(i) : nullptr;
+            const std::vector<Discord::Member> *members = ready.mergedMembers.hasValue() ? &ready.mergedMembers->at(i) : nullptr;
             saveGuild(guild, members, ready.user->id.get(), db);
-            guildIds.append(guild.properties->id);
+            guildIds.push_back(guild.properties->id);
         }
 
         userManager->saveUser(ready.user);
@@ -144,17 +142,17 @@ ClientInstance::ClientInstance(const AccountInfo &info,
             for (const auto &channel : ready.privateChannels.get()) {
                 channelRepo.saveChannel(channel, db);
 
-                QList<Core::Snowflake> recipientIds;
+                std::vector<Core::Snowflake> recipientIds;
                 if (channel.recipients.hasValue()) {
                     for (const auto &user : channel.recipients.get()) {
                         userManager->saveUser(user);
-                        recipientIds.append(user.id.get());
+                        recipientIds.push_back(user.id.get());
                     }
                 } else if (channel.recipientIds.hasValue()) {
                     recipientIds = channel.recipientIds.get();
                 }
 
-                if (!recipientIds.isEmpty())
+                if (!recipientIds.empty())
                     channelRepo.saveChannelRecipients(channel.id.get(), recipientIds, db);
             }
         }
@@ -169,9 +167,9 @@ ClientInstance::ClientInstance(const AccountInfo &info,
 
         readStateManager->loadFromReady(
                 ready.readState.hasValue() ? ready.readState.get()
-                                           : QList<Discord::ReadStateEntry>{},
+                                           : std::vector<Discord::ReadStateEntry>{},
                 ready.userGuildSettings.hasValue() ? ready.userGuildSettings.get()
-                                                   : QList<Discord::UserGuildSettings>{},
+                                                   : std::vector<Discord::UserGuildSettings>{},
                 ready.notificationSettings.hasValue() && ready.notificationSettings->flags.hasValue()
                         ? ready.notificationSettings->flags.get()
                         : 0);
@@ -186,12 +184,11 @@ ClientInstance::ClientInstance(const AccountInfo &info,
                 readStateManager->registerPrivateChannel(channel);
         }
 
-        emit detailsUpdated(account);
-        emit this->ready(ready);
-    });
+        detailsUpdated.publish(account);
+        ready.publish(ready);
+    }));
 
-    connect(client, &Discord::Client::readySupplemental, this,
-            [this](const Discord::ReadySupplemental &data) {
+    track(client->readySupplemental.connect([this](const Discord::ReadySupplemental &data) {
                 auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
                 Storage::Transaction txn(db);
@@ -207,10 +204,10 @@ ClientInstance::ClientInstance(const AccountInfo &info,
                 txn.commit();
 
                 if (data.mergedPresences.hasValue()) {
-                    QList<Snowflake> guildIds;
+                    std::vector<Snowflake> guildIds;
                     guildIds.reserve(data.guilds->size());
                     for (const auto &guild : data.guilds.get())
-                        guildIds.append(guild.id.get());
+                        guildIds.push_back(guild.id.get());
                     presenceManager->loadMergedPresences(data.mergedPresences.get(), guildIds);
                 }
 
@@ -225,106 +222,104 @@ ClientInstance::ClientInstance(const AccountInfo &info,
                     }
                 }
 #endif
-            });
+            }));
 
-    connect(client, &Discord::Client::messageCreated, messageManager, &MessageManager::onMessageCreated);
-    connect(client, &Discord::Client::messageUpdated, messageManager, &MessageManager::onMessageUpdated);
-    connect(client, &Discord::Client::messageDeleted, messageManager, &MessageManager::onMessageDeleted);
-    connect(client, &Discord::Client::messageSendFailed, messageManager, &MessageManager::onMessageSendFailed);
-    connect(client, &Discord::Client::attachmentUploadProgress, messageManager, &MessageManager::attachmentUploadProgress);
-    connect(client, &Discord::Client::messageReactionAdd, messageManager, &MessageManager::onReactionAdd);
-    connect(client, &Discord::Client::messageReactionAddMany, messageManager, &MessageManager::onReactionAddMany);
-    connect(client, &Discord::Client::messageReactionRemove, messageManager, &MessageManager::onReactionRemove);
-    connect(client, &Discord::Client::messageReactionRemoveAll, messageManager, &MessageManager::onReactionRemoveAll);
-    connect(client, &Discord::Client::messageReactionRemoveEmoji, messageManager, &MessageManager::onReactionRemoveEmoji);
-    connect(client, &Discord::Client::relationshipAdded, relationshipManager, &RelationshipManager::onRelationshipAdded);
-    connect(client, &Discord::Client::relationshipUpdated, relationshipManager, &RelationshipManager::onRelationshipUpdated);
-    connect(client, &Discord::Client::relationshipRemoved, relationshipManager, &RelationshipManager::onRelationshipRemoved);
-    connect(client, &Discord::Client::userNoteUpdated, this,
-            [this](const Discord::UserNoteUpdate &event) {
+    track(client->messageCreated.connect([this](auto &&...args) { messageManager->onMessageCreated(args...); }));
+    track(client->messageUpdated.connect([this](auto &&...args) { messageManager->onMessageUpdated(args...); }));
+    track(client->messageDeleted.connect([this](auto &&...args) { messageManager->onMessageDeleted(args...); }));
+    track(client->messageSendFailed.connect([this](auto &&...args) { messageManager->onMessageSendFailed(args...); }));
+    track(client->attachmentUploadProgress.connect([this](auto &&...args) { messageManager->attachmentUploadProgress.publish(args...); }));
+    track(client->messageReactionAdd.connect([this](auto &&...args) { messageManager->onReactionAdd(args...); }));
+    track(client->messageReactionAddMany.connect([this](auto &&...args) { messageManager->onReactionAddMany(args...); }));
+    track(client->messageReactionRemove.connect([this](auto &&...args) { messageManager->onReactionRemove(args...); }));
+    track(client->messageReactionRemoveAll.connect([this](auto &&...args) { messageManager->onReactionRemoveAll(args...); }));
+    track(client->messageReactionRemoveEmoji.connect([this](auto &&...args) { messageManager->onReactionRemoveEmoji(args...); }));
+    track(client->relationshipAdded.connect([this](auto &&...args) { relationshipManager->onRelationshipAdded(args...); }));
+    track(client->relationshipUpdated.connect([this](auto &&...args) { relationshipManager->onRelationshipUpdated(args...); }));
+    track(client->relationshipRemoved.connect([this](auto &&...args) { relationshipManager->onRelationshipRemoved(args...); }));
+    track(client->userNoteUpdated.connect([this](const Discord::UserNoteUpdate &event) {
                 if (event.id.hasValue() && event.note.hasValue())
                     userManager->setCachedNote(event.id.get(), event.note.get());
-            });
+            }));
 
-    connect(client, &Discord::Client::ready, emojiManager, &EmojiManager::onReady);
-    connect(client, &Discord::Client::guildEmojisUpdated, emojiManager, &EmojiManager::onGuildEmojisUpdated);
-    connect(client, &Discord::Client::userSettingsProtoUpdated, emojiManager, &EmojiManager::onUserSettingsProtoUpdated);
-    connect(client, &Discord::Client::frecencySettingsReceived, emojiManager, &EmojiManager::onFrecencySettingsReceived);
-    connect(client, &Discord::Client::userSettingsProtoUpdated, favoriteGifManager, &FavoriteGifs::onUserSettingsProtoUpdated);
-    connect(client, &Discord::Client::frecencySettingsReceived, favoriteGifManager, &FavoriteGifs::onFrecencySettingsReceived);
-    connect(client, &Discord::Client::settingsChanged, this, [this]() { presenceManager->applyProtoStatus(client->getSettings()); });
+    track(client->ready.connect([this](const auto &) { emojiManager->onReady(); }));
+    track(client->guildEmojisUpdated.connect([this](auto &&...args) { emojiManager->onGuildEmojisUpdated(args...); }));
+    track(client->userSettingsProtoUpdated.connect([this](auto &&...args) { emojiManager->onUserSettingsProtoUpdated(args...); }));
+    track(client->frecencySettingsReceived.connect([this](auto &&...args) { emojiManager->onFrecencySettingsReceived(args...); }));
+    track(client->userSettingsProtoUpdated.connect([this](auto &&...args) { favoriteGifManager->onUserSettingsProtoUpdated(args...); }));
+    track(client->frecencySettingsReceived.connect([this](auto &&...args) { favoriteGifManager->onFrecencySettingsReceived(args...); }));
+    track(client->settingsChanged.connect([this]() { presenceManager->applyProtoStatus(client->getSettings()); }));
 
-    connect(client, &Discord::Client::presenceUpdated, presenceManager, &PresenceManager::onPresenceUpdate);
-    connect(client, &Discord::Client::presencesReplaced, presenceManager, &PresenceManager::onPresencesReplace);
-    connect(client, &Discord::Client::sessionsReplaced, presenceManager, &PresenceManager::onSessionsReplace);
-    connect(client, &Discord::Client::guildCreated, presenceManager, &PresenceManager::onGuildCreated);
-    connect(client, &Discord::Client::guildMembersChunk, presenceManager, &PresenceManager::onGuildMembersChunk);
+    track(client->presenceUpdated.connect([this](auto &&...args) { presenceManager->onPresenceUpdate(args...); }));
+    track(client->presencesReplaced.connect([this](auto &&...args) { presenceManager->onPresencesReplace(args...); }));
+    track(client->sessionsReplaced.connect([this](auto &&...args) { presenceManager->onSessionsReplace(args...); }));
+    track(client->guildCreated.connect([this](auto &&...args) { presenceManager->onGuildCreated(args...); }));
+    track(client->guildMembersChunk.connect([this](auto &&...args) { presenceManager->onGuildMembersChunk(args...); }));
 
-    connect(client, &Discord::Client::guildCreated, this, &ClientInstance::onGuildCreated);
-    connect(client, &Discord::Client::guildUpdated, this, &ClientInstance::onGuildUpdated);
-    connect(client, &Discord::Client::guildDeleted, this, &ClientInstance::onGuildDeleted);
-    connect(client, &Discord::Client::channelCreated, this, &ClientInstance::onChannelCreated);
-    connect(client, &Discord::Client::channelUpdated, this, &ClientInstance::onChannelUpdated);
-    connect(client, &Discord::Client::channelDeleted, this, &ClientInstance::onChannelDeleted);
-    connect(client, &Discord::Client::guildRoleCreated, this, &ClientInstance::onGuildRoleCreated);
-    connect(client, &Discord::Client::guildRoleUpdated, this, &ClientInstance::onGuildRoleUpdated);
-    connect(client, &Discord::Client::guildRoleDeleted, this, &ClientInstance::onGuildRoleDeleted);
-    connect(client, &Discord::Client::guildMembersChunk, this, &ClientInstance::onGuildMembersChunk);
-    connect(client, &Discord::Client::guildMemberAdded, this, &ClientInstance::onGuildMemberAdded);
-    connect(client, &Discord::Client::guildMemberUpdated, this, &ClientInstance::onGuildMemberUpdate);
-    connect(client, &Discord::Client::guildMemberRemoved, this, &ClientInstance::onGuildMemberRemoved);
-    connect(client, &Discord::Client::guildBanAdded, this, &ClientInstance::onGuildBanAdded);
-    connect(client, &Discord::Client::guildBanRemoved, this, &ClientInstance::onGuildBanRemoved);
-    connect(client, &Discord::Client::inviteCreated, this, &ClientInstance::onInviteCreated);
-    connect(client, &Discord::Client::inviteRevoked, this, &ClientInstance::onInviteRevoked);
-    connect(client, &Discord::Client::guildMemberListUpdate, presenceManager, &PresenceManager::onGuildMemberListUpdate);
-    connect(client, &Discord::Client::guildMemberListUpdate, memberListManager, &MemberListManager::handleMemberListUpdate);
-    connect(client, &Discord::Client::guildMemberListUpdate, this, &ClientInstance::onGuildMemberListUpdate);
-    connect(memberListManager, &MemberListManager::subscriptionRequested, client, &Discord::Client::subscribeToGuildChannel);
-    connect(messageManager, &MessageManager::messagesReceived, this, &ClientInstance::onMessagesReceived);
-    connect(messageManager, &MessageManager::membersLearnedFromMessage, this, &ClientInstance::membersUpdated);
+    track(client->guildCreated.connect([this](auto &&...args) { onGuildCreated(args...); }));
+    track(client->guildUpdated.connect([this](auto &&...args) { onGuildUpdated(args...); }));
+    track(client->guildDeleted.connect([this](auto &&...args) { onGuildDeleted(args...); }));
+    track(client->channelCreated.connect([this](auto &&...args) { onChannelCreated(args...); }));
+    track(client->channelUpdated.connect([this](auto &&...args) { onChannelUpdated(args...); }));
+    track(client->channelDeleted.connect([this](auto &&...args) { onChannelDeleted(args...); }));
+    track(client->guildRoleCreated.connect([this](auto &&...args) { onGuildRoleCreated(args...); }));
+    track(client->guildRoleUpdated.connect([this](auto &&...args) { onGuildRoleUpdated(args...); }));
+    track(client->guildRoleDeleted.connect([this](auto &&...args) { onGuildRoleDeleted(args...); }));
+    track(client->guildMembersChunk.connect([this](auto &&...args) { onGuildMembersChunk(args...); }));
+    track(client->guildMemberAdded.connect([this](auto &&...args) { onGuildMemberAdded(args...); }));
+    track(client->guildMemberUpdated.connect([this](auto &&...args) { onGuildMemberUpdate(args...); }));
+    track(client->guildMemberRemoved.connect([this](auto &&...args) { onGuildMemberRemoved(args...); }));
+    track(client->guildBanAdded.connect([this](auto &&...args) { onGuildBanAdded(args...); }));
+    track(client->guildBanRemoved.connect([this](auto &&...args) { onGuildBanRemoved(args...); }));
+    track(client->inviteCreated.connect([this](auto &&...args) { onInviteCreated(args...); }));
+    track(client->inviteRevoked.connect([this](auto &&...args) { onInviteRevoked(args...); }));
+    track(client->guildMemberListUpdate.connect([this](auto &&...args) { presenceManager->onGuildMemberListUpdate(args...); }));
+    track(client->guildMemberListUpdate.connect([this](auto &&...args) { memberListManager->handleMemberListUpdate(args...); }));
+    track(client->guildMemberListUpdate.connect([this](auto &&...args) { onGuildMemberListUpdate(args...); }));
+    track(memberListManager->subscriptionRequested.connect([this](auto &&...args) { client->subscribeToGuildChannel(args...); }));
+    track(messageManager->messagesReceived.connect([this](auto &&...args) { onMessagesReceived(args...); }));
+    track(messageManager->membersLearnedFromMessage.connect([this](auto &&...args) { membersUpdated.publish(args...); }));
 
-    connect(client, &Discord::Client::messageAcked, readStateManager, &ReadStateManager::onMessageAck);
-    connect(client, &Discord::Client::userGuildSettingsUpdated, readStateManager, &ReadStateManager::onUserGuildSettingsUpdate);
-    connect(client, &Discord::Client::notificationSettingsUpdated, readStateManager, &ReadStateManager::onNotificationSettingsUpdate);
+    track(client->messageAcked.connect([this](auto &&...args) { readStateManager->onMessageAck(args...); }));
+    track(client->userGuildSettingsUpdated.connect([this](auto &&...args) { readStateManager->onUserGuildSettingsUpdate(args...); }));
+    track(client->notificationSettingsUpdated.connect([this](auto &&...args) { readStateManager->onNotificationSettingsUpdate(args...); }));
 
-    connect(client, &Discord::Client::messageCreated, this, &ClientInstance::onMessageCreated);
+    track(client->messageCreated.connect([this](auto &&...args) { onMessageCreated(args...); }));
 
-    connect(client, &Discord::Client::threadCreated, forumManager, &ForumManager::onThreadCreated);
-    connect(client, &Discord::Client::threadUpdated, forumManager, &ForumManager::onThreadUpdated);
-    connect(client, &Discord::Client::threadDeleted, forumManager, &ForumManager::onThreadDeleted);
-    connect(client, &Discord::Client::threadListSync, forumManager, &ForumManager::onThreadListSync);
-    connect(client, &Discord::Client::threadMemberUpdated, forumManager, &ForumManager::onThreadMemberUpdate);
-    connect(client, &Discord::Client::forumUnreads, forumManager, &ForumManager::onForumUnreads);
-    connect(client, &Discord::Client::messageCreated, forumManager, &ForumManager::onMessageCreated);
+    track(client->threadCreated.connect([this](auto &&...args) { forumManager->onThreadCreated(args...); }));
+    track(client->threadUpdated.connect([this](auto &&...args) { forumManager->onThreadUpdated(args...); }));
+    track(client->threadDeleted.connect([this](auto &&...args) { forumManager->onThreadDeleted(args...); }));
+    track(client->threadListSync.connect([this](auto &&...args) { forumManager->onThreadListSync(args...); }));
+    track(client->threadMemberUpdated.connect([this](auto &&...args) { forumManager->onThreadMemberUpdate(args...); }));
+    track(client->forumUnreads.connect([this](auto &&...args) { forumManager->onForumUnreads(args...); }));
+    track(client->messageCreated.connect([this](auto &&...args) { forumManager->onMessageCreated(args...); }));
 
-    connect(client, &Discord::Client::threadCreated, this, &ClientInstance::onThreadCreated);
-    connect(client, &Discord::Client::threadUpdated, this, &ClientInstance::onThreadUpdated);
-    connect(client, &Discord::Client::threadDeleted, this, &ClientInstance::onThreadDeleted);
-    connect(client, &Discord::Client::threadListSync, this, &ClientInstance::onThreadListSync);
-    connect(client, &Discord::Client::threadMemberUpdated, this, &ClientInstance::onThreadMemberUpdate);
-    connect(client, &Discord::Client::threadMembersUpdated, this, &ClientInstance::onThreadMembersUpdate);
+    track(client->threadCreated.connect([this](auto &&...args) { onThreadCreated(args...); }));
+    track(client->threadUpdated.connect([this](auto &&...args) { onThreadUpdated(args...); }));
+    track(client->threadDeleted.connect([this](auto &&...args) { onThreadDeleted(args...); }));
+    track(client->threadListSync.connect([this](auto &&...args) { onThreadListSync(args...); }));
+    track(client->threadMemberUpdated.connect([this](auto &&...args) { onThreadMemberUpdate(args...); }));
+    track(client->threadMembersUpdated.connect([this](auto &&...args) { onThreadMembersUpdate(args...); }));
 
-    connect(forumManager, &ForumManager::badgeChanged, this, &ClientInstance::forumBadgeChanged);
-    connect(forumManager, &ForumManager::joinedPostsChanged, this, &ClientInstance::forumJoinedPostsChanged);
+    track(forumManager->badgeChanged.connect([this](auto &&...args) { forumBadgeChanged.publish(args...); }));
+    track(forumManager->joinedPostsChanged.connect([this](auto &&...args) { forumJoinedPostsChanged.publish(args...); }));
 
-    connect(readStateManager, &ReadStateManager::readStateUpdated, this, &ClientInstance::readStateChanged);
-    connect(readStateManager, &ReadStateManager::guildSettingsUpdated, this, &ClientInstance::guildSettingsChanged);
+    track(readStateManager->readStateUpdated.connect([this](auto &&...args) { readStateChanged.publish(args...); }));
+    track(readStateManager->guildSettingsUpdated.connect([this](auto &&...args) { guildSettingsChanged.publish(args...); }));
 
-    connect(readStateManager, &ReadStateManager::ackRequested, this, &ClientInstance::handleAckRequest);
-    connect(readStateManager, &ReadStateManager::bulkAckRequested, this, &ClientInstance::handleBulkAckRequest);
+    track(readStateManager->ackRequested.connect([this](auto &&...args) { handleAckRequest(args...); }));
+    track(readStateManager->bulkAckRequested.connect([this](auto &&...args) { handleBulkAckRequest(args...); }));
 
-    connect(client, &Discord::Client::voiceStateUpdated, this, &ClientInstance::onVoiceStateUpdated);
+    track(client->voiceStateUpdated.connect([this](auto &&...args) { onVoiceStateUpdated(args...); }));
 
 #ifndef STYX_NO_VOICE
-    connect(client, &Discord::Client::voiceServerUpdated, this,
-            [this](const Discord::VoiceServerUpdate &event) {
-                qCInfo(LogVoice) << "VOICE_SERVER_UPDATE: guild" << event.guildId.get()
+    track(client->voiceServerUpdated.connect([this](const Discord::VoiceServerUpdate &event) {
+                log(LogLevel::Info, LogVoice) << "VOICE_SERVER_UPDATE: guild" << event.guildId.get()
                                  << "endpoint" << (event.endpoint.isNull() ? "null" : event.endpoint.get())
-                                 << "token" << event.token.get().left(8) + "...";
+                                 << "token" << event.token.get().substr(0, 8) + "...";
 
                 voiceManager->handleVoiceServerUpdate(event);
-            });
+            }));
 #endif
 }
 
@@ -359,8 +354,8 @@ void ClientInstance::onCallDeleted(const Discord::CallDelete &event)
 
 void ClientInstance::onVoiceStateUpdated(const Discord::VoiceState &event)
 {
-    qCInfo(LogVoice) << "VOICE_STATE_UPDATE: user" << event.userId.get()
-                     << "channel" << (event.channelId.isNull() ? 0 : static_cast<quint64>(event.channelId.get()))
+    log(LogLevel::Info, LogVoice) << "VOICE_STATE_UPDATE: user" << event.userId.get()
+                     << "channel" << (event.channelId.isNull() ? 0 : static_cast<std::uint64_t>(event.channelId.get()))
                      << "session" << event.sessionId.get()
                      << "mute" << event.selfMute.get()
                      << "deaf" << event.selfDeaf.get();
@@ -374,7 +369,7 @@ void ClientInstance::onVoiceStateUpdated(const Discord::VoiceState &event)
             currentVoiceChannelId = event.channelId.get();
             currentVoiceGuildId = event.guildId.hasValue() ? event.guildId.get() : Snowflake::Invalid;
         }
-        emit voiceStateChanged(currentVoiceChannelId, currentVoiceGuildId);
+        voiceStateChanged.publish(currentVoiceChannelId, currentVoiceGuildId);
     }
 
 #ifndef STYX_NO_VOICE
@@ -390,7 +385,7 @@ void ClientInstance::noteChannelSelected(Snowflake channelId)
 
 void ClientInstance::connectSelectedCall(bool force)
 {
-    if (!selectedChannelId.isValid() || gatewaySessionId.isEmpty())
+    if (!selectedChannelId.isValid() || gatewaySessionId.empty())
         return;
 
     const auto channel = getChannel(selectedChannelId);
@@ -406,7 +401,7 @@ void ClientInstance::onHeartbeatSessionChanged(const Discord::HeartbeatSession &
     accountRepo.updateHeartbeatSession(account.id, session);
 }
 
-void ClientInstance::saveGuild(const Discord::GatewayGuild &guild, const QList<Discord::Member> *members, Snowflake myId, Platform::Database &db)
+void ClientInstance::saveGuild(const Discord::GatewayGuild &guild, const std::vector<Discord::Member> *members, Snowflake myId, Platform::Database &db)
 {
     Snowflake guildId = guild.properties->id.get();
 
@@ -458,11 +453,11 @@ void ClientInstance::initGuildReadState(const Discord::GatewayGuild &guild)
 
     readStateManager->setGuildReadInfo(
             guildId,
-            guild.joinedAt.hasValue() ? guild.joinedAt.get() : QDateTime(),
+            guild.joinedAt.hasValue() ? guild.joinedAt.get() : Platform::DateTime(),
             props.defaultMessageNotifications.hasValue()
                     ? props.defaultMessageNotifications.get()
                     : Discord::MessageNotificationLevel::ALL_MESSAGES,
-            props.hasFeature(QStringLiteral("COMMUNITY")));
+            props.hasFeature(("COMMUNITY")));
 
     if (guild.channels.hasValue()) {
         for (const auto &channel : guild.channels.get()) {
@@ -499,7 +494,7 @@ void ClientInstance::onGuildCreated(const Discord::GatewayGuild &guild)
 
     initGuildReadState(guild);
 
-    emit guildCreated(guild);
+    guildCreated.publish(guild);
 }
 
 void ClientInstance::onGuildUpdated(const Discord::Guild &guild)
@@ -519,9 +514,9 @@ void ClientInstance::onGuildUpdated(const Discord::Guild &guild)
     readStateManager->updateGuildDefaults(
             guildId,
             guild.defaultMessageNotifications.valueOr(Discord::MessageNotificationLevel::ALL_MESSAGES),
-            guild.hasFeature(QStringLiteral("COMMUNITY")));
+            guild.hasFeature(("COMMUNITY")));
 
-    emit guildUpdated(guild);
+    guildUpdated.publish(guild);
 }
 
 void ClientInstance::onGuildDeleted(const Discord::GuildDelete &event)
@@ -531,11 +526,11 @@ void ClientInstance::onGuildDeleted(const Discord::GuildDelete &event)
 
     Snowflake guildId = event.id.get();
 
-    qCInfo(LogCore) << "Removed from guild:" << guildId;
+    log(LogLevel::Info, LogCore) << "Removed from guild:" << guildId;
 
     presenceManager->onGuildRemoved(guildId);
 
-    QList<Discord::Channel> channels = channelRepo.getChannelsForGuild(guildId);
+    std::vector<Discord::Channel> channels = channelRepo.getChannelsForGuild(guildId);
 
     if (!runInCacheTransaction("guild deletion", [&](Platform::Database &db) {
             for (const auto &channel : channels)
@@ -549,7 +544,7 @@ void ClientInstance::onGuildDeleted(const Discord::GuildDelete &event)
     for (const auto &channel : channels) {
         Snowflake channelId = channel.id.get();
         permissionManager->invalidateChannelCache(channelId);
-        forumParentCache.remove(channelId);
+        forumParentCache.erase(channelId);
     }
 
     readStateManager->removeGuild(guildId);
@@ -557,11 +552,11 @@ void ClientInstance::onGuildDeleted(const Discord::GuildDelete &event)
     userManager->removeGuildMembers(guildId);
     memberListManager->clearGuild(guildId);
     permissionManager->invalidateUserGuildCache(account.id, guildId);
-    rolesCacheByGuild.remove(guildId);
-    observedBansByGuild.remove(guildId);
-    createdInvitesByGuild.remove(guildId);
+    rolesCacheByGuild.erase(guildId);
+    observedBansByGuild.erase(guildId);
+    createdInvitesByGuild.erase(guildId);
 
-    emit guildRemoved(guildId);
+    guildRemoved.publish(guildId);
 }
 
 void ClientInstance::onChannelCreated(const Discord::ChannelCreate &event)
@@ -582,17 +577,17 @@ void ClientInstance::onChannelCreated(const Discord::ChannelCreate &event)
         channelRepo.savePermissionOverwrites(channelId, channel.permissionOverwrites.get(), db);
 
     if (channel.type == Discord::ChannelType::DM || channel.type == Discord::ChannelType::GROUP_DM) {
-        QList<Core::Snowflake> recipientIds;
+        std::vector<Core::Snowflake> recipientIds;
         if (channel.recipients.hasValue()) {
             for (const auto &user : channel.recipients.get()) {
                 userManager->saveUser(user);
-                recipientIds.append(user.id.get());
+                recipientIds.push_back(user.id.get());
             }
         } else if (channel.recipientIds.hasValue()) {
             recipientIds = channel.recipientIds.get();
         }
 
-        if (!recipientIds.isEmpty())
+        if (!recipientIds.empty())
             channelRepo.saveChannelRecipients(channelId, recipientIds, db);
     }
 
@@ -607,9 +602,9 @@ void ClientInstance::onChannelCreated(const Discord::ChannelCreate &event)
             readStateManager->updateChannelLastMessageId(channelId, channel.lastMessageId.get());
     }
 
-    forumParentCache.remove(channelId);
+    forumParentCache.erase(channelId);
 
-    emit channelCreated(event);
+    channelCreated.publish(event);
 }
 
 void ClientInstance::onChannelUpdated(const Discord::ChannelUpdate &event)
@@ -620,7 +615,7 @@ void ClientInstance::onChannelUpdated(const Discord::ChannelUpdate &event)
     const Discord::Channel &channel = event.channel.get();
     Core::Snowflake channelId = channel.id.get();
 
-    qCDebug(LogCore) << "Channel updated:" << channelId;
+    log(LogLevel::Debug, LogCore) << "Channel updated:" << channelId;
 
     auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
@@ -634,17 +629,17 @@ void ClientInstance::onChannelUpdated(const Discord::ChannelUpdate &event)
     txn.commit();
 
     permissionManager->invalidateChannelCache(channelId);
-    forumParentCache.remove(channelId);
+    forumParentCache.erase(channelId);
 
     if (channel.guildId.hasValue()) {
         readStateManager->registerChannel(channel, channel.guildId.get());
-        emit readStateChanged(channelId);
+        readStateChanged.publish(channelId);
     } else if (channel.type == Discord::ChannelType::DM || channel.type == Discord::ChannelType::GROUP_DM) {
         readStateManager->registerPrivateChannel(channel);
-        emit readStateChanged(channelId);
+        readStateChanged.publish(channelId);
     }
 
-    emit channelUpdated(event);
+    channelUpdated.publish(event);
 }
 
 void ClientInstance::onChannelDeleted(const Discord::ChannelDelete &event)
@@ -655,7 +650,7 @@ void ClientInstance::onChannelDeleted(const Discord::ChannelDelete &event)
     Core::Snowflake channelId = event.id.get();
     callStore->forget(channelId);
 
-    qCDebug(LogCore) << "Channel deleted:" << channelId;
+    log(LogLevel::Debug, LogCore) << "Channel deleted:" << channelId;
 
     auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
 
@@ -666,23 +661,23 @@ void ClientInstance::onChannelDeleted(const Discord::ChannelDelete &event)
     txn.commit();
 
     permissionManager->invalidateChannelCache(channelId);
-    forumParentCache.remove(channelId);
+    forumParentCache.erase(channelId);
 
-    emit channelDeleted(event);
+    channelDeleted.publish(event);
 }
 
 bool ClientInstance::isForumParent(Snowflake parentId)
 {
     if (!parentId.isValid())
         return false;
-    auto it = forumParentCache.constFind(parentId);
-    if (it != forumParentCache.constEnd())
-        return it.value();
+    auto it = forumParentCache.find(parentId);
+    if (it != forumParentCache.end())
+        return it->second;
     auto ch = channelRepo.getChannel(parentId);
     bool isForum = ch && ch->type.hasValue() &&
                    (ch->type.get() == Discord::ChannelType::GUILD_FORUM ||
                     ch->type.get() == Discord::ChannelType::GUILD_MEDIA);
-    forumParentCache.insert(parentId, isForum);
+    forumParentCache.insert_or_assign(parentId, isForum);
     return isForum;
 }
 
@@ -699,7 +694,7 @@ void ClientInstance::cacheThread(const Discord::Channel &thread, Snowflake guild
     Discord::Channel copy = thread;
     if (!copy.guildId.hasValue() && guildId.isValid())
         copy.guildId = guildId;
-    threadCache.insert(copy.id.get(), copy);
+    threadCache.insert_or_assign(copy.id.get(), copy);
     const Snowflake resolvedGuildId = copy.guildId.hasValue() ? copy.guildId.get() : guildId;
     client->registerChannelGuild(copy.id.get(), resolvedGuildId);
     registerThreadReadState(copy, resolvedGuildId);
@@ -727,7 +722,7 @@ void ClientInstance::onThreadCreated(const Discord::ChannelCreate &event)
     bool isMember = thread.member.hasValue() || (thread.ownerId.hasValue() && thread.ownerId.get() == account.id);
     if (isMember) {
         joinedThreads.insert(threadId);
-        emit threadCreated(thread);
+        threadCreated.publish(thread);
     }
 }
 
@@ -742,7 +737,7 @@ void ClientInstance::onThreadUpdated(const Discord::ChannelUpdate &event)
     Snowflake guildId = thread.guildId.hasValue() ? thread.guildId.get() : Snowflake::Invalid;
     ingestThread(thread, guildId);
 
-    emit threadUpdated(thread);
+    threadUpdated.publish(thread);
 }
 
 void ClientInstance::onThreadDeleted(const Discord::ThreadDelete &event)
@@ -755,25 +750,25 @@ void ClientInstance::onThreadDeleted(const Discord::ThreadDelete &event)
 
     Snowflake threadId = event.id.get();
     Snowflake guildId = event.guildId.hasValue() ? event.guildId.get() : Snowflake::Invalid;
-    threadCache.remove(threadId);
-    joinedThreads.remove(threadId);
+    threadCache.erase(threadId);
+    joinedThreads.erase(threadId);
 
-    emit threadDeleted(threadId, parentId, guildId);
+    threadDeleted.publish(threadId, parentId, guildId);
 }
 
 void ClientInstance::onThreadListSync(const Discord::ThreadListSync &event)
 {
     Snowflake guildId = event.guildId.get();
 
-    QList<Discord::Channel> textThreads;
-    QSet<Snowflake> textThreadIds;
+    std::vector<Discord::Channel> textThreads;
+    std::unordered_set<Snowflake> textThreadIds;
     if (event.threads.hasValue()) {
         for (const auto &thread : event.threads.get()) {
             if (!thread.parentId.hasValue() || isForumParent(thread.parentId.get()))
                 continue;
             ingestThread(thread, guildId);
             textThreadIds.insert(thread.id.get());
-            textThreads.append(thread);
+            textThreads.push_back(thread);
         }
     }
 
@@ -782,9 +777,9 @@ void ClientInstance::onThreadListSync(const Discord::ThreadListSync &event)
             if (member.id.hasValue() && textThreadIds.contains(member.id.get()))
                 joinedThreads.insert(member.id.get());
 
-    QList<Snowflake> parentIds =
-            event.channelIds.hasValue() ? event.channelIds.get() : QList<Snowflake>{};
-    emit threadListSynced(guildId, parentIds, textThreads);
+    std::vector<Snowflake> parentIds =
+            event.channelIds.hasValue() ? event.channelIds.get() : std::vector<Snowflake>{};
+    threadListSynced.publish(guildId, parentIds, textThreads);
 }
 
 void ClientInstance::onThreadMemberUpdate(const Discord::ThreadMemberUpdate &event)
@@ -799,7 +794,7 @@ void ClientInstance::onThreadMemberUpdate(const Discord::ThreadMemberUpdate &eve
         return;
 
     joinedThreads.insert(threadId);
-    emit threadMembershipChanged(threadId);
+    threadMembershipChanged.publish(threadId);
 }
 
 void ClientInstance::onThreadMembersUpdate(const Discord::ThreadMembersUpdate &event)
@@ -822,19 +817,19 @@ void ClientInstance::onThreadMembersUpdate(const Discord::ThreadMembersUpdate &e
     }
     if (event.removedMemberIds.hasValue()) {
         for (Snowflake userId : event.removedMemberIds.get())
-            if (userId == account.id && joinedThreads.remove(threadId))
+            if (userId == account.id && joinedThreads.erase(threadId))
                 changed = true;
     }
 
     if (changed)
-        emit threadMembershipChanged(threadId);
+        threadMembershipChanged.publish(threadId);
 }
 
 std::optional<Discord::Channel> ClientInstance::getChannel(Snowflake channelId)
 {
-    auto it = threadCache.constFind(channelId);
-    if (it != threadCache.constEnd())
-        return it.value();
+    auto it = threadCache.find(channelId);
+    if (it != threadCache.end())
+        return it->second;
     return channelRepo.getChannel(channelId);
 }
 
@@ -854,8 +849,9 @@ void ClientInstance::fetchThreadListAttempt(Snowflake channelId, bool archived, 
 
     client->searchThreads(
             channelId, archived, offset,
-            [this, channelId, archived, offset, attempt,
+            [this, guard = Platform::Guard<ClientInstance>(this), channelId, archived, offset, attempt,
              callback](const Result<Discord::Client::ThreadListResult> &res) {
+                if (!guard) return;
                 if (!res.success()) {
                     callback(Result<ThreadListPage>::makeError(res.error));
                     return;
@@ -864,15 +860,15 @@ void ClientInstance::fetchThreadListAttempt(Snowflake channelId, bool archived, 
                 const auto &data = *res.value;
                 if (data.indexNotReady) {
                     if (attempt >= kMaxRetries) {
-                        qCWarning(LogCore)
+                        log(LogLevel::Warning, LogCore)
                                 << "Thread search index not ready after retries for" << channelId;
                         callback(Result<ThreadListPage>::makeError("Thread list is not ready yet"));
                         return;
                     }
-                    int delayMs = qMax(1, data.retryAfterSeconds) * 1000;
-                    QTimer::singleShot(delayMs, this,
-                                       [this, channelId, archived, offset, attempt, callback]() {
-                                           fetchThreadListAttempt(channelId, archived, offset, attempt + 1, callback);
+                    int delayMs = std::max(1, data.retryAfterSeconds) * 1000;
+                    Platform::Dispatcher::main().setTimer(delayMs, false,
+                                       [guard = Platform::Guard<ClientInstance>(this), channelId, archived, offset, attempt, callback]() {
+                                           if (guard) guard->fetchThreadListAttempt(channelId, archived, offset, attempt + 1, callback);
                                        });
                     return;
                 }
@@ -904,7 +900,7 @@ bool ClientInstance::runInCacheTransaction(const char *what,
     op(db);
 
     if (!txn.commit()) {
-        qCWarning(LogCore) << "Failed to commit" << what;
+        log(LogLevel::Warning, LogCore) << "Failed to commit" << what;
         return false;
     }
     return true;
@@ -913,7 +909,7 @@ bool ClientInstance::runInCacheTransaction(const char *what,
 void ClientInstance::onGuildRoleCreated(const Discord::GuildRoleCreate &event)
 {
     if (!event.guildId.hasValue() || !event.role.hasValue()) {
-        qCWarning(LogCore) << "Invalid GUILD_ROLE_CREATE event: missing guildId or role";
+        log(LogLevel::Warning, LogCore) << "Invalid GUILD_ROLE_CREATE event: missing guildId or role";
         return;
     }
 
@@ -921,26 +917,26 @@ void ClientInstance::onGuildRoleCreated(const Discord::GuildRoleCreate &event)
     const Discord::Role &role = event.role.get();
 
     if (!role.id.hasValue()) {
-        qCWarning(LogCore) << "Invalid role in GUILD_ROLE_CREATE: missing role ID";
+        log(LogLevel::Warning, LogCore) << "Invalid role in GUILD_ROLE_CREATE: missing role ID";
         return;
     }
 
-    qCDebug(LogCore) << "Role created:" << role.id.get() << "in guild:" << guildId;
+    log(LogLevel::Debug, LogCore) << "Role created:" << role.id.get() << "in guild:" << guildId;
 
     if (!runInCacheTransaction("role creation",
                                [&](Platform::Database &db) { roleRepo.saveRole(guildId, role, db); }))
         return;
 
-    rolesCacheByGuild.remove(guildId);
+    rolesCacheByGuild.erase(guildId);
     permissionManager->invalidateUserGuildCache(account.id, guildId);
     memberListManager->handleRoleCreated(guildId, role);
-    emit guildRoleCreated(event);
+    guildRoleCreated.publish(event);
 }
 
 void ClientInstance::onGuildRoleUpdated(const Discord::GuildRoleUpdate &event)
 {
     if (!event.guildId.hasValue() || !event.role.hasValue()) {
-        qCWarning(LogCore) << "Invalid GUILD_ROLE_UPDATE event: missing guildId or role";
+        log(LogLevel::Warning, LogCore) << "Invalid GUILD_ROLE_UPDATE event: missing guildId or role";
         return;
     }
 
@@ -948,48 +944,48 @@ void ClientInstance::onGuildRoleUpdated(const Discord::GuildRoleUpdate &event)
     const Discord::Role &role = event.role.get();
 
     if (!role.id.hasValue()) {
-        qCWarning(LogCore) << "Invalid role in GUILD_ROLE_UPDATE: missing role ID";
+        log(LogLevel::Warning, LogCore) << "Invalid role in GUILD_ROLE_UPDATE: missing role ID";
         return;
     }
 
-    qCDebug(LogCore) << "Role updated:" << role.id.get() << "in guild:" << guildId;
+    log(LogLevel::Debug, LogCore) << "Role updated:" << role.id.get() << "in guild:" << guildId;
 
     if (!runInCacheTransaction("role update",
                                [&](Platform::Database &db) { roleRepo.saveRole(guildId, role, db); }))
         return;
 
-    rolesCacheByGuild.remove(guildId);
+    rolesCacheByGuild.erase(guildId);
     permissionManager->invalidateUserGuildCache(account.id, guildId);
     memberListManager->handleRoleUpdated(guildId, role);
-    emit guildRoleUpdated(event);
+    guildRoleUpdated.publish(event);
 }
 
 void ClientInstance::onGuildRoleDeleted(const Discord::GuildRoleDelete &event)
 {
     if (!event.guildId.hasValue() || !event.roleId.hasValue()) {
-        qCWarning(LogCore) << "Invalid GUILD_ROLE_DELETE event: missing guildId or roleId";
+        log(LogLevel::Warning, LogCore) << "Invalid GUILD_ROLE_DELETE event: missing guildId or roleId";
         return;
     }
 
     Core::Snowflake guildId = event.guildId.get();
     Core::Snowflake roleId = event.roleId.get();
 
-    qCDebug(LogCore) << "Role deleted:" << roleId << "in guild:" << guildId;
+    log(LogLevel::Debug, LogCore) << "Role deleted:" << roleId << "in guild:" << guildId;
 
     if (!runInCacheTransaction("role deletion",
                                [&](Platform::Database &db) { roleRepo.deleteRole(guildId, roleId, db); }))
         return;
 
-    rolesCacheByGuild.remove(guildId);
+    rolesCacheByGuild.erase(guildId);
     permissionManager->invalidateUserGuildCache(account.id, guildId);
     memberListManager->handleRoleDeleted(guildId, roleId);
-    emit guildRoleDeleted(event);
+    guildRoleDeleted.publish(event);
 }
 
 void ClientInstance::onGuildMembersChunk(const Discord::GuildMembersChunk &chunk)
 {
     Snowflake guildId = chunk.guildId.get();
-    QList<Snowflake> updatedUserIds;
+    std::vector<Snowflake> updatedUserIds;
 
     for (const auto &member : chunk.members.get()) {
         Snowflake userId =
@@ -1003,12 +999,12 @@ void ClientInstance::onGuildMembersChunk(const Discord::GuildMembersChunk &chunk
         if (member.user.hasValue())
             userManager->saveUser(member.user.get());
 
-        pendingMemberRequests.remove(qMakePair(guildId, userId));
-        updatedUserIds.append(userId);
+        pendingMemberRequests.erase(std::make_pair(guildId, userId));
+        updatedUserIds.push_back(userId);
     }
 
-    if (!updatedUserIds.isEmpty())
-        emit membersUpdated(guildId, updatedUserIds);
+    if (!updatedUserIds.empty())
+        membersUpdated.publish(guildId, updatedUserIds);
 }
 
 void ClientInstance::onGuildMemberAdded(const Discord::GuildMemberAdd &event)
@@ -1019,7 +1015,7 @@ void ClientInstance::onGuildMemberAdded(const Discord::GuildMemberAdd &event)
 
     Snowflake guildId = event.guildId.get();
     userManager->saveMemberWithUser(guildId, member);
-    emit membersUpdated(guildId, { member.user->id.get() });
+    membersUpdated.publish(guildId, { member.user->id.get() });
 }
 
 void ClientInstance::onGuildMemberRemoved(const Discord::GuildMemberRemove &event)
@@ -1030,21 +1026,24 @@ void ClientInstance::onGuildMemberRemoved(const Discord::GuildMemberRemove &even
         return;
 
     userManager->removeMember(guildId, userId);
-    emit memberRemoved(guildId, userId);
+    memberRemoved.publish(guildId, userId);
 }
 
-QList<Discord::Ban> ClientInstance::observedBans(Snowflake guildId) const
+std::vector<Discord::Ban> ClientInstance::observedBans(Snowflake guildId) const
 {
-    return observedBansByGuild.value(guildId);
+    auto it = observedBansByGuild.find(guildId);
+    return it == observedBansByGuild.end() ? std::vector<Discord::Ban>{} : it->second;
 }
 
-QList<Discord::Invite> ClientInstance::createdInvites(Snowflake guildId) const
+std::vector<Discord::Invite> ClientInstance::createdInvites(Snowflake guildId) const
 {
-    QList<Discord::Invite> unexpired;
-    const QDateTime now = QDateTime::currentDateTimeUtc();
-    for (const Discord::Invite &invite : createdInvitesByGuild.value(guildId))
+    std::vector<Discord::Invite> unexpired;
+    const Platform::DateTime now = Platform::DateTime::now();
+    auto it = createdInvitesByGuild.find(guildId);
+    if (it == createdInvitesByGuild.end()) return unexpired;
+    for (const Discord::Invite &invite : it->second)
         if (!invite.hasExpired(now))
-            unexpired.append(invite);
+            unexpired.push_back(invite);
     return unexpired;
 }
 
@@ -1054,7 +1053,7 @@ std::optional<RoleHierarchy> ClientInstance::selfRoleHierarchy(Snowflake guildId
     if (!guild)
         return std::nullopt;
     const auto selfRoles = userManager->getMemberRoles(guildId, account.id);
-    return RoleHierarchy(guildId, guild->ownerId.get(), account.id, getRolesForGuild(guildId), selfRoles.value_or(QList<Snowflake>()));
+    return RoleHierarchy(guildId, guild->ownerId.get(), account.id, getRolesForGuild(guildId), selfRoles.value_or(std::vector<Snowflake>()));
 }
 
 void ClientInstance::onGuildBanAdded(const Discord::GuildBanEvent &event)
@@ -1062,19 +1061,19 @@ void ClientInstance::onGuildBanAdded(const Discord::GuildBanEvent &event)
     const Snowflake userId = event.user->id.get();
     if (!userId.isValid())
         return;
-    QList<Discord::Ban> &bans = observedBansByGuild[event.guildId.get()];
+    std::vector<Discord::Ban> &bans = observedBansByGuild[event.guildId.get()];
     removeBanOf(bans, userId);
     Discord::Ban ban;
     ban.user = event.user.get();
     ban.reason = nullptr;
-    bans.append(ban);
+    bans.push_back(ban);
 }
 
 void ClientInstance::onGuildBanRemoved(const Discord::GuildBanEvent &event)
 {
     const auto bans = observedBansByGuild.find(event.guildId.get());
     if (bans != observedBansByGuild.end())
-        removeBanOf(*bans, event.user->id.get());
+        removeBanOf(bans->second, event.user->id.get());
 }
 
 void ClientInstance::onInviteCreated(const Discord::Invite &invite)
@@ -1086,14 +1085,14 @@ void ClientInstance::onInviteCreated(const Discord::Invite &invite)
     if (!guildId.isValid())
         return;
 
-    QList<Discord::Invite> &invites = createdInvitesByGuild[guildId];
+    std::vector<Discord::Invite> &invites = createdInvitesByGuild[guildId];
     removeInvite(invites, invite.code.get());
-    invites.append(invite);
+    invites.push_back(invite);
 }
 
-void ClientInstance::onInviteRevoked(const QString &code)
+void ClientInstance::onInviteRevoked(const std::string &code)
 {
-    for (QList<Discord::Invite> &invites : createdInvitesByGuild)
+    for (auto &[guildId, invites] : createdInvitesByGuild)
         removeInvite(invites, code);
 }
 
@@ -1113,7 +1112,7 @@ void ClientInstance::onGuildMemberUpdate(const Discord::GuildMemberUpdate &event
     if (userId == account.id)
         permissionManager->invalidateUserGuildCache(userId, guildId);
 
-    emit membersUpdated(guildId, { userId });
+    membersUpdated.publish(guildId, { userId });
 }
 
 void ClientInstance::onGuildMemberListUpdate(const Discord::GuildMemberListUpdate &update)
@@ -1122,15 +1121,15 @@ void ClientInstance::onGuildMemberListUpdate(const Discord::GuildMemberListUpdat
         return;
 
     const Snowflake guildId = update.guildId.get();
-    QList<Discord::User> users;
-    QList<Discord::Member> members;
+    std::vector<Discord::User> users;
+    std::vector<Discord::Member> members;
 
     auto persist = [&](const Discord::Member &member) {
         if (!member.user.hasValue() || !member.user->id.hasValue())
             return;
-        users.append(member.user.get());
-        members.append(member);
-        members.last().presence.undefine();
+        users.push_back(member.user.get());
+        members.push_back(member);
+        members.back().presence.undefine();
     };
 
     for (const auto &op : update.ops.get()) {
@@ -1144,9 +1143,9 @@ void ClientInstance::onGuildMemberListUpdate(const Discord::GuildMemberListUpdat
             persist(op.item.get().member.get());
     }
 
-    if (!users.isEmpty())
+    if (!users.empty())
         userManager->saveUsers(users);
-    if (!members.isEmpty())
+    if (!members.empty())
         userManager->saveMembers(guildId, members);
 }
 
@@ -1154,7 +1153,7 @@ static Markdown::ChannelLinkPart channelLinkPart(const Discord::Channel &channel
 {
     using Discord::ChannelType;
 
-    QString icon = "hash";
+    std::string icon = "hash";
     if (channel.isThread()) {
         icon = "thread";
     } else if (channel.type.hasValue()) {
@@ -1175,11 +1174,11 @@ static Markdown::ChannelLinkPart channelLinkPart(const Discord::Channel &channel
         }
     }
 
-    QString name = channel.name.hasValue() ? channel.name.get() : QString::number(channel.id.get());
+    std::string name = channel.name.hasValue() ? channel.name.get() : channel.id.get().toString();
     return { icon, name };
 }
 
-QList<Markdown::ChannelLinkPart> ClientInstance::channelLinkParts(const Markdown::ChannelLinkRef &ref)
+std::vector<Markdown::ChannelLinkPart> ClientInstance::channelLinkParts(const Markdown::ChannelLinkRef &ref)
 {
     using Part = Markdown::ChannelLinkPart;
 
@@ -1189,15 +1188,15 @@ QList<Markdown::ChannelLinkPart> ClientInstance::channelLinkParts(const Markdown
 
     auto channel = channelRepo.getChannel(ref.channelId);
     if (!channel) {
-        QList<Part> parts;
+        std::vector<Part> parts;
         if (ref.guildId.isValid()) {
             auto guild = guildRepo.getGuild(ref.guildId);
             if (!guild)
                 return {};
             if (ref.guildId != sourceGuildId)
-                parts.append({ {}, guild->name.get() });
+                parts.push_back({ {}, guild->name.get() });
         }
-        parts.append({ "hash", QObject::tr("unknown"), true });
+        parts.push_back({ "hash", "unknown", true });
         return parts;
     }
 
@@ -1208,7 +1207,7 @@ QList<Markdown::ChannelLinkPart> ClientInstance::channelLinkParts(const Markdown
         return {};
 
     if (!permissionManager->hasChannelPermission(accountId(), ref.channelId, Discord::Permission::VIEW_CHANNEL))
-        return { { "locked", QObject::tr("No Access") } };
+        return { { "locked", "No Access" } };
 
     bool isForumPost = channel->isThread() && channel->parentId.hasValue() && isForumParent(channel->parentId.get());
 
@@ -1234,7 +1233,7 @@ QList<Markdown::ChannelLinkPart> ClientInstance::channelLinkParts(const Markdown
 
 void ClientInstance::onMessagesReceived(const MessageRequestResult &result)
 {
-    if (!result.success || result.messages.isEmpty())
+    if (!result.success || result.messages.empty())
         return;
 
     if (result.type == Discord::Client::MessageLoadType::Created)
@@ -1245,7 +1244,7 @@ void ClientInstance::onMessagesReceived(const MessageRequestResult &result)
         return;
 
     Snowflake guildId = channelOpt->guildId.get();
-    QList<Snowflake> missingUserIds;
+    std::vector<Snowflake> missingUserIds;
 
     for (const auto &msg : result.messages) {
         if (!msg.author.hasValue())
@@ -1253,17 +1252,17 @@ void ClientInstance::onMessagesReceived(const MessageRequestResult &result)
 
         Snowflake userId = msg.author->id.get();
 
-        if (pendingMemberRequests.contains(qMakePair(guildId, userId)))
+        if (pendingMemberRequests.contains(std::make_pair(guildId, userId)))
             continue;
 
         if (userManager->getMember(guildId, userId))
             continue;
 
-        pendingMemberRequests.insert(qMakePair(guildId, userId));
-        missingUserIds.append(userId);
+        pendingMemberRequests.insert(std::make_pair(guildId, userId));
+        missingUserIds.push_back(userId);
     }
 
-    if (!missingUserIds.isEmpty())
+    if (!missingUserIds.empty())
         client->requestGuildMembers(guildId, missingUserIds);
 }
 
@@ -1283,7 +1282,7 @@ void ClientInstance::onMessageCreated(const Discord::Message &msg)
     bool isMention = !fromSelf && isMessageMentioningMe(msg);
     readStateManager->handleMessageCreated(channelId, messageId, fromSelf, isMention);
 
-    emit channelLastMessageUpdated(channelId, messageId);
+    channelLastMessageUpdated.publish(channelId, messageId);
 }
 
 bool ClientInstance::isMessageMentioningMe(const Discord::Message &msg) const
@@ -1316,7 +1315,7 @@ bool ClientInstance::isMessageMentioningMe(const Discord::Message &msg) const
     if (!myRoles)
         return false;
     for (const auto &roleId : msg.mentionRoles.get())
-        if (myRoles->contains(roleId))
+        if (std::find(myRoles->begin(), myRoles->end(), roleId) != myRoles->end())
             return true;
 
     return false;
@@ -1337,10 +1336,10 @@ void ClientInstance::handleAckRequest(Snowflake channelId, Snowflake messageId)
     client->ackMessage(channelId, messageId, ackFlags, lastViewed);
 }
 
-void ClientInstance::handleBulkAckRequest(const QList<QPair<Snowflake, Snowflake>> &pairs)
+void ClientInstance::handleBulkAckRequest(const std::vector<std::pair<Snowflake, Snowflake>> &pairs)
 {
     for (const auto &[channelId, messageId] : pairs)
-        queuedBulkAcks.append({ channelId, messageId, 0 });
+        queuedBulkAcks.push_back({ channelId, messageId, 0 });
 
     if (!bulkAckInFlight)
         sendNextBulkAckBatch();
@@ -1351,27 +1350,29 @@ void ClientInstance::sendNextBulkAckBatch()
     constexpr int maxPerRequest = 100;
     constexpr int delayBetweenRequestsMs = 1000;
 
-    bulkAckInFlight = !queuedBulkAcks.isEmpty();
+    bulkAckInFlight = !queuedBulkAcks.empty();
     if (!bulkAckInFlight)
         return;
 
-    const auto batch = queuedBulkAcks.mid(0, maxPerRequest);
+    const auto batchEnd = queuedBulkAcks.begin() + std::min<std::size_t>(queuedBulkAcks.size(), maxPerRequest);
+    const std::vector<Discord::Client::AckEntry> batch(queuedBulkAcks.begin(), batchEnd);
     queuedBulkAcks.erase(queuedBulkAcks.begin(), queuedBulkAcks.begin() + batch.size());
 
-    client->ackBulk(batch, [this](bool success) {
+    client->ackBulk(batch, [this, guard = Platform::Guard<ClientInstance>(this)](bool success) {
+        if (!guard) return;
         if (!success) {
             queuedBulkAcks.clear();
             bulkAckInFlight = false;
             return;
         }
-        QTimer::singleShot(delayBetweenRequestsMs, this, [this]() { sendNextBulkAckBatch(); });
+        Platform::Dispatcher::main().setTimer(delayBetweenRequestsMs, false, [guard = Platform::Guard<ClientInstance>(this)]() { if (guard) guard->sendNextBulkAckBatch(); });
     });
 }
 
-QList<Snowflake> ClientInstance::markableChannelIds(Snowflake guildId, Snowflake categoryId)
+std::vector<Snowflake> ClientInstance::markableChannelIds(Snowflake guildId, Snowflake categoryId)
 {
-    QList<Snowflake> ids;
-    QSet<Snowflake> viewableParents;
+    std::vector<Snowflake> ids;
+    std::unordered_set<Snowflake> viewableParents;
 
     for (const auto &channel : channelRepo.getChannelsForGuild(guildId)) {
         if (!channel.type.hasValue() || channel.isThread() ||
@@ -1387,31 +1388,32 @@ QList<Snowflake> ClientInstance::markableChannelIds(Snowflake guildId, Snowflake
             !permissionManager->hasChannelPermission(account.id, channelId, Discord::Permission::CONNECT))
             continue;
 
-        ids.append(channelId);
+        ids.push_back(channelId);
         viewableParents.insert(channelId);
 
         if (isForumParent(channelId))
             for (const auto &post : forumManager->joinedPosts(channelId))
-                ids.append(post.id.get());
+                ids.push_back(post.id.get());
     }
 
-    for (auto thread = threadCache.constBegin(); thread != threadCache.constEnd(); ++thread) {
-        if (!thread->parentId.hasValue() || !viewableParents.contains(thread->parentId.get()))
+    for (auto thread = threadCache.begin(); thread != threadCache.end(); ++thread) {
+        if (!thread->second.parentId.hasValue() || !viewableParents.contains(thread->second.parentId.get()))
             continue;
 
-        bool activeJoined = joinedThreads.contains(thread.key()) && !thread->isArchived();
-        if (activeJoined || readStateManager->getMentionCount(thread.key()) > 0)
-            ids.append(thread.key());
+        bool activeJoined = joinedThreads.contains(thread->first) && !thread->second.isArchived();
+        if (activeJoined || readStateManager->getMentionCount(thread->first) > 0)
+            ids.push_back(thread->first);
     }
 
     return ids;
 }
 
-void ClientInstance::markGuildsAsRead(const QList<Snowflake> &guildIds)
+void ClientInstance::markGuildsAsRead(const std::vector<Snowflake> &guildIds)
 {
-    QList<Snowflake> channelIds;
+    std::vector<Snowflake> channelIds;
     for (Snowflake guildId : guildIds)
-        channelIds += markableChannelIds(guildId, Snowflake::Invalid);
+        { auto ids = markableChannelIds(guildId, Snowflake::Invalid);
+        channelIds.insert(channelIds.end(), ids.begin(), ids.end()); }
 
     readStateManager->markChannelsAsRead(channelIds);
 }
@@ -1423,6 +1425,23 @@ void ClientInstance::markCategoryAsRead(Snowflake guildId, Snowflake categoryId)
 
 ClientInstance::~ClientInstance()
 {
+#ifdef STYX_HAVE_SCREENSHARE
+    streamManager.reset();
+#endif
+#ifndef STYX_NO_VOICE
+    voiceManager.reset();
+#endif
+    messageManager.reset();
+    forumManager.reset();
+    favoriteGifManager.reset();
+    emojiManager.reset();
+    memberListManager.reset();
+    readStateManager.reset();
+    presenceManager.reset();
+    userManager.reset();
+    relationshipManager.reset();
+    permissionManager.reset();
+    client.reset();
     Storage::DatabaseManager::instance().closeCacheDatabase(account.id);
 }
 
@@ -1446,57 +1465,57 @@ void ClientInstance::stop()
 
 Discord::Client *ClientInstance::discord() const
 {
-    return client;
+    return client.get();
 }
 
 MessageManager *ClientInstance::messages() const
 {
-    return messageManager;
+    return messageManager.get();
 }
 
 ForumManager *ClientInstance::forums() const
 {
-    return forumManager;
+    return forumManager.get();
 }
 
 UserManager *ClientInstance::users() const
 {
-    return userManager;
+    return userManager.get();
 }
 
 PermissionManager *ClientInstance::permissions() const
 {
-    return permissionManager;
+    return permissionManager.get();
 }
 
 ReadStateManager *ClientInstance::readState() const
 {
-    return readStateManager;
+    return readStateManager.get();
 }
 
 RelationshipManager *ClientInstance::relationships() const
 {
-    return relationshipManager;
+    return relationshipManager.get();
 }
 
 PresenceManager *ClientInstance::presences() const
 {
-    return presenceManager;
+    return presenceManager.get();
 }
 
 MemberListManager *ClientInstance::memberList() const
 {
-    return memberListManager;
+    return memberListManager.get();
 }
 
 EmojiManager *ClientInstance::emojis() const
 {
-    return emojiManager;
+    return emojiManager.get();
 }
 
 FavoriteGifs *ClientInstance::favoriteGifs() const
 {
-    return favoriteGifManager;
+    return favoriteGifManager.get();
 }
 
 CallStore *ClientInstance::calls() const
@@ -1507,40 +1526,40 @@ CallStore *ClientInstance::calls() const
 #ifndef STYX_NO_VOICE
 Audio::VoiceManager *ClientInstance::voice() const
 {
-    return voiceManager;
+    return voiceManager.get();
 }
 
 #ifdef STYX_HAVE_SCREENSHARE
 Stream::StreamManager *ClientInstance::streams() const
 {
-    return streamManager;
+    return streamManager.get();
 }
 #endif
 #endif
 
-QList<Discord::Role> ClientInstance::getRolesForGuild(Snowflake guildId)
+std::vector<Discord::Role> ClientInstance::getRolesForGuild(Snowflake guildId)
 {
-    auto it = rolesCacheByGuild.constFind(guildId);
-    if (it != rolesCacheByGuild.constEnd())
-        return it.value();
+    auto it = rolesCacheByGuild.find(guildId);
+    if (it != rolesCacheByGuild.end())
+        return it->second;
 
     auto roles = roleRepo.getRolesForGuild(guildId);
-    rolesCacheByGuild.insert(guildId, roles);
+    rolesCacheByGuild.insert_or_assign(guildId, roles);
     return roles;
 }
 
-QList<Discord::Role> ClientInstance::getMemberRolesSorted(Snowflake guildId, Snowflake userId)
+std::vector<Discord::Role> ClientInstance::getMemberRolesSorted(Snowflake guildId, Snowflake userId)
 {
     auto memberRoleIds = userManager->getMemberRoles(guildId, userId);
-    if (!memberRoleIds || memberRoleIds->isEmpty())
+    if (!memberRoleIds || memberRoleIds->empty())
         return {};
 
-    QSet<Snowflake> memberRoleSet(memberRoleIds->begin(), memberRoleIds->end());
-    QList<Discord::Role> result;
+    std::unordered_set<Snowflake> memberRoleSet(memberRoleIds->begin(), memberRoleIds->end());
+    std::vector<Discord::Role> result;
     result.reserve(memberRoleIds->size());
     for (const auto &role : getRolesForGuild(guildId)) {
         if (memberRoleSet.contains(role.id.get()))
-            result.append(role);
+            result.push_back(role);
     }
 
     std::sort(result.begin(), result.end(),
@@ -1555,7 +1574,7 @@ std::optional<Discord::Guild> ClientInstance::getGuild(Snowflake guildId)
     return guildRepo.getGuild(guildId);
 }
 
-QList<Discord::Channel> ClientInstance::getGuildChannels(Snowflake guildId)
+std::vector<Discord::Channel> ClientInstance::getGuildChannels(Snowflake guildId)
 {
     return channelRepo.getChannelsForGuild(guildId);
 }
@@ -1572,7 +1591,8 @@ void ClientInstance::openDmChannel(Snowflake userId, DmChannelCallback callback)
         return;
     }
 
-    client->openDmChannel(userId, [this, callback](const Result<Discord::ChannelCreate> &res) {
+    client->openDmChannel(userId, [this, guard = Platform::Guard<ClientInstance>(this), callback](const Result<Discord::ChannelCreate> &res) {
+        if (!guard) return;
         if (!res.success()) {
             callback(Result<Snowflake>::makeError(res.error));
             return;

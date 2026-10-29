@@ -4,6 +4,7 @@
 #include "Platform/Native.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <iterator>
 #include <nlohmann/json.hpp>
 
@@ -43,7 +44,13 @@ UnicodeEmojiIndex &UnicodeEmojiIndex::instance()
 
 UnicodeEmojiIndex::UnicodeEmojiIndex()
 {
-    const auto bytes = Platform::Resources::read("emoji_data.json");
+    std::string bytes;
+    try {
+        bytes = Platform::Resources::read("emoji_data.json");
+    } catch (const std::exception &error) {
+        Core::log(Core::LogLevel::Warning, LogCore) << "UnicodeEmojiIndex: cannot read emoji_data.json: " << error.what();
+        return;
+    }
     const auto doc = nlohmann::json::parse(bytes, nullptr, false);
     if (!doc.is_object() || !doc.contains("emojis") || !doc["emojis"].is_array()) {
         Core::log(Core::LogLevel::Warning, LogCore) << "UnicodeEmojiIndex: cannot read emoji_data.json";

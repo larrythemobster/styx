@@ -41,45 +41,47 @@ void OnPlayback(ma_device *pDevice, void *pOutput, const void *, ma_uint32 frame
 
 static void MiniaudioLogCallback(void *pUserData, ma_uint32 level, const char *pMessage)
 {
-    Q_UNUSED(pUserData);
-
-    QString msg = QString::fromUtf8(pMessage).trimmed();
-    if (msg.isEmpty())
+    (void)pUserData;
+    std::string msg = pMessage ? pMessage : "";
+    const auto end = msg.find_last_not_of(" \t\r\n");
+    if (end == std::string::npos)
         return;
+    msg.erase(end + 1);
+    msg.erase(0, msg.find_first_not_of(" \t\r\n"));
 
     switch (level) {
     case MA_LOG_LEVEL_ERROR:
-        qCCritical(LogMiniaudio).noquote() << msg;
+        log(LogLevel::Error, LogMiniaudio) << msg;
         break;
     case MA_LOG_LEVEL_WARNING:
-        qCWarning(LogMiniaudio).noquote() << msg;
+        log(LogLevel::Warning, LogMiniaudio) << msg;
         break;
     case MA_LOG_LEVEL_INFO:
-        qCInfo(LogMiniaudio).noquote() << msg;
+        log(LogLevel::Info, LogMiniaudio) << msg;
         break;
     case MA_LOG_LEVEL_DEBUG:
     default:
-        qCDebug(LogMiniaudio).noquote() << msg;
+        log(LogLevel::Debug, LogMiniaudio) << msg;
         break;
     }
 }
 
-static QByteArray SerializeDeviceId(const ma_device_id &id)
+static std::string SerializeDeviceId(const ma_device_id &id)
 {
-    return QByteArray(reinterpret_cast<const char *>(&id), sizeof(ma_device_id));
+    return std::string(reinterpret_cast<const char *>(&id), sizeof(ma_device_id));
 }
 
-static bool DeserializeDeviceId(const QByteArray &bytes, ma_device_id &id)
+static bool DeserializeDeviceId(const std::string &bytes, ma_device_id &id)
 {
     if (bytes.size() != sizeof(ma_device_id))
         return false;
-    std::memcpy(&id, bytes.constData(), sizeof(ma_device_id));
+    std::memcpy(&id, bytes.data(), sizeof(ma_device_id));
     return true;
 }
 
-static QList<AudioDeviceInfo> EnumerateDevices(ma_context *ctx, ma_device_type type)
+static std::vector<AudioDeviceInfo> EnumerateDevices(ma_context *ctx, ma_device_type type)
 {
-    QList<AudioDeviceInfo> result;
+    std::vector<AudioDeviceInfo> result;
 
     ma_device_info *pPlayback = nullptr;
     ma_uint32 playbackCount = 0;
@@ -95,17 +97,16 @@ static QList<AudioDeviceInfo> EnumerateDevices(ma_context *ctx, ma_device_type t
     for (ma_uint32 i = 0; i < count; i++) {
         AudioDeviceInfo info;
         info.id = SerializeDeviceId(infos[i].id);
-        info.description = QString::fromUtf8(infos[i].name);
+        info.description = infos[i].name;
         info.isDefault = infos[i].isDefault != 0;
-        result.append(info);
+        result.push_back(std::move(info));
     }
 
     return result;
 }
 
-MiniaudioAudioBackend::MiniaudioAudioBackend(QObject *parent)
-    : IAudioBackend(parent),
-      ma(std::make_unique<MiniaudioState>())
+MiniaudioAudioBackend::MiniaudioAudioBackend()
+    : ma(std::make_unique<MiniaudioState>())
 {
     if (ma_log_init(nullptr, &ma->log) == MA_SUCCESS) {
         ma->logInit = true;
@@ -117,12 +118,12 @@ MiniaudioAudioBackend::MiniaudioAudioBackend(QObject *parent)
         contextConfig.pLog = &ma->log;
 
     if (!initAudioContext(&ma->context, &contextConfig))
-        qCWarning(LogVoice) << "Failed to initialize miniaudio context";
+        log(LogLevel::Warning, LogVoice) << "Failed to initialize miniaudio context";
     else
         ma->contextInit = true;
 
     if (ma_pcm_rb_init(ma_format_s16, AUDIO_CHANNELS, PLAYBACK_RB_FRAMES, NULL, NULL, &ma->playbackRB) != MA_SUCCESS)
-        qCWarning(LogVoice) << "Failed to init playback ring buffer";
+        log(LogLevel::Warning, LogVoice) << "Failed to init playback ring buffer";
     else
         ma->playbackRBInit = true;
 }
@@ -142,27 +143,27 @@ MiniaudioAudioBackend::~MiniaudioAudioBackend()
         ma_log_uninit(&ma->log);
 }
 
-QList<AudioDeviceInfo> MiniaudioAudioBackend::availableInputDevices() const
+std::vector<AudioDeviceInfo> MiniaudioAudioBackend::availableInputDevices() const
 {
     if (!ma->contextInit)
         return {};
     return EnumerateDevices(&ma->context, ma_device_type_capture);
 }
 
-QList<AudioDeviceInfo> MiniaudioAudioBackend::availableOutputDevices() const
+std::vector<AudioDeviceInfo> MiniaudioAudioBackend::availableOutputDevices() const
 {
     if (!ma->contextInit)
         return {};
     return EnumerateDevices(&ma->context, ma_device_type_playback);
 }
 
-void MiniaudioAudioBackend::setInputDevice(const QByteArray &deviceId)
+void MiniaudioAudioBackend::setInputDevice(const std::string &deviceId)
 {
     if (deviceId == selectedInputId)
         return;
 
     selectedInputId = deviceId;
-    qCInfo(LogVoice) << "Input device changed";
+    log(LogLevel::Info, LogVoice) << "Input device changed";
 
     if (ma->captureDeviceInit) {
         stopCapture();
@@ -170,13 +171,13 @@ void MiniaudioAudioBackend::setInputDevice(const QByteArray &deviceId)
     }
 }
 
-void MiniaudioAudioBackend::setOutputDevice(const QByteArray &deviceId)
+void MiniaudioAudioBackend::setOutputDevice(const std::string &deviceId)
 {
     if (deviceId == selectedOutputId)
         return;
 
     selectedOutputId = deviceId;
-    qCInfo(LogVoice) << "Output device changed";
+    log(LogLevel::Info, LogVoice) << "Output device changed";
 
     if (ma->playbackDeviceInit) {
         stopPlayback();
@@ -201,26 +202,26 @@ bool MiniaudioAudioBackend::startCapture()
     config.periodSizeInFrames = AUDIO_FRAME_SAMPLES;
 
     ma_device_id deviceId;
-    if (!selectedInputId.isEmpty() && DeserializeDeviceId(selectedInputId, deviceId))
+    if (!selectedInputId.empty() && DeserializeDeviceId(selectedInputId, deviceId))
         config.capture.pDeviceID = &deviceId;
 
     ma_result initResult = ma_device_init(&ma->context, &config, &ma->captureDevice);
     if (initResult != MA_SUCCESS) {
-        qCWarning(LogVoice) << "Failed to init miniaudio capture device:" << ma_result_description(initResult);
+        log(LogLevel::Warning, LogVoice) << "Failed to init miniaudio capture device:" << ma_result_description(initResult);
         return false;
     }
 
     captureBuffer.clear();
 
     if (ma_device_start(&ma->captureDevice) != MA_SUCCESS) {
-        qCWarning(LogVoice) << "Failed to start miniaudio capture device";
+        log(LogLevel::Warning, LogVoice) << "Failed to start miniaudio capture device";
         ma_device_uninit(&ma->captureDevice);
         return false;
     }
 
     ma->captureDeviceInit = true;
     selectedInputId = SerializeDeviceId(ma->captureDevice.capture.id);
-    qCInfo(LogVoice) << "Miniaudio capture started:" << ma->captureDevice.capture.name;
+    log(LogLevel::Info, LogVoice) << "Miniaudio capture started:" << ma->captureDevice.capture.name;
     return true;
 }
 
@@ -234,7 +235,7 @@ void MiniaudioAudioBackend::stopCapture()
     ma->captureDeviceInit = false;
     captureBuffer.clear();
 
-    qCInfo(LogVoice) << "Miniaudio capture stopped";
+    log(LogLevel::Info, LogVoice) << "Miniaudio capture stopped";
 }
 
 bool MiniaudioAudioBackend::startPlayback()
@@ -256,24 +257,24 @@ bool MiniaudioAudioBackend::startPlayback()
     config.periodSizeInFrames = AUDIO_FRAME_SAMPLES;
 
     ma_device_id deviceId;
-    if (!selectedOutputId.isEmpty() && DeserializeDeviceId(selectedOutputId, deviceId))
+    if (!selectedOutputId.empty() && DeserializeDeviceId(selectedOutputId, deviceId))
         config.playback.pDeviceID = &deviceId;
 
     ma_result initResult = ma_device_init(&ma->context, &config, &ma->playbackDevice);
     if (initResult != MA_SUCCESS) {
-        qCWarning(LogVoice) << "Failed to init miniaudio playback device:" << ma_result_description(initResult);
+        log(LogLevel::Warning, LogVoice) << "Failed to init miniaudio playback device:" << ma_result_description(initResult);
         return false;
     }
 
     if (ma_device_start(&ma->playbackDevice) != MA_SUCCESS) {
-        qCWarning(LogVoice) << "Failed to start miniaudio playback device";
+        log(LogLevel::Warning, LogVoice) << "Failed to start miniaudio playback device";
         ma_device_uninit(&ma->playbackDevice);
         return false;
     }
 
     ma->playbackDeviceInit = true;
     selectedOutputId = SerializeDeviceId(ma->playbackDevice.playback.id);
-    qCInfo(LogVoice) << "Miniaudio playback started:" << ma->playbackDevice.playback.name;
+    log(LogLevel::Info, LogVoice) << "Miniaudio playback started:" << ma->playbackDevice.playback.name;
     return true;
 }
 
@@ -286,7 +287,7 @@ void MiniaudioAudioBackend::stopPlayback()
     ma_device_uninit(&ma->playbackDevice);
     ma->playbackDeviceInit = false;
 
-    qCInfo(LogVoice) << "Miniaudio playback stopped";
+    log(LogLevel::Info, LogVoice) << "Miniaudio playback stopped";
 }
 
 bool MiniaudioAudioBackend::isCapturing() const
@@ -348,14 +349,14 @@ void MiniaudioAudioBackend::handleCapturedFrames(const void *input, unsigned int
     // Drop excess data to prevent falling behind
     if (captureBuffer.size() > AUDIO_FRAME_SIZE * 2) {
         int keep = captureBuffer.size() % AUDIO_FRAME_SIZE + AUDIO_FRAME_SIZE;
-        captureBuffer.remove(0, captureBuffer.size() - keep);
+        captureBuffer.erase(0, captureBuffer.size() - keep);
     }
 
     float gain = inputGain.load(std::memory_order_relaxed);
 
     while (captureBuffer.size() >= AUDIO_FRAME_SIZE) {
-        QByteArray frame = captureBuffer.left(AUDIO_FRAME_SIZE);
-        captureBuffer.remove(0, AUDIO_FRAME_SIZE);
+        std::string frame = captureBuffer.substr(0, AUDIO_FRAME_SIZE);
+        captureBuffer.erase(0, AUDIO_FRAME_SIZE);
 
         if (gain != 1.0f) {
             auto *samples = reinterpret_cast<int16_t *>(frame.data());
@@ -368,7 +369,7 @@ void MiniaudioAudioBackend::handleCapturedFrames(const void *input, unsigned int
             }
         }
 
-        emit audioCaptured(frame);
+        audioCaptured.publish(std::move(frame));
     }
 }
 

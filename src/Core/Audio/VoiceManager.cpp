@@ -2,32 +2,51 @@
 #include "AudioPipeline.hpp"
 #include "Platform/Dispatcher.hpp"
 #include <future>
+#include <atomic>
+#include <algorithm>
+#include <string_view>
 
 #include "Core/Logging.hpp"
 #include "Core/SettingsKeys.hpp"
-
-#ifdef Q_OS_WIN
-#include <objbase.h>
-#endif
 
 namespace Styx {
 namespace Core {
 namespace Audio {
 
-VoiceManager::VoiceManager(Snowflake accountId, const ProxyConfig &proxy, QObject *parent)
-    : QObject(parent), accountId(accountId), proxy(proxy)
+namespace {
+std::string decodeDeviceId(std::string_view hex)
+{
+    std::string result;
+    int low = -1;
+    for (auto it = hex.rbegin(); it != hex.rend(); ++it) {
+        const char c = *it;
+        const int value = c >= '0' && c <= '9' ? c - '0' :
+                          c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+                          c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        if (value < 0) continue;
+        if (low < 0) low = value;
+        else { result.push_back(static_cast<char>((value << 4) | low)); low = -1; }
+    }
+    if (low >= 0) result.push_back(static_cast<char>(low));
+    std::reverse(result.begin(), result.end());
+    return result;
+}
+}
+
+VoiceManager::VoiceManager(Snowflake accountId, const ProxyConfig &proxy)
+    : accountId(accountId), proxy(proxy)
 {
     const int inVol = Settings::getInt(Settings::Keys::VoiceInputVolume, Settings::Defaults::VoiceInputVolume);
     cachedInputGain = static_cast<float>(inVol) / 100.0f;
     const int outVol = Settings::getInt(Settings::Keys::VoiceOutputVolume, Settings::Defaults::VoiceOutputVolume);
     cachedOutputVolume = static_cast<float>(outVol) / 100.0f;
 
-    const QString inDev = Settings::getString(Settings::Keys::VoiceInputDevice, Settings::Defaults::VoiceInputDevice);
-    if (!inDev.isEmpty())
-        currentInputDeviceId = QByteArray::fromHex(inDev.toLatin1());
-    const QString outDev = Settings::getString(Settings::Keys::VoiceOutputDevice, Settings::Defaults::VoiceOutputDevice);
-    if (!outDev.isEmpty())
-        currentOutputDeviceId = QByteArray::fromHex(outDev.toLatin1());
+    const std::string inDev = Settings::getString(Settings::Keys::VoiceInputDevice, Settings::Defaults::VoiceInputDevice);
+    if (!inDev.empty())
+        currentInputDeviceId = decodeDeviceId(inDev);
+    const std::string outDev = Settings::getString(Settings::Keys::VoiceOutputDevice, Settings::Defaults::VoiceOutputDevice);
+    if (!outDev.empty())
+        currentOutputDeviceId = decodeDeviceId(outDev);
 }
 
 VoiceManager::~VoiceManager()
@@ -41,11 +60,17 @@ IAudioBackend *VoiceManager::backend() const
         audioBackend = IAudioBackend::create();
         audioBackend->setInputGain(cachedInputGain);
         audioBackend->setOutputVolume(cachedOutputVolume);
-        if (!currentInputDeviceId.isEmpty())
+        if (!currentInputDeviceId.empty())
             audioBackend->setInputDevice(currentInputDeviceId);
-        if (!currentOutputDeviceId.isEmpty())
+        if (!currentOutputDeviceId.empty())
             audioBackend->setOutputDevice(currentOutputDeviceId);
-        connect(audioBackend.get(), &IAudioBackend::devicesChanged, this, &VoiceManager::onDevicesChanged);
+        Platform::Guard<VoiceManager> guard(const_cast<VoiceManager *>(this));
+        const_cast<VoiceManager *>(this)->track(audioBackend->devicesChanged.connect(
+            [guard](const auto &inputs, const auto &outputs) {
+                Platform::Dispatcher::main().post([guard, inputs, outputs]() {
+                    if (guard) guard->onDevicesChanged(inputs, outputs);
+                });
+            }));
     }
     return audioBackend.get();
 }
@@ -60,27 +85,27 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
         Snowflake oldChannel;
         bool hadOld = false;
         Discord::VoiceState oldState;
-        auto oldIt = knownVoiceStates.constFind(userId);
-        if (oldIt != knownVoiceStates.constEnd()) {
+        auto oldIt = knownVoiceStates.find(userId);
+        if (oldIt != knownVoiceStates.end()) {
             hadOld = true;
-            oldState = oldIt.value();
-            if (!oldIt->channelId.isNull())
-                oldChannel = oldIt->channelId.get();
+            oldState = oldIt->second;
+            if (!oldIt->second.channelId.isNull())
+                oldChannel = oldIt->second.channelId.get();
         }
 
         bool leftVoice = state.channelId.isNull() || !state.channelId.get().isValid();
         Snowflake newChannel = leftVoice ? Snowflake::Invalid : state.channelId.get();
 
         if (leftVoice)
-            knownVoiceStates.remove(userId);
+            knownVoiceStates.erase(userId);
         else
             knownVoiceStates[userId] = state;
 
         if (oldChannel != newChannel) {
             if (oldChannel.isValid())
-                emit channelVoiceMemberChanged(oldChannel, userId, false);
+                channelVoiceMemberChanged.publish(oldChannel, userId, false);
             if (newChannel.isValid())
-                emit channelVoiceMemberChanged(newChannel, userId, true);
+                channelVoiceMemberChanged.publish(newChannel, userId, true);
         } else if (newChannel.isValid() && hadOld) {
             bool stateDiffers = oldState.selfMute.get() != state.selfMute.get() ||
                                 oldState.selfDeaf.get() != state.selfDeaf.get() ||
@@ -89,13 +114,13 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
                                 oldState.suppress.get() != state.suppress.get() ||
                                 oldState.selfStream.valueOr(false) != state.selfStream.valueOr(false);
             if (stateDiffers)
-                emit participantVoiceStateChanged(newChannel, userId);
+                participantVoiceStateChanged.publish(newChannel, userId);
         }
     }
 
     if (isMe) {
         if (state.channelId.isNull() || !state.channelId.get().isValid()) {
-            qCInfo(LogVoice) << "Voice state: disconnected from channel";
+            log(LogLevel::Info, LogVoice) << "Voice state: disconnected from channel";
             Snowflake oldChannel = channelId;
             voiceSessionId.clear();
             channelId = Snowflake::Invalid;
@@ -103,7 +128,7 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
             pending = {};
 
             if (oldChannel.isValid())
-                emit channelVoiceMemberChanged(oldChannel, accountId, false);
+                channelVoiceMemberChanged.publish(oldChannel, accountId, false);
 
             if (voiceLoop)
                 disconnect();
@@ -119,15 +144,15 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
         guildId = state.guildId.hasValue() ? state.guildId.get() : Snowflake::Invalid;
 
         if (channelChanged) {
-            if (!participants.isEmpty()) {
+            if (!participants.empty()) {
                 participants.clear();
-                emit participantsCleared();
+                participantsCleared.publish();
             }
             populateParticipantsFromCache();
 
             if (oldSelfChannel.isValid())
-                emit channelVoiceMemberChanged(oldSelfChannel, accountId, false);
-            emit channelVoiceMemberChanged(newChannelId, accountId, true);
+                channelVoiceMemberChanged.publish(oldSelfChannel, accountId, false);
+            channelVoiceMemberChanged.publish(newChannelId, accountId, true);
         }
 
         bool wasMuted = selfMute;
@@ -135,11 +160,11 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
         selfMute = state.selfMute.get();
         selfDeaf = state.selfDeaf.get();
 
-        qCInfo(LogVoice) << "Voice state: session =" << voiceSessionId
+        log(LogLevel::Info, LogVoice) << "Voice state: session =" << voiceSessionId
                          << "channel =" << channelId << "guild =" << guildId;
 
         if (!channelChanged && channelId.isValid() && (selfMute != wasMuted || selfDeaf != wasDeaf))
-            emit participantVoiceStateChanged(channelId, accountId);
+            participantVoiceStateChanged.publish(channelId, accountId);
 
         if (audioPipeline && voiceLoop && (selfMute != wasMuted || selfDeaf != wasDeaf)) {
             if (selfMute || selfDeaf)
@@ -166,16 +191,16 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
     bool userLeftChannel = state.channelId.isNull() || !state.channelId.get().isValid() || state.channelId.get() != channelId;
 
     if (userLeftChannel) {
-        if (participants.remove(userId)) {
+        if (participants.erase(userId)) {
             if (audioPipeline && voiceLoop)
                 voiceLoop->post([p = audioPipeline, userId]() { p->removeUser(userId); });
-            emit participantLeft(userId);
+            participantLeft.publish(userId);
         }
     } else {
         auto it = participants.find(userId);
         bool isNew = (it == participants.end());
 
-        VoiceParticipant &p = isNew ? participants[userId] : it.value();
+        VoiceParticipant &p = isNew ? participants[userId] : it->second;
         if (isNew)
             p.userId = userId;
 
@@ -187,9 +212,9 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
         p.streaming = state.selfStream.valueOr(false);
 
         if (isNew)
-            emit participantJoined(userId);
+            participantJoined.publish(userId);
         else
-            emit participantUpdated(userId);
+            participantUpdated.publish(userId);
     }
 }
 
@@ -197,20 +222,20 @@ void VoiceManager::handleVoiceServerUpdate(const Discord::VoiceServerUpdate &eve
 {
     Snowflake eventGuildId = event.guildId.get();
 
-    if (event.endpoint.isNull() || event.endpoint.get().isEmpty()) {
-        qCInfo(LogVoice) << "Voice server update with null endpoint, waiting for new one";
+    if (event.endpoint.isNull() || event.endpoint.get().empty()) {
+        log(LogLevel::Info, LogVoice) << "Voice server update with null endpoint, waiting for new one";
         return;
     }
 
     if (!proxy.canRelayUdp()) {
-        qCWarning(LogVoice) << "Refusing voice connection: an HTTP proxy cannot relay voice UDP";
+        log(LogLevel::Warning, LogVoice) << "Refusing voice connection: an HTTP proxy cannot relay voice UDP";
         return;
     }
 
-    QString eventEndpoint = event.endpoint.get();
-    QString eventToken = event.token.get();
+    std::string eventEndpoint = event.endpoint.get();
+    std::string eventToken = event.token.get();
 
-    qCInfo(LogVoice) << "Voice server update: guild =" << eventGuildId
+    log(LogLevel::Info, LogVoice) << "Voice server update: guild =" << eventGuildId
                      << "endpoint =" << eventEndpoint;
 
     if (voiceLoop && guildId == eventGuildId) {
@@ -224,7 +249,7 @@ void VoiceManager::handleVoiceServerUpdate(const Discord::VoiceServerUpdate &eve
     pending.guildId = eventGuildId;
     pending.hasServerUpdate = true;
 
-    if (pending.hasStateUpdate && !voiceSessionId.isEmpty()) {
+    if (pending.hasStateUpdate && !voiceSessionId.empty()) {
         connectToVoiceServer(eventEndpoint, eventToken);
         pending = {};
     }
@@ -234,8 +259,8 @@ void VoiceManager::disconnect()
 {
     stopVoiceThread();
     pending = {};
-    emit voiceDisconnected();
-    emit voiceStateChanged();
+    voiceDisconnected.publish();
+    voiceStateChanged.publish();
 }
 
 bool VoiceManager::isConnected() const
@@ -251,7 +276,7 @@ Discord::Voice::VoiceClient::State VoiceManager::clientState() const
     return voiceClient->state();
 }
 
-void VoiceManager::playStreamAudio(quint32 ssrc, quint16 sequence, quint32 timestamp, const QByteArray &opus)
+void VoiceManager::playStreamAudio(std::uint32_t ssrc, std::uint16_t sequence, std::uint32_t timestamp, const std::string &opus)
 {
     if (audioPipeline && voiceLoop && !selfDeaf)
         voiceLoop->post([p = audioPipeline, ssrc, sequence, timestamp, opus]() {
@@ -348,21 +373,21 @@ void VoiceManager::setUseRnnoiseVad(bool enabled)
     if (audioPipeline && voiceLoop)
         voiceLoop->post([p = audioPipeline, enabled]() { p->setUseRnnoiseVad(enabled); });
 }
-QList<AudioDeviceInfo> VoiceManager::availableInputDevices() const
+std::vector<AudioDeviceInfo> VoiceManager::availableInputDevices() const
 {
     if (voiceLoop)
         return cachedInputDevices;
     return backend()->availableInputDevices();
 }
 
-QList<AudioDeviceInfo> VoiceManager::availableOutputDevices() const
+std::vector<AudioDeviceInfo> VoiceManager::availableOutputDevices() const
 {
     if (voiceLoop)
         return cachedOutputDevices;
     return backend()->availableOutputDevices();
 }
 
-void VoiceManager::setInputDevice(const QByteArray &deviceId)
+void VoiceManager::setInputDevice(const std::string &deviceId)
 {
     currentInputDeviceId = deviceId;
     if (audioBackend)
@@ -371,7 +396,7 @@ void VoiceManager::setInputDevice(const QByteArray &deviceId)
         voiceLoop->post([p = audioPipeline, deviceId]() { p->setInputDevice(deviceId); });
 }
 
-void VoiceManager::setOutputDevice(const QByteArray &deviceId)
+void VoiceManager::setOutputDevice(const std::string &deviceId)
 {
     currentOutputDeviceId = deviceId;
     if (audioBackend)
@@ -379,17 +404,21 @@ void VoiceManager::setOutputDevice(const QByteArray &deviceId)
     if (audioPipeline && voiceLoop)
         voiceLoop->post([p = audioPipeline, deviceId]() { p->setOutputDevice(deviceId); });
 }
-QList<VoiceParticipant> VoiceManager::currentParticipants() const
+std::vector<VoiceParticipant> VoiceManager::currentParticipants() const
 {
-    return participants.values();
+    std::vector<VoiceParticipant> result;
+    result.reserve(participants.size());
+    for (const auto &[id, participant] : participants)
+        result.push_back(participant);
+    return result;
 }
 
 const VoiceParticipant *VoiceManager::participant(Snowflake userId) const
 {
-    auto it = participants.constFind(userId);
-    if (it == participants.constEnd())
+    auto it = participants.find(userId);
+    if (it == participants.end())
         return nullptr;
-    return &it.value();
+    return &it->second;
 }
 
 void VoiceManager::setUserMuted(Snowflake userId, bool muted)
@@ -397,7 +426,7 @@ void VoiceManager::setUserMuted(Snowflake userId, bool muted)
     if (muted)
         mutedUsers.insert(userId);
     else
-        mutedUsers.remove(userId);
+        mutedUsers.erase(userId);
 
     setUserVolume(userId, muted ? 0.0f : 1.0f);
 }
@@ -413,8 +442,8 @@ int VoiceManager::channelVoiceUserCount(Snowflake targetChannelId) const
         return 0;
 
     int count = 0;
-    for (auto it = knownVoiceStates.constBegin(); it != knownVoiceStates.constEnd(); ++it) {
-        if (!it->channelId.isNull() && it->channelId.get() == targetChannelId)
+    for (auto it = knownVoiceStates.begin(); it != knownVoiceStates.end(); ++it) {
+        if (!it->second.channelId.isNull() && it->second.channelId.get() == targetChannelId)
             ++count;
     }
 
@@ -425,18 +454,18 @@ int VoiceManager::channelVoiceUserCount(Snowflake targetChannelId) const
     return count;
 }
 
-QList<Snowflake> VoiceManager::channelVoiceUsers(Snowflake targetChannelId) const
+std::vector<Snowflake> VoiceManager::channelVoiceUsers(Snowflake targetChannelId) const
 {
-    QList<Snowflake> users;
+    std::vector<Snowflake> users;
     if (!targetChannelId.isValid())
         return users;
 
     if (channelId == targetChannelId && channelId.isValid())
-        users.append(accountId);
+        users.push_back(accountId);
 
-    for (auto it = knownVoiceStates.constBegin(); it != knownVoiceStates.constEnd(); ++it) {
-        if (!it->channelId.isNull() && it->channelId.get() == targetChannelId)
-            users.append(it.key());
+    for (auto it = knownVoiceStates.begin(); it != knownVoiceStates.end(); ++it) {
+        if (!it->second.channelId.isNull() && it->second.channelId.get() == targetChannelId)
+            users.push_back(it->first);
     }
 
     return users;
@@ -456,10 +485,10 @@ std::optional<Discord::VoiceState> VoiceManager::voiceStateForUser(Snowflake use
         return state;
     }
 
-    auto it = knownVoiceStates.constFind(userId);
-    if (it == knownVoiceStates.constEnd())
+    auto it = knownVoiceStates.find(userId);
+    if (it == knownVoiceStates.end())
         return std::nullopt;
-    return it.value();
+    return it->second;
 }
 
 bool VoiceManager::isDaveEnabled() const
@@ -467,10 +496,10 @@ bool VoiceManager::isDaveEnabled() const
     return voiceClient && voiceClient->isDaveEnabled();
 }
 
-void VoiceManager::requestVerificationCode(Snowflake targetUserId, std::function<void(const QString &)> callback)
+void VoiceManager::requestVerificationCode(Snowflake targetUserId, std::function<void(const std::string &)> callback)
 {
     if (!voiceClient) {
-        callback(QString());
+        callback(std::string());
         return;
     }
     if (voiceLoop) {
@@ -480,16 +509,16 @@ void VoiceManager::requestVerificationCode(Snowflake targetUserId, std::function
     }
 }
 
-void VoiceManager::connectToVoiceServer(const QString &endpoint, const QString &token)
+void VoiceManager::connectToVoiceServer(const std::string &endpoint, const std::string &token)
 {
-    if (voiceSessionId.isEmpty()) {
-        qCWarning(LogVoice) << "Cannot connect to voice: no session ID";
+    if (voiceSessionId.empty()) {
+        log(LogLevel::Warning, LogVoice) << "Cannot connect to voice: no session ID";
         return;
     }
 
     stopVoiceThread();
 
-    qCInfo(LogVoice) << "Creating voice loop for endpoint" << endpoint
+    log(LogLevel::Info, LogVoice) << "Creating voice loop for endpoint" << endpoint
                      << "guild" << guildId << "channel" << channelId;
 
     Styx::Platform::WorkerOptions opts;
@@ -499,143 +528,116 @@ void VoiceManager::connectToVoiceServer(const QString &endpoint, const QString &
 
     Snowflake serverId = guildId.isValid() ? guildId : channelId;
     voiceClient = new Discord::Voice::VoiceClient(endpoint, token, serverId, channelId, accountId, voiceSessionId, proxy, voiceLoop.get());
-    audioPipeline = new AudioPipeline;
+    audioPipeline = new AudioPipeline(*voiceLoop);
 
-    QList<Snowflake> channelUsers;
-    for (auto it = knownVoiceStates.constBegin(); it != knownVoiceStates.constEnd(); ++it) {
-        const auto &vs = it.value();
+    std::vector<Snowflake> channelUsers;
+    for (auto it = knownVoiceStates.begin(); it != knownVoiceStates.end(); ++it) {
+        const auto &vs = it->second;
         if (!vs.channelId.isNull() && vs.channelId.get() == channelId)
-            channelUsers.append(it.key());
+            channelUsers.push_back(it->first);
     }
     voiceClient->seedConnectedUsers(channelUsers);
 
     cachedInputDevices = backend()->availableInputDevices();
     cachedOutputDevices = backend()->availableOutputDevices();
 
-    connect(voiceClient, &Discord::Voice::VoiceClient::audioReceived, audioPipeline, &AudioPipeline::onAudioReceived, Qt::DirectConnection);
-    connect(audioPipeline, &AudioPipeline::encodedAudioReady, voiceClient, &Discord::Voice::VoiceClient::sendAudio, Qt::DirectConnection);
-    connect(audioPipeline, &AudioPipeline::speakingChanged, voiceClient, &Discord::Voice::VoiceClient::setSpeaking, Qt::DirectConnection);
+    audioPipeline->track(voiceClient->audioReceived.connect(
+        [ap = audioPipeline](std::uint32_t ssrc, std::uint16_t sequence, std::uint32_t timestamp, const std::string &opus) {
+            ap->onAudioReceived(ssrc, sequence, timestamp, opus);
+        }));
+    voiceClient->track(audioPipeline->encodedAudioReady.connect(
+        [vc = voiceClient](const std::string &opus) { vc->sendAudio(opus); }));
+    voiceClient->track(audioPipeline->speakingChanged.connect(
+        [vc = voiceClient](bool speaking) { vc->setSpeaking(speaking); }));
+    audioPipeline->track(voiceClient->speakingReceived.connect(
+        [ap = audioPipeline](const Discord::Voice::SpeakingData &data) {
+            if (data.userId.hasValue() && data.userId->isValid() && data.ssrc.get() != 0)
+                ap->setSsrcUserId(data.ssrc, data.userId.get());
+        }));
+    audioPipeline->track(voiceClient->clientConnected.connect(
+        [ap = audioPipeline](const Discord::Voice::ClientConnectData &data) {
+            if (data.userId.hasValue() && data.userId->isValid() && data.audioSsrc.get() != 0)
+                ap->setSsrcUserId(data.audioSsrc, data.userId.get());
+        }));
 
-    connect(voiceClient, &Discord::Voice::VoiceClient::speakingReceived, audioPipeline,
-            [ap = audioPipeline](const Discord::Voice::SpeakingData &data) {
-                if (data.userId.hasValue() && data.userId->isValid() && data.ssrc.get() != 0)
-                    ap->setSsrcUserId(data.ssrc, data.userId.get());
-            }, Qt::DirectConnection);
-
-    connect(voiceClient, &Discord::Voice::VoiceClient::clientConnected, audioPipeline,
-            [ap = audioPipeline](const Discord::Voice::ClientConnectData &data) {
-                if (data.userId.hasValue() && data.userId->isValid() && data.audioSsrc.get() != 0)
-                    ap->setSsrcUserId(data.audioSsrc, data.userId.get());
-            }, Qt::DirectConnection);
-
-    unsigned int gen = voiceGeneration;
+    const unsigned int gen = voiceGeneration;
     auto alive = m_voiceAlive;
-
-    connect(voiceClient, &Discord::Voice::VoiceClient::clientConnected,
-            this, [this, gen, alive](const Discord::Voice::ClientConnectData &data) {
-                Styx::Platform::Dispatcher::main().post([this, gen, alive, data]() {
-                    if (!*alive || gen != voiceGeneration)
-                        return;
-                    Snowflake userId = data.userId;
-                    if (!userId.isValid() || userId == accountId || participants.contains(userId))
-                        return;
-                    VoiceParticipant p;
-                    p.userId = userId;
-                    participants.insert(userId, p);
-                    emit participantJoined(userId);
-                });
-            }, Qt::DirectConnection);
-
-    connect(voiceClient, &Discord::Voice::VoiceClient::clientDisconnected,
-            this, [this, gen, alive](Snowflake userId) {
-                Styx::Platform::Dispatcher::main().post([this, gen, alive, userId]() {
-                    if (!*alive || gen != voiceGeneration)
-                        return;
-                    if (participants.remove(userId)) {
-                        if (audioPipeline && voiceLoop)
-                            voiceLoop->post([p = audioPipeline, userId]() { p->removeUser(userId); });
-                        emit participantLeft(userId);
-                    }
-                });
-            }, Qt::DirectConnection);
-
-    connect(voiceClient, &Discord::Voice::VoiceClient::speakingReceived,
-            this, [this, gen, alive](const Discord::Voice::SpeakingData &data) {
-                Styx::Platform::Dispatcher::main().post([this, gen, alive, data]() {
-                    if (!*alive || gen != voiceGeneration)
-                        return;
-                    if (!data.userId.hasValue() || !data.userId->isValid())
-                        return;
-                    Snowflake userId = data.userId.get();
-                    auto it = participants.find(userId);
-                    if (it == participants.end())
-                        return;
-                    bool wasSpeaking = it->speaking;
-                    it->speaking = (data.speaking.get() != 0);
-                    if (it->speaking != wasSpeaking)
-                        emit participantSpeakingChanged(userId, it->speaking);
-                });
-            }, Qt::DirectConnection);
-
-    connect(audioPipeline, &AudioPipeline::userAudioLevelChanged, this, [this, alive](Snowflake userId, float level) {
-        Styx::Platform::Dispatcher::main().post([this, alive, userId, level]() {
-            if (!*alive)
+    track(voiceClient->clientConnected.connect([this, gen, alive](const Discord::Voice::ClientConnectData &data) {
+        Platform::Dispatcher::main().post([this, gen, alive, data]() {
+            if (!*alive || gen != voiceGeneration || !data.userId.hasValue())
                 return;
-            emit userAudioLevelChanged(userId, level);
+            Snowflake userId = data.userId.get();
+            if (!userId.isValid() || userId == accountId || participants.contains(userId))
+                return;
+            VoiceParticipant p;
+            p.userId = userId;
+            participants.emplace(userId, p);
+            participantJoined.publish(userId);
         });
-    }, Qt::DirectConnection);
-
-    connect(voiceClient, &Discord::Voice::VoiceClient::connected,
-            this, [this, gen, alive]() {
-                Styx::Platform::Dispatcher::main().post([this, gen, alive]() {
-                    if (!*alive || gen != voiceGeneration)
-                        return;
-                    onVoiceClientConnected();
-                });
-            }, Qt::DirectConnection);
-
-    connect(voiceClient, &Discord::Voice::VoiceClient::disconnected, this, [this, gen, alive]() {
-        Styx::Platform::Dispatcher::main().post([this, gen, alive]() {
+    }));
+    track(voiceClient->clientDisconnected.connect([this, gen, alive](Snowflake userId) {
+        Platform::Dispatcher::main().post([this, gen, alive, userId]() {
             if (!*alive || gen != voiceGeneration)
                 return;
-            onVoiceClientDisconnected();
+            if (participants.erase(userId)) {
+                if (audioPipeline && voiceLoop)
+                    voiceLoop->post([p = audioPipeline, userId]() { p->removeUser(userId); });
+                participantLeft.publish(userId);
+            }
         });
-    }, Qt::DirectConnection);
-
-    connect(voiceClient, &Discord::Voice::VoiceClient::stateChanged,
-            this, [this, gen, alive](Discord::Voice::VoiceClient::State state) {
-                Styx::Platform::Dispatcher::main().post([this, gen, alive, state]() {
-                    if (!*alive || gen != voiceGeneration)
-                        return;
-                    onVoiceClientStateChanged(state);
-                });
-            }, Qt::DirectConnection);
-
-    connect(audioPipeline, &AudioPipeline::audioLevelChanged, this, [this, alive](float level) {
-        Styx::Platform::Dispatcher::main().post([this, alive, level]() {
-            if (!*alive)
+    }));
+    track(voiceClient->speakingReceived.connect([this, gen, alive](const Discord::Voice::SpeakingData &data) {
+        Platform::Dispatcher::main().post([this, gen, alive, data]() {
+            if (!*alive || gen != voiceGeneration || !data.userId.hasValue() || !data.userId->isValid())
                 return;
-            emit audioLevelChanged(level);
-        });
-    }, Qt::DirectConnection);
-
-    connect(audioPipeline, &AudioPipeline::speakingChanged, this, [this, alive](bool speaking) {
-        Styx::Platform::Dispatcher::main().post([this, alive, speaking]() {
-            if (!*alive)
+            Snowflake userId = data.userId.get();
+            auto it = participants.find(userId);
+            if (it == participants.end())
                 return;
-            emit speakingChanged(speaking);
+            bool wasSpeaking = it->second.speaking;
+            it->second.speaking = data.speaking.get() != 0;
+            if (it->second.speaking != wasSpeaking)
+                participantSpeakingChanged.publish(userId, it->second.speaking);
         });
-    }, Qt::DirectConnection);
-
-    connect(voiceClient, &Discord::Voice::VoiceClient::privacyCodeChanged,
-            this, [this, gen, alive](const QString &code) {
-                Styx::Platform::Dispatcher::main().post([this, gen, alive, code]() {
-                    if (!*alive || gen != voiceGeneration)
-                        return;
-                    cachedPrivacyCode = code;
-                    emit privacyCodeChanged(code);
-                });
-            }, Qt::DirectConnection);
+    }));
+    track(audioPipeline->userAudioLevelChanged.connect([this, alive](Snowflake userId, float level) {
+        Platform::Dispatcher::main().post([this, alive, userId, level]() {
+            if (*alive) userAudioLevelChanged.publish(userId, level);
+        });
+    }));
+    track(voiceClient->connected.connect([this, gen, alive]() {
+        Platform::Dispatcher::main().post([this, gen, alive]() {
+            if (*alive && gen == voiceGeneration) onVoiceClientConnected();
+        });
+    }));
+    track(voiceClient->disconnected.connect([this, gen, alive]() {
+        Platform::Dispatcher::main().post([this, gen, alive]() {
+            if (*alive && gen == voiceGeneration) onVoiceClientDisconnected();
+        });
+    }));
+    track(voiceClient->stateChanged.connect([this, gen, alive](Discord::Voice::VoiceClient::State state) {
+        Platform::Dispatcher::main().post([this, gen, alive, state]() {
+            if (*alive && gen == voiceGeneration) onVoiceClientStateChanged(state);
+        });
+    }));
+    track(audioPipeline->audioLevelChanged.connect([this, alive](float level) {
+        Platform::Dispatcher::main().post([this, alive, level]() {
+            if (*alive) audioLevelChanged.publish(level);
+        });
+    }));
+    track(audioPipeline->speakingChanged.connect([this, alive](bool speaking) {
+        Platform::Dispatcher::main().post([this, alive, speaking]() {
+            if (*alive) speakingChanged.publish(speaking);
+        });
+    }));
+    track(voiceClient->privacyCodeChanged.connect([this, gen, alive](const std::string &code) {
+        Platform::Dispatcher::main().post([this, gen, alive, code]() {
+            if (!*alive || gen != voiceGeneration)
+                return;
+            cachedPrivacyCode = code;
+            privacyCodeChanged.publish(code);
+        });
+    }));
 
     voiceLoop->post([vc = voiceClient]() {
         vc->start();
@@ -650,62 +652,63 @@ void VoiceManager::stopVoiceThread()
     voiceGeneration++;
     if (m_voiceAlive)
         *m_voiceAlive = false;
-    m_voiceAlive = std::make_shared<bool>(true);
+    m_voiceAlive = std::make_shared<std::atomic<bool>>(true);
 
-    bool hadParticipants = !participants.isEmpty();
+    bool hadParticipants = !participants.empty();
     participants.clear();
     mutedUsers.clear();
     cachedPrivacyCode.clear();
     if (hadParticipants)
-        emit participantsCleared();
+        participantsCleared.publish();
 
     AudioPipeline *ap = audioPipeline;
     Discord::Voice::VoiceClient *vc = voiceClient;
 
     if (voiceLoop->isRunning()) {
-        std::promise<void> promise;
-        auto future = promise.get_future();
-        voiceLoop->post([ap, vc, &promise]() {
+        auto promise = std::make_shared<std::promise<void>>();
+        auto future = promise->get_future();
+        voiceLoop->post([ap, vc, promise]() {
             if (ap) ap->stop();
             if (vc) vc->stop();
-            promise.set_value();
+            promise->set_value();
         });
         if (future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
-            qCWarning(LogVoice) << "Voice worker stop timed out";
+            log(LogLevel::Warning, LogVoice) << "Voice worker stop timed out";
         }
     }
 
     voiceLoop->stopAndWait();
-    voiceLoop.reset();
+    
 
     delete audioPipeline;
     audioPipeline = nullptr;
 
     delete voiceClient;
     voiceClient = nullptr;
+    voiceLoop.reset();
 
-    qCDebug(LogVoice) << "Voice loop stopped";
+    log(LogLevel::Debug, LogVoice) << "Voice loop stopped";
 }
 
 void VoiceManager::populateParticipantsFromCache()
 {
-    for (auto it = knownVoiceStates.constBegin(); it != knownVoiceStates.constEnd(); ++it) {
-        const auto &vs = it.value();
+    for (auto it = knownVoiceStates.begin(); it != knownVoiceStates.end(); ++it) {
+        const auto &vs = it->second;
         if (vs.channelId.isNull() || vs.channelId.get() != channelId)
             continue;
-        if (participants.contains(it.key()))
+        if (participants.contains(it->first))
             continue;
 
         VoiceParticipant p;
-        p.userId = it.key();
+        p.userId = it->first;
         p.selfMute = vs.selfMute.get();
         p.selfDeaf = vs.selfDeaf.get();
         p.serverMute = vs.mute.get();
         p.serverDeaf = vs.deaf.get();
         p.suppress = vs.suppress.get();
         p.streaming = vs.selfStream.valueOr(false);
-        participants.insert(it.key(), p);
-        emit participantJoined(it.key());
+        participants.emplace(it->first, p);
+        participantJoined.publish(it->first);
     }
 }
 
@@ -714,11 +717,11 @@ void VoiceManager::onVoiceClientConnected()
     if (!audioPipeline)
         return;
 
-    qCInfo(LogVoice) << "Voice connection established for channel" << channelId;
+    log(LogLevel::Info, LogVoice) << "Voice connection established for channel" << channelId;
 
     bool capturing = !selfMute && !selfDeaf;
-    QByteArray inputId = currentInputDeviceId;
-    QByteArray outputId = currentOutputDeviceId;
+    std::string inputId = currentInputDeviceId;
+    std::string outputId = currentOutputDeviceId;
     IAudioBackend *audio = backend();
     int application = cachedOpusApplication;
     int bitrate = cachedOpusBitrate;
@@ -745,40 +748,40 @@ void VoiceManager::onVoiceClientConnected()
             p->start(audio, capturing);
             p->setInputGain(inGain);
             p->setOutputVolume(outVol);
-            if (!inputId.isEmpty())
+            if (!inputId.empty())
                 p->setInputDevice(inputId);
-            if (!outputId.isEmpty())
+            if (!outputId.empty())
                 p->setOutputDevice(outputId);
         });
     }
 
     populateParticipantsFromCache();
 
-    emit voiceConnected();
-    emit voiceStateChanged();
+    voiceConnected.publish();
+    voiceStateChanged.publish();
 }
 
 void VoiceManager::onVoiceClientDisconnected()
 {
-    qCInfo(LogVoice) << "Voice client disconnected";
+    log(LogLevel::Info, LogVoice) << "Voice client disconnected";
 
     stopVoiceThread();
 
-    emit voiceDisconnected();
-    emit voiceStateChanged();
+    voiceDisconnected.publish();
+    voiceStateChanged.publish();
 }
 
 void VoiceManager::onVoiceClientStateChanged(Discord::Voice::VoiceClient::State state)
 {
-    qCDebug(LogVoice) << "VoiceManager: client state ->" << static_cast<int>(state);
-    emit voiceStateChanged();
+    log(LogLevel::Debug, LogVoice) << "VoiceManager: client state ->" << static_cast<int>(state);
+    voiceStateChanged.publish();
 }
 
-void VoiceManager::onDevicesChanged(const QList<AudioDeviceInfo> &inputs, const QList<AudioDeviceInfo> &outputs)
+void VoiceManager::onDevicesChanged(const std::vector<AudioDeviceInfo> &inputs, const std::vector<AudioDeviceInfo> &outputs)
 {
     cachedInputDevices = inputs;
     cachedOutputDevices = outputs;
-    emit devicesChanged();
+    devicesChanged.publish();
 }
 
 } // namespace Audio

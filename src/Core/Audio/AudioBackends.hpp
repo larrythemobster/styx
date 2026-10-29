@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QString>
-#include <QStringList>
+#include <string>
+#include <vector>
 
 struct ma_context;
 struct ma_context_config;
@@ -12,10 +12,10 @@ namespace Styx {
 namespace Core {
 namespace Audio {
 
-QStringList supportedAudioBackends();
+std::vector<std::string> supportedAudioBackends();
 
-QString configuredAudioBackend();
-void setConfiguredAudioBackend(const QString &name);
+std::string configuredAudioBackend();
+void setConfiguredAudioBackend(const std::string &name);
 
 bool initAudioContext(ma_context *context, const ma_context_config *config);
 bool initAudioDevice(const ma_device_config *config, ma_device *device);

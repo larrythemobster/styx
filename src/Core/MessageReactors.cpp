@@ -18,7 +18,7 @@ bool ReactionRef::sameReaction(const ReactionRef &other) const
 MessageReactors::MessageReactors(Discord::Client *client, UserManager *users)
     : client(client), users(users)
 {
-    track(client->ready.connect([this] { onReady(); }));
+    track(client->ready.connect([this](const Discord::Ready &) { onReady(); }));
 }
 
 void MessageReactors::onReady()

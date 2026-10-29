@@ -2,12 +2,13 @@
 
 #ifdef STYX_HAVE_FFMPEG
 
-#include <QByteArray>
-#include <QImage>
-#include <QObject>
-#include <QSize>
-
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
+#include "Platform/Signal.hpp"
+#include "Platform/Trackable.hpp"
 #include <atomic>
+#include <cstdint>
+#include <string>
 
 struct AVCodecContext;
 struct AVFrame;
@@ -21,23 +22,17 @@ namespace Stream {
 
 // H264 access units from a watched stream -> RGB images at the size the view shows them.
 // Decodes on the GPU (D3D11VA) when it can, in software otherwise. Lives on its own thread.
-class StreamDecoder : public QObject
+class StreamDecoder : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit StreamDecoder(QObject *parent = nullptr);
-    ~StreamDecoder() override;
+    StreamDecoder() = default;
+    ~StreamDecoder();
 
-    // Thread-safe; the next frame is scaled to fit this (device pixels).
-    void setTargetSize(const QSize &size);
+    void setTargetSize(const Platform::Size &size);
+    void decode(const std::string &annexB, uint32_t rtpTimestamp, bool keyframe);
 
-public slots:
-    void decode(const QByteArray &annexB, quint32 rtpTimestamp, bool keyframe);
-
-signals:
-    void frameDecoded(const QImage &image, const QSize &sourceSize);
-    // The decoder lost its reference picture; ask the streamer for a keyframe.
-    void needKeyframe();
+    Platform::Signal<const Platform::ImageBuffer &, const Platform::Size &> frameDecoded;
+    Platform::Signal<> needKeyframe;
 
 private:
     bool openDecoder(bool hardware);

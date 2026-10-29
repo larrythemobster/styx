@@ -1,23 +1,21 @@
 #pragma once
 
-#include <QByteArray>
-#include <QImage>
-#include <QString>
+#include <cstdint>
+#include <string>
+#include "Platform/Image.hpp"
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 
 struct PendingAttachment
 {
-    QString filePath;
-    QImage image; // pasted
-    QByteArray data;
-    QString filename;
-    QString description;
-    QString mimeType;
-    qint64 size = 0;
+    std::string filePath;
+    Platform::ImageBuffer image;
+    std::string data;
+    std::string filename;
+    std::string description;
+    std::string mimeType;
+    std::int64_t size = 0;
     bool isSpoiler = false;
 };
 
-} // namespace Core
-} // namespace Styx
+} // namespace Styx::Core

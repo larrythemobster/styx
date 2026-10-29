@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QByteArray>
+#include <string>
 
 namespace Styx {
 namespace Core {
@@ -13,9 +13,9 @@ namespace Stream {
  *
  * @param spsNal One SPS NAL unit including its 1-byte NAL header, without start code,
  *               in escaped (emulation-prevention) form.
- * @return The rewritten NAL unit in the same form, or an empty QByteArray if parsing fails.
+ * @return The rewritten NAL unit in the same form, or an empty string if parsing fails.
  */
-QByteArray rewriteSpsVui(const QByteArray &spsNal);
+std::string rewriteSpsVui(const std::string &spsNal);
 
 /**
  * @brief Rewrites an H.264 Annex B access unit, replacing all SPS NAL units (type 7)
@@ -25,7 +25,7 @@ QByteArray rewriteSpsVui(const QByteArray &spsNal);
  * @return The access unit with rewritten SPS (prefixed by 4-byte start codes),
  *         leaving other NALs and their start codes byte-identical.
  */
-QByteArray rewriteAccessUnitSps(const QByteArray &annexB);
+std::string rewriteAccessUnitSps(const std::string &annexB);
 
 } // namespace Stream
 } // namespace Core

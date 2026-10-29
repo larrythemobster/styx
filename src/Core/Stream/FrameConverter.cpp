@@ -6,6 +6,8 @@
 
 #include "Core/Logging.hpp"
 
+#include <iterator>
+
 namespace Styx {
 namespace Core {
 namespace Stream {
@@ -20,7 +22,7 @@ FrameConverter::FrameConverter(std::shared_ptr<D3DDevice> dev) : device(std::mov
 
 FrameConverter::~FrameConverter() = default;
 
-bool FrameConverter::ensureProcessor(const QSize &sourceSize, const QSize &targetSize)
+bool FrameConverter::ensureProcessor(const Platform::Size &sourceSize, const Platform::Size &targetSize)
 {
     if (processor && processorSource == sourceSize && processorTarget == targetSize)
         return true;
@@ -34,17 +36,18 @@ bool FrameConverter::ensureProcessor(const QSize &sourceSize, const QSize &targe
 
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{};
     desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
-    desc.InputWidth = static_cast<UINT>(sourceSize.width());
-    desc.InputHeight = static_cast<UINT>(sourceSize.height());
-    desc.OutputWidth = static_cast<UINT>(targetSize.width());
-    desc.OutputHeight = static_cast<UINT>(targetSize.height());
+    desc.InputWidth = static_cast<UINT>(sourceSize.width);
+    desc.InputHeight = static_cast<UINT>(sourceSize.height);
+    desc.OutputWidth = static_cast<UINT>(targetSize.width);
+    desc.OutputHeight = static_cast<UINT>(targetSize.height);
     desc.InputFrameRate = { 60, 1 };
     desc.OutputFrameRate = { 60, 1 };
     desc.Usage = D3D11_VIDEO_USAGE_OPTIMAL_SPEED;
 
     if (FAILED(videoDevice->CreateVideoProcessorEnumerator(&desc, &enumerator))
         || FAILED(videoDevice->CreateVideoProcessor(enumerator.Get(), 0, &processor))) {
-        qCWarning(LogStream) << "Could not create a D3D11 video processor for" << sourceSize << "->" << targetSize;
+        log(LogLevel::Warning, LogStream) << "Could not create a D3D11 video processor for"
+            << sourceSize.width << "x" << sourceSize.height << "->" << targetSize.width << "x" << targetSize.height;
         processor.Reset();
         enumerator.Reset();
         return false;
@@ -61,12 +64,12 @@ bool FrameConverter::ensureProcessor(const QSize &sourceSize, const QSize &targe
     videoContext->VideoProcessorSetStreamAutoProcessingMode(processor.Get(), 0, FALSE);
 
     // letterbox: fit the source inside the target, centred, black around it
-    const QSize fitted = sourceSize.scaled(targetSize, Qt::KeepAspectRatio);
-    const int x = (targetSize.width() - fitted.width()) / 2;
-    const int y = (targetSize.height() - fitted.height()) / 2;
-    RECT dest{ x & ~1, y & ~1, (x + fitted.width()) & ~1, (y + fitted.height()) & ~1 };
-    RECT src{ 0, 0, sourceSize.width(), sourceSize.height() };
-    RECT full{ 0, 0, targetSize.width(), targetSize.height() };
+    const Platform::Size fitted = Platform::fitWithin(sourceSize, targetSize);
+    const int x = (targetSize.width - fitted.width) / 2;
+    const int y = (targetSize.height - fitted.height) / 2;
+    RECT dest{ x & ~1, y & ~1, (x + fitted.width) & ~1, (y + fitted.height) & ~1 };
+    RECT src{ 0, 0, sourceSize.width, sourceSize.height };
+    RECT full{ 0, 0, targetSize.width, targetSize.height };
     videoContext->VideoProcessorSetStreamSourceRect(processor.Get(), 0, TRUE, &src);
     videoContext->VideoProcessorSetStreamDestRect(processor.Get(), 0, TRUE, &dest);
     videoContext->VideoProcessorSetOutputTargetRect(processor.Get(), TRUE, &full);
@@ -83,10 +86,10 @@ bool FrameConverter::ensureProcessor(const QSize &sourceSize, const QSize &targe
     return true;
 }
 
-bool FrameConverter::convert(ID3D11Texture2D *source, const QSize &sourceSize, ID3D11Texture2D *target, UINT targetIndex,
-                             const QSize &targetSize)
+bool FrameConverter::convert(ID3D11Texture2D *source, const Platform::Size &sourceSize, ID3D11Texture2D *target, UINT targetIndex,
+                             const Platform::Size &targetSize)
 {
-    if (!source || !target || sourceSize.isEmpty() || !ensureProcessor(sourceSize, targetSize))
+    if (!source || !target || sourceSize.empty() || targetSize.empty() || !ensureProcessor(sourceSize, targetSize))
         return false;
 
     if (source != inputTexture || !inputView) {

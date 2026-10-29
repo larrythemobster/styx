@@ -2,8 +2,10 @@
 
 #ifdef STYX_HAVE_FFMPEG
 
-#include <QByteArray>
-#include <QUrl>
+#include <charconv>
+#include <cctype>
+#include <cstdint>
+#include <string_view>
 
 #include <curl/curl.h>
 
@@ -41,8 +43,8 @@ struct Stream
     CURL *easy = nullptr;
 
     std::deque<char> pending;
-    qint64 position = 0;
-    qint64 contentLength = -1;
+    int64_t position = 0;
+    int64_t contentLength = -1;
     bool transferRunning = false;
     bool paused = false;
     bool endOfStream = false;
@@ -76,18 +78,26 @@ struct Stream
 size_t onHeader(char *buffer, size_t size, size_t count, void *userdata)
 {
     auto *stream = static_cast<Stream *>(userdata);
-    const QByteArray header = QByteArray(buffer, static_cast<int>(size * count)).trimmed().toLower();
-
-    bool ok = false;
-    if (header.startsWith("content-range:")) {
-        const qint64 total = header.mid(header.lastIndexOf('/') + 1).trimmed().toLongLong(&ok);
-        if (ok)
-            stream->contentLength = total;
-    } else if (stream->position == 0 && header.startsWith("content-length:")) {
-        const qint64 length = header.mid(header.indexOf(':') + 1).trimmed().toLongLong(&ok);
-        if (ok)
-            stream->contentLength = length;
+    std::string header(buffer, size * count);
+    std::transform(header.begin(), header.end(), header.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::string_view value(header);
+    if (value.starts_with("content-range:")) {
+        const auto slash = value.rfind('/');
+        value = slash == std::string_view::npos ? std::string_view{} : value.substr(slash + 1);
+    } else if (stream->position == 0 && value.starts_with("content-length:")) {
+        value.remove_prefix(value.find(':') + 1);
+    } else {
+        return size * count;
     }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+        value.remove_prefix(1);
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+        value.remove_suffix(1);
+    int64_t length = 0;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), length);
+    if (result.ec == std::errc{} && result.ptr == value.data() + value.size())
+        stream->contentLength = length;
 
     return size * count;
 }
@@ -170,7 +180,7 @@ bool fillBuffer(Stream *stream)
             int queued = 0;
             while (CURLMsg *msg = curl_multi_info_read(stream->multi, &queued)) {
                 if (msg->msg == CURLMSG_DONE && msg->data.result != CURLE_OK) {
-                    qCWarning(LogVideo) << "media transfer failed:" << curl_easy_strerror(msg->data.result);
+                    Core::log(Core::LogLevel::Warning, LogVideo) << "media transfer failed:" << curl_easy_strerror(msg->data.result);
                     stream->failed = true;
                 }
             }
@@ -187,7 +197,7 @@ bool fillBuffer(Stream *stream)
         if (stream->pending.size() == before) {
             idleMs += POLL_INTERVAL_MS;
             if (idleMs >= STALL_TIMEOUT_MS) {
-                qCWarning(LogVideo) << "media transfer stalled";
+                Core::log(Core::LogLevel::Warning, LogVideo) << "media transfer stalled";
                 return false;
             }
         } else {
@@ -216,7 +226,7 @@ int readPacket(void *opaque, uint8_t *buf, int size)
     if (stream->pending.empty())
         return AVERROR_EOF;
 
-    const int copied = static_cast<int>(qMin<size_t>(static_cast<size_t>(size), stream->pending.size()));
+    const int copied = static_cast<int>(std::min<size_t>(static_cast<size_t>(size), stream->pending.size()));
     std::copy(stream->pending.begin(), stream->pending.begin() + copied, buf);
     stream->pending.erase(stream->pending.begin(), stream->pending.begin() + copied);
     stream->position += copied;
@@ -233,7 +243,7 @@ int64_t seekPacket(void *opaque, int64_t offset, int whence)
     if (whence == AVSEEK_SIZE)
         return stream->contentLength >= 0 ? stream->contentLength : AVERROR(ENOSYS);
 
-    qint64 target = offset;
+    int64_t target = offset;
     if (whence == SEEK_CUR)
         target = stream->position + offset;
     else if (whence == SEEK_END)
@@ -258,16 +268,21 @@ int64_t seekPacket(void *opaque, int64_t offset, int whence)
 
 } // namespace
 
-bool handlesScheme(const QString &url)
+bool handlesScheme(const std::string &url)
 {
-    const QString scheme = QUrl(url).scheme().toLower();
-    return scheme == QStringLiteral("http") || scheme == QStringLiteral("https");
+    const auto colon = url.find(':');
+    if (colon == std::string::npos)
+        return false;
+    std::string scheme = url.substr(0, colon);
+    std::transform(scheme.begin(), scheme.end(), scheme.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return scheme == "http" || scheme == "https";
 }
 
-AVIOContext *create(const QString &url, const ProxyConfig &proxy, const AVIOInterruptCB &interrupt)
+AVIOContext *create(const std::string &url, const ProxyConfig &proxy, const AVIOInterruptCB &interrupt)
 {
     auto *stream = new Stream;
-    stream->url = url.toStdString();
+    stream->url = url;
     stream->proxy = proxy;
     stream->interrupt = interrupt;
     stream->multi = curl_multi_init();
