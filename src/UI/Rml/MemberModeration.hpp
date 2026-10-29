@@ -3,19 +3,21 @@
 #include <QDateTime>
 #include <QList>
 #include <QString>
-
+#include <memory>
 #include <optional>
+#include <vector>
 
 #include "Core/Snowflake.hpp"
-
-class QMenu;
-class QWidget;
 
 namespace Styx {
 namespace Core {
 class ClientInstance;
-} // namespace Core
+}
 namespace UI {
+class Shell;
+namespace Rml {
+struct MenuItem;
+}
 
 struct MemberModerationTarget
 {
@@ -25,31 +27,37 @@ struct MemberModerationTarget
     QList<Core::Snowflake> roleIds;
     bool bot = false;
     QDateTime timeoutUntil;
-
     [[nodiscard]] bool isTimedOut() const { return timeoutUntil.isValid() && timeoutUntil > QDateTime::currentDateTimeUtc(); }
 };
 
 namespace MemberModeration {
+class Controller
+{
+public:
+    struct Impl;
+    explicit Controller(Shell &shell);
+    ~Controller();
+    Controller(const Controller &) = delete;
+    Controller &operator=(const Controller &) = delete;
+
+private:
+    std::unique_ptr<Impl> impl;
+};
 
 [[nodiscard]] std::optional<MemberModerationTarget> targetFor(Core::ClientInstance *instance, Core::Snowflake guildId, Core::Snowflake userId);
-
 [[nodiscard]] bool canKick(Core::ClientInstance *instance, const MemberModerationTarget &target);
 [[nodiscard]] bool canBan(Core::ClientInstance *instance, const MemberModerationTarget &target);
 [[nodiscard]] bool canTimeout(Core::ClientInstance *instance, const MemberModerationTarget &target);
 [[nodiscard]] bool canChangeNickname(Core::ClientInstance *instance, const MemberModerationTarget &target);
 [[nodiscard]] bool canEditRoles(Core::ClientInstance *instance, const MemberModerationTarget &target);
-
 [[nodiscard]] QString timeoutRemaining(const QDateTime &until);
 
-void kick(QWidget *parent, Core::ClientInstance *instance, const MemberModerationTarget &target);
-void ban(QWidget *parent, Core::ClientInstance *instance, const MemberModerationTarget &target);
-void timeout(QWidget *parent, Core::ClientInstance *instance, const MemberModerationTarget &target);
-void removeTimeout(QWidget *parent, Core::ClientInstance *instance, const MemberModerationTarget &target);
-void changeNickname(QWidget *parent, Core::ClientInstance *instance, const MemberModerationTarget &target);
-
-void addRolesMenu(QMenu *menu, QWidget *dialogParent, Core::ClientInstance *instance, const MemberModerationTarget &target);
-void addModerationActions(QMenu *menu, QWidget *dialogParent, Core::ClientInstance *instance, const MemberModerationTarget &target);
-
+void kick(Shell &shell, Core::ClientInstance *instance, const MemberModerationTarget &target);
+void ban(Shell &shell, Core::ClientInstance *instance, const MemberModerationTarget &target);
+void timeout(Shell &shell, Core::ClientInstance *instance, const MemberModerationTarget &target);
+void removeTimeout(Shell &shell, Core::ClientInstance *instance, const MemberModerationTarget &target);
+void changeNickname(Shell &shell, Core::ClientInstance *instance, const MemberModerationTarget &target);
+void addModerationActions(std::vector<Rml::MenuItem> &items, Shell &shell, Core::ClientInstance *instance, const MemberModerationTarget &target);
 } // namespace MemberModeration
 } // namespace UI
 } // namespace Styx

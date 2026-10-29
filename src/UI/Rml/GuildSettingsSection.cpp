@@ -1,8 +1,5 @@
 #include "GuildSettingsSection.hpp"
 
-#include <QCoreApplication>
-#include <QMenu>
-#include <QMouseEvent>
 
 #include "Core/ClientInstance.hpp"
 
@@ -14,10 +11,6 @@ using Discord::Permission;
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("GuildSettings", text);
-}
 
 bool hasAny(Core::ClientInstance *instance, Core::Snowflake guildId, Discord::Permissions permissions)
 {
@@ -25,32 +18,6 @@ bool hasAny(Core::ClientInstance *instance, Core::Snowflake guildId, Discord::Pe
     return (granted & permissions) != Discord::NO_PERMISSIONS;
 }
 
-class SubmenuEntryClick : public QObject
-{
-public:
-    SubmenuEntryClick(QMenu *parentMenu, QMenu *submenu) : QObject(submenu), parentMenu(parentMenu), submenu(submenu) { parentMenu->installEventFilter(this); }
-
-protected:
-    bool eventFilter(QObject *watched, QEvent *event) override
-    {
-        if (watched != parentMenu || event->type() != QEvent::MouseButtonRelease)
-            return false;
-        const auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        if (mouseEvent->button() != Qt::LeftButton || parentMenu->actionAt(mouseEvent->pos()) != submenu->menuAction())
-            return false;
-        const QList<QAction *> entries = submenu->actions();
-        if (entries.isEmpty())
-            return false;
-        QAction *first = entries.first();
-        parentMenu->close();
-        first->trigger();
-        return true;
-    }
-
-private:
-    QMenu *parentMenu;
-    QMenu *submenu;
-};
 
 } // namespace
 
@@ -59,26 +26,26 @@ bool canOpen(Core::ClientInstance *instance, Core::Snowflake guildId)
     return instance && instance->getGuild(guildId).has_value();
 }
 
-QList<GuildSettingsSection> visibleSections(Core::ClientInstance *instance, Core::Snowflake guildId)
+std::vector<GuildSettingsSection> visibleSections(Core::ClientInstance *instance, Core::Snowflake guildId)
 {
     const auto guild = instance ? instance->getGuild(guildId) : std::nullopt;
     if (!guild)
         return {};
     auto has = [&](Discord::Permissions permissions) { return hasAny(instance, guildId, permissions); };
 
-    QList<GuildSettingsSection> sections{ GuildSettingsSection::Profile, GuildSettingsSection::Engagement,
+    std::vector<GuildSettingsSection> sections{ GuildSettingsSection::Profile, GuildSettingsSection::Engagement,
                                           GuildSettingsSection::BoostPerks, GuildSettingsSection::Emoji,
                                           GuildSettingsSection::Stickers, GuildSettingsSection::Members,
                                           GuildSettingsSection::Roles };
 
     if (has(Permission::MANAGE_GUILD | Permission::CREATE_INSTANT_INVITE))
-        sections << GuildSettingsSection::Invites;
+        sections.push_back(GuildSettingsSection::Invites);
     if (has(Permission::VIEW_AUDIT_LOG))
-        sections << GuildSettingsSection::AuditLog;
+        sections.push_back(GuildSettingsSection::AuditLog);
     if (has(Permission::BAN_MEMBERS | Permission::VIEW_AUDIT_LOG))
-        sections << GuildSettingsSection::Bans;
+        sections.push_back(GuildSettingsSection::Bans);
     if (guild->ownerId.get() == instance->accountId())
-        sections << GuildSettingsSection::DeleteServer;
+        sections.push_back(GuildSettingsSection::DeleteServer);
     return sections;
 }
 
@@ -127,31 +94,31 @@ bool canEdit(Core::ClientInstance *instance, Core::Snowflake guildId, GuildSetti
     return false;
 }
 
-QString title(GuildSettingsSection section)
+std::string title(GuildSettingsSection section)
 {
     switch (section) {
     case GuildSettingsSection::Profile:
-        return tr("Server Profile");
+        return "Server Profile";
     case GuildSettingsSection::Engagement:
-        return tr("Engagement");
+        return "Engagement";
     case GuildSettingsSection::BoostPerks:
-        return tr("Boost Perks");
+        return "Boost Perks";
     case GuildSettingsSection::Emoji:
-        return tr("Emoji");
+        return "Emoji";
     case GuildSettingsSection::Stickers:
-        return tr("Stickers");
+        return "Stickers";
     case GuildSettingsSection::Members:
-        return tr("Members");
+        return "Members";
     case GuildSettingsSection::Roles:
-        return tr("Roles");
+        return "Roles";
     case GuildSettingsSection::Invites:
-        return tr("Invites");
+        return "Invites";
     case GuildSettingsSection::AuditLog:
-        return tr("Audit Log");
+        return "Audit Log";
     case GuildSettingsSection::Bans:
-        return tr("Bans");
+        return "Bans";
     case GuildSettingsSection::DeleteServer:
-        return tr("Delete Server");
+        return "Delete Server";
     }
     return {};
 }
@@ -179,15 +146,15 @@ GuildSettingsGroup group(GuildSettingsSection section)
     return GuildSettingsGroup::Server;
 }
 
-QString groupTitle(GuildSettingsGroup group)
+std::string groupTitle(GuildSettingsGroup group)
 {
     switch (group) {
     case GuildSettingsGroup::Expression:
-        return tr("Expression");
+        return "Expression";
     case GuildSettingsGroup::People:
-        return tr("People");
+        return "People";
     case GuildSettingsGroup::Moderation:
-        return tr("Moderation");
+        return "Moderation";
     case GuildSettingsGroup::Server:
     case GuildSettingsGroup::Danger:
         return {};
@@ -195,20 +162,6 @@ QString groupTitle(GuildSettingsGroup group)
     return {};
 }
 
-void addMenu(QMenu *menu, const SectionsProvider &provider, Core::Snowflake accountId, Core::Snowflake guildId,
-             const std::function<void(GuildSettingsSection)> &open)
-{
-    const QList<GuildSettingsSection> sections = provider ? provider(accountId, guildId) : QList<GuildSettingsSection>();
-    if (sections.isEmpty())
-        return;
-
-    menu->addSeparator();
-    QMenu *settings = menu->addMenu(tr("Server Settings"));
-    for (GuildSettingsSection section : sections)
-        if (section != GuildSettingsSection::DeleteServer)
-            settings->addAction(title(section), settings, [open, section]() { open(section); });
-    new SubmenuEntryClick(menu, settings);
-}
 
 } // namespace GuildSettingsAccess
 } // namespace UI

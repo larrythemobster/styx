@@ -2,273 +2,126 @@
 
 #include "Storage/AccountRepository.hpp"
 #include "Core/TokenStore.hpp"
-
 #include "Core/Session.hpp"
 #include "Discord/CdnUrls.hpp"
-#include <QMimeData>
 
-namespace Styx {
-namespace UI {
+#include <utility>
+
+namespace Styx::UI {
 
 using namespace Styx::Core;
 using namespace Styx::Storage;
 
-AccountsModel::AccountsModel(Core::Session *session, QObject *parent)
-    : QAbstractListModel(parent), session(session)
+AccountsModel::AccountsModel(Session *session) : session(session)
 {
-
     AccountRepository repo;
     accounts = repo.getAllAccounts();
 
-    connect(session, &Session::connectionStateChanged, this,
-            [this](Snowflake id, ConnectionState newState) {
-                for (int i = 0; i < accounts.size(); ++i) {
-                    if (accounts[i].id == id) {
-                        accounts[i].state = newState;
-
-                        QModelIndex idx = index(i, 0);
-                        emit dataChanged(idx, idx, { Qt::DisplayRole, ConnectionStateRole });
-                        break;
-                    }
-                }
+    track(session->connectionStateChanged.connect([this](Snowflake id, ConnectionState state) {
+        const int row = rowForId(id);
+        if (row < 0) return;
+        accounts[row].state = state;
+        changed.publish(row);
+    }));
+    track(session->accountDetailsUpdated.connect([this](const AccountInfo &info) {
+        const int row = rowForId(info.id);
+        if (row < 0) return;
+        accounts[row].username = info.username;
+        accounts[row].displayName = info.displayName;
+        accounts[row].avatar = info.avatar;
+        changed.publish(row);
+    }));
+    track(session->getImageManager()->imageFetched.connect(
+        [this](const std::string &url, const Platform::Size &, const Platform::ImageBuffer &) {
+            avatarTracker.notify(url, [this](Snowflake id) {
+                const int row = rowForId(id);
+                if (row >= 0) avatarChanged.publish(row);
             });
-
-    connect(session, &Session::accountDetailsUpdated, this, [this](const AccountInfo &info) {
-        for (int i = 0; i < accounts.size(); ++i) {
-            if (accounts[i].id == info.id) {
-                accounts[i].username = info.username;
-                accounts[i].displayName = info.displayName;
-                accounts[i].avatar = info.avatar;
-
-                QModelIndex idx = index(i, 0);
-                emit dataChanged(idx, idx, { Qt::DisplayRole, AccountObjectRole });
-                break;
-            }
-        }
-    });
-
-    connect(session->getImageManager(), &Core::ImageManager::imageFetched, this,
-            [this](const QUrl &url, const QSize &size, const QPixmap &pixmap) {
-                avatarTracker.notify(url, [this](const QModelIndex &index) {
-                    if (index.isValid())
-                        emit dataChanged(index, index, { Qt::DecorationRole });
-                });
-            });
+        }));
 }
 
-int AccountsModel::rowCount(const QModelIndex &parent) const
+Platform::ImageBuffer AccountsModel::avatar(int row) const
 {
-    return accounts.size();
-}
-
-QVariant AccountsModel::data(const QModelIndex &index, int role) const
-{
-    if (!index.isValid() || index.row() >= accounts.size())
-        return {};
-
-    const auto &acc = accounts[index.row()];
-
-    switch (role) {
-    case Qt::DisplayRole: {
-        QString text = acc.getEntryString();
-
-        if (acc.state == ConnectionState::Connected)
-            text += " [Connected]";
-        else if (acc.state == ConnectionState::Connecting)
-            text += " [Connecting...]";
-        return text;
-    }
-    case Qt::DecorationRole: {
-        const QSize desiredSize(32, 32);
-        QUrl avatarUrl = Discord::Cdn::userAvatar(acc.id, acc.avatar, desiredSize.width());
-        return avatarTracker.fetch(session->getImageManager(), avatarUrl, desiredSize, index, acc.id);
-    }
-    case AccountObjectRole:
-        return QVariant::fromValue((void *)&acc);
-
-    case ConnectionStateRole:
-        return QVariant::fromValue(acc.state);
-
-    case AutoConnectRole:
-        return acc.autoConnect;
-
-    default:
-        return {};
-    }
+    const auto *account = accountAt(row);
+    if (!account) return {};
+    constexpr Platform::Size size{32, 32};
+    const auto url = Discord::Cdn::userAvatar(account->id, account->avatar, size.width);
+    return avatarTracker.fetch(session->getImageManager(), url, size, account->id, account->id);
 }
 
 Result<void> AccountsModel::addAccount(const AccountInfo &account)
 {
-    Result<void> saved = Core::TokenStore::saveToken(account.id, account.token);
-    if (!saved.success())
-        return saved;
+    Result<void> saved = TokenStore::saveToken(account.id, account.token);
+    if (!saved.success()) return saved;
 
     AccountInfo newAccount = account;
-
     int maxOrder = -1;
-    for (const auto &acc : accounts) {
-        if (acc.displayOrder > maxOrder)
-            maxOrder = acc.displayOrder;
-    }
+    for (const auto &acc : accounts)
+        if (acc.displayOrder > maxOrder) maxOrder = acc.displayOrder;
     newAccount.displayOrder = maxOrder + 1;
 
     AccountRepository repo;
     repo.saveAccount(newAccount);
     repo.clearHeartbeatSession(newAccount.id);
     session->getImageManager()->setAccountProxy(newAccount.id, newAccount.proxy);
-
-    // Don't keep the token in the in-memory model
     newAccount.token.clear();
-
-    beginInsertRows(QModelIndex(), accounts.size(), accounts.size());
-    accounts.append(newAccount);
-    endInsertRows();
-
+    accounts.push_back(std::move(newAccount));
+    reset.publish();
     return saved;
 }
 
 void AccountsModel::removeAccount(int row)
 {
-    if (row < 0 || row >= accounts.size())
-        return;
-
-    quint64 idToRemove = accounts[row].id;
-    session->disconnectAccount(idToRemove);
+    if (!accountAt(row)) return;
+    const auto id = accounts[row].id;
+    session->disconnectAccount(id);
     AccountRepository repo;
-    repo.removeAccount(idToRemove);
-
-    beginRemoveRows(QModelIndex(), row, row);
-    accounts.removeAt(row);
-    endRemoveRows();
+    repo.removeAccount(id);
+    accounts.erase(accounts.begin() + row);
+    reset.publish();
 }
 
 void AccountsModel::setConnectionState(int row, ConnectionState state)
 {
-    if (row < 0 || row >= accounts.size())
-        return;
-
+    if (!accountAt(row)) return;
     accounts[row].state = state;
-
-    QModelIndex idx = index(row, 0);
-
-    emit dataChanged(idx, idx, { Qt::DisplayRole, ConnectionStateRole, AccountObjectRole });
+    changed.publish(row);
 }
 
 void AccountsModel::setAutoConnect(int row, bool enabled)
 {
-    if (row < 0 || row >= accounts.size())
-        return;
-
-    if (accounts[row].autoConnect == enabled)
-        return;
-
+    if (!accountAt(row) || accounts[row].autoConnect == enabled) return;
     accounts[row].autoConnect = enabled;
-
     AccountRepository repo;
     repo.updateAutoConnect(accounts[row].id, enabled);
-
-    QModelIndex idx = index(row, 0);
-    emit dataChanged(idx, idx, { Qt::CheckStateRole, AutoConnectRole });
+    changed.publish(row);
 }
 
-void AccountsModel::setProxy(int row, const Core::ProxyConfig &proxy)
+void AccountsModel::setProxy(int row, const ProxyConfig &proxy)
 {
-    if (row < 0 || row >= accounts.size())
-        return;
-
-    if (accounts[row].proxy == proxy || accounts[row].state != ConnectionState::Disconnected)
-        return;
-
+    if (!accountAt(row) || accounts[row].proxy == proxy ||
+        accounts[row].state != ConnectionState::Disconnected) return;
     accounts[row].proxy = proxy;
     session->setAccountProxy(accounts[row].id, proxy);
-
-    QModelIndex idx = index(row, 0);
-    emit dataChanged(idx, idx, { AccountObjectRole });
+    changed.publish(row);
 }
 
-Qt::ItemFlags AccountsModel::flags(const QModelIndex &index) const
+bool AccountsModel::moveAccount(int sourceRow, int targetRow)
 {
-    Qt::ItemFlags defaultFlags = QAbstractListModel::flags(index);
-    if (index.isValid())
-        return Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled | defaultFlags;
-    return Qt::ItemIsDropEnabled | defaultFlags;
-}
-
-Qt::DropActions AccountsModel::supportedDropActions() const
-{
-    return Qt::MoveAction;
-}
-
-QStringList AccountsModel::mimeTypes() const
-{
-    return { "application/x-styx-account-index" };
-}
-
-QMimeData *AccountsModel::mimeData(const QModelIndexList &indexes) const
-{
-    if (indexes.isEmpty())
-        return nullptr;
-
-    QMimeData *mimeData = new QMimeData();
-    QByteArray encodedData;
-    QDataStream stream(&encodedData, QIODevice::WriteOnly);
-
-    for (const QModelIndex &index : indexes) {
-        if (index.isValid())
-            stream << index.row();
-    }
-
-    mimeData->setData("application/x-styx-account-index", encodedData);
-    return mimeData;
-}
-
-bool AccountsModel::dropMimeData(const QMimeData *data, Qt::DropAction action, int row, int column,
-                                 const QModelIndex &parent)
-{
-    if (!data->hasFormat("application/x-styx-account-index"))
-        return false;
-
-    if (action == Qt::IgnoreAction)
-        return true;
-
-    int targetRow = row;
-    if (targetRow == -1) {
-        if (parent.isValid())
-            targetRow = parent.row();
-        else
-            targetRow = rowCount();
-    }
-
-    QByteArray encodedData = data->data("application/x-styx-account-index");
-    QDataStream stream(&encodedData, QIODevice::ReadOnly);
-
-    int sourceRow;
-    stream >> sourceRow;
-
-    if (sourceRow == targetRow || sourceRow + 1 == targetRow)
-        return false;
-
-    int actualTargetRow = targetRow;
-    if (sourceRow < targetRow)
-        actualTargetRow--;
-
-    if (actualTargetRow < 0 || actualTargetRow >= accounts.size() || sourceRow < 0 ||
-        sourceRow >= accounts.size())
-        return false;
-
-    beginMoveRows(QModelIndex(), sourceRow, sourceRow, QModelIndex(),
-                  sourceRow < actualTargetRow ? actualTargetRow + 1 : actualTargetRow);
-    accounts.move(sourceRow, actualTargetRow);
-    endMoveRows();
+    if (sourceRow < 0 || sourceRow >= rowCount() || targetRow < 0 || targetRow > rowCount() ||
+        sourceRow == targetRow || sourceRow + 1 == targetRow) return false;
+    const int destination = targetRow - (sourceRow < targetRow ? 1 : 0);
+    auto account = std::move(accounts[sourceRow]);
+    accounts.erase(accounts.begin() + sourceRow);
+    accounts.insert(accounts.begin() + destination, std::move(account));
 
     AccountRepository repo;
-    for (int i = 0; i < accounts.size(); ++i) {
+    for (int i = 0; i < rowCount(); ++i) {
         accounts[i].displayOrder = i;
         repo.updateDisplayOrder(accounts[i].id, i);
     }
-
+    reset.publish();
     return true;
 }
 
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI

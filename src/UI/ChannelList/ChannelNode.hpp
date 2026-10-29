@@ -1,7 +1,8 @@
 #pragma once
 
-#include <QString>
-#include <QUrl>
+#include <string>
+#include <optional>
+#include <cstdint>
 
 #include <memory>
 #include <vector>
@@ -30,7 +31,7 @@ struct ChannelNode
     };
 
     Core::Snowflake id;
-    QString name;
+    std::string name;
     Type type;
     int position = 0;
     Core::ChannelReadState self; // before descendants
@@ -46,13 +47,13 @@ struct ChannelNode
     Core::Snowflake parentId;
     Core::Snowflake rulesChannelId;
     Core::Snowflake ownerId;
-    QString TEMP_iconHash;
-    std::optional<QString> folderName;
+    std::string TEMP_iconHash;
+    std::optional<std::string> folderName;
     std::optional<uint64_t> folderColor;
-    QList<Core::Snowflake> recipientIds;
-    QString dmAvatarHash;
+    std::vector<Core::Snowflake> recipientIds;
+    std::string dmAvatarHash;
     Core::Snowflake dmRecipientId;
-    QUrl voiceParticipantAvatarUrl;
+    std::string voiceParticipantAvatarUrl;
     Core::Snowflake lastMessageId;
     bool isPrivate = false;
     int voiceParticipantCount = 0;
@@ -62,6 +63,7 @@ struct ChannelNode
 
     std::vector<std::unique_ptr<ChannelNode>> children;
     ChannelNode *parent = nullptr;
+    mutable std::uint64_t avatarTarget = 0;
 
     [[nodiscard]] bool opensChat() const
     {

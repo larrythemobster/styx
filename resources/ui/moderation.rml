@@ -1,0 +1,21 @@
+<rml>
+<head>
+    <title>Moderation</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="moderation.rcss"/>
+</head>
+<body id="moderation-root">
+    <div id="moderation-backdrop">
+        <div id="moderation-card">
+            <h2 id="moderation-title"></h2>
+            <div id="moderation-body"></div>
+            <div id="moderation-error"></div>
+            <div id="moderation-footer">
+                <button id="moderation-cancel">Cancel</button>
+                <button id="moderation-confirm">Confirm</button>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

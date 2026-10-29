@@ -59,12 +59,7 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
-#include <QLabel>
-#include <QMenu>
-#include <QMessageBox>
 #include <QSettings>
-#include <QVBoxLayout>
-#include <QWidgetAction>
 
 #include <RmlUi/Core/ElementDocument.h>
 
@@ -117,52 +112,6 @@ QString guildChannelKey(Core::Snowflake accountId, Core::Snowflake guildId)
             .arg(static_cast<quint64>(guildId));
 }
 
-QWidget *buildUserMenuHeader(QMenu *parent, Core::Session *session, Snowflake accountId,
-                             const QString &displayName, const QString &username,
-                             const QUrl &avatarUrl)
-{
-    auto *header = new QWidget(parent);
-    auto *layout = new QHBoxLayout(header);
-    layout->setContentsMargins(10, 10, 16, 10);
-    layout->setSpacing(12);
-
-    constexpr QSize avatarSize(64, 64);
-    auto *avatar = new QLabel(header);
-    avatar->setFixedSize(avatarSize);
-    session->getImageManager()->assign(avatar, avatarUrl, avatarSize, accountId);
-
-    layout->addWidget(avatar);
-
-    auto *textLayout = new QVBoxLayout;
-    textLayout->setContentsMargins(0, 0, 0, 0);
-    textLayout->setSpacing(2);
-
-    auto *displayLabel = new QLabel(displayName, header);
-    QFont displayFont = displayLabel->font();
-    displayFont.setBold(true);
-    displayFont.setPointSize(displayFont.pointSize() + 2);
-    displayLabel->setFont(displayFont);
-    textLayout->addWidget(displayLabel);
-
-    if (!username.isEmpty() && username != displayName) {
-        auto *usernameLabel = new QLabel(username, header);
-        usernameLabel->setStyleSheet(QStringLiteral("color: palette(placeholder-text);"));
-        textLayout->addWidget(usernameLabel);
-    }
-    textLayout->addStretch();
-    layout->addLayout(textLayout, 1);
-
-    return header;
-}
-
-QWidget *buildRoleChip(const Discord::Role &role, QWidget *parent)
-{
-    auto *label = new QLabel(role.name.get(), parent);
-    label->setContentsMargins(24, 4, 24, 4);
-    if (role.hasColor())
-        label->setStyleSheet(QStringLiteral("color: %1;").arg(role.getColor().name()));
-    return label;
-}
 
 } // namespace
 static Shell *s_primaryShell = nullptr;
@@ -178,7 +127,7 @@ Shell::Shell(Core::Session *session, QWidget *parent) : QMainWindow(parent), cor
     s_primaryShell = this;
     Rml::Runtime::instance().setImageManager(session->getImageManager());
 
-    auto *captchaResolver = new BrowserCaptchaResolver(this, this);
+    auto *captchaResolver = new BrowserCaptchaResolver(*this, this);
     session->setCaptchaResolver(captchaResolver);
 
     chatModel = new ChatModel(session->getImageManager(), this);
@@ -275,6 +224,9 @@ Shell::Shell(Core::Session *session, QWidget *parent) : QMainWindow(parent), cor
 
     rmlView = new Rml::View(QStringLiteral("main"), this);
     setCentralWidget(rmlView);
+    contextMenu = std::make_unique<Rml::ContextMenu>(*rmlView);
+    connect(this, &Shell::locationChanged, this, [this] { contextMenu->hide(); });
+    connect(this, &Shell::instanceChanged, this, [this] { contextMenu->hide(); });
     connect(rmlView, &Rml::View::documentLoaded, this, &Shell::onDocumentLoaded);
     rmlView->loadDocument(QStringLiteral("main.rml"));
     setWindowTitle(QStringLiteral("Styx"));
@@ -333,6 +285,7 @@ QString Shell::imageSource(const QUrl &url, const QSize &logicalSize) const
 void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
 {
     auto region = [doc](const char *id) { return doc->GetElementById(id); };
+    moderationController = std::make_unique<MemberModeration::Controller>(*this);
     controllers.push_back(std::make_unique<Rml::RailController>(*this, region("rail")));
     controllers.push_back(std::make_unique<Rml::ChannelListController>(*this, region("sidebar")));
     controllers.push_back(std::make_unique<Rml::UserPanelController>(*this, region("sidebar")));
@@ -611,10 +564,13 @@ void Shell::setupPermanentConnections(Core::ClientInstance *inst)
             [this, inst](Snowflake guildId, const QString &error) {
                 auto guild = inst->getGuild(guildId);
                 QString guildName = guild.has_value() ? guild->name.get() : QString::number(guildId);
-                QMessageBox::warning(this,
-                                     tr("Failed to leave server"),
-                                     tr("Could not leave <b>%1</b>.<br>Error: %2")
-                                             .arg(guildName.toHtmlEscaped(), error));
+                Rml::ConfirmOptions options;
+                options.title = tr("Failed to leave server");
+                options.body = tr("Could not leave <b>%1</b>.<br/>Error: %2")
+                                   .arg(guildName.toHtmlEscaped(), error.toHtmlEscaped());
+                options.confirmText = tr("OK");
+                options.cancelText.clear();
+                Rml::showConfirmModal(*this, options);
             });
     connect(inst, &Core::ClientInstance::channelCreated, this,
             [this, inst](const Discord::ChannelCreate &event) {
@@ -854,6 +810,7 @@ void Shell::openFriends(Core::Snowflake accountId)
     current = { accountId, Snowflake::Invalid, Snowflake::Invalid };
     channelFilterProxy->setSelectedChannel(Snowflake::Invalid, accountId);
     chatModel->setActiveChannel(Snowflake::Invalid, Snowflake::Invalid);
+    inst->noteChannelSelected(Snowflake::Invalid);
     if (inst->memberList())
         inst->memberList()->clear();
     if (forumController)
@@ -906,6 +863,7 @@ void Shell::openGuild(Core::Snowflake accountId, Core::Snowflake guildId)
         current = { accountId, guildId, Snowflake::Invalid };
         channelFilterProxy->setSelectedChannel(Snowflake::Invalid, accountId);
         chatModel->setActiveChannel(Snowflake::Invalid, guildId);
+        inst->noteChannelSelected(Snowflake::Invalid);
         applyBodyClasses();
         emit locationChanged(current);
     }
@@ -966,6 +924,7 @@ void Shell::openChannel(Core::Snowflake accountId, Core::Snowflake guildId, Core
     channelTreeModel->clearTemporaryThread(channelId);
 
     inst->readState()->setActiveChannel(channelId);
+    inst->noteChannelSelected(channelId);
 
     bool isDm = !guildId.isValid();
     if (node)
@@ -1049,9 +1008,12 @@ void Shell::joinVoice(Core::Snowflake accountId, Core::Snowflake guildId, Core::
 
 #ifndef STYX_NO_VOICE
     if (!inst->discord()->getProxy().canRelayUdp()) {
-        QMessageBox::warning(this,
-                             tr("Voice unavailable"),
-                             tr("This account uses an HTTP proxy, which cannot carry voice traffic.<br>Switch it to a SOCKS5 proxy to use voice."));
+        Rml::ConfirmOptions options;
+        options.title = tr("Voice unavailable");
+        options.body = tr("This account uses an HTTP proxy, which cannot carry voice traffic.<br/>Switch it to a SOCKS5 proxy to use voice.");
+        options.confirmText = tr("OK");
+        options.cancelText.clear();
+        Rml::showConfirmModal(*this, options);
         return;
     }
 
@@ -1314,73 +1276,62 @@ void Shell::openThreadBrowser(Core::Snowflake channelId)
     threadBrowserController->open(instance, channelId, name);
 }
 
+void Shell::showContextMenu(std::vector<Rml::MenuItem> items)
+{
+    if (contextMenu && rmlView)
+        contextMenu->show(std::move(items), rmlView->mapFromGlobal(QCursor::pos()));
+}
+
 void Shell::showContextMenuForUser(Core::Snowflake userId, Core::Snowflake guildId)
 {
-    QMenu menu(this);
+    std::vector<Rml::MenuItem> menu;
     ClientInstance *inst = instance;
     QPointer<ClientInstance> instanceGuard(inst);
-
     if (inst) {
-        auto user = inst->users()->getUser(userId);
-        QString displayName = inst->users()->getDisplayName(userId, guildId);
-        QString username = (user && user->username.hasValue()) ? user->username.get() : QString();
-        QUrl avatarUrl = user ? inst->users()->getAvatarUrl(*user, guildId, 128)
-                              : Discord::Cdn::defaultUserAvatar(userId, 128);
-
-        auto *header = buildUserMenuHeader(&menu, coreSession, inst->accountId(),
-                                           displayName, username, avatarUrl);
-        auto *headerAction = new QWidgetAction(&menu);
-        headerAction->setDefaultWidget(header);
-        menu.addAction(headerAction);
-        menu.addSeparator();
+        const auto user = inst->users()->getUser(userId);
+        const QString displayName = inst->users()->getDisplayName(userId, guildId);
+        const QString username = user ? user->username.valueOr(QString()) : QString();
+        const QUrl avatarUrl = user ? inst->users()->getAvatarUrl(*user, guildId, 128)
+                                   : Discord::Cdn::defaultUserAvatar(userId, 128);
+        Rml::MenuItem header{ displayName };
+        header.enabled = false;
+        header.subtitle = username != displayName ? username : QString();
+        header.imageSource = Rml::Runtime::instance().imageSource(avatarUrl, QSize(64, 64), inst->accountId());
+        menu.push_back(std::move(header));
+        menu.push_back({ {}, {}, false, false, true });
     }
-
-    QAction *profileAction = menu.addAction(tr("Profile"));
-    connect(profileAction, &QAction::triggered, this, [this, userId, guildId]() {
-        showUserProfile(userId, guildId);
-    });
-
-    QAction *mentionAction = menu.addAction(tr("Mention"));
-    mentionAction->setEnabled(inst != nullptr);
-    connect(mentionAction, &QAction::triggered, this, [userId]() {
+    menu.push_back({ tr("Profile"), [this, userId, guildId] { showUserProfile(userId, guildId); } });
+    menu.push_back({ tr("Mention"), [userId] {
         QGuiApplication::clipboard()->setText(QStringLiteral("<@%1>").arg(quint64(userId)));
-    });
-
-    QAction *openDmAction = menu.addAction(tr("Open DM"));
-    openDmAction->setEnabled(inst && userId != inst->accountId());
-    connect(openDmAction, &QAction::triggered, this, [this, instanceGuard, userId]() {
-        if (!instanceGuard)
-            return;
-        openDmWithUser(instanceGuard->accountId(), userId);
-    });
+    }, inst != nullptr });
+    menu.push_back({ tr("Open DM"), [this, instanceGuard, userId] {
+        if (instanceGuard)
+            openDmWithUser(instanceGuard->accountId(), userId);
+    }, inst && userId != inst->accountId() });
 
     if (guildId.isValid() && inst) {
         const auto target = MemberModeration::targetFor(inst, guildId, userId);
-        const bool moderationAddsRolesMenu = target && MemberModeration::canEditRoles(inst, *target);
-        if (!moderationAddsRolesMenu) {
-            QMenu *rolesMenu = menu.addMenu(tr("Roles"));
-            const auto memberRoles = inst->getMemberRolesSorted(guildId, userId);
-            if (memberRoles.isEmpty()) {
-                rolesMenu->addAction(tr("No roles"))->setEnabled(false);
-            } else {
-                for (const auto &role : memberRoles) {
-                    auto *action = new QWidgetAction(rolesMenu);
-                    action->setDefaultWidget(buildRoleChip(role, rolesMenu));
-                    rolesMenu->addAction(action);
-                }
+        if (!target || !MemberModeration::canEditRoles(inst, *target)) {
+            Rml::MenuItem roles{ tr("Roles") };
+            for (const auto &role : inst->getMemberRolesSorted(guildId, userId)) {
+                Rml::MenuItem item{ role.name.get() };
+                item.enabled = false;
+                if (role.hasColor())
+                    item.color = role.getColor().name();
+                roles.children.push_back(std::move(item));
             }
+            if (roles.children.empty())
+                roles.children.push_back({ tr("No roles"), {}, false });
+            menu.push_back(std::move(roles));
         }
         if (target)
-            MemberModeration::addModerationActions(&menu, this, inst, *target);
+            MemberModeration::addModerationActions(menu, *this, inst, *target);
     }
-
-    menu.addSeparator();
-    QAction *copyIdAction = menu.addAction(tr("Copy User ID"));
-    connect(copyIdAction, &QAction::triggered, this, [userId]() {
+    menu.push_back({ {}, {}, false, false, true });
+    menu.push_back({ tr("Copy User ID"), [userId] {
         QGuiApplication::clipboard()->setText(QString::number(quint64(userId)));
-    });
-
-    menu.exec(QCursor::pos());
+    } });
+    showContextMenu(std::move(menu));
 }
 
 void Shell::showContextMenuForGuild(Core::Snowflake accountId, Core::Snowflake guildId)
@@ -1388,38 +1339,32 @@ void Shell::showContextMenuForGuild(Core::Snowflake accountId, Core::Snowflake g
     ClientInstance *inst = instanceFor(accountId);
     if (!inst)
         return;
-
-    QMenu menu(this);
-
-    QAction *markRead = menu.addAction(tr("Mark As Read"));
-    connect(markRead, &QAction::triggered, this, [this, accountId, guildId]() {
-        markGuildRead(accountId, guildId);
-    });
-
-    GuildSettingsAccess::addMenu(&menu, [this](Core::Snowflake accId, Core::Snowflake gId) {
-        return GuildSettingsAccess::visibleSections(instanceFor(accId), gId);
-    }, accountId, guildId, [this, accountId, guildId](GuildSettingsSection section) {
-        openGuildSettings(accountId, guildId, section);
-    });
-
-    menu.addSeparator();
-
-    auto guild = inst->getGuild(guildId);
-    bool isOwner = guild && guild->ownerId.hasValue() && guild->ownerId.get() == accountId;
-
-    QAction *leaveAction = menu.addAction(tr("Leave Server"));
-    leaveAction->setEnabled(!isOwner);
-    connect(leaveAction, &QAction::triggered, this, [inst, guildId]() {
-        inst->discord()->leaveGuild(guildId);
-    });
-
-    menu.addSeparator();
-    QAction *copyIdAction = menu.addAction(tr("Copy Server ID"));
-    connect(copyIdAction, &QAction::triggered, this, [guildId]() {
+    QPointer<ClientInstance> guard(inst);
+    std::vector<Rml::MenuItem> menu;
+    menu.push_back({ tr("Mark As Read"), [this, accountId, guildId] { markGuildRead(accountId, guildId); } });
+    Rml::MenuItem settings{ tr("Server Settings") };
+    for (const auto section : GuildSettingsAccess::visibleSections(inst, guildId)) {
+        if (section != GuildSettingsSection::DeleteServer)
+            settings.children.push_back({ GuildSettingsAccess::title(section), [this, accountId, guildId, section] {
+                openGuildSettings(accountId, guildId, section);
+            } });
+    }
+    if (!settings.children.empty()) {
+        menu.push_back({ {}, {}, false, false, true });
+        menu.push_back(std::move(settings));
+    }
+    menu.push_back({ {}, {}, false, false, true });
+    const auto guild = inst->getGuild(guildId);
+    const bool isOwner = guild && guild->ownerId.hasValue() && guild->ownerId.get() == accountId;
+    menu.push_back({ tr("Leave Server"), [guard, guildId] {
+        if (guard)
+            guard->discord()->leaveGuild(guildId);
+    }, !isOwner, true });
+    menu.push_back({ {}, {}, false, false, true });
+    menu.push_back({ tr("Copy Server ID"), [guildId] {
         QGuiApplication::clipboard()->setText(QString::number(quint64(guildId)));
-    });
-
-    menu.exec(QCursor::pos());
+    } });
+    showContextMenu(std::move(menu));
 }
 
 void Shell::showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId)
@@ -1427,50 +1372,30 @@ void Shell::showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake
     ClientInstance *inst = instanceFor(accountId);
     if (!inst)
         return;
-
-    QMenu menu(this);
-
+    std::vector<Rml::MenuItem> menu;
     ChannelNode *node = channelTreeModel->findChannelTreeNode(channelId, accountId);
-    bool isVoice = (node && node->type == ChannelNode::Type::VoiceChannel);
-    bool isDm = (node && node->type == ChannelNode::Type::DMChannel);
-
+    const bool isVoice = node && node->type == ChannelNode::Type::VoiceChannel;
+    const bool isDm = node && node->type == ChannelNode::Type::DMChannel;
     if (isVoice || isDm) {
-        QString joinText = isDm ? tr("Join Call") : tr("Join Voice Channel");
-        QAction *joinAction = menu.addAction(joinText);
-#ifdef STYX_NO_VOICE
-        joinAction->setEnabled(false);
-#else
-        connect(joinAction, &QAction::triggered, this, [this, accountId, guildId, channelId]() {
+        bool canJoin = false;
+        bool canDisconnect = false;
+#ifndef STYX_NO_VOICE
+        canJoin = true;
+        canDisconnect = inst->isInVoice() && inst->voiceChannelId() == channelId;
+#endif
+        menu.push_back({ isDm ? tr("Join Call") : tr("Join Voice Channel"), [this, accountId, guildId, channelId] {
             joinVoice(accountId, guildId, channelId);
             setCallOpen(true);
-        });
-#endif
-
-        bool inVoice = inst->isInVoice() && inst->voiceChannelId() == channelId;
-        QAction *disconnectAction = menu.addAction(tr("Disconnect from Voice"));
-#ifdef STYX_NO_VOICE
-        disconnectAction->setEnabled(false);
-#else
-        disconnectAction->setEnabled(inVoice);
-        connect(disconnectAction, &QAction::triggered, this, [this]() {
-            leaveVoice();
-        });
-#endif
-        menu.addSeparator();
+        }, canJoin });
+        menu.push_back({ tr("Disconnect from Voice"), [this] { leaveVoice(); }, canDisconnect });
+        menu.push_back({ {}, {}, false, false, true });
     }
-
-    QAction *markReadAction = menu.addAction(tr("Mark As Read"));
-    connect(markReadAction, &QAction::triggered, this, [this, channelId]() {
-        markChannelRead(channelId);
-    });
-
-    menu.addSeparator();
-    QAction *copyIdAction = menu.addAction(tr("Copy Channel ID"));
-    connect(copyIdAction, &QAction::triggered, this, [channelId]() {
+    menu.push_back({ tr("Mark As Read"), [this, channelId] { markChannelRead(channelId); } });
+    menu.push_back({ {}, {}, false, false, true });
+    menu.push_back({ tr("Copy Channel ID"), [channelId] {
         QGuiApplication::clipboard()->setText(QString::number(quint64(channelId)));
-    });
-
-    menu.exec(QCursor::pos());
+    } });
+    showContextMenu(std::move(menu));
 }
 
 } // namespace UI

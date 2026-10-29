@@ -18,6 +18,9 @@
 #include "Core/Stream/StreamManager.hpp"
 #endif
 
+#include <format>
+#include <string_view>
+
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Event.h>
@@ -44,14 +47,14 @@ UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root, QOb
         listen("click", [this](::Rml::Event &event) {
             auto *target = event.GetTargetElement();
             if (auto *btn = closest(target, "data-action")) {
-                const QString action = attribute(btn, "data-action");
-                if (action == QLatin1String("toggle-mute")) {
+                const std::string action = attribute(btn, "data-action");
+                if (action == std::string_view("toggle-mute")) {
                     this->shell.setSelfMute(!this->shell.isSelfMute());
-                } else if (action == QLatin1String("toggle-deaf")) {
+                } else if (action == std::string_view("toggle-deaf")) {
                     this->shell.setSelfDeaf(!this->shell.isSelfDeaf());
-                } else if (action == QLatin1String("settings")) {
+                } else if (action == std::string_view("settings")) {
                     this->shell.openSettings();
-                } else if (action == QLatin1String("profile")) {
+                } else if (action == std::string_view("profile")) {
                     if (auto *inst = this->shell.currentInstance()) {
                         this->shell.showUserProfile(inst->accountId(), this->shell.location().guildId);
                     }
@@ -64,12 +67,12 @@ UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root, QOb
         listen("click", [this](::Rml::Event &event) {
             auto *target = event.GetTargetElement();
             if (auto *btn = closest(target, "data-action")) {
-                const QString action = attribute(btn, "data-action");
-                if (action == QLatin1String("disconnect")) {
+                const std::string action = attribute(btn, "data-action");
+                if (action == std::string_view("disconnect")) {
                     this->shell.leaveVoice();
-                } else if (action == QLatin1String("open-call")) {
+                } else if (action == std::string_view("open-call")) {
                     this->shell.setCallOpen(true);
-                } else if (action == QLatin1String("toggle-share")) {
+                } else if (action == std::string_view("toggle-share")) {
 #ifdef STYX_HAVE_SCREENSHARE
                     this->onShareClicked();
 #endif
@@ -171,12 +174,12 @@ void UserPanelController::renderVoicePanel()
     voicePanel->SetProperty("display", "flex");
 
     const bool connected = (clientState == Discord::Voice::VoiceClient::State::Connected);
-    const QString statusText = connected ? QStringLiteral("Voice Connected") : QStringLiteral("Connecting...");
-    const QString statusClass = connected ? QStringLiteral("voice-conn-status") : QStringLiteral("voice-conn-status connecting");
+    const std::string statusText = connected ? "Voice Connected" : "Connecting...";
+    const std::string statusClass = connected ? "voice-conn-status" : "voice-conn-status connecting";
 
     // Resolve channel and guild names
-    QString channelName = QStringLiteral("Voice");
-    QString guildName;
+    std::string channelName = "Voice";
+    std::string guildName;
     if (auto *inst = shell.currentInstance()) {
         auto chOpt = inst->getChannel(currentChannelId);
         if (chOpt.has_value()) {
@@ -197,40 +200,37 @@ void UserPanelController::renderVoicePanel()
         }
     }
 
-    const QString channelLabel = !guildName.isEmpty()
-                                     ? QStringLiteral("%1 / %2").arg(channelName).arg(guildName)
+    const std::string channelLabel = !guildName.empty()
+                                     ? std::format("{0} / {1}", channelName, guildName)
                                      : channelName;
 
-    QString rml;
-    rml += QStringLiteral("<div class=\"voice-panel-header\">");
-    rml += QStringLiteral("<span class=\"%1\">%2</span>").arg(statusClass).arg(Rml::escape(statusText));
-    rml += QStringLiteral("<div class=\"voice-action-btn disconnect\" data-action=\"disconnect\" title=\"Disconnect\">");
-    rml += QStringLiteral("<img src=\"icon:phone-off\"/>");
-    rml += QStringLiteral("</div>"); // .disconnect
-    rml += QStringLiteral("</div>"); // .voice-panel-header
+    std::string rml;
+    rml += "<div class=\"voice-panel-header\">";
+    rml += std::format("<span class=\"{0}\">{1}</span>", statusClass, Rml::escape(statusText));
+    rml += "<div class=\"voice-action-btn disconnect\" data-action=\"disconnect\" title=\"Disconnect\">";
+    rml += "<img src=\"icon:phone-off\"/>";
+    rml += "</div>"; // .disconnect
+    rml += "</div>"; // .voice-panel-header
 
-    rml += QStringLiteral("<div class=\"voice-panel-info\">");
-    rml += QStringLiteral("<div class=\"voice-channel-link\" data-action=\"open-call\" title=\"Open Call\">%1</div>")
-               .arg(Rml::escape(channelLabel));
+    rml += "<div class=\"voice-panel-info\">";
+    rml += std::format("<div class=\"voice-channel-link\" data-action=\"open-call\" title=\"Open Call\">{0}</div>", Rml::escape(channelLabel));
 
 #ifdef STYX_HAVE_SCREENSHARE
     if (auto *inst = shell.currentInstance()) {
         auto *sm = inst->streams();
         const bool isStreaming = sm && sm->isStreaming();
-        const QString shareClass = isStreaming ? QStringLiteral("voice-action-btn streaming") : QStringLiteral("voice-action-btn");
-        const QString shareTip = isStreaming ? QStringLiteral("Stop streaming") : QStringLiteral("Share your screen");
+        const std::string shareClass = isStreaming ? "voice-action-btn streaming" : "voice-action-btn";
+        const std::string shareTip = isStreaming ? "Stop streaming" : "Share your screen";
 
-        rml += QStringLiteral("<div class=\"%1\" data-action=\"toggle-share\" title=\"%2\">")
-                   .arg(shareClass)
-                   .arg(Rml::escape(shareTip));
-        rml += QStringLiteral("<img src=\"icon:monitor\"/>");
-        rml += QStringLiteral("</div>"); // .voice-action-btn
+        rml += std::format("<div class=\"{0}\" data-action=\"toggle-share\" title=\"{1}\">", shareClass, Rml::escape(shareTip));
+        rml += "<img src=\"icon:monitor\"/>";
+        rml += "</div>"; // .voice-action-btn
     }
 #endif
 
-    rml += QStringLiteral("</div>"); // .voice-panel-info
+    rml += "</div>"; // .voice-panel-info
 
-    voicePanel->SetInnerRML(rml.toUtf8().constData());
+    voicePanel->SetInnerRML(rml.c_str());
 }
 
 void UserPanelController::renderUserPanel()
@@ -251,40 +251,40 @@ void UserPanelController::renderUserPanel()
     if (userMgr)
         me = userMgr->getUser(accountId);
 
-    QString displayName = (me && me->globalName.hasValue() && !me->globalName->isEmpty())
+    std::string displayName = (me && me->globalName.hasValue() && !me->globalName->empty())
                               ? *me->globalName
-                              : (info.displayName.isEmpty() ? info.username : info.displayName);
-    if (displayName.isEmpty())
+                              : (info.displayName.empty() ? info.username : info.displayName);
+    if (displayName.empty())
         displayName = info.username;
 
     // Sub-name: display custom status if active, otherwise username
     auto *pres = inst->presences();
-    QString customStatus;
+    std::string customStatus;
     if (pres) {
         const auto activities = pres->activities(accountId);
         if (const auto *activity = Core::ActivityFormat::custom(activities))
             customStatus = activity->stateText();
     }
-    QString subName = !customStatus.isEmpty() ? customStatus : (me ? QStringLiteral("@") + me->username : QStringLiteral("@") + info.username);
+    std::string subName = !customStatus.empty() ? customStatus : (me ? "@" + me->username : "@" + info.username);
 
-    QString avatarHash = (me && me->avatar.hasValue()) ? *me->avatar : info.avatar;
-    QUrl avatarUrl = !avatarHash.isEmpty()
+    std::string avatarHash = (me && me->avatar.hasValue()) ? *me->avatar : info.avatar;
+    std::string avatarUrl = !avatarHash.empty()
                          ? Discord::Cdn::userAvatar(accountId, avatarHash, 32)
                          : Discord::Cdn::defaultUserAvatar(accountId);
-    QString avatarSrc = shell.imageSource(avatarUrl, QSize(32, 32));
+    std::string avatarSrc = shell.imageSource(avatarUrl, Platform::Size{32, 32});
 
     // Presence status dot
     auto badge = pres ? pres->badge(accountId) : Core::PresenceBadge();
-    QString statusClass;
+    std::string statusClass;
     switch (badge.status) {
-    case Discord::StatusType::ONLINE: statusClass = QStringLiteral("status-online"); break;
-    case Discord::StatusType::IDLE: statusClass = QStringLiteral("status-idle"); break;
-    case Discord::StatusType::DND: statusClass = QStringLiteral("status-dnd"); break;
+    case Discord::StatusType::ONLINE: statusClass = "status-online"; break;
+    case Discord::StatusType::IDLE: statusClass = "status-idle"; break;
+    case Discord::StatusType::DND: statusClass = "status-dnd"; break;
     case Discord::StatusType::OFFLINE:
-    default: statusClass = QStringLiteral("status-offline"); break;
+    default: statusClass = "status-offline"; break;
     }
     if (badge.streaming)
-        statusClass = QStringLiteral("status-streaming");
+        statusClass = "status-streaming";
 
     // Mute and deaf state (from Shell and VoiceManager)
     bool isMuted = shell.isSelfMute();
@@ -301,44 +301,44 @@ void UserPanelController::renderUserPanel()
     }
 #endif
 
-    const QString muteClass = isMuted ? QStringLiteral("panel-btn muted") : QStringLiteral("panel-btn");
-    const QString muteIcon = isMuted ? QStringLiteral("icon:mic-off") : QStringLiteral("icon:mic");
-    const QString muteTip = isMuted ? QStringLiteral("Unmute") : QStringLiteral("Mute");
+    const std::string muteClass = isMuted ? "panel-btn muted" : "panel-btn";
+    const std::string muteIcon = isMuted ? "icon:mic-off" : "icon:mic";
+    const std::string muteTip = isMuted ? "Unmute" : "Mute";
 
-    const QString deafClass = isDeafened ? QStringLiteral("panel-btn deafened") : QStringLiteral("panel-btn");
-    const QString deafIcon = isDeafened ? QStringLiteral("icon:volume-x") : QStringLiteral("icon:headphones");
-    const QString deafTip = isDeafened ? QStringLiteral("Undeafen") : QStringLiteral("Deafen");
+    const std::string deafClass = isDeafened ? "panel-btn deafened" : "panel-btn";
+    const std::string deafIcon = isDeafened ? "icon:volume-x" : "icon:headphones";
+    const std::string deafTip = isDeafened ? "Undeafen" : "Deafen";
 
-    QString rml;
-    rml += QStringLiteral("<div class=\"user-panel-info\" data-action=\"profile\" title=\"User Profile\">");
-    rml += QStringLiteral("<div class=\"user-avatar-wrap\">");
-    rml += QStringLiteral("<div class=\"user-avatar-clip\">");
-    rml += QStringLiteral("<img class=\"user-avatar\" src=\"%1\"/>").arg(Rml::escape(avatarSrc));
-    rml += QStringLiteral("</div>"); // .user-avatar-clip
-    rml += QStringLiteral("<div class=\"status-dot %1\"></div>").arg(statusClass);
-    rml += QStringLiteral("</div>"); // .user-avatar-wrap
+    std::string rml;
+    rml += "<div class=\"user-panel-info\" data-action=\"profile\" title=\"User Profile\">";
+    rml += "<div class=\"user-avatar-wrap\">";
+    rml += "<div class=\"user-avatar-clip\">";
+    rml += std::format("<img class=\"user-avatar\" src=\"{0}\"/>", Rml::escape(avatarSrc));
+    rml += "</div>"; // .user-avatar-clip
+    rml += std::format("<div class=\"status-dot {0}\"></div>", statusClass);
+    rml += "</div>"; // .user-avatar-wrap
 
-    rml += QStringLiteral("<div class=\"user-names\">");
-    rml += QStringLiteral("<span class=\"user-display-name\">%1</span>").arg(Rml::escape(displayName));
-    rml += QStringLiteral("<span class=\"user-sub-name\">%1</span>").arg(Rml::escape(subName));
-    rml += QStringLiteral("</div>"); // .user-names
-    rml += QStringLiteral("</div>"); // .user-panel-info
+    rml += "<div class=\"user-names\">";
+    rml += std::format("<span class=\"user-display-name\">{0}</span>", Rml::escape(displayName));
+    rml += std::format("<span class=\"user-sub-name\">{0}</span>", Rml::escape(subName));
+    rml += "</div>"; // .user-names
+    rml += "</div>"; // .user-panel-info
 
-    rml += QStringLiteral("<div class=\"user-panel-buttons\">");
-    rml += QStringLiteral("<div class=\"%1\" data-action=\"toggle-mute\" title=\"%2\">").arg(muteClass).arg(Rml::escape(muteTip));
-    rml += QStringLiteral("<img src=\"%1\"/>").arg(muteIcon);
-    rml += QStringLiteral("</div>"); // mute-btn
+    rml += "<div class=\"user-panel-buttons\">";
+    rml += std::format("<div class=\"{0}\" data-action=\"toggle-mute\" title=\"{1}\">", muteClass, Rml::escape(muteTip));
+    rml += std::format("<img src=\"{0}\"/>", muteIcon);
+    rml += "</div>"; // mute-btn
 
-    rml += QStringLiteral("<div class=\"%1\" data-action=\"toggle-deaf\" title=\"%2\">").arg(deafClass).arg(Rml::escape(deafTip));
-    rml += QStringLiteral("<img src=\"%1\"/>").arg(deafIcon);
-    rml += QStringLiteral("</div>"); // deaf-btn
+    rml += std::format("<div class=\"{0}\" data-action=\"toggle-deaf\" title=\"{1}\">", deafClass, Rml::escape(deafTip));
+    rml += std::format("<img src=\"{0}\"/>", deafIcon);
+    rml += "</div>"; // deaf-btn
 
-    rml += QStringLiteral("<div class=\"panel-btn\" data-action=\"settings\" title=\"User Settings\">");
-    rml += QStringLiteral("<img src=\"icon:settings\"/>");
-    rml += QStringLiteral("</div>"); // settings-btn
-    rml += QStringLiteral("</div>"); // .user-panel-buttons
+    rml += "<div class=\"panel-btn\" data-action=\"settings\" title=\"User Settings\">";
+    rml += "<img src=\"icon:settings\"/>";
+    rml += "</div>"; // settings-btn
+    rml += "</div>"; // .user-panel-buttons
 
-    userPanel->SetInnerRML(rml.toUtf8().constData());
+    userPanel->SetInnerRML(rml.c_str());
 }
 
 #ifdef STYX_HAVE_SCREENSHARE

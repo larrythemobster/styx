@@ -3,9 +3,11 @@
 #include "Controller.hpp"
 #include "Core/Snowflake.hpp"
 
-#include <QPointer>
-#include <QString>
-#include <QTimer>
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace Styx {
 namespace Core {
@@ -16,7 +18,6 @@ namespace Rml {
 
 class FriendsController final : public Controller
 {
-    Q_OBJECT
 public:
     enum class Tab {
         Online,
@@ -24,18 +25,17 @@ public:
         AddFriend,
     };
 
-    FriendsController(Shell &shell, ::Rml::Element *root, QObject *parent = nullptr);
+    FriendsController(Shell &shell, ::Rml::Element *root);
     ~FriendsController() override;
 
-private slots:
+private:
     void rebuild();
 
-private:
     void render();
-    void renderHeader(QString &rml, int onlineCount, int allCount);
-    void renderFriendsList(QString &rml, int onlineCount, int allCount);
-    void renderActiveNow(QString &rml);
-    void renderAddFriend(QString &rml);
+    void renderHeader(std::string &rml, int onlineCount, int allCount);
+    void renderFriendsList(std::string &rml, int onlineCount, int allCount);
+    void renderActiveNow(std::string &rml);
+    void renderAddFriend(std::string &rml);
 
     void switchTab(Tab newTab);
     void setupEventListeners();
@@ -44,15 +44,17 @@ private:
     void updateAddFriendControls();
 
     Tab currentTab = Tab::Online;
-    QString searchText;
-    QString addFriendInputText;
-    QString addFriendFeedback;
+    std::string searchText;
+    std::string addFriendInputText;
+    std::string addFriendFeedback;
     bool addFriendSuccess = false;
     bool addFriendPending = false;
-    quint64 requestGeneration = 0;
+    std::uint64_t requestGeneration = 0;
 
-    QTimer rebuildTimer;
-    QPointer<Core::ClientInstance> lastInstance;
+    void scheduleRebuild();
+    Platform::Timer rebuildTimer;
+    Platform::Guard<Core::ClientInstance> lastInstance;
+    std::vector<Platform::Connection> instanceConnections;
 };
 
 } // namespace Rml

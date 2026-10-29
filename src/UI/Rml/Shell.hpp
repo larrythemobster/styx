@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Core/Snowflake.hpp"
+#include "ContextMenu.hpp"
 
 namespace Rml {
 class ElementDocument;
@@ -38,6 +39,9 @@ class ChatModel;
 class MemberListModel;
 class TrayIcon;
 enum class GuildSettingsSection;
+namespace MemberModeration {
+class Controller;
+}
 namespace Rml {
 class GuildSettingsController;
 class View;
@@ -127,7 +131,7 @@ public:
     void markChannelRead(Core::Snowflake channelId);
     void markGuildRead(Core::Snowflake accountId, Core::Snowflake guildId);
 
-    // --- Qt windows that stay Qt (settings, profiles, server settings, pickers) -----------
+    // --- RmlUi dialogs and menus -------------------------------------------------------
     void showUserProfile(Core::Snowflake userId, Core::Snowflake guildId, const QRectF &anchorRect = QRectF());
     void openSettings();
     void closeSettings();
@@ -147,6 +151,7 @@ public:
     void openGoLivePicker(bool screensTab = false);
     void closeGoLivePicker();
     [[nodiscard]] bool isGoLivePickerOpen() const;
+    void showContextMenu(std::vector<Rml::MenuItem> items);
     void showContextMenuForUser(Core::Snowflake userId, Core::Snowflake guildId);
     void showContextMenuForGuild(Core::Snowflake accountId, Core::Snowflake guildId);
     void showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId);
@@ -187,6 +192,8 @@ private:
     bool selfMute = false;
     bool selfDeaf = false;
     Rml::View *rmlView = nullptr;
+    std::unique_ptr<Rml::ContextMenu> contextMenu;
+    std::unique_ptr<MemberModeration::Controller> moderationController;
     std::vector<std::unique_ptr<Rml::Controller>> controllers;
     Rml::ConfirmModalController *confirmModalController = nullptr;
     Rml::UserProfileController *userProfileController = nullptr;

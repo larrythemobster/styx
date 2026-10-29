@@ -1,110 +1,69 @@
 #pragma once
 
-#include <QAbstractListModel>
-#include <QPersistentModelIndex>
-#include <QSet>
-#include <QString>
-#include <QStringList>
-#include <QUrl>
-#include <QVariant>
-#include <QVector>
-
-#include <optional>
-
 #include "Core/Snowflake.hpp"
+#include "Platform/Image.hpp"
+#include "Platform/Trackable.hpp"
 
-namespace Styx {
-namespace Core {
-class Session;
-struct AccountInfo;
-} // namespace Core
-namespace UI {
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
+namespace Styx::Core { class Session; }
+namespace Styx::UI {
 class ChannelTreeModel;
+struct ChannelNode;
 
-// piggyback off the ChannelTreeModel
-class ServerRailModel : public QAbstractListModel
+class ServerRailModel : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    enum class Kind {
-        AccountHome,
-        Folder,
-        Server,
-    };
-
-    enum Roles {
-        KindRole = Qt::UserRole,
-        AccountIdRole,
-        IdRole,
-        IsUnreadRole,
-        MentionCountRole,
-        IsMutedRole,
-        IsExpandedRole,
-        IsSelectedRole,
-        IsFirstOfAccountRole,
-        DepthRole,
-        FolderChildIconsRole,
-        FolderColorRole,
-        InFolderGroupRole, // true for expanded folder and its child guilds for painting purposes
-        OwnerIdRole,
-    };
-
-    ServerRailModel(Core::Session *session, ChannelTreeModel *source, QObject *parent = nullptr);
-
-    int rowCount(const QModelIndex &parent = {}) const override;
-    QVariant data(const QModelIndex &index, int role) const override;
-
-    void toggleFolder(Core::Snowflake accountId, Core::Snowflake folderId);
-    [[nodiscard]] bool isFolderExpanded(Core::Snowflake accountId, Core::Snowflake folderId) const;
-
-    void setSelected(Kind kind, Core::Snowflake accountId, Core::Snowflake id);
-
-    [[nodiscard]] QStringList expandedFolderKeys() const;
-    void setExpandedFolderKeys(const QStringList &keys);
-
-    void rebuild();
-
-private:
-    struct RailEntry
-    {
-        Kind kind;
+    enum class Kind { AccountHome, Folder, Server };
+    struct RailEntry {
+        Kind kind = Kind::AccountHome;
         Core::Snowflake accountId;
         Core::Snowflake id;
-        QString name;
+        std::string name;
         bool isFirstOfAccount = false;
         int depth = 0;
         bool inFolderGroup = false;
-        std::optional<quint64> folderColor;
-        QString accountAvatarHash;
-        QVariantList folderIcons;
-        QPersistentModelIndex srcIndex;
-        QPersistentModelIndex unreadSrcIndex; // distinct because account maps to DMHeader
+        std::optional<std::uint64_t> folderColor;
+        std::string accountAvatarHash;
+        std::vector<Platform::ImageBuffer> folderIcons;
+        ChannelNode *node = nullptr;
+        ChannelNode *unreadNode = nullptr;
     };
 
-    static QString folderKey(Core::Snowflake accountId, Core::Snowflake folderId);
-    QModelIndex dmHeaderFor(const QModelIndex &accountIndex) const;
-    Core::Snowflake folderForGuild(Core::Snowflake accountId, Core::Snowflake guildId) const;
-    QVariant decorationFor(const RailEntry &entry) const;
-    QVariantList computeFolderChildIcons(const QModelIndex &folderIndex) const;
-    void emitAllChanged();
-    // so we dont rebuild for unrelated changes
-    [[nodiscard]] bool structureAffectsRail(const QModelIndex &parent) const;
-    void onSourceDataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight, const QVector<int> &roles);
+    ServerRailModel(Core::Session *session, ChannelTreeModel *source);
+    const std::vector<RailEntry> &rows() const { return entries; }
+    bool isUnread(const RailEntry &entry) const;
+    int mentionCount(const RailEntry &entry) const;
+    bool isMuted(const RailEntry &entry) const;
+    bool isExpanded(const RailEntry &entry) const;
+    bool isSelected(const RailEntry &entry) const;
+    Core::Snowflake ownerId(const RailEntry &entry) const;
+    Platform::ImageBuffer decorationFor(const RailEntry &entry) const;
+    void toggleFolder(Core::Snowflake accountId, Core::Snowflake folderId);
+    bool isFolderExpanded(Core::Snowflake accountId, Core::Snowflake folderId) const;
+    void setSelected(Kind kind, Core::Snowflake accountId, Core::Snowflake id);
+    std::vector<std::string> expandedFolderKeys() const;
+    void setExpandedFolderKeys(const std::vector<std::string> &keys);
+    void rebuild();
+    Platform::Signal<> changed;
+    Platform::Signal<> reset;
 
+private:
+    static std::string folderKey(Core::Snowflake accountId, Core::Snowflake folderId);
+    Core::Snowflake folderForGuild(Core::Snowflake accountId, Core::Snowflake guildId) const;
+    std::vector<Platform::ImageBuffer> computeFolderChildIcons(ChannelNode *folder) const;
     Core::Session *session;
     ChannelTreeModel *source;
-
-    QVector<RailEntry> entries;
-    QSet<QString> expandedFolders;
-
+    std::vector<RailEntry> entries;
+    std::unordered_set<std::string> expandedFolders;
     Kind selectedKind = Kind::AccountHome;
     Core::Snowflake selectedAccountId;
     Core::Snowflake selectedGuildId;
     Core::Snowflake selectedFolderId;
-
-    mutable QSet<QUrl> pendingAccountAvatars;
+    mutable std::unordered_set<std::string> pendingAccountAvatars;
 };
-
-} // namespace UI
-} // namespace Styx
+}

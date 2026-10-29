@@ -5,9 +5,10 @@
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
 
-#include <QList>
-#include <QPointer>
-#include <QString>
+#include "Platform/Trackable.hpp"
+#include "Platform/Signal.hpp"
+#include <string>
+#include <vector>
 
 namespace Rml {
 class ElementDocument;
@@ -19,17 +20,15 @@ namespace Rml {
 
 class ThreadBrowserController final : public Controller
 {
-    Q_OBJECT
 public:
-    explicit ThreadBrowserController(Shell &shell, QObject *parent = nullptr);
+    explicit ThreadBrowserController(Shell &shell);
     ~ThreadBrowserController() override;
 
-    void open(Core::ClientInstance *instance, Core::Snowflake channelId, const QString &channelName);
+    void open(Core::ClientInstance *instance, Core::Snowflake channelId, const std::string &channelName);
     void close();
     [[nodiscard]] bool isOpen() const { return visible; }
 
-signals:
-    void threadActivated(Core::Snowflake threadId);
+    Platform::Signal<Core::Snowflake> threadActivated;
 
 private:
     enum class Tab {
@@ -46,24 +45,24 @@ private:
     ::Rml::ElementDocument *threadsDocument = nullptr;
     bool visible = false;
 
-    QPointer<Core::ClientInstance> clientInstance;
+    Platform::Guard<Core::ClientInstance> clientInstance;
     Core::Snowflake currentChannelId;
-    QString currentChannelName;
+    std::string currentChannelName;
 
     Tab currentTab = Tab::Active;
     int loadGeneration = 0;
 
-    QList<Discord::Channel> activeThreads;
+    std::vector<Discord::Channel> activeThreads;
     bool activeLoading = false;
     bool activeLoaded = false;
-    QString activeError;
+    std::string activeError;
 
-    QList<Discord::Channel> archivedThreads;
+    std::vector<Discord::Channel> archivedThreads;
     bool archivedLoading = false;
     bool archivedLoaded = false;
     bool archivedHasMore = false;
     int archivedOffset = 0;
-    QString archivedError;
+    std::string archivedError;
 };
 
 } // namespace Rml

@@ -91,6 +91,12 @@
         <file alias="golive.rcss">ui/golive.rcss</file>
         <file alias="confirm_modal.rml">ui/confirm_modal.rml</file>
         <file alias="confirm_modal.rcss">ui/confirm_modal.rcss</file>
+        <file alias="context_menu.rml">ui/context_menu.rml</file>
+        <file alias="context_menu.rcss">ui/context_menu.rcss</file>
+        <file alias="moderation.rml">ui/moderation.rml</file>
+        <file alias="moderation.rcss">ui/moderation.rcss</file>
+        <file alias="captcha_modal.rml">ui/captcha_modal.rml</file>
+        <file alias="captcha_modal.rcss">ui/captcha_modal.rcss</file>
         <file alias="user_profile.rml">ui/user_profile.rml</file>
         <file alias="user_profile.rcss">ui/user_profile.rcss</file>
         <file alias="image_viewer.rml">ui/image_viewer.rml</file>

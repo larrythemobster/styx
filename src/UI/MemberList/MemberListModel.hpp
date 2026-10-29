@@ -1,79 +1,63 @@
 #pragma once
 
-#include <QAbstractListModel>
-#include <QPixmap>
-#include <QPointer>
+#include <string>
+#include <vector>
 
 #include "Core/MemberListManager.hpp"
 #include "Core/ImageManager.hpp"
 #include "Core/Presence/PresenceManager.hpp"
+#include "Platform/Trackable.hpp"
 #include "UI/AvatarRequestTracker.hpp"
 
-namespace Styx {
-namespace UI {
+namespace Styx::UI {
 
 struct MemberActivity
 {
-    QString text;
+    std::string text;
     Discord::ActivityType kind = Discord::ActivityType::PLAYING;
-    QPixmap emoji;
-    QString emojiText;
+    Platform::ImageBuffer emoji;
+    std::string emojiText;
 };
 
-class MemberListModel : public QAbstractListModel
+struct MemberRow
 {
-    Q_OBJECT
+    Core::MemberListItem::Type type = Core::MemberListItem::Type::Placeholder;
+    bool loaded = false;
+    Core::Snowflake userId;
+    std::string username;
+    Platform::ImageBuffer avatar;
+    Platform::Color roleColor;
+    std::string groupName;
+    int groupCount = 0;
+    Platform::Color groupColor;
+    Core::PresenceBadge presence;
+    MemberActivity activity;
+    bool hasActivity = false;
+};
+
+class MemberListModel : public Platform::Trackable
+{
 public:
-    enum Roles {
-        ItemTypeRole = Qt::UserRole + 1,
-        UserIdRole,
-        UsernameRole,
-        AvatarRole,
-        RoleColorRole,
-        GroupNameRole,
-        GroupCountRole,
-        GroupColorRole,
-        LoadedRole,
-        PresenceBadgeRole,
-        HasActivityRole,
-        ActivityRole,
-    };
-
-    explicit MemberListModel(Core::ImageManager *imageManager, QObject *parent = nullptr);
-
+    explicit MemberListModel(Core::ImageManager *imageManager);
     void setManager(Core::MemberListManager *manager);
     void setPresenceManager(Core::PresenceManager *presences);
     void setAccount(Core::Snowflake accountId);
+    [[nodiscard]] int rowCount() const;
+    [[nodiscard]] MemberRow row(int index) const;
 
-    [[nodiscard]] int rowCount(const QModelIndex &parent = QModelIndex()) const override;
-    [[nodiscard]] QVariant data(const QModelIndex &index, int role) const override;
+    Platform::Signal<> reset;
+    Platform::Signal<std::vector<int>> rowsChanged;
 
 private:
-    QVariant presenceData(const Core::MemberListItem &item, int role, const QModelIndex &index) const;
-    QString activityText(const Core::MemberListItem &item, Core::Snowflake guildId) const;
-    MemberActivity activityLine(const Core::MemberListItem &item, Core::Snowflake guildId, const QModelIndex &index) const;
-    QVariant cachedImage(const QUrl &url, const QSize &size, const QModelIndex &index) const;
+    Platform::ImageBuffer cachedImage(const std::string &url, Platform::Size size, Core::Snowflake userId) const;
+    void notifyRows(const std::vector<int> &rows);
 
-    void onListAboutToReset();
-    void onListReset();
-    void onItemsChanged(const QList<int> &indices);
-    void onPresencesChanged(const QList<Core::Snowflake> &userIds);
-    void onImageFetched(const QUrl &url, const QSize &size, const QPixmap &pixmap);
-
-    void connectManager();
-    void disconnectManager();
-
-    void notifyRows(const QList<int> &rows);
-
-    QPointer<Core::MemberListManager> manager;
-    QPointer<Core::PresenceManager> presenceManager;
+    Platform::Guard<Core::MemberListManager> manager;
+    mutable AvatarRequestTracker<Core::Snowflake> avatarTracker;
     Core::ImageManager *imageManager;
     Core::Snowflake accountId;
-
-    mutable AvatarRequestTracker<QPersistentModelIndex> avatarTracker;
+    std::vector<Platform::Connection> managerConnections;
+    Platform::Connection presenceConnection;
 };
 
-} // namespace UI
-} // namespace Styx
-
-Q_DECLARE_METATYPE(Styx::UI::MemberActivity)
+} // namespace Styx::UI

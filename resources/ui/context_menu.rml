@@ -1,0 +1,11 @@
+<rml>
+<head>
+    <title>Context menu</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="context_menu.rcss"/>
+</head>
+<body id="context-menu-root">
+    <div id="context-menu-panel"></div>
+</body>
+</rml>

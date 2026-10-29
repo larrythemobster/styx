@@ -19,6 +19,9 @@
 
 #include <QDateTime>
 #include <utility>
+#include <algorithm>
+#include <format>
+#include <string_view>
 
 namespace Styx {
 namespace UI {
@@ -102,13 +105,13 @@ void FriendsController::connectInstance(Core::ClientInstance *instance)
     }
 
     if (auto *prs = instance->presences()) {
-        connect(prs, &Core::PresenceManager::presencesChanged, this, [this](const QList<Snowflake> &) {
+        connect(prs, &Core::PresenceManager::presencesChanged, this, [this](const std::vector<Snowflake> &) {
             if (this->shell.isFriendsOpen())
                 rebuildTimer.start();
         });
     }
 
-    connect(instance, &Core::ClientInstance::membersUpdated, this, [this](Snowflake, const QList<Snowflake> &) {
+    connect(instance, &Core::ClientInstance::membersUpdated, this, [this](Snowflake, const std::vector<Snowflake> &) {
         if (this->shell.isFriendsOpen())
             rebuildTimer.start();
     });
@@ -123,31 +126,31 @@ void FriendsController::setupEventListeners()
         auto *target = event.GetTargetElement();
 
         if (auto *tabEl = closest(target, "data-tab")) {
-            QString tabStr = attribute(tabEl, "data-tab");
-            if (tabStr == QLatin1String("online"))
+            std::string tabStr = attribute(tabEl, "data-tab");
+            if (tabStr == std::string_view("online"))
                 switchTab(Tab::Online);
-            else if (tabStr == QLatin1String("all"))
+            else if (tabStr == std::string_view("all"))
                 switchTab(Tab::All);
-            else if (tabStr == QLatin1String("add"))
+            else if (tabStr == std::string_view("add"))
                 switchTab(Tab::AddFriend);
             return;
         }
 
         if (auto *act = closest(target, "data-action")) {
-            QString action = attribute(act, "data-action");
-            if (action == QLatin1String("message")) {
+            std::string action = attribute(act, "data-action");
+            if (action == std::string_view("message")) {
                 Snowflake uId(attribute(act, "data-user-id").toULongLong());
                 if (uId.isValid())
                     this->shell.openDmWithUser(this->shell.location().accountId, uId);
                 return;
             }
-            if (action == QLatin1String("more")) {
+            if (action == std::string_view("more")) {
                 Snowflake uId(attribute(act, "data-user-id").toULongLong());
                 if (uId.isValid())
                     this->shell.showContextMenuForUser(uId, Snowflake::Invalid);
                 return;
             }
-            if (action == QLatin1String("clear-friends-search")) {
+            if (action == std::string_view("clear-friends-search")) {
                 searchText.clear();
                 if (auto *inp = dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("friends-search-input"))) {
                     inp->SetValue("");
@@ -155,7 +158,7 @@ void FriendsController::setupEventListeners()
                 rebuild();
                 return;
             }
-            if (action == QLatin1String("send-friend-request")) {
+            if (action == std::string_view("send-friend-request")) {
                 sendFriendRequest();
                 return;
             }
@@ -185,13 +188,13 @@ void FriendsController::setupEventListeners()
         auto *target = event.GetTargetElement();
         if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target)) {
             if (input->GetId() == "friends-search-input") {
-                QString val = QString::fromStdString(input->GetValue());
+                std::string val = input->GetValue();
                 if (val != searchText) {
                     searchText = val;
                     rebuildTimer.start();
                 }
             } else if (input->GetId() == "add-friend-input") {
-                addFriendInputText = QString::fromStdString(input->GetValue());
+                addFriendInputText = input->GetValue();
                 updateAddFriendControls();
             }
         }
@@ -203,7 +206,7 @@ void FriendsController::setupEventListeners()
                 const int key = event.GetParameter<int>("key_identifier", 0);
                 if (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER) {
                     event.StopPropagation();
-                    addFriendInputText = QString::fromStdString(input->GetValue());
+                    addFriendInputText = input->GetValue();
                     sendFriendRequest();
                 }
             }
@@ -225,20 +228,20 @@ void FriendsController::sendFriendRequest()
     if (addFriendPending)
         return;
 
-    QString tag = addFriendInputText.trimmed();
-    if (tag.isEmpty())
+    std::string tag = addFriendInputText.trimmed();
+    if (tag.empty())
         return;
 
     auto *inst = shell.currentInstance();
     if (!inst || !inst->discord()) {
-        addFriendFeedback = QStringLiteral("Client instance not available.");
+        addFriendFeedback = "Client instance not available.";
         addFriendSuccess = false;
         rebuildTimer.start();
         return;
     }
 
     addFriendPending = true;
-    const quint64 generation = ++requestGeneration;
+    const std::uint64_t generation = ++requestGeneration;
     const QPointer<FriendsController> self(this);
     inst->discord()->sendFriendRequest(tag, [self, generation, tag](const Core::Result<void> &res) {
         if (!self || self->requestGeneration != generation)
@@ -246,7 +249,7 @@ void FriendsController::sendFriendRequest()
         self->addFriendPending = false;
         self->addFriendSuccess = res.success();
         if (res.success()) {
-            self->addFriendFeedback = QStringLiteral("Friend request sent to %1.").arg(tag);
+            self->addFriendFeedback = std::format("Friend request sent to {0}.", tag);
             self->addFriendInputText.clear();
         } else {
             self->addFriendFeedback = res.error;
@@ -261,9 +264,9 @@ void FriendsController::updateAddFriendControls()
     if (!regionRoot)
         return;
     if (auto *placeholder = regionRoot->GetElementById("add-friend-placeholder"))
-        placeholder->SetProperty("display", addFriendInputText.isEmpty() ? "block" : "none");
+        placeholder->SetProperty("display", addFriendInputText.empty() ? "block" : "none");
     if (auto *button = regionRoot->GetElementById("add-friend-btn"))
-        button->SetClass("disabled", addFriendPending || addFriendInputText.trimmed().isEmpty());
+        button->SetClass("disabled", addFriendPending || addFriendInputText.trimmed().empty());
     requestRender();
 }
 
@@ -302,93 +305,84 @@ void FriendsController::render()
     auto *headerEl = regionRoot->GetElementById("friends-header");
 
     if (currentTab != Tab::AddFriend && existingSearch && listContainer && activeNowList && headerEl) {
-        QString headerRml;
+        std::string headerRml;
         renderHeader(headerRml, onlineCount, allCount);
-        headerEl->SetInnerRML(headerRml.toUtf8().constData());
+        headerEl->SetInnerRML(headerRml.c_str());
 
         if (auto *placeholder = regionRoot->GetElementById("friends-search-placeholder")) {
-            placeholder->SetProperty("display", searchText.isEmpty() ? "inline" : "none");
+            placeholder->SetProperty("display", searchText.empty() ? "inline" : "none");
         }
         if (auto *clear = regionRoot->GetElementById("friends-search-clear"))
-            clear->SetProperty("display", searchText.isEmpty() ? "none" : "block");
+            clear->SetProperty("display", searchText.empty() ? "none" : "block");
 
-        QString listRml;
+        std::string listRml;
         renderFriendsList(listRml, onlineCount, allCount);
-        listContainer->SetInnerRML(listRml.toUtf8().constData());
+        listContainer->SetInnerRML(listRml.c_str());
 
-        QString activeRml;
+        std::string activeRml;
         renderActiveNow(activeRml);
         if (auto *activeNowEl = regionRoot->GetElementById("friends-active-now")) {
-            activeNowEl->SetInnerRML(activeRml.toUtf8().constData());
+            activeNowEl->SetInnerRML(activeRml.c_str());
         }
         return;
     }
 
-    QString rml;
-    rml += QStringLiteral("<div id=\"friends-header\">");
+    std::string rml;
+    rml += "<div id=\"friends-header\">";
     renderHeader(rml, onlineCount, allCount);
-    rml += QStringLiteral("</div>");
+    rml += "</div>";
 
-    rml += QStringLiteral("<div id=\"friends-body\">");
-    rml += QStringLiteral("<div id=\"friends-main\">");
+    rml += "<div id=\"friends-body\">";
+    rml += "<div id=\"friends-main\">";
 
     if (currentTab == Tab::AddFriend) {
         renderAddFriend(rml);
     } else {
-        const QString clearBtn = QStringLiteral(
-            "<img id=\"friends-search-clear\" class=\"friends-search-clear\" src=\"icon:x\" data-action=\"clear-friends-search\" style=\"%1\"/>")
-            .arg(searchText.isEmpty() ? QStringLiteral("display: none;") : QString());
+        const std::string clearBtn = std::format(
+            "<img id=\"friends-search-clear\" class=\"friends-search-clear\" src=\"icon:x\" data-action=\"clear-friends-search\" style=\"{0}\"/>", searchText.empty() ? "display: none;" : std::string());
 
-        rml += QStringLiteral(
+        rml += std::format(
             "<div class=\"friends-search-box\">"
-            "<input type=\"text\" id=\"friends-search-input\" class=\"friends-search-input\" value=\"%1\"/>"
-            "<span id=\"friends-search-placeholder\" class=\"friends-search-placeholder\" style=\"%2\">Search</span>"
+            "<input type=\"text\" id=\"friends-search-input\" class=\"friends-search-input\" value=\"{0}\"/>"
+            "<span id=\"friends-search-placeholder\" class=\"friends-search-placeholder\" style=\"{1}\">Search</span>"
             "<img class=\"friends-search-icon\" src=\"icon:search\"/>"
-            "%3"
-            "</div>")
-            .arg(Rml::escape(searchText),
-                 searchText.isEmpty() ? QString() : QStringLiteral("display: none;"),
-                 clearBtn);
+            "{2}"
+            "</div>", Rml::escape(searchText), searchText.empty() ? std::string() : "display: none;", clearBtn);
 
-        rml += QStringLiteral("<div id=\"friends-list-container\">");
+        rml += "<div id=\"friends-list-container\">";
         renderFriendsList(rml, onlineCount, allCount);
-        rml += QStringLiteral("</div>"); // #friends-list-container
+        rml += "</div>"; // #friends-list-container
     }
 
-    rml += QStringLiteral("</div>"); // #friends-main
+    rml += "</div>"; // #friends-main
 
-    rml += QStringLiteral("<div id=\"friends-active-now\">");
+    rml += "<div id=\"friends-active-now\">";
     renderActiveNow(rml);
-    rml += QStringLiteral("</div>"); // #friends-active-now
+    rml += "</div>"; // #friends-active-now
 
-    rml += QStringLiteral("</div>"); // #friends-body
+    rml += "</div>"; // #friends-body
 
-    regionRoot->SetInnerRML(rml.toUtf8().constData());
+    regionRoot->SetInnerRML(rml.c_str());
 }
 
-void FriendsController::renderHeader(QString &rml, int onlineCount, int allCount)
+void FriendsController::renderHeader(std::string &rml, int onlineCount, int allCount)
 {
-    const QString onlineClass = (currentTab == Tab::Online) ? QStringLiteral(" selected") : QString();
-    const QString allClass = (currentTab == Tab::All) ? QStringLiteral(" selected") : QString();
-    const QString addClass = (currentTab == Tab::AddFriend) ? QStringLiteral(" selected") : QString();
+    const std::string onlineClass = (currentTab == Tab::Online) ? " selected" : std::string();
+    const std::string allClass = (currentTab == Tab::All) ? " selected" : std::string();
+    const std::string addClass = (currentTab == Tab::AddFriend) ? " selected" : std::string();
 
-    rml += QStringLiteral(
+    rml += std::format(
         "<div class=\"friends-header-title\">"
         "<img class=\"friends-header-icon\" src=\"icon:user-plus\"/>"
         "<span class=\"friends-header-text\">Friends</span>"
         "</div>"
         "<div class=\"friends-header-divider\"></div>"
-        "<div class=\"friends-tab%1\" data-tab=\"online\">Online%2</div>"
-        "<div class=\"friends-tab%3\" data-tab=\"all\">All%4</div>"
-        "<div class=\"friends-tab-add%5\" data-tab=\"add\">Add Friend</div>")
-        .arg(onlineClass)
-        .arg(onlineCount > 0 ? QStringLiteral(" (%1)").arg(onlineCount) : QString())
-        .arg(allClass)
-        .arg(allCount > 0 ? QStringLiteral(" (%1)").arg(allCount) : QString())
-        .arg(addClass);
+        "<div class=\"friends-tab{0}\" data-tab=\"online\">Online{1}</div>"
+        "<div class=\"friends-tab{2}\" data-tab=\"all\">All{3}</div>"
+        "<div class=\"friends-tab-add{4}\" data-tab=\"add\">Add Friend</div>", onlineClass, onlineCount > 0 ? std::format(" ({0})", onlineCount) : std::string(), allClass, allCount > 0 ? std::format(" ({0})", allCount) : std::string(), addClass);
 }
 
-void FriendsController::renderFriendsList(QString &rml, int onlineCount, int allCount)
+void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int allCount)
 {
     auto *inst = shell.currentInstance();
     if (!inst || !inst->relationships() || !inst->presences())
@@ -397,18 +391,18 @@ void FriendsController::renderFriendsList(QString &rml, int onlineCount, int all
 
     struct FriendItem {
         Snowflake userId;
-        QString displayName;
-        QString username;
-        QString avatarSrc;
-        QString statusClass;
-        QString subtext;
+        std::string displayName;
+        std::string username;
+        std::string avatarSrc;
+        std::string statusClass;
+        std::string subtext;
         bool isOnline = false;
     };
 
-    QList<FriendItem> items;
+    std::vector<FriendItem> items;
     items.reserve(allRels.size());
 
-    const QString searchFilter = searchText.trimmed().toLower();
+    const std::string searchFilter = searchText.trimmed().toLower();
 
     for (auto it = allRels.cbegin(); it != allRels.cend(); ++it) {
         const auto &rel = it.value();
@@ -429,53 +423,53 @@ void FriendsController::renderFriendsList(QString &rml, int onlineCount, int all
         else if (rel.user.hasValue())
             user = rel.user.get();
 
-        QString displayName = inst->users()->getDisplayName(userId);
-        if (displayName.isEmpty())
-            displayName = user.globalName.valueOr(user.username.valueOr(QStringLiteral("Friend")));
+        std::string displayName = inst->users()->getDisplayName(userId);
+        if (displayName.empty())
+            displayName = user.globalName.valueOr(user.username.valueOr("Friend"));
 
-        QString username = user.username.valueOr();
+        std::string username = user.username.valueOr();
 
-        if (!searchFilter.isEmpty()) {
+        if (!searchFilter.empty()) {
             if (!displayName.toLower().contains(searchFilter) && !username.toLower().contains(searchFilter))
                 continue;
         }
 
-        QUrl avatarUrl = user.avatar.hasValue()
+        std::string avatarUrl = user.avatar.hasValue()
                              ? Discord::Cdn::userAvatar(userId, user.avatar.get(), 64)
                              : Discord::Cdn::defaultUserAvatar(userId);
-        QString avatarSrc = shell.imageSource(avatarUrl, QSize(36, 36));
+        std::string avatarSrc = shell.imageSource(avatarUrl, Platform::Size{36, 36});
 
-        QString statusClass;
+        std::string statusClass;
         switch (badge.status) {
-        case Discord::StatusType::ONLINE: statusClass = QStringLiteral("status-online"); break;
-        case Discord::StatusType::IDLE: statusClass = QStringLiteral("status-idle"); break;
-        case Discord::StatusType::DND: statusClass = QStringLiteral("status-dnd"); break;
+        case Discord::StatusType::ONLINE: statusClass = "status-online"; break;
+        case Discord::StatusType::IDLE: statusClass = "status-idle"; break;
+        case Discord::StatusType::DND: statusClass = "status-dnd"; break;
         case Discord::StatusType::OFFLINE:
-        default: statusClass = QStringLiteral("status-offline"); break;
+        default: statusClass = "status-offline"; break;
         }
         if (badge.streaming)
-            statusClass = QStringLiteral("status-streaming");
+            statusClass = "status-streaming";
 
         auto acts = inst->presences()->activities(userId);
         auto sorted = Core::ActivityFormat::sortAndFilter(acts);
         const auto *custom = Core::ActivityFormat::custom(acts);
         const auto *prim = Core::ActivityFormat::primary(sorted);
 
-        QString subtext;
-        if (custom && !custom->stateText().isEmpty()) {
+        std::string subtext;
+        if (custom && !custom->stateText().empty()) {
             subtext = custom->stateText();
         } else if (prim) {
             subtext = Core::ActivityFormat::cardHeading(*prim);
-            QString sec = Core::ActivityFormat::secondaryText(*prim);
-            if (!sec.isEmpty())
-                subtext += QStringLiteral(": ") + sec;
+            std::string sec = Core::ActivityFormat::secondaryText(*prim);
+            if (!sec.empty())
+                subtext += ": " + sec;
         } else {
             switch (badge.status) {
-            case Discord::StatusType::ONLINE: subtext = QStringLiteral("Online"); break;
-            case Discord::StatusType::IDLE: subtext = QStringLiteral("Idle"); break;
-            case Discord::StatusType::DND: subtext = QStringLiteral("Do Not Disturb"); break;
+            case Discord::StatusType::ONLINE: subtext = "Online"; break;
+            case Discord::StatusType::IDLE: subtext = "Idle"; break;
+            case Discord::StatusType::DND: subtext = "Do Not Disturb"; break;
             case Discord::StatusType::OFFLINE:
-            default: subtext = QStringLiteral("Offline"); break;
+            default: subtext = "Offline"; break;
             }
         }
 
@@ -486,95 +480,91 @@ void FriendsController::renderFriendsList(QString &rml, int onlineCount, int all
         return a.displayName.compare(b.displayName, Qt::CaseInsensitive) < 0;
     });
 
-    const QString sectionTitle = (currentTab == Tab::Online)
-                                     ? QStringLiteral("Online — %1").arg(items.size())
-                                     : QStringLiteral("All friends — %1").arg(items.size());
+    const std::string sectionTitle = (currentTab == Tab::Online)
+                                     ? std::format("Online — {0}", items.size())
+                                     : std::format("All friends — {0}", items.size());
 
-    rml += QStringLiteral("<div class=\"friends-section-title\">%1</div>").arg(sectionTitle);
-    rml += QStringLiteral("<div id=\"friends-list\">");
+    rml += std::format("<div class=\"friends-section-title\">{0}</div>", sectionTitle);
+    rml += "<div id=\"friends-list\">";
 
-    if (items.isEmpty()) {
-        QString emptyTitle;
-        QString emptySubtitle;
-        if (!searchText.isEmpty()) {
-            emptyTitle = QStringLiteral("No friends found");
-            emptySubtitle = QStringLiteral("No friends found matching \"%1\".").arg(Rml::escape(searchText));
+    if (items.empty()) {
+        std::string emptyTitle;
+        std::string emptySubtitle;
+        if (!searchText.empty()) {
+            emptyTitle = "No friends found";
+            emptySubtitle = std::format("No friends found matching \"{0}\".", Rml::escape(searchText));
         } else if (currentTab == Tab::Online) {
-            emptyTitle = QStringLiteral("No one's around to play with Wumpus.");
-            emptySubtitle = QStringLiteral("None of your friends are currently online.");
+            emptyTitle = "No one's around to play with Wumpus.";
+            emptySubtitle = "None of your friends are currently online.";
         } else {
-            emptyTitle = QStringLiteral("You don't have any friends yet.");
-            emptySubtitle = QStringLiteral("Add friends using their Discord Tag or username!");
+            emptyTitle = "You don't have any friends yet.";
+            emptySubtitle = "Add friends using their Discord Tag or username!";
         }
 
-        rml += QStringLiteral(
+        rml += std::format(
             "<div class=\"friends-empty-state\">"
             "<img class=\"empty-state-icon\" src=\"icon:user-plus\"/>"
-            "<div class=\"empty-state-title\">%1</div>"
-            "<div class=\"empty-state-subtitle\">%2</div>"
-            "</div>")
-            .arg(emptyTitle)
-            .arg(emptySubtitle);
+            "<div class=\"empty-state-title\">{0}</div>"
+            "<div class=\"empty-state-subtitle\">{1}</div>"
+            "</div>", emptyTitle, emptySubtitle);
     } else {
         for (const auto &item : items) {
-            QString usernamePart;
-            if (!item.username.isEmpty() && item.username != item.displayName) {
-                usernamePart = QStringLiteral("<span class=\"friend-username\">@%1</span>").arg(Rml::escape(item.username));
+            std::string usernamePart;
+            if (!item.username.empty() && item.username != item.displayName) {
+                usernamePart = std::format("<span class=\"friend-username\">@{0}</span>", Rml::escape(item.username));
             }
 
-            rml += QStringLiteral(
-                "<div class=\"friend-row\" data-user-id=\"%1\">"
+            rml += std::format(
+                "<div class=\"friend-row\" data-user-id=\"{0}\">"
                 "<div class=\"friend-avatar-wrap\">"
                 "<div class=\"avatar-clip\">"
-                "<img class=\"friend-avatar\" src=\"%2\"/>"
+                "<img class=\"friend-avatar\" src=\"{1}\"/>"
                 "</div>"
-                "<div class=\"status-dot %3\"></div>"
+                "<div class=\"status-dot {2}\"></div>"
                 "</div>"
                 "<div class=\"friend-info\">"
                 "<div class=\"friend-name-line\">"
-                "<span class=\"friend-display-name\">%4</span>"
-                "%5"
+                "<span class=\"friend-display-name\">{3}</span>"
+                "{4}"
                 "</div>"
-                "<div class=\"friend-subtext\">%6</div>"
+                "<div class=\"friend-subtext\">{5}</div>"
                 "</div>"
                 "<div class=\"friend-actions\">"
-                "<div class=\"friend-action-btn\" data-action=\"message\" data-user-id=\"%1\" title=\"Message\">"
+                "<div class=\"friend-action-btn\" data-action=\"message\" data-user-id=\"{0}\" title=\"Message\">"
                 "<img class=\"icon\" src=\"icon:message-circle\"/>"
                 "</div>"
-                "<div class=\"friend-action-btn friend-action-more\" data-action=\"more\" data-user-id=\"%1\" title=\"More\">"
+                "<div class=\"friend-action-btn friend-action-more\" data-action=\"more\" data-user-id=\"{0}\" title=\"More\">"
                 "<img class=\"icon\" src=\"icon:ellipsis\"/>"
                 "</div>"
                 "</div>"
-                "</div>")
-                .arg(item.userId.toString(), escape(item.avatarSrc), item.statusClass,
-                     escape(item.displayName), usernamePart, escape(item.subtext));
+                "</div>", item.userId.toString(), escape(item.avatarSrc), item.statusClass, escape(item.displayName), usernamePart, escape(item.subtext));
         }
     }
 
-    rml += QStringLiteral("</div>"); // #friends-list
+    rml += "</div>"; // #friends-list
 }
 
-void FriendsController::renderActiveNow(QString &rml)
+void FriendsController::renderActiveNow(std::string &rml)
 {
     auto *inst = shell.currentInstance();
-    rml += QStringLiteral("<div class=\"active-now-title\">Active Now</div>");
-    rml += QStringLiteral("<div id=\"active-now-list\">");
+    rml += "<div class=\"active-now-title\">Active Now</div>";
+    rml += "<div id=\"active-now-list\">";
 
     struct CardData {
         Snowflake userId;
-        QString displayName;
-        QString avatarSrc;
-        QString statusClass;
-        QString typeIcon;
-        QString activityType;
-        QString heading;
-        QString details;
-        QString state;
-        QString artworkSrc;
+        std::string displayName;
+        std::string avatarSrc;
+        std::string statusClass;
+        std::string typeIcon;
+        std::string activityType;
+        std::string heading;
+        std::string details;
+        std::string state;
+        std::string artworkSrc;
         bool streaming;
     };
 
-    QList<CardData> cards;
+    std::vector<CardData> cards;
 
     if (inst && inst->relationships() && inst->presences()) {
         const auto &allRels = inst->relationships()->all();
@@ -586,7 +576,7 @@ void FriendsController::renderActiveNow(QString &rml)
             auto acts = inst->presences()->activities(userId);
             auto sorted = Core::ActivityFormat::sortAndFilter(acts);
             auto profileCards = Core::ActivityFormat::profileCardActivities(sorted);
-            if (profileCards.isEmpty())
+            if (profileCards.empty())
                 continue;
 
             auto userOpt = inst->users()->getUser(userId);
@@ -596,58 +586,58 @@ void FriendsController::renderActiveNow(QString &rml)
             else if (it.value().user.hasValue())
                 user = it.value().user.get();
 
-            QString displayName = inst->users()->getDisplayName(userId);
-            if (displayName.isEmpty())
-                displayName = user.globalName.valueOr(user.username.valueOr(QStringLiteral("Friend")));
+            std::string displayName = inst->users()->getDisplayName(userId);
+            if (displayName.empty())
+                displayName = user.globalName.valueOr(user.username.valueOr("Friend"));
 
-            QUrl avatarUrl = user.avatar.hasValue()
+            std::string avatarUrl = user.avatar.hasValue()
                                  ? Discord::Cdn::userAvatar(userId, user.avatar.get(), 32)
                                  : Discord::Cdn::defaultUserAvatar(userId);
-            QString avatarSrc = shell.imageSource(avatarUrl, QSize(32, 32));
+            std::string avatarSrc = shell.imageSource(avatarUrl, Platform::Size{32, 32});
 
             auto badge = inst->presences()->badge(userId);
-            QString statusClass;
+            std::string statusClass;
             switch (badge.status) {
-            case Discord::StatusType::ONLINE: statusClass = QStringLiteral("status-online"); break;
-            case Discord::StatusType::IDLE: statusClass = QStringLiteral("status-idle"); break;
-            case Discord::StatusType::DND: statusClass = QStringLiteral("status-dnd"); break;
+            case Discord::StatusType::ONLINE: statusClass = "status-online"; break;
+            case Discord::StatusType::IDLE: statusClass = "status-idle"; break;
+            case Discord::StatusType::DND: statusClass = "status-dnd"; break;
             case Discord::StatusType::OFFLINE:
-            default: statusClass = QStringLiteral("status-offline"); break;
+            default: statusClass = "status-offline"; break;
             }
             if (badge.streaming)
-                statusClass = QStringLiteral("status-streaming");
+                statusClass = "status-streaming";
 
             for (const auto &act : profileCards) {
-                QString typeIcon = QStringLiteral("icon:gamepad-2");
-                QString typeText = QStringLiteral("Playing");
+                std::string typeIcon = "icon:gamepad-2";
+                std::string typeText = "Playing";
 
                 if (act.kind() == Discord::ActivityType::LISTENING) {
-                    typeIcon = QStringLiteral("icon:music");
-                    typeText = QStringLiteral("Listening to %1").arg(act.name.valueOr(QStringLiteral("music")));
+                    typeIcon = "icon:music";
+                    typeText = std::format("Listening to {0}", act.name.valueOr("music"));
                 } else if (act.kind() == Discord::ActivityType::STREAMING) {
-                    typeIcon = QStringLiteral("icon:monitor");
-                    typeText = QStringLiteral("Streaming");
+                    typeIcon = "icon:monitor";
+                    typeText = "Streaming";
                 }
 
-                QString heading = Core::ActivityFormat::cardHeading(act);
-                if (heading.isEmpty())
+                std::string heading = Core::ActivityFormat::cardHeading(act);
+                if (heading.empty())
                     heading = act.name.valueOr();
 
-                QString details = act.detailsText();
-                QString state = act.stateText();
-                if (act.kind() == Discord::ActivityType::LISTENING && !details.isEmpty()) {
+                std::string details = act.detailsText();
+                std::string state = act.stateText();
+                if (act.kind() == Discord::ActivityType::LISTENING && !details.empty()) {
                     heading = std::move(details);
                     details = std::move(state);
-                    state = act.assets.hasValue() ? act.assets->largeText.valueOr() : QString();
+                    state = act.assets.hasValue() ? act.assets->largeText.valueOr() : std::string();
                     if (state == heading || state == details)
                         state.clear();
                 }
 
                 const bool streaming = act.kind() == Discord::ActivityType::STREAMING;
-                const QSize artSize = streaming ? QSize(320, 180) : QSize(64, 64);
-                QString artworkSrc;
+                const QSize artSize = streaming ? Platform::Size{320, 180} : Platform::Size{64, 64};
+                std::string artworkSrc;
                 if (act.assets.hasValue() && act.assets->largeImage.hasValue()) {
-                    const QUrl artwork = Discord::Cdn::activityAsset(
+                    const std::string artwork = Discord::Cdn::activityAsset(
                         act.applicationId.valueOr(Snowflake::Invalid), *act.assets->largeImage, streaming ? 512 : 64);
                     if (artwork.isValid())
                         artworkSrc = shell.imageSource(artwork, artSize);
@@ -658,89 +648,77 @@ void FriendsController::renderActiveNow(QString &rml)
         }
     }
 
-    if (cards.isEmpty()) {
-        rml += QStringLiteral(
+    if (cards.empty()) {
+        rml += 
             "<div class=\"active-now-empty\">"
             "<div class=\"active-now-empty-heading\">It's quiet for now...</div>"
             "<div class=\"active-now-empty-text\">When friends are playing games, hanging out in voice, or listening to music, they'll show up here.</div>"
-            "</div>");
+            "</div>";
     } else {
         for (const auto &card : cards) {
-            QString detailsPart;
-            if (!card.details.isEmpty()) {
-                detailsPart = QStringLiteral("<div class=\"active-card-details\">%1</div>").arg(Rml::escape(card.details));
+            std::string detailsPart;
+            if (!card.details.empty()) {
+                detailsPart = std::format("<div class=\"active-card-details\">{0}</div>", Rml::escape(card.details));
             }
-            QString statePart;
-            if (!card.state.isEmpty()) {
-                statePart = QStringLiteral("<div class=\"active-card-state\">%1</div>").arg(Rml::escape(card.state));
+            std::string statePart;
+            if (!card.state.empty()) {
+                statePart = std::format("<div class=\"active-card-state\">{0}</div>", Rml::escape(card.state));
             }
-            const QString artwork = card.artworkSrc.isEmpty() ? QString() : QStringLiteral(
-                "<div class=\"active-card-art\"><img src=\"%1\"/></div>").arg(escape(card.artworkSrc));
+            const std::string artwork = card.artworkSrc.empty() ? std::string() : std::format(
+                "<div class=\"active-card-art\"><img src=\"{0}\"/></div>", escape(card.artworkSrc));
 
-            rml += QStringLiteral("<div class=\"active-card%1\" data-user-id=\"%2\">")
-                .arg(card.streaming ? QStringLiteral(" streaming") : QString(), card.userId.toString());
-            rml += QStringLiteral(
+            rml += std::format("<div class=\"active-card{0}\" data-user-id=\"{1}\">", card.streaming ? " streaming" : std::string(), card.userId.toString());
+            rml += std::format(
                 "<div class=\"active-card-top\">"
                 "<div class=\"active-card-avatar-wrap\">"
                 "<div class=\"active-card-avatar-clip\">"
-                "<img class=\"active-card-avatar\" src=\"%1\"/>"
+                "<img class=\"active-card-avatar\" src=\"{0}\"/>"
                 "</div>"
-                "<div class=\"status-dot %2\"></div>"
+                "<div class=\"status-dot {1}\"></div>"
                 "</div>"
                 "<div class=\"active-card-user-info\">"
-                "<span class=\"active-card-user\">%3</span>"
-                "<span class=\"active-card-activity-type\">%4</span>"
+                "<span class=\"active-card-user\">{2}</span>"
+                "<span class=\"active-card-activity-type\">{3}</span>"
                 "</div>"
-                "<img class=\"active-card-type-icon\" src=\"%5\"/>"
+                "<img class=\"active-card-type-icon\" src=\"{4}\"/>"
                 "</div>"
                 "<div class=\"active-card-body\">"
-                "%9"
+                "{8}"
                 "<div class=\"active-card-text\">"
-                "<div class=\"active-card-heading\">%6</div>"
-                "%7"
-                "%8"
+                "<div class=\"active-card-heading\">{5}</div>"
+                "{6}"
+                "{7}"
                 "</div>"
                 "</div>"
-                "</div>")
-                .arg(escape(card.avatarSrc), card.statusClass, escape(card.displayName),
-                     escape(card.activityType), card.typeIcon, escape(card.heading),
-                     detailsPart, statePart, artwork);
+                "</div>", escape(card.avatarSrc), card.statusClass, escape(card.displayName), escape(card.activityType), card.typeIcon, escape(card.heading), detailsPart, statePart, artwork);
         }
     }
 
-    rml += QStringLiteral("</div>"); // #active-now-list
+    rml += "</div>"; // #active-now-list
 }
 
-void FriendsController::renderAddFriend(QString &rml)
+void FriendsController::renderAddFriend(std::string &rml)
 {
-    const bool canSend = !addFriendInputText.trimmed().isEmpty() && !addFriendPending;
-    const QString btnClass = canSend ? QString() : QStringLiteral(" disabled");
+    const bool canSend = !addFriendInputText.trimmed().empty() && !addFriendPending;
+    const std::string btnClass = canSend ? std::string() : " disabled";
 
-    QString feedbackHtml;
-    if (!addFriendFeedback.isEmpty()) {
-        const QString feedbackClass = addFriendSuccess ? QStringLiteral("feedback-success") : QStringLiteral("feedback-error");
-        feedbackHtml = QStringLiteral("<div class=\"add-friend-feedback %1\">%2</div>")
-                           .arg(feedbackClass)
-                           .arg(Rml::escape(addFriendFeedback));
+    std::string feedbackHtml;
+    if (!addFriendFeedback.empty()) {
+        const std::string feedbackClass = addFriendSuccess ? "feedback-success" : "feedback-error";
+        feedbackHtml = std::format("<div class=\"add-friend-feedback {0}\">{1}</div>", feedbackClass, Rml::escape(addFriendFeedback));
     }
 
-    rml += QStringLiteral(
+    rml += std::format(
         "<div class=\"add-friend-container\">"
         "<div class=\"add-friend-header\">ADD FRIEND</div>"
         "<div class=\"add-friend-subtitle\">You can add friends with their Discord Tag or username.</div>"
         "<div class=\"add-friend-input-wrap\">"
-        "<input type=\"text\" id=\"add-friend-input\" class=\"add-friend-input\" value=\"%1\"%6/>"
-        "<span id=\"add-friend-placeholder\" class=\"add-friend-placeholder\" style=\"%2\">You can add friends with their Discord Tag or username</span>"
-        "<button id=\"add-friend-btn\" class=\"add-friend-btn%3\" data-action=\"send-friend-request\">%4</button>"
+        "<input type=\"text\" id=\"add-friend-input\" class=\"add-friend-input\" value=\"{0}\"{5}/>"
+        "<span id=\"add-friend-placeholder\" class=\"add-friend-placeholder\" style=\"{1}\">You can add friends with their Discord Tag or username</span>"
+        "<button id=\"add-friend-btn\" class=\"add-friend-btn{2}\" data-action=\"send-friend-request\">{3}</button>"
         "</div>"
-        "%5"
-        "</div>")
-        .arg(Rml::escape(addFriendInputText),
-             addFriendInputText.isEmpty() ? QString() : QStringLiteral("display: none;"),
-             btnClass,
-             addFriendPending ? QStringLiteral("Sending...") : QStringLiteral("Send Friend Request"),
-             feedbackHtml,
-             addFriendPending ? QStringLiteral(" disabled=\"disabled\"") : QString());
+        "{4}"
+        "</div>", Rml::escape(addFriendInputText), addFriendInputText.empty() ? std::string() : "display: none;", btnClass, addFriendPending ? "Sending..." : "Send Friend Request", feedbackHtml, addFriendPending ? " disabled=\"disabled\"" : std::string());
 }
 
 } // namespace Rml

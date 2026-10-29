@@ -1,13 +1,9 @@
 #pragma once
 
-#include <QList>
-#include <QString>
-
-#include <functional>
+#include <string>
+#include <vector>
 
 #include "Core/Snowflake.hpp"
-
-class QMenu;
 
 namespace Styx {
 namespace Core {
@@ -40,25 +36,17 @@ enum class GuildSettingsGroup {
 namespace GuildSettingsAccess {
 
 [[nodiscard]] bool canOpen(Core::ClientInstance *instance, Core::Snowflake guildId);
-[[nodiscard]] QList<GuildSettingsSection> visibleSections(Core::ClientInstance *instance, Core::Snowflake guildId);
+[[nodiscard]] std::vector<GuildSettingsSection> visibleSections(Core::ClientInstance *instance, Core::Snowflake guildId);
 [[nodiscard]] bool canEdit(Core::ClientInstance *instance, Core::Snowflake guildId, GuildSettingsSection section);
 [[nodiscard]] bool selfHasMfa(Core::ClientInstance *instance);
 
-[[nodiscard]] QString title(GuildSettingsSection section);
+[[nodiscard]] std::string title(GuildSettingsSection section);
 [[nodiscard]] GuildSettingsGroup group(GuildSettingsSection section);
-[[nodiscard]] QString groupTitle(GuildSettingsGroup group);
+[[nodiscard]] std::string groupTitle(GuildSettingsGroup group);
 
-using SectionsProvider = std::function<QList<GuildSettingsSection>(Core::Snowflake accountId, Core::Snowflake guildId)>;
-
-void addMenu(QMenu *menu, const SectionsProvider &provider, Core::Snowflake accountId, Core::Snowflake guildId,
-             const std::function<void(GuildSettingsSection)> &open);
 
 } // namespace GuildSettingsAccess
 
-inline size_t qHash(GuildSettingsSection key, size_t seed = 0) noexcept
-{
-    return ::qHash(static_cast<int>(key), seed);
-}
 
 } // namespace UI
 } // namespace Styx

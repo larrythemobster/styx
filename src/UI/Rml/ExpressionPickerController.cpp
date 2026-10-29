@@ -15,7 +15,11 @@
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/Input.h>
 
-#include <QGuiApplication>
+#include "Platform/Utf8.hpp"
+#include <algorithm>
+#include <chrono>
+#include <format>
+#include <unordered_map>
 
 namespace Styx {
 namespace UI {
@@ -23,50 +27,46 @@ namespace Rml {
 
 namespace {
 
-QString categoryIconName(const QString &sectionId)
+std::string categoryIconName(const std::string &sectionId)
 {
-    static const QHash<QString, const char *> icons = {
-        { QStringLiteral("people"), "smile" },
-        { QStringLiteral("nature"), "leaf" },
-        { QStringLiteral("food"), "utensils" },
-        { QStringLiteral("activity"), "gamepad-2" },
-        { QStringLiteral("travel"), "car" },
-        { QStringLiteral("objects"), "lightbulb" },
-        { QStringLiteral("symbols"), "heart" },
-        { QStringLiteral("flags"), "flag" },
+    static const std::unordered_map<std::string, std::string> icons = {
+        {"people", "smile"}, {"nature", "leaf"}, {"food", "utensils"},
+        {"activity", "gamepad-2"}, {"travel", "car"}, {"objects", "lightbulb"},
+        {"symbols", "heart"}, {"flags", "flag"},
     };
-    return QString::fromLatin1(icons.value(sectionId, "smile"));
+    const auto it = icons.find(sectionId);
+    return it == icons.end() ? "smile" : it->second;
 }
 
 } // namespace
 
-ExpressionPickerController::ExpressionPickerController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
+ExpressionPickerController::ExpressionPickerController(Shell &shell)
+    : Controller(shell, nullptr)
 {
-    connect(&emojiModel, &EmojiGridModel::activeEmojiChanged, this, [this]() {
+    track(emojiModel.activeEmojiChanged.connect([this]() {
         const Core::PickerEmoji *emoji = emojiModel.activeEmoji();
         updateInspector(emoji);
         renderVisibleGrid();
         requestRender();
-    });
+    }));
 
-    connect(&emojiModel, &EmojiGridModel::topSectionChanged, this, [this](int) {
+    track(emojiModel.topSectionChanged.connect([this](int) {
         renderRail();
         requestRender();
-    });
+    }));
 
-    connect(&emojiModel, &EmojiGridModel::scrollRequested, this, [this](int newY) {
+    track(emojiModel.scrollRequested.connect([this](int newY) {
         if (gridScrollEl) {
             gridScrollEl->SetScrollTop(static_cast<float>(newY));
             lastRenderedScrollY = newY;
             renderVisibleGrid();
             requestRender();
         }
-    });
+    }));
 
-    connect(&emojiModel, &EmojiGridModel::emojiClicked, this, [this](const Core::PickerEmoji &emoji, Qt::KeyboardModifiers modifiers) {
-        pickEmoji(emoji, modifiers.testFlag(Qt::ShiftModifier));
-    });
+    track(emojiModel.emojiClicked.connect([this](const Core::PickerEmoji &emoji, bool keepOpen) {
+        pickEmoji(emoji, keepOpen);
+    }));
 }
 
 ExpressionPickerController::~ExpressionPickerController()
@@ -86,9 +86,9 @@ void ExpressionPickerController::ensureDocument()
     if (!view || !view->context())
         return;
 
-    pickerDoc = view->context()->LoadDocument(":/ui/expression_picker.rml");
+    pickerDoc = view->context()->LoadDocument("ui/expression_picker.rml");
     if (!pickerDoc) {
-        qCWarning(LogUI) << "ExpressionPickerController: could not load expression_picker.rml";
+        Core::log(Core::LogLevel::Warning, LogUI) << "ExpressionPickerController: could not load expression_picker.rml";
         return;
     }
 
@@ -127,10 +127,10 @@ void ExpressionPickerController::setupEventListeners()
     // Tab buttons
     listen("click", [this](::Rml::Event &event) {
         if (auto *target = closest(event.GetTargetElement(), "data-tab")) {
-            const QString tabStr = attribute(target, "data-tab");
-            if (tabStr == QLatin1String("gifs"))
+            const std::string tabStr = attribute(target, "data-tab");
+            if (tabStr == "gifs")
                 showTab(Tab::Gifs);
-            else if (tabStr == QLatin1String("emoji"))
+            else if (tabStr == "emoji")
                 showTab(Tab::Emoji);
         }
     }, tabsEl);
@@ -138,12 +138,12 @@ void ExpressionPickerController::setupEventListeners()
     // Search input
     listen("change", [this](::Rml::Event &) {
         if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(searchInputEl))
-            onSearchChanged(QString::fromStdString(input->GetValue()));
+            onSearchChanged(input->GetValue());
     }, searchInputEl);
 
     listen("keyup", [this](::Rml::Event &) {
         if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(searchInputEl))
-            onSearchChanged(QString::fromStdString(input->GetValue()));
+            onSearchChanged(input->GetValue());
     }, searchInputEl);
 
     // Search clear button
@@ -217,7 +217,7 @@ void ExpressionPickerController::setupEventListeners()
     listen("click", [this](::Rml::Event &event) {
         if (auto *header = closest(event.GetTargetElement(), "data-section")) {
             if (header->GetClassNames().find("emoji-section-header") != ::Rml::String::npos) {
-                const int sec = attribute(header, "data-section").toInt();
+                const int sec = std::stoi(attribute(header, "data-section"));
                 emojiModel.toggleCollapsed(sec);
                 renderVisibleGrid();
                 requestRender();
@@ -226,18 +226,18 @@ void ExpressionPickerController::setupEventListeners()
         }
 
         if (auto *cell = closest(event.GetTargetElement(), "data-index")) {
-            const int sec = attribute(cell, "data-section").toInt();
-            const int idx = attribute(cell, "data-index").toInt();
+            const int sec = std::stoi(attribute(cell, "data-section"));
+            const int idx = std::stoi(attribute(cell, "data-index"));
             const bool shift = (event.GetParameter<int>("shift_key", 0) != 0);
-            emojiModel.clickCell({ sec, idx }, shift ? Qt::ShiftModifier : Qt::NoModifier);
+            emojiModel.clickCell({ sec, idx }, shift);
         }
     }, gridScrollEl);
 
     // Emoji Grid mouseover preview
     listen("mouseover", [this](::Rml::Event &event) {
         if (auto *cell = closest(event.GetTargetElement(), "data-index")) {
-            const int sec = attribute(cell, "data-section").toInt();
-            const int idx = attribute(cell, "data-index").toInt();
+            const int sec = std::stoi(attribute(cell, "data-section"));
+            const int idx = std::stoi(attribute(cell, "data-index"));
             if (const auto *emoji = emojiModel.emojiAt({ sec, idx }))
                 updateInspector(emoji);
         }
@@ -264,7 +264,7 @@ void ExpressionPickerController::setupEventListeners()
                     input->SetValue("");
                 onSearchChanged({});
             }
-            const int sec = attribute(btn, "data-rail-sec").toInt();
+            const int sec = std::stoi(attribute(btn, "data-rail-sec"));
             emojiModel.scrollToSection(sec);
         }
     }, railEl);
@@ -272,9 +272,9 @@ void ExpressionPickerController::setupEventListeners()
     // GIF Grid clicks
     listen("click", [this](::Rml::Event &event) {
         if (auto *tile = closest(event.GetTargetElement(), "data-gif-index")) {
-            const int idx = attribute(tile, "data-gif-index").toInt();
+            const int idx = std::stoi(attribute(tile, "data-gif-index"));
             if (idx >= 0 && idx < filteredGifs.size())
-                pickGif(QString::fromStdString(filteredGifs.at(idx).url));
+                pickGif(filteredGifs.at(idx).url);
         }
     }, gifScrollEl);
 }
@@ -284,9 +284,9 @@ void ExpressionPickerController::openForChat(Core::EmojiManager *emojiManager,
                                              Core::Snowflake accountId,
                                              Core::Snowflake channelId,
                                              Tab tab,
-                                             const QRect &anchor)
+                                             const Platform::Rect &anchor)
 {
-    openTimer.restart();
+    openTimer = std::chrono::steady_clock::now();
     ensureDocument();
     if (!pickerDoc)
         return;
@@ -301,11 +301,11 @@ void ExpressionPickerController::openForChat(Core::EmojiManager *emojiManager,
     if (tabsEl)
         tabsEl->SetProperty("display", "flex");
 
-    browseSections = emojis ? emojis->pickerSections(channelId, intention) : QList<Core::PickerSection>();
+    browseSections = emojis ? emojis->pickerSections(channelId, intention) : std::vector<Core::PickerSection>();
     guildNames.clear();
     for (const auto &sec : browseSections) {
         if (sec.guildId.isValid())
-            guildNames.insert(sec.guildId, sec.title);
+            guildNames[sec.guildId] = sec.title;
     }
 
     placeCard(anchor);
@@ -332,16 +332,16 @@ void ExpressionPickerController::openForChat(Core::EmojiManager *emojiManager,
         searchInputEl->Focus();
 
     requestRender();
-    qCInfo(LogUI) << "ExpressionPicker opened for chat in" << openTimer.elapsed() << "ms";
+    Core::log(Core::LogLevel::Info, LogUI) << "ExpressionPicker opened for chat in" << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - openTimer).count() << "ms";
 }
 
 void ExpressionPickerController::openForReaction(Core::EmojiManager *emojiManager,
                                                  Core::Snowflake accountId,
                                                  Core::Snowflake channelId,
                                                  Core::Snowflake messageId,
-                                                 const QRect &anchor)
+                                                 const Platform::Rect &anchor)
 {
-    openTimer.restart();
+    openTimer = std::chrono::steady_clock::now();
     ensureDocument();
     if (!pickerDoc)
         return;
@@ -356,11 +356,11 @@ void ExpressionPickerController::openForReaction(Core::EmojiManager *emojiManage
     if (tabsEl)
         tabsEl->SetProperty("display", "none");
 
-    browseSections = emojis ? emojis->pickerSections(channelId, intention) : QList<Core::PickerSection>();
+    browseSections = emojis ? emojis->pickerSections(channelId, intention) : std::vector<Core::PickerSection>();
     guildNames.clear();
     for (const auto &sec : browseSections) {
         if (sec.guildId.isValid())
-            guildNames.insert(sec.guildId, sec.title);
+            guildNames[sec.guildId] = sec.title;
     }
 
     placeCard(anchor);
@@ -387,7 +387,7 @@ void ExpressionPickerController::openForReaction(Core::EmojiManager *emojiManage
         searchInputEl->Focus();
 
     requestRender();
-    qCInfo(LogUI) << "ExpressionPicker opened for reaction in" << openTimer.elapsed() << "ms";
+    Core::log(Core::LogLevel::Info, LogUI) << "ExpressionPicker opened for reaction in" << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - openTimer).count() << "ms";
 }
 
 void ExpressionPickerController::close()
@@ -402,7 +402,7 @@ void ExpressionPickerController::close()
         pickerDoc->Hide();
 
     requestRender();
-    emit closed();
+    closed();
 }
 
 void ExpressionPickerController::showTab(Tab tab)
@@ -443,33 +443,33 @@ void ExpressionPickerController::showTab(Tab tab)
     requestRender();
 }
 
-void ExpressionPickerController::onSearchChanged(const QString &text)
+void ExpressionPickerController::onSearchChanged(const std::string &text)
 {
-    searchQuery = text.trimmed();
+    searchQuery = Platform::trim(text);
     if (searchClearBtn)
-        searchClearBtn->SetProperty("display", searchQuery.isEmpty() ? "none" : "flex");
+        searchClearBtn->SetProperty("display", searchQuery.empty() ? "none" : "flex");
 
     if (activeTab == Tab::Emoji) {
-        if (searchQuery.isEmpty() || !emojis) {
+        if (searchQuery.empty() || !emojis) {
             searching = false;
             emojiModel.setSections(browseSections);
             emojiModel.activateFirst();
             renderRail();
         } else {
             searching = true;
-            QString query = searchQuery;
-            if (query.startsWith(QLatin1Char(':')))
-                query.remove(0, 1);
-            if (query.endsWith(QLatin1Char(':')))
-                query.chop(1);
+            std::string query = searchQuery;
+            if (query.starts_with(':'))
+                query.erase(0, 1);
+            if (query.ends_with(':'))
+                query.pop_back();
 
             const auto results = emojis->searchPicker(query, currentChannelId, intention);
-            QList<Core::PickerSection> sections;
-            if (!results.isEmpty()) {
+            std::vector<Core::PickerSection> sections;
+            if (!results.empty()) {
                 Core::PickerSection sec;
-                sec.title = QStringLiteral("Search Results");
+                sec.title = "Search Results";
                 sec.emojis = results;
-                sections.append(sec);
+                sections.push_back(sec);
             }
             emojiModel.setSections(sections);
             emojiModel.activateFirst();
@@ -492,171 +492,96 @@ void ExpressionPickerController::renderRail()
 {
     if (!railEl)
         return;
-
-    QString rml;
+    std::string rml;
     const int topSec = emojiModel.topSection();
-    for (int i = 0; i < emojiModel.sections().size(); ++i) {
-        const auto *sec = &emojiModel.sections().at(i);
-        if (!sec)
-            continue;
-
-        const bool isActive = (i == topSec);
-        if (sec->id == QLatin1String("recent")) {
-            rml += QStringLiteral("<button class=\"rail-btn%1\" data-rail-sec=\"%2\">"
-                                  "<img class=\"rail-icon\" src=\"icon:clock\"/>"
-                                  "</button>")
-                       .arg(isActive ? QStringLiteral(" active") : QString())
-                       .arg(i);
-        } else if (sec->guildId.isValid()) {
-            if (sec->guildIconUrl.isValid()) {
-                const QString iconSrc = Runtime::instance().imageSource(sec->guildIconUrl, QSize(24, 24), currentAccountId);
-                rml += QStringLiteral("<button class=\"rail-btn%1\" data-rail-sec=\"%2\">"
-                                      "<img class=\"rail-guild-img\" src=\"%3\"/>"
-                                      "</button>")
-                           .arg(isActive ? QStringLiteral(" active") : QString())
-                           .arg(i)
-                           .arg(iconSrc);
+    const auto &sections = emojiModel.sections();
+    for (int i = 0; i < static_cast<int>(sections.size()); ++i) {
+        const auto &sec = sections[i];
+        const char *active = i == topSec ? " active" : "";
+        if (sec.id == "recent") {
+            rml += std::format("<button class=\"rail-btn{}\" data-rail-sec=\"{}\"><img class=\"rail-icon\" src=\"icon:clock\"/></button>", active, i);
+        } else if (sec.guildId.isValid()) {
+            if (!sec.guildIconUrl.empty()) {
+                const auto src = Runtime::instance().imageSource(sec.guildIconUrl, {24, 24}, currentAccountId);
+                rml += std::format("<button class=\"rail-btn{}\" data-rail-sec=\"{}\"><img class=\"rail-guild-img\" src=\"{}\"/></button>", active, i, Rml::escape(src));
             } else {
-                QString initials;
-                const auto parts = sec->title.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-                for (const auto &p : parts) {
-                    if (!p.isEmpty())
-                        initials += p[0].toUpper();
-                    if (initials.size() == 2)
-                        break;
+                std::string initials;
+                int count = 0;
+                for (auto part : Platform::split(sec.title, ' ', true)) {
+                    const auto points = Platform::codepoints(part);
+                    if (!points.empty()) {
+                        initials += Platform::unicodeUpper(Platform::fromCodepoints({points.front()}));
+                        if (++count == 2) break;
+                    }
                 }
-                if (initials.isEmpty())
-                    initials = QStringLiteral("?");
-                rml += QStringLiteral("<button class=\"rail-btn%1\" data-rail-sec=\"%2\">"
-                                      "<div class=\"rail-guild-initials\">%3</div>"
-                                      "</button>")
-                           .arg(isActive ? QStringLiteral(" active") : QString())
-                           .arg(i)
-                           .arg(initials);
+                if (initials.empty()) initials = "?";
+                rml += std::format("<button class=\"rail-btn{}\" data-rail-sec=\"{}\"><div class=\"rail-guild-initials\">{}</div></button>", active, i, Rml::escape(initials));
             }
         } else {
-            const QString icon = categoryIconName(sec->id);
-            rml += QStringLiteral("<button class=\"rail-btn%1\" data-rail-sec=\"%2\">"
-                                  "<img class=\"rail-icon\" src=\"icon:%3\"/>"
-                                  "</button>")
-                       .arg(isActive ? QStringLiteral(" active") : QString())
-                       .arg(i)
-                       .arg(icon);
+            rml += std::format("<button class=\"rail-btn{}\" data-rail-sec=\"{}\"><img class=\"rail-icon\" src=\"icon:{}\"/></button>", active, i, categoryIconName(sec.id));
         }
     }
-    railEl->SetInnerRML(rml.toStdString());
+    railEl->SetInnerRML(rml);
 }
 
 void ExpressionPickerController::renderVisibleGrid()
 {
-    if (!gridScrollEl)
-        return;
-
+    if (!gridScrollEl) return;
     const auto virtualSections = emojiModel.computeVirtualSections(120);
-    if (virtualSections.isEmpty()) {
+    if (virtualSections.empty()) {
         gridScrollEl->SetInnerRML("<div class=\"empty-results\">No emoji match your search</div>");
         return;
     }
-
-    QString rml;
+    std::string rml;
     for (const auto &vs : virtualSections) {
-        rml += QStringLiteral("<div class=\"emoji-section\" data-section=\"%1\">").arg(vs.sectionIndex);
-        if (!vs.title.isEmpty()) {
-            rml += QStringLiteral("<div class=\"emoji-section-header\" data-section=\"%1\">"
-                                  "<span class=\"emoji-section-title\">%2</span>"
-                                  "</div>")
-                       .arg(vs.sectionIndex)
-                       .arg(Rml::escape(vs.title));
-        }
-
-        if (vs.topSpacer > 0)
-            rml += QStringLiteral("<div style=\"height: %1dp;\"></div>").arg(vs.topSpacer);
-
-        const auto *sec = emojiModel.section(vs.sectionIndex);
-        if (sec) {
+        rml += std::format("<div class=\"emoji-section\" data-section=\"{}\">", vs.sectionIndex);
+        if (!vs.title.empty())
+            rml += std::format("<div class=\"emoji-section-header\" data-section=\"{}\"><span class=\"emoji-section-title\">{}</span></div>", vs.sectionIndex, Rml::escape(vs.title));
+        if (vs.topSpacer > 0) rml += std::format("<div style=\"height: {}dp;\"></div>", vs.topSpacer);
+        if (const auto *sec = emojiModel.section(vs.sectionIndex)) {
             for (const auto &vr : vs.visibleRows) {
-                rml += QStringLiteral("<div class=\"emoji-row\">");
+                rml += "<div class=\"emoji-row\">";
                 for (int col = 0; col < vr.emojiCount; ++col) {
-                    const int emojiIdx = vr.firstEmojiIndex + col;
-                    const auto &emoji = sec->emojis.at(emojiIdx);
-                    const bool isActive = (emojiModel.activeCell().section == vs.sectionIndex &&
-                                           emojiModel.activeCell().index == emojiIdx);
-
-                    QString src;
-                    if (emoji.isCustom())
-                        src = Runtime::instance().imageSource(Discord::Cdn::emoji(emoji.customId, 64, false), QSize(32, 32), currentAccountId);
-                    else
-                        src = Runtime::emojiSource(emoji.surrogates);
-
-                    rml += QStringLiteral("<div class=\"emoji-cell%1\" data-section=\"%2\" data-index=\"%3\">"
-                                          "<img class=\"emoji-img\" src=\"%4\"/>"
-                                          "</div>")
-                               .arg(isActive ? QStringLiteral(" active") : QString())
-                               .arg(vs.sectionIndex)
-                               .arg(emojiIdx)
-                               .arg(src);
+                    const int index = vr.firstEmojiIndex + col;
+                    const auto &emoji = sec->emojis.at(index);
+                    const bool active = emojiModel.activeCell().section == vs.sectionIndex && emojiModel.activeCell().index == index;
+                    const auto src = emoji.isCustom() ? Runtime::instance().imageSource(Discord::Cdn::emoji(emoji.customId, 64, false), {32, 32}, currentAccountId) : Runtime::emojiSource(emoji.surrogates);
+                    rml += std::format("<div class=\"emoji-cell{}\" data-section=\"{}\" data-index=\"{}\"><img class=\"emoji-img\" src=\"{}\"/></div>", active ? " active" : "", vs.sectionIndex, index, Rml::escape(src));
                 }
-                rml += QStringLiteral("</div>");
+                rml += "</div>";
             }
         }
-
-        if (vs.bottomSpacer > 0)
-            rml += QStringLiteral("<div style=\"height: %1dp;\"></div>").arg(vs.bottomSpacer);
-
-        rml += QStringLiteral("</div>");
+        if (vs.bottomSpacer > 0) rml += std::format("<div style=\"height: {}dp;\"></div>", vs.bottomSpacer);
+        rml += "</div>";
     }
-
-    gridScrollEl->SetInnerRML(rml.toStdString());
+    gridScrollEl->SetInnerRML(rml);
 }
 
 void ExpressionPickerController::renderGifs()
 {
-    if (!gifScrollEl)
-        return;
-
-    const QList<Proto::FavoriteGif> allGifs = favoriteGifs ? favoriteGifs->newestFirst() : QList<Proto::FavoriteGif>();
+    if (!gifScrollEl) return;
+    const auto allGifs = favoriteGifs ? favoriteGifs->newestFirst() : std::vector<Proto::FavoriteGif>();
     filteredGifs.clear();
-    const QString query = searchQuery.trimmed();
-    for (const auto &gif : allGifs) {
-        if (query.isEmpty() || Core::FavoriteGifRules::matchesSearch(QString::fromStdString(gif.url), query))
-            filteredGifs.append(gif);
-    }
-
-    if (filteredGifs.isEmpty()) {
+    const std::string query(Platform::trim(searchQuery));
+    for (const auto &gif : allGifs)
+        if (query.empty() || Core::FavoriteGifRules::matchesSearch(gif.url, query)) filteredGifs.push_back(gif);
+    if (filteredGifs.empty()) {
         gifScrollEl->SetInnerRML("<div class=\"empty-results\">No favorite GIFs found</div>");
         return;
     }
-
-    QList<QSize> sizes;
+    std::vector<Platform::Size> sizes;
     sizes.reserve(filteredGifs.size());
-    for (const auto &gif : filteredGifs)
-        sizes.append(QSize(static_cast<int>(gif.width), static_cast<int>(gif.height)));
-
-    constexpr int ViewportWidth = 420;
-    constexpr int Columns = 2;
-    const auto arrangement = GifMasonry::arrange(sizes, ViewportWidth, Columns);
-
-    QString rml;
-    rml += QStringLiteral("<div class=\"gif-container\" style=\"height: %1dp;\">").arg(arrangement.contentHeight);
-    for (int i = 0; i < filteredGifs.size() && i < arrangement.tiles.size(); ++i) {
-        const auto &gif = filteredGifs.at(i);
-        const QRect &tile = arrangement.tiles.at(i);
-        const QUrl stillUrl = Core::FavoriteGifRules::stillServedByDiscord(gif);
-        const QString src = stillUrl.isValid() ? Runtime::instance().imageSource(stillUrl, tile.size(), currentAccountId)
-                                              : QStringLiteral(":/resources/placeholder.png");
-
-        rml += QStringLiteral("<div class=\"gif-tile\" data-gif-index=\"%1\" style=\"left: %2dp; top: %3dp; width: %4dp; height: %5dp;\">"
-                              "<img class=\"gif-img\" src=\"%6\"/>"
-                              "</div>")
-                   .arg(i)
-                   .arg(tile.x())
-                   .arg(tile.y())
-                   .arg(tile.width())
-                   .arg(tile.height())
-                   .arg(src);
+    for (const auto &gif : filteredGifs) sizes.push_back({static_cast<int>(gif.width), static_cast<int>(gif.height)});
+    const auto arrangement = GifMasonry::arrange(sizes, 420, 2);
+    std::string rml = std::format("<div class=\"gif-container\" style=\"height: {}dp;\">", arrangement.contentHeight);
+    for (size_t i = 0; i < filteredGifs.size() && i < arrangement.tiles.size(); ++i) {
+        const auto &tile = arrangement.tiles[i];
+        const auto stillUrl = Core::FavoriteGifRules::stillServedByDiscord(filteredGifs[i]);
+        const auto src = !stillUrl.empty() ? Runtime::instance().imageSource(stillUrl, {static_cast<int>(tile.width), static_cast<int>(tile.height)}, currentAccountId) : "placeholder.png";
+        rml += std::format("<div class=\"gif-tile\" data-gif-index=\"{}\" style=\"left: {}dp; top: {}dp; width: {}dp; height: {}dp;\"><img class=\"gif-img\" src=\"{}\"/></div>", i, tile.x, tile.y, tile.width, tile.height, Rml::escape(src));
     }
-    rml += QStringLiteral("</div>");
-    gifScrollEl->SetInnerRML(rml.toStdString());
+    rml += "</div>";
+    gifScrollEl->SetInnerRML(rml);
 }
 
 void ExpressionPickerController::updateInspector(const Core::PickerEmoji *emoji)
@@ -672,29 +597,29 @@ void ExpressionPickerController::updateInspector(const Core::PickerEmoji *emoji)
     }
 
     inspectorImgEl->SetProperty("display", "inline-block");
-    QString src;
+    std::string src;
     if (emoji->isCustom())
-        src = Runtime::instance().imageSource(Discord::Cdn::emoji(emoji->customId, 64, false), QSize(28, 28), currentAccountId);
+        src = Runtime::instance().imageSource(Discord::Cdn::emoji(emoji->customId, 64, false), Platform::Size{28, 28}, currentAccountId);
     else
         src = Runtime::emojiSource(emoji->surrogates);
 
-    inspectorImgEl->SetAttribute("src", src.toStdString());
-    inspectorNameEl->SetInnerRML(Rml::escape(":" + emoji->name + ":").toStdString());
+    inspectorImgEl->SetAttribute("src", src);
+    inspectorNameEl->SetInnerRML(Rml::escape(":" + emoji->name + ":"));
 
     if (emoji->isCustom() && guildNames.contains(emoji->guildId))
-        inspectorGuildEl->SetInnerRML(Rml::escape("from " + guildNames.value(emoji->guildId)).toStdString());
+        inspectorGuildEl->SetInnerRML(Rml::escape("from " + guildNames.at(emoji->guildId)));
     else
         inspectorGuildEl->SetInnerRML("");
 }
 
-void ExpressionPickerController::placeCard(const QRect &anchor)
+void ExpressionPickerController::placeCard(const Platform::Rect &anchor)
 {
     if (!cardEl)
         return;
 
-    if (isReaction && anchor.isValid() && anchor.width() > 0) {
-        const int x = std::clamp(anchor.right() - 440, 20, 1200);
-        const int y = std::clamp(anchor.top() - 480 - 8, 20, 700);
+    if (isReaction && !anchor.empty()) {
+        const int x = std::clamp(static_cast<int>(anchor.x + anchor.width - 1 - 440), 20, 1200);
+        const int y = std::clamp(static_cast<int>(anchor.y - 480 - 8), 20, 700);
         cardEl->SetProperty("left", ::Rml::String(std::to_string(x) + "dp"));
         cardEl->SetProperty("top", ::Rml::String(std::to_string(y) + "dp"));
         cardEl->RemoveProperty("right");
@@ -709,14 +634,14 @@ void ExpressionPickerController::placeCard(const QRect &anchor)
 
 void ExpressionPickerController::pickEmoji(const Core::PickerEmoji &emoji, bool keepOpen)
 {
-    emit emojiPicked(emoji, keepOpen);
+    emojiPicked(emoji, keepOpen);
     if (!keepOpen)
         close();
 }
 
-void ExpressionPickerController::pickGif(const QString &url)
+void ExpressionPickerController::pickGif(const std::string &url)
 {
-    emit gifPicked(url);
+    gifPicked(url);
     close();
 }
 

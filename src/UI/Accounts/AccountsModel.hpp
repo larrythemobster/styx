@@ -1,70 +1,52 @@
 #pragma once
 
-#include <QAbstractListModel>
-#include <QVector>
+#include <vector>
+
 #include "Core/AccountInfo.hpp"
 #include "Core/Result.hpp"
+#include "Platform/Trackable.hpp"
 #include "UI/AvatarRequestTracker.hpp"
 
 namespace Styx {
-
-namespace Core {
-class Session;
-}
-
+namespace Core { class Session; }
 namespace UI {
 
-class AccountsModel : public QAbstractListModel
+class AccountsModel : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit AccountsModel(Core::Session *session, QObject *parent = nullptr);
+    explicit AccountsModel(Core::Session *session);
 
-    enum Roles {
-        AccountObjectRole = Qt::UserRole + 1,
-        ConnectionStateRole,
-        AutoConnectRole,
-    };
-
-    int rowCount(const QModelIndex &parent = {}) const override;
-    QVariant data(const QModelIndex &index, int role) const override;
-    Qt::ItemFlags flags(const QModelIndex &index) const override;
-
-    Qt::DropActions supportedDropActions() const override;
-    QStringList mimeTypes() const override;
-    QMimeData *mimeData(const QModelIndexList &indexes) const override;
-    bool dropMimeData(const QMimeData *data, Qt::DropAction action, int row, int column,
-                      const QModelIndex &parent) override;
+    [[nodiscard]] int rowCount() const { return static_cast<int>(accounts.size()); }
+    [[nodiscard]] const std::vector<Core::AccountInfo> &allAccounts() const { return accounts; }
+    [[nodiscard]] const Core::AccountInfo *accountAt(int row) const {
+        return row >= 0 && row < rowCount() ? &accounts[row] : nullptr;
+    }
+    [[nodiscard]] const Core::AccountInfo *accountById(Core::Snowflake id) const {
+        const int row = rowForId(id);
+        return accountAt(row);
+    }
+    [[nodiscard]] int rowForId(Core::Snowflake id) const {
+        for (int i = 0; i < rowCount(); ++i)
+            if (accounts[i].id == id) return i;
+        return -1;
+    }
+    [[nodiscard]] Platform::ImageBuffer avatar(int row) const;
 
     [[nodiscard]] Core::Result<void> addAccount(const Core::AccountInfo &account);
     void removeAccount(int row);
-
     void setConnectionState(int row, Core::ConnectionState state);
     void setAutoConnect(int row, bool enabled);
     void setProxy(int row, const Core::ProxyConfig &proxy);
-    [[nodiscard]] const QVector<Core::AccountInfo> &allAccounts() const { return accounts; }
-    [[nodiscard]] const Core::AccountInfo *accountAt(int row) const {
-        if (row >= 0 && row < accounts.size()) return &accounts[row];
-        return nullptr;
-    }
-    [[nodiscard]] const Core::AccountInfo *accountById(Core::Snowflake id) const {
-        for (const auto &acc : accounts) {
-            if (acc.id == id) return &acc;
-        }
-        return nullptr;
-    }
-    int rowForId(Core::Snowflake id) const {
-        for (int i = 0; i < accounts.size(); ++i) {
-            if (accounts[i].id == id) return i;
-        }
-        return -1;
-    }
+    bool moveAccount(int sourceRow, int targetRow);
+
+    Platform::Signal<int> changed;
+    Platform::Signal<> reset;
+    Platform::Signal<int> avatarChanged;
 
 private:
     Core::Session *session;
-
-    QVector<Core::AccountInfo> accounts;
-    mutable AvatarRequestTracker<QPersistentModelIndex> avatarTracker;
+    std::vector<Core::AccountInfo> accounts;
+    mutable AvatarRequestTracker<Core::Snowflake> avatarTracker;
 };
 
 } // namespace UI

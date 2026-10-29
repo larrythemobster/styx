@@ -1,12 +1,10 @@
 #pragma once
 
-#include <QHash>
-#include <QList>
-#include <QObject>
-#include <QPoint>
-#include <QRect>
-#include <QSet>
-#include <QString>
+#include "Platform/Native.hpp"
+#include "Platform/Trackable.hpp"
+#include <string>
+#include <vector>
+#include <unordered_set>
 
 #include <algorithm>
 
@@ -16,9 +14,8 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-class EmojiGridModel : public QObject
+class EmojiGridModel : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     static constexpr int Columns = 9;
     static constexpr int CellPx = 40;
@@ -62,24 +59,24 @@ public:
     struct VirtualSection
     {
         int sectionIndex = -1;
-        QString id;
-        QString title;
+        std::string id;
+        std::string title;
         Core::Snowflake guildId;
         bool collapsed = false;
         int top = 0;
         int height = 0;
         int topSpacer = 0;
-        QList<VisibleRow> visibleRows;
+        std::vector<VisibleRow> visibleRows;
         int bottomSpacer = 0;
     };
 
-    explicit EmojiGridModel(QObject *parent = nullptr);
+    EmojiGridModel() = default;
 
-    void setSections(const QList<Core::PickerSection> &sections);
-    [[nodiscard]] const QList<Core::PickerSection> &sections() const { return shownSections; }
+    void setSections(const std::vector<Core::PickerSection> &sections);
+    [[nodiscard]] const std::vector<Core::PickerSection> &sections() const { return shownSections; }
 
-    void setCollapsedSections(const QSet<QString> &sectionIds);
-    [[nodiscard]] const QSet<QString> &collapsedSections() const { return collapsed; }
+    void setCollapsedSections(const std::unordered_set<std::string> &sectionIds);
+    [[nodiscard]] const std::unordered_set<std::string> &collapsedSections() const { return collapsed; }
     void toggleCollapsed(int section);
 
     void setViewportHeight(int height);
@@ -104,22 +101,22 @@ public:
     [[nodiscard]] const Core::PickerSection *section(int index) const;
     [[nodiscard]] const Core::PickerEmoji *emojiAt(const Cell &cell) const;
 
-    [[nodiscard]] Hit hitTest(const QPoint &viewportPos) const;
-    [[nodiscard]] QRect cellRect(const Cell &cell) const;
+    [[nodiscard]] Hit hitTest(const Platform::Point &viewportPos) const;
+    [[nodiscard]] Platform::Rect cellRect(const Cell &cell) const;
     [[nodiscard]] int stickyHeaderY(int section) const;
 
-    void mouseClick(const QPoint &viewportPos, Qt::KeyboardModifiers modifiers = {});
-    void clickCell(const Cell &cell, Qt::KeyboardModifiers modifiers = {});
+    void mouseClick(const Platform::Point &viewportPos, bool keepOpen = false);
+    void clickCell(const Cell &cell, bool keepOpen = false);
 
-    [[nodiscard]] QList<VirtualSection> computeVirtualSections(int overscanPx = 80) const;
+    [[nodiscard]] std::vector<VirtualSection> computeVirtualSections(int overscanPx = 80) const;
 
-signals:
-    void activeEmojiChanged();
-    void topSectionChanged(int section);
-    void collapsedSectionsChanged();
-    void scrollRequested(int newScrollY);
-    void emojiClicked(const Styx::Core::PickerEmoji &emoji, Qt::KeyboardModifiers modifiers);
-    void layoutChanged();
+public:
+    Platform::Signal<> activeEmojiChanged;
+    Platform::Signal<int> topSectionChanged;
+    Platform::Signal<> collapsedSectionsChanged;
+    Platform::Signal<int> scrollRequested;
+    Platform::Signal<const Core::PickerEmoji &, bool> emojiClicked;
+    Platform::Signal<> layoutChanged;
 
 private:
     void relayout();
@@ -129,9 +126,9 @@ private:
     void ensureVisible(const Cell &cell);
     void notifyTopSection();
 
-    QList<Core::PickerSection> shownSections;
-    QList<SectionGeometry> geometry;
-    QSet<QString> collapsed;
+    std::vector<Core::PickerSection> shownSections;
+    std::vector<SectionGeometry> geometry;
+    std::unordered_set<std::string> collapsed;
 
     Cell active;
     int viewHeight = 360;

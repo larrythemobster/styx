@@ -1,6 +1,9 @@
 #include "ChannelTreeModel.hpp"
 
+#include <algorithm>
 #include <functional>
+#include <unordered_set>
+#include "Platform/Native.hpp"
 #include <utility>
 
 #include <Core/ClientInstance.hpp>
@@ -36,26 +39,27 @@ static bool isChannelPrivate(const Discord::Channel &channel, Core::Snowflake gu
     return false;
 }
 
-static QString getDMDisplayName(const Discord::Channel &channel, Core::UserManager *users)
+static std::string getDMDisplayName(const Discord::Channel &channel, Core::UserManager *users)
 {
-    if (channel.name.hasValue() && !channel.name->isEmpty())
+    if (channel.name.hasValue() && !channel.name->empty())
         return channel.name.get();
-
-    QStringList names;
-
+    std::vector<std::string> names;
     if (channel.recipients.hasValue()) {
         for (const auto &user : channel.recipients.get()) {
-            QString friendNickname = users->getNickname(user.id.get(), Core::Snowflake::Invalid);
-            names.append(friendNickname.isEmpty() ? user.getDisplayName() : friendNickname);
+            auto nickname = users->getNickname(user.id.get(), Core::Snowflake::Invalid);
+            names.push_back(nickname.empty() ? user.getDisplayName() : nickname);
         }
     } else if (channel.recipientIds.hasValue()) {
-        for (const auto &userId : channel.recipientIds.get()) {
-            if (users->getUser(userId))
-                names.append(users->getDisplayName(userId));
-        }
+        for (const auto &id : channel.recipientIds.get())
+            if (users->getUser(id)) names.push_back(users->getDisplayName(id));
     }
-
-    return names.isEmpty() ? "Unnamed" : names.join(", ");
+    if (names.empty()) return "Unnamed";
+    std::string result;
+    for (const auto &name : names) {
+        if (!result.empty()) result += ", ";
+        result += name;
+    }
+    return result;
 }
 
 static std::optional<ChannelNode::Type> nodeTypeForChannel(Discord::ChannelType type)
@@ -76,216 +80,93 @@ static std::optional<ChannelNode::Type> nodeTypeForChannel(Discord::ChannelType 
     }
 }
 
-ChannelTreeModel::ChannelTreeModel(Session *session, QObject *parent)
-    : QAbstractItemModel(parent), session(session)
+ChannelTreeModel::ChannelTreeModel(Session *session) : session(session)
 {
     root = std::make_unique<ChannelNode>();
     root->name = "Root";
     root->type = ChannelNode::Type::Root;
-
-    connect(session, &Session::accountDetailsUpdated, this, [this](const Core::AccountInfo &info) {
-        ChannelNode *node = accountNodes.value(info.id, nullptr);
-        if (!node)
-            return;
-
-        node->name = info.displayName;
-
-        QModelIndex index = indexForNode(node);
-        emit dataChanged(index, index, { Qt::DisplayRole });
-    });
-
-    connect(session->getImageManager(), &Core::ImageManager::imageFetched, this,
-            [this](const QUrl &url, const QSize &size, const QPixmap &pixmap) {
-                avatarTracker.notify(url, [this](const QModelIndex &index) {
-                    if (index.isValid())
-                        emit dataChanged(index, index, { Qt::DecorationRole });
-                });
+    track(session->accountDetailsUpdated.connect([this](const Core::AccountInfo &info) {
+        auto it = accountNodes.find(info.id);
+        if (it == accountNodes.end()) return;
+        it->second->name = info.displayName;
+        changed.publish(it->second);
+    }));
+    track(session->getImageManager()->imageFetched.connect(
+        [this](const std::string &url, const Platform::Size &, const Platform::ImageBuffer &) {
+            avatarTracker.notify(url, [this](std::uint64_t target) {
+                std::function<ChannelNode *(ChannelNode *)> find = [&](ChannelNode *node) -> ChannelNode * {
+                    if (node->avatarTarget == target) return node;
+                    for (const auto &child : node->children)
+                        if (auto *found = find(child.get())) return found;
+                    return nullptr;
+                };
+                if (auto *node = find(root.get())) changed.publish(node);
             });
+        }));
 }
 
-QModelIndex ChannelTreeModel::index(int row, int column, const QModelIndex &parentIndex) const
+Platform::ImageBuffer ChannelTreeModel::avatar(ChannelNode *node) const
 {
-    if (!hasIndex(row, column, parentIndex))
-        return {};
-
-    ChannelNode *parentNode = nodeFromIndex(parentIndex);
-    if (row >= (int)parentNode->children.size())
-        return {};
-
-    return createIndex(row, column, parentNode->children[row].get());
-}
-
-QModelIndex ChannelTreeModel::parent(const QModelIndex &childIndex) const
-{
-    if (!childIndex.isValid())
-        return {};
-
-    ChannelNode *node = nodeFromIndex(childIndex);
-    ChannelNode *parentNode = node->parent;
-
-    if (!parentNode || parentNode == root.get())
-        return {};
-
-    return indexForNode(parentNode);
-}
-
-int ChannelTreeModel::rowCount(const QModelIndex &parentIndex) const
-{
-    ChannelNode *parentNode = nodeFromIndex(parentIndex);
-    return parentNode ? parentNode->children.size() : 0;
-}
-
-int ChannelTreeModel::columnCount(const QModelIndex &) const
-{
-    return 1;
-}
-
-QVariant ChannelTreeModel::data(const QModelIndex &index, int role) const
-{
-    if (!index.isValid())
-        return {};
-    ChannelNode *node = nodeFromIndex(index);
-
-    if (role == Qt::DisplayRole)
-        return node->name;
-
-    if (role == Qt::DecorationRole) {
-        ChannelNode *accountNode = getAccountNodeFor(node);
-        const Snowflake avatarAccountId = accountNode ? accountNode->id : Snowflake();
-
-        if (node->type == ChannelNode::Type::Server) {
-            const QSize desiredSize(64, 64);
-            QUrl iconUrl = Discord::Cdn::guildIcon(node->id, node->TEMP_iconHash, desiredSize.width());
-            return avatarTracker.fetch(session->getImageManager(), iconUrl, desiredSize, index,
-                                       avatarAccountId, Core::PinGroup::ChannelList);
-        }
-
-        if (node->type == ChannelNode::Type::DMChannel) {
-            const QSize desiredSize(64, 64);
-            QUrl avatarUrl;
-
-            if (node->dmRecipientId.isValid()) {
-                avatarUrl = Discord::Cdn::userAvatar(node->dmRecipientId, node->dmAvatarHash,
-                                                     desiredSize.width());
-            } else if (!node->TEMP_iconHash.isEmpty()) {
-                avatarUrl = Discord::Cdn::channelIcon(node->id, node->TEMP_iconHash,
-                                                      desiredSize.width());
-            }
-
-            if (!avatarUrl.isEmpty())
-                return avatarTracker.fetch(session->getImageManager(), avatarUrl, desiredSize, index,
-                                           avatarAccountId, Core::PinGroup::ChannelList);
-        }
-
-        if (node->type == ChannelNode::Type::VoiceParticipant &&
-            node->dmRecipientId.isValid()) {
-            const QSize desiredSize(VoiceParticipantAvatarPx, VoiceParticipantAvatarPx);
-            return avatarTracker.fetch(session->getImageManager(),
-                                       node->voiceParticipantAvatarUrl, desiredSize, index,
-                                       avatarAccountId, Core::PinGroup::ChannelList);
-        }
-
-        return {};
+    if (!node) return {};
+    auto *account = getAccountNodeFor(node);
+    auto accountId = account ? account->id : Snowflake();
+    Platform::Size size{64, 64};
+    std::string url;
+    if (node->type == ChannelNode::Type::Server)
+        url = Discord::Cdn::guildIcon(node->id, node->TEMP_iconHash, size.width);
+    else if (node->type == ChannelNode::Type::DMChannel) {
+        if (node->dmRecipientId.isValid())
+            url = Discord::Cdn::userAvatar(node->dmRecipientId, node->dmAvatarHash, size.width);
+        else if (!node->TEMP_iconHash.empty())
+            url = Discord::Cdn::channelIcon(node->id, node->TEMP_iconHash, size.width);
+    } else if (node->type == ChannelNode::Type::VoiceParticipant && node->dmRecipientId.isValid()) {
+        size = {VoiceParticipantAvatarPx, VoiceParticipantAvatarPx};
+        url = node->voiceParticipantAvatarUrl;
     }
+    if (url.empty()) return {};
+    if (!node->avatarTarget) node->avatarTarget = nextAvatarTarget++;
+    return avatarTracker.fetch(session->getImageManager(), url, size, node->avatarTarget,
+                               accountId, Core::PinGroup::ChannelList);
+}
 
-    if (role == IdRole)
-        return static_cast<quint64>(node->id);
-    if (role == TypeRole)
-        return static_cast<int>(node->type);
-    if (role == PositionRole)
-        return node->position;
-    if (role == LastMessageIdRole)
-        return static_cast<quint64>(node->lastMessageId);
-    if (role == IsUnreadRole)
-        return node->isUnread;
-    if (role == MentionCountRole)
-        return node->mentionCount;
-    if (role == OwnMentionCountRole)
-        return node->self.mentionCount;
-    if (role == IsMutedRole)
-        return node->isMuted;
-    if (role == CollapsedRole)
-        return node->collapsed;
-    if (role == VoiceParticipantCountRole)
-        return node->voiceParticipantCount;
-    if (role == UserLimitRole)
-        return node->userLimit;
-    if (role == IconHashRole)
-        return node->TEMP_iconHash;
-    if (role == FolderColorRole) {
-        if (node->folderColor.has_value())
-            return static_cast<quint64>(node->folderColor.value());
-        return {};
-    }
-    if (role == OwnerIdRole)
-        return static_cast<quint64>(node->ownerId);
+Core::PresenceBadge ChannelTreeModel::presenceBadge(ChannelNode *node) const
+{
+    if (!node || (node->type != ChannelNode::Type::DMChannel && node->type != ChannelNode::Type::VoiceParticipant) || !node->dmRecipientId.isValid()) return {};
+    auto *account = getAccountNodeFor(node);
+    auto *instance = account ? session->client(account->id) : nullptr;
+    return instance ? instance->presences()->badge(node->dmRecipientId) : Core::PresenceBadge();
+}
 
-    if (role == PresenceBadgeRole) {
-        if ((node->type != ChannelNode::Type::DMChannel &&
-             node->type != ChannelNode::Type::VoiceParticipant) ||
-            !node->dmRecipientId.isValid())
-            return QVariant::fromValue(Core::PresenceBadge());
+bool ChannelTreeModel::threadJoined(ChannelNode *node) const
+{
+    if (!node || node->type != ChannelNode::Type::Thread || !node->parent || node->parent->type != ChannelNode::Type::Channel) return false;
+    auto *account = getAccountNodeFor(node);
+    auto *instance = account ? session->client(account->id) : nullptr;
+    return instance && instance->isThreadJoined(node->id);
+}
 
-        ChannelNode *accNode = getAccountNodeFor(node);
-        auto *instance = accNode ? session->client(accNode->id) : nullptr;
-        if (!instance)
-            return QVariant::fromValue(Core::PresenceBadge());
-
-        return QVariant::fromValue(instance->presences()->badge(node->dmRecipientId));
-    }
-
-    if (role == ThreadJoinedRole) {
-        if (node->type != ChannelNode::Type::Thread ||
-            !node->parent ||
-            node->parent->type != ChannelNode::Type::Channel)
-            return false;
-        ChannelNode *accNode = getAccountNodeFor(node);
-        if (!accNode)
-            return false;
-        auto *instance = session->client(accNode->id);
-        return instance && instance->isThreadJoined(node->id);
-    }
-
-    if (role == IsVoiceMutedRole || role == IsVoiceDeafenedRole) {
-        if (node->type != ChannelNode::Type::VoiceParticipant)
-            return false;
+bool ChannelTreeModel::voiceMuted(ChannelNode *node) const
+{
 #ifndef STYX_NO_VOICE
-        ChannelNode *accNode = getAccountNodeFor(node);
-        if (!accNode)
-            return false;
-        auto *instance = session->client(accNode->id);
-        if (!instance)
-            return false;
-        auto state = instance->voice()->voiceStateForUser(node->id);
-        if (!state.has_value())
-            return false;
-        if (role == IsVoiceMutedRole)
-            return state->selfMute.get() || state->mute.get();
-        return state->selfDeaf.get() || state->deaf.get();
-#else
-        return false;
-#endif
+    if (node && node->type == ChannelNode::Type::VoiceParticipant) {
+        auto *account = getAccountNodeFor(node);
+        auto *instance = account ? session->client(account->id) : nullptr;
+        if (instance) { auto state = instance->voice()->voiceStateForUser(node->id); return state && (state->selfMute.get() || state->mute.get()); }
     }
-
-    return {};
+#endif
+    return false;
 }
 
-Qt::ItemFlags ChannelTreeModel::flags(const QModelIndex &index) const
+bool ChannelTreeModel::voiceDeafened(ChannelNode *node) const
 {
-    if (!index.isValid())
-        return Qt::NoItemFlags;
-
-    ChannelNode *node = nodeFromIndex(index);
-    Qt::ItemFlags f = QAbstractItemModel::flags(index);
-
-    if (node->opensChat())
-        return f | Qt::ItemIsSelectable | Qt::ItemIsEnabled;
-
-    // Folders should be enabled (for expansion) but not selectable
-    if (node->type == ChannelNode::Type::Folder)
-        return f | Qt::ItemIsEnabled;
-
-    return f & ~Qt::ItemIsSelectable;
+#ifndef STYX_NO_VOICE
+    if (node && node->type == ChannelNode::Type::VoiceParticipant) {
+        auto *account = getAccountNodeFor(node);
+        auto *instance = account ? session->client(account->id) : nullptr;
+        if (instance) { auto state = instance->voice()->voiceStateForUser(node->id); return state && (state->selfDeaf.get() || state->deaf.get()); }
+    }
+#endif
+    return false;
 }
 
 void ChannelTreeModel::addAccount(const Styx::Core::AccountInfo &account)

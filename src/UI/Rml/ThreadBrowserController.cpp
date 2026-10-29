@@ -6,6 +6,9 @@
 #include "Core/ClientInstance.hpp"
 #include "Core/TimeUtils.hpp"
 
+#include "Platform/Native.hpp"
+#include <format>
+#include <charconv>
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
@@ -15,13 +18,13 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-static QString escape(const QString &str)
+static std::string escape(const std::string &str)
 {
-    return str.toHtmlEscaped();
+    return Platform::htmlEscape(str);
 }
 
-ThreadBrowserController::ThreadBrowserController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
+ThreadBrowserController::ThreadBrowserController(Shell &shell)
+    : Controller(shell, nullptr)
 {
 }
 
@@ -42,7 +45,7 @@ void ThreadBrowserController::ensureDocument()
     if (!view || !view->context())
         return;
 
-    threadsDocument = view->context()->LoadDocument(":/ui/threads.rml");
+    threadsDocument = view->context()->LoadDocument("ui/threads.rml");
     if (!threadsDocument)
         return;
 
@@ -50,7 +53,7 @@ void ThreadBrowserController::ensureDocument()
     setupEventListeners();
 }
 
-void ThreadBrowserController::open(Core::ClientInstance *instance, Core::Snowflake channelId, const QString &channelName)
+void ThreadBrowserController::open(Core::ClientInstance *instance, Core::Snowflake channelId, const std::string &channelName)
 {
     ensureDocument();
     if (!threadsDocument)
@@ -78,8 +81,8 @@ void ThreadBrowserController::open(Core::ClientInstance *instance, Core::Snowfla
     threadsDocument->Show(::Rml::ModalFlag::None);
 
     if (auto *nameEl = threadsDocument->GetElementById("threads-channel-name")) {
-        QString display = channelName.isEmpty() ? QString() : QStringLiteral("#%1").arg(channelName);
-        nameEl->SetInnerRML(escape(display).toStdString());
+        std::string display = channelName.empty() ? std::string{} : "#" + channelName;
+        nameEl->SetInnerRML(escape(display));
     }
 
     render();
@@ -116,30 +119,32 @@ void ThreadBrowserController::setupEventListeners()
         if (!actionEl)
             return;
 
-        const QString action = attribute(actionEl, "data-action");
+        const std::string action = attribute(actionEl, "data-action");
 
-        if (action == QStringLiteral("close")) {
+        if (action == "close") {
             close();
-        } else if (action == QStringLiteral("tab-active")) {
+        } else if (action == "tab-active") {
             if (currentTab != Tab::Active) {
                 currentTab = Tab::Active;
                 render();
             }
-        } else if (action == QStringLiteral("tab-archived")) {
+        } else if (action == "tab-archived") {
             if (currentTab != Tab::Archived) {
                 currentTab = Tab::Archived;
                 render();
                 if (!archivedLoaded && !archivedLoading)
                     loadArchived();
             }
-        } else if (action == QStringLiteral("load-more-archived")) {
+        } else if (action == "load-more-archived") {
             if (!archivedLoading && archivedHasMore)
                 loadArchived();
-        } else if (action == QStringLiteral("open-thread")) {
-            const quint64 idVal = attribute(actionEl, "data-thread-id").toULongLong();
+        } else if (action == "open-thread") {
+            const auto idText = attribute(actionEl, "data-thread-id");
+            std::uint64_t idVal = 0;
+            std::from_chars(idText.data(), idText.data() + idText.size(), idVal);
             if (idVal != 0) {
                 Core::Snowflake threadId(idVal);
-                emit threadActivated(threadId);
+                threadActivated.publish(threadId);
                 close();
             }
         }
@@ -160,13 +165,13 @@ void ThreadBrowserController::loadActive()
         currentChannelId,
         false,
         0,
-        [this, gen](const Core::Result<Core::ClientInstance::ThreadListPage> &res) {
-            if (gen != loadGeneration)
+        [this, guard = lifetime(), gen](const Core::Result<Core::ClientInstance::ThreadListPage> &res) {
+            if (guard.expired() || gen != loadGeneration)
                 return;
             activeLoading = false;
             activeLoaded = true;
             if (!res.success()) {
-                activeError = QStringLiteral("Failed to load active threads");
+                activeError = "Failed to load active threads";
             } else {
                 activeThreads = res.value->threads;
             }
@@ -190,17 +195,17 @@ void ThreadBrowserController::loadArchived()
         currentChannelId,
         true,
         offset,
-        [this, gen](const Core::Result<Core::ClientInstance::ThreadListPage> &res) {
-            if (gen != loadGeneration)
+        [this, guard = lifetime(), gen](const Core::Result<Core::ClientInstance::ThreadListPage> &res) {
+            if (guard.expired() || gen != loadGeneration)
                 return;
             archivedLoading = false;
             archivedLoaded = true;
             if (!res.success()) {
-                archivedError = QStringLiteral("Failed to load archived threads");
+                archivedError = "Failed to load archived threads";
                 archivedHasMore = false;
             } else {
-                archivedThreads.append(res.value->threads);
-                archivedOffset += res.value->threads.size();
+                archivedThreads.insert(archivedThreads.end(), res.value->threads.begin(), res.value->threads.end());
+                archivedOffset += static_cast<int>(res.value->threads.size());
                 archivedHasMore = res.value->hasMore;
             }
             render();
@@ -233,16 +238,16 @@ void ThreadBrowserController::render()
     const bool isLoading = isAct ? activeLoading : archivedLoading;
     const bool isLoaded = isAct ? activeLoaded : archivedLoaded;
     const auto &threads = isAct ? activeThreads : archivedThreads;
-    const QString &error = isAct ? activeError : archivedError;
+    const std::string &error = isAct ? activeError : archivedError;
 
     if (loadingEl)
-        loadingEl->SetProperty("display", isLoading && threads.isEmpty() ? "block" : "none");
+        loadingEl->SetProperty("display", isLoading && threads.empty() ? "block" : "none");
 
     if (emptyEl) {
-        if (!error.isEmpty()) {
-            emptyEl->SetInnerRML(escape(error).toStdString());
+        if (!error.empty()) {
+            emptyEl->SetInnerRML(escape(error));
             emptyEl->SetProperty("display", "block");
-        } else if (isLoaded && threads.isEmpty()) {
+        } else if (isLoaded && threads.empty()) {
             emptyEl->SetInnerRML(isAct ? "No active threads" : "No archived threads");
             emptyEl->SetProperty("display", "block");
         } else {
@@ -250,39 +255,35 @@ void ThreadBrowserController::render()
         }
     }
 
-    QString rml;
+    std::string rml;
     for (const auto &thread : threads) {
         const Core::Snowflake threadId = thread.id.get();
-        QString name = thread.name.valueOr(QString::number(static_cast<quint64>(threadId)));
+        std::string name = thread.name.valueOr(threadId.toString());
         const bool isPrivate = thread.type.hasValue() && thread.type.get() == Discord::ChannelType::PRIVATE_THREAD;
-        const QString icon = isPrivate ? QStringLiteral("icon:lock") : QStringLiteral("icon:messages-square");
+        const std::string icon = isPrivate ? "icon:lock" : "icon:messages-square";
 
-        QString meta;
+        std::string meta;
         if (thread.messageCount.hasValue()) {
-            meta += QStringLiteral("%1 messages").arg(thread.messageCount.get());
+            meta += std::format("{} messages", thread.messageCount.get());
         }
         if (thread.lastMessageId.hasValue() && thread.lastMessageId->isValid()) {
-            QString rel = Core::TimeUtils::relativeTime(thread.lastMessageId->toDateTime());
-            if (!meta.isEmpty())
-                meta += QStringLiteral(" • ");
+            std::string rel = Core::TimeUtils::relativeTime(thread.lastMessageId->toDateTime());
+            if (!meta.empty())
+                meta += " • ";
             meta += rel;
         }
 
-        rml += QStringLiteral(
-            "<div class=\"thread-item-row\" data-action=\"open-thread\" data-thread-id=\"%1\">"
-            "  <img class=\"thread-item-icon\" src=\"%2\"/>"
+        rml += std::format(
+            "<div class=\"thread-item-row\" data-action=\"open-thread\" data-thread-id=\"{}\">"
+            "  <img class=\"thread-item-icon\" src=\"{}\"/>"
             "  <div class=\"thread-item-info\">"
-            "    <span class=\"thread-item-name\">%3</span>"
-            "    <span class=\"thread-item-meta\">%4</span>"
+            "    <span class=\"thread-item-name\">{}</span>"
+            "    <span class=\"thread-item-meta\">{}</span>"
             "  </div>"
-            "</div>")
-            .arg(QString::number(static_cast<quint64>(threadId)),
-                 icon,
-                 escape(name),
-                 escape(meta));
+            "</div>", threadId.toString(), icon, escape(name), escape(meta));
     }
 
-    itemsEl->SetInnerRML(rml.toStdString());
+    itemsEl->SetInnerRML(rml);
 
     if (loadMoreEl) {
         const bool showMore = (!isAct && archivedHasMore && !archivedLoading);

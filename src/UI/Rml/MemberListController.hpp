@@ -2,26 +2,23 @@
 
 #include "Controller.hpp"
 #include "Core/Snowflake.hpp"
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
 
-#include <QPointer>
-#include <QSet>
-#include <QTimer>
+#include <vector>
 
-namespace Styx {
-namespace Core {
+namespace Styx::Core {
 class ClientInstance;
 class MemberListManager;
 class PresenceManager;
-} // namespace Core
+}
 
-namespace UI {
-namespace Rml {
+namespace Styx::UI::Rml {
 
 class MemberListController final : public Controller
 {
-    Q_OBJECT
 public:
-    MemberListController(Shell &shell, ::Rml::Element *root, QObject *parent = nullptr);
+    MemberListController(Shell &shell, ::Rml::Element *root);
     ~MemberListController() override;
 
 private:
@@ -29,29 +26,24 @@ private:
     void onLocationChanged();
     void onInstanceChanged();
     void onScroll();
-
+    void scheduleUpdate();
     void updateMemberList();
     void renderGuildMemberList();
-    void renderGroupDmList(const QList<Core::Snowflake> &recipients);
+    void renderGroupDmList(const std::vector<Core::Snowflake> &recipients);
     void renderSingleDmProfile(Core::Snowflake targetUserId);
-
     void connectCurrentManager();
     void disconnectCurrentManager();
 
-    QTimer updateDebounceTimer;
-    QPointer<Core::ClientInstance> currentInstance;
-    QPointer<Core::MemberListManager> currentMemberListManager;
-    QPointer<Core::PresenceManager> currentPresenceManager;
-
+    Platform::Timer updateDebounceTimer;
+    Platform::Guard<Core::ClientInstance> currentInstance;
+    Platform::Guard<Core::MemberListManager> currentMemberListManager;
+    Platform::Guard<Core::PresenceManager> currentPresenceManager;
+    std::vector<Platform::Connection> managerConnections;
     Core::Snowflake activeGuildId;
     Core::Snowflake activeChannelId;
     int lastSubStart = -1;
     int lastSubEnd = -1;
-
     static constexpr int RowHeight = 42;
-    static constexpr int GroupHeaderHeight = 40;
 };
 
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI::Rml

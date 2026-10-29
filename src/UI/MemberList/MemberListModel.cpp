@@ -3,249 +3,114 @@
 #include "Core/Presence/ActivityFormat.hpp"
 #include "Discord/CdnUrls.hpp"
 
-namespace Styx {
-namespace UI {
+#include <unordered_set>
 
-constexpr static QSize AvatarRequestSize = QSize(32, 32);
-constexpr static QSize EmojiRequestSize = QSize(16, 16);
+namespace Styx::UI {
 
-MemberListModel::MemberListModel(Core::ImageManager *imageManager, QObject *parent)
-    : QAbstractListModel(parent), imageManager(imageManager)
+namespace {
+constexpr Platform::Size AvatarRequestSize{32, 32};
+constexpr Platform::Size EmojiRequestSize{16, 16};
+}
+
+MemberListModel::MemberListModel(Core::ImageManager *images) : imageManager(images)
 {
-    connect(imageManager, &Core::ImageManager::imageFetched, this, &MemberListModel::onImageFetched);
+    if (imageManager) {
+        track(imageManager->imageFetched.connect([this](const std::string &url, const Platform::Size &, const Platform::ImageBuffer &) {
+            avatarTracker.notify(url, [this](Core::Snowflake userId) {
+                if (manager)
+                    notifyRows(manager->indicesForUsers({userId}));
+            });
+        }));
+    }
 }
 
 void MemberListModel::setManager(Core::MemberListManager *newManager)
 {
-    beginResetModel();
-    disconnectManager();
+    managerConnections.clear();
     manager = newManager;
     avatarTracker.clear();
-    connectManager();
-    endResetModel();
-}
-
-int MemberListModel::rowCount(const QModelIndex &parent) const
-{
-    if (parent.isValid() || !manager)
-        return 0;
-
-    return manager->totalItemCount();
-}
-
-QVariant MemberListModel::data(const QModelIndex &index, int role) const
-{
-    if (!index.isValid() || !manager)
-        return {};
-
-    int row = index.row();
-    if (row < 0 || row >= manager->totalItemCount())
-        return {};
-
-    const auto *item = manager->itemAt(row);
-
-    if (!item) {
-        switch (role) {
-        case ItemTypeRole:
-            return static_cast<int>(Core::MemberListItem::Type::Placeholder);
-        case LoadedRole:
-            return false;
-        default:
-            return {};
-        }
+    if (manager) {
+        managerConnections.push_back(manager->listAboutToReset.connect([this] { avatarTracker.clear(); }));
+        managerConnections.push_back(manager->listReset.connect([this] { reset.publish(); }));
+        managerConnections.push_back(manager->itemsChanged.connect([this](const std::vector<int> &indices) { notifyRows(indices); }));
     }
-
-    switch (role) {
-    case ItemTypeRole:
-        return static_cast<int>(item->type);
-    case LoadedRole:
-        return true;
-    case UserIdRole:
-        return item->type == Core::MemberListItem::Type::Member
-                       ? QVariant::fromValue(static_cast<quint64>(item->userId))
-                       : QVariant();
-    case UsernameRole:
-        return item->type == Core::MemberListItem::Type::Member
-                       ? item->displayName
-                       : QString();
-    case AvatarRole: {
-        if (item->type != Core::MemberListItem::Type::Member)
-            return QVariant();
-
-        const Discord::Member &member = item->member;
-        return cachedImage(Discord::Cdn::effectiveAvatar(manager->currentGuildId(), item->userId,
-                                                         member.avatar.valueOr(), member.user->avatar.get(),
-                                                         AvatarRequestSize.width()),
-                           AvatarRequestSize, index);
-    }
-    case RoleColorRole:
-        return item->type == Core::MemberListItem::Type::Member
-                       ? QVariant::fromValue(item->roleColor)
-                       : QVariant();
-    case GroupNameRole:
-        return item->type == Core::MemberListItem::Type::Group
-                       ? item->groupName
-                       : QString();
-    case GroupCountRole:
-        return item->type == Core::MemberListItem::Type::Group
-                       ? item->groupCount
-                       : 0;
-    case GroupColorRole:
-        return item->type == Core::MemberListItem::Type::Group
-                       ? QVariant::fromValue(item->groupColor)
-                       : QVariant();
-    case PresenceBadgeRole:
-    case HasActivityRole:
-    case ActivityRole:
-        return presenceData(*item, role, index);
-    default:
-        return {};
-    }
-}
-
-QVariant MemberListModel::presenceData(const Core::MemberListItem &item, int role,
-                                       const QModelIndex &index) const
-{
-    const bool member = item.type == Core::MemberListItem::Type::Member && presenceManager;
-    const Core::Snowflake guildId = manager->currentGuildId();
-
-    if (role == PresenceBadgeRole)
-        return QVariant::fromValue(member ? presenceManager->badge(item.userId, guildId)
-                                          : Core::PresenceBadge());
-
-    if (role == HasActivityRole)
-        return member && !activityText(item, guildId).isEmpty();
-
-    return QVariant::fromValue(member ? activityLine(item, guildId, index) : MemberActivity());
-}
-
-QString MemberListModel::activityText(const Core::MemberListItem &item, Core::Snowflake guildId) const
-{
-    const Discord::Activity *activity = presenceManager->primaryActivity(item.userId, guildId);
-    if (activity == nullptr)
-        return {};
-
-    return Core::ActivityFormat::secondaryText(*activity);
-}
-
-MemberActivity MemberListModel::activityLine(const Core::MemberListItem &item, Core::Snowflake guildId, const QModelIndex &index) const
-{
-    const Discord::Activity *activity = presenceManager->primaryActivity(item.userId, guildId);
-    if (activity == nullptr)
-        return {};
-
-    MemberActivity line;
-    line.text = Core::ActivityFormat::secondaryText(*activity);
-    line.kind = activity->kind();
-
-    if (!activity->isCustom() || !activity->emoji.hasValue())
-        return line;
-
-    const Discord::ActivityEmoji &emoji = activity->emoji.get();
-    if (emoji.isUnicode())
-        line.emojiText = emoji.nameText();
-    else
-        line.emoji = qvariant_cast<QPixmap>(
-                cachedImage(emoji.stillImageUrl(EmojiRequestSize.width()),
-                            EmojiRequestSize,
-                            index));
-
-    return line;
-}
-
-QVariant MemberListModel::cachedImage(const QUrl &url, const QSize &size, const QModelIndex &index) const
-{
-    if (url.isEmpty())
-        return {};
-
-    if (imageManager->isCached(url, size))
-        return imageManager->get(url, size, accountId);
-
-    imageManager->get(url, size, accountId);
-    avatarTracker.track(url, index);
-
-    return {};
+    reset.publish();
 }
 
 void MemberListModel::setPresenceManager(Core::PresenceManager *presences)
 {
-    if (presenceManager)
-        disconnect(presenceManager, nullptr, this, nullptr);
-
+    presenceConnection.disconnect();
     presenceManager = presences;
-
-    if (presenceManager)
-        connect(presenceManager, &Core::PresenceManager::presencesChanged, this, &MemberListModel::onPresencesChanged);
-}
-
-void MemberListModel::setAccount(Core::Snowflake id)
-{
-    accountId = id;
-}
-
-void MemberListModel::notifyRows(const QList<int> &rows)
-{
-    if (rows.isEmpty())
-        return;
-
-    for (int row : rows) {
-        if (row >= 0 && row < rowCount())
-            emit dataChanged(index(row), index(row));
+    if (presenceManager) {
+        presenceConnection = presenceManager->presencesChanged.connect([this](const std::vector<Core::Snowflake> &ids) {
+            if (manager)
+                notifyRows(manager->indicesForUsers(std::unordered_set<Core::Snowflake>(ids.begin(), ids.end())));
+        });
     }
+    reset.publish();
 }
 
-void MemberListModel::onItemsChanged(const QList<int> &indices)
+void MemberListModel::setAccount(Core::Snowflake id) { accountId = id; }
+
+int MemberListModel::rowCount() const { return manager ? manager->totalItemCount() : 0; }
+
+MemberRow MemberListModel::row(int index) const
 {
-    notifyRows(indices);
+    MemberRow result;
+    if (!manager || index < 0 || index >= manager->totalItemCount())
+        return result;
+    const auto *item = manager->itemAt(index);
+    if (!item)
+        return result;
+    result.loaded = true;
+    result.type = item->type;
+    if (item->type == Core::MemberListItem::Type::Group) {
+        result.groupName = item->groupName;
+        result.groupCount = item->groupCount;
+        result.groupColor = item->groupColor;
+    } else if (item->type == Core::MemberListItem::Type::Member) {
+        result.userId = item->userId;
+        result.username = item->displayName;
+        result.roleColor = item->roleColor;
+        const auto &member = item->member;
+        const std::string userAvatar = member.user.hasValue() ? member.user->avatar.valueOr() : std::string{};
+        result.avatar = cachedImage(Discord::Cdn::effectiveAvatar(manager->currentGuildId(), item->userId,
+                                    member.avatar.valueOr(), userAvatar, AvatarRequestSize.width), AvatarRequestSize, item->userId);
+        if (presenceManager) {
+            const auto guildId = manager->currentGuildId();
+            result.presence = presenceManager->badge(item->userId, guildId);
+            if (const auto *activity = presenceManager->primaryActivity(item->userId, guildId)) {
+                result.activity.text = Core::ActivityFormat::secondaryText(*activity);
+                result.activity.kind = activity->kind();
+                result.hasActivity = !result.activity.text.empty();
+                if (activity->isCustom() && activity->emoji.hasValue()) {
+                    const auto &emoji = activity->emoji.get();
+                    if (emoji.isUnicode())
+                        result.activity.emojiText = emoji.nameText();
+                    else
+                        result.activity.emoji = cachedImage(emoji.stillImageUrl(EmojiRequestSize.width), EmojiRequestSize, item->userId);
+                }
+            }
+        }
+    }
+    return result;
 }
 
-void MemberListModel::onPresencesChanged(const QList<Core::Snowflake> &userIds)
+Platform::ImageBuffer MemberListModel::cachedImage(const std::string &url, Platform::Size size, Core::Snowflake userId) const
 {
-    if (!manager)
-        return;
-
-    notifyRows(manager->indicesForUsers(QSet<Core::Snowflake>(userIds.cbegin(), userIds.cend())));
+    if (url.empty() || !imageManager)
+        return {};
+    if (imageManager->isCached(url, size))
+        return imageManager->get(url, size, accountId);
+    imageManager->get(url, size, accountId);
+    avatarTracker.track(url, userId);
+    return {};
 }
 
-void MemberListModel::onListAboutToReset()
+void MemberListModel::notifyRows(const std::vector<int> &rows)
 {
-    beginResetModel();
+    if (!rows.empty())
+        rowsChanged.publish(rows);
 }
 
-void MemberListModel::onListReset()
-{
-    avatarTracker.clear();
-    endResetModel();
-}
-
-void MemberListModel::onImageFetched(const QUrl &url, const QSize &size, const QPixmap &pixmap)
-{
-    Q_UNUSED(size);
-    Q_UNUSED(pixmap);
-
-    avatarTracker.notify(url, [this](const QModelIndex &index) {
-        if (index.isValid())
-            emit dataChanged(index, index);
-    });
-}
-
-void MemberListModel::connectManager()
-{
-    if (!manager)
-        return;
-
-    connect(manager, &Core::MemberListManager::listAboutToReset, this, &MemberListModel::onListAboutToReset);
-    connect(manager, &Core::MemberListManager::listReset, this, &MemberListModel::onListReset);
-    connect(manager, &Core::MemberListManager::itemsChanged, this, &MemberListModel::onItemsChanged);
-}
-
-void MemberListModel::disconnectManager()
-{
-    if (!manager)
-        return;
-
-    disconnect(manager, nullptr, this, nullptr);
-}
-
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI

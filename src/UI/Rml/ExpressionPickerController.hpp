@@ -3,12 +3,12 @@
 #include "Controller.hpp"
 #include "UI/Rml/EmojiGridModel.hpp"
 
-#include <QElapsedTimer>
-#include <QHash>
-#include <QList>
-#include <QPointer>
-#include <QRect>
-#include <QString>
+#include <chrono>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include "Platform/Native.hpp"
+#include "Platform/Trackable.hpp"
 
 #include "Core/Emoji/EmojiManager.hpp"
 #include "Core/Emoji/PickerEmoji.hpp"
@@ -27,14 +27,13 @@ namespace Rml {
 
 class ExpressionPickerController final : public Controller
 {
-    Q_OBJECT
 public:
     enum class Tab {
         Gifs,
         Emoji,
     };
 
-    explicit ExpressionPickerController(Shell &shell, QObject *parent = nullptr);
+    explicit ExpressionPickerController(Shell &shell);
     ~ExpressionPickerController() override;
 
     void openForChat(Core::EmojiManager *emojiManager,
@@ -42,22 +41,22 @@ public:
                      Core::Snowflake accountId,
                      Core::Snowflake channelId,
                      Tab tab = Tab::Emoji,
-                     const QRect &anchor = {});
+                     const Platform::Rect &anchor = {});
 
     void openForReaction(Core::EmojiManager *emojiManager,
                          Core::Snowflake accountId,
                          Core::Snowflake channelId,
                          Core::Snowflake messageId,
-                         const QRect &anchor = {});
+                         const Platform::Rect &anchor = {});
 
     void close();
     [[nodiscard]] bool isOpen() const { return visible; }
     [[nodiscard]] Tab currentTab() const { return activeTab; }
 
-signals:
-    void emojiPicked(const Styx::Core::PickerEmoji &emoji, bool keepOpen);
-    void gifPicked(const QString &url);
-    void closed();
+public:
+    Platform::Signal<const Core::PickerEmoji &, bool> emojiPicked;
+    Platform::Signal<const std::string &> gifPicked;
+    Platform::Signal<> closed;
 
 private:
     void ensureDocument();
@@ -67,10 +66,10 @@ private:
     void renderVisibleGrid();
     void renderGifs();
     void updateInspector(const Core::PickerEmoji *emoji);
-    void onSearchChanged(const QString &text);
-    void placeCard(const QRect &anchor);
+    void onSearchChanged(const std::string &text);
+    void placeCard(const Platform::Rect &anchor);
     void pickEmoji(const Core::PickerEmoji &emoji, bool keepOpen);
-    void pickGif(const QString &url);
+    void pickGif(const std::string &url);
 
     ::Rml::ElementDocument *pickerDoc = nullptr;
     ::Rml::Element *backdropEl = nullptr;
@@ -90,8 +89,8 @@ private:
     ::Rml::Element *inspectorGuildEl = nullptr;
 
     EmojiGridModel emojiModel;
-    QPointer<Core::EmojiManager> emojis;
-    QPointer<Core::FavoriteGifs> favoriteGifs;
+    Platform::Guard<Core::EmojiManager> emojis;
+    Platform::Guard<Core::FavoriteGifs> favoriteGifs;
     Core::Snowflake currentAccountId;
     Core::Snowflake currentChannelId;
     Core::Snowflake reactionMessageId;
@@ -101,14 +100,14 @@ private:
     bool visible = false;
     bool isReaction = false;
     bool searching = false;
-    QString searchQuery;
+    std::string searchQuery;
 
-    QList<Core::PickerSection> browseSections;
-    QHash<Core::Snowflake, QString> guildNames;
-    QList<Proto::FavoriteGif> filteredGifs;
+    std::vector<Core::PickerSection> browseSections;
+    std::unordered_map<Core::Snowflake, std::string> guildNames;
+    std::vector<Proto::FavoriteGif> filteredGifs;
 
     int lastRenderedScrollY = -999;
-    QElapsedTimer openTimer;
+    std::chrono::steady_clock::time_point openTimer;
 };
 
 } // namespace Rml

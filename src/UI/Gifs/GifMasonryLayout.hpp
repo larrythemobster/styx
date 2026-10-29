@@ -1,8 +1,7 @@
 #pragma once
 
-#include <QList>
-#include <QRect>
-#include <QSize>
+#include "Platform/Native.hpp"
+#include <vector>
 
 namespace Styx {
 namespace UI {
@@ -17,14 +16,14 @@ inline constexpr int RoomyStillWidth = 256;
 
 struct Arrangement
 {
-    QList<QRect> tiles;
+    std::vector<Platform::Rect> tiles;
     int contentHeight = 0;
     int gutter = RoomiestGutter;
 };
 
 [[nodiscard]] int gutterFor(int columns);
-[[nodiscard]] QSize stillSizeFor(const QSize &naturalSize, int tileWidth);
-[[nodiscard]] Arrangement arrange(const QList<QSize> &naturalSizes, int availableWidth, int columns);
+[[nodiscard]] Platform::Size stillSizeFor(const Platform::Size &naturalSize, int tileWidth);
+[[nodiscard]] Arrangement arrange(const std::vector<Platform::Size> &naturalSizes, int availableWidth, int columns);
 
 } // namespace GifMasonry
 } // namespace UI

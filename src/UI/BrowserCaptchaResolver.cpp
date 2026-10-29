@@ -1,22 +1,23 @@
 #include "BrowserCaptchaResolver.hpp"
 
 #include <QDesktopServices>
-#include <QDialog>
-#include <QDialogButtonBox>
-
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLabel>
-#include <QPushButton>
 #include <QRandomGenerator>
-#include "Platform/Dispatcher.hpp"
 #include <QTimer>
 #include <QUrl>
 #include <QUuid>
-#include <QVBoxLayout>
+
+#include <RmlUi/Core/Context.h>
+#include <RmlUi/Core/Element.h>
+#include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/Event.h>
+#include <RmlUi/Core/Input.h>
 
 #include "Core/Logging.hpp"
-#include "UI/Rml/ConfirmModal.hpp"
+#include "Platform/Dispatcher.hpp"
+#include "UI/Rml/RmlView.hpp"
+#include "UI/Rml/Shell.hpp"
 
 namespace Styx {
 namespace UI {
@@ -130,15 +131,30 @@ static void sendHttp(intptr_t clientSock, int code, const QByteArray &contentTyp
     closeNativeSocket(static_cast<native_socket_t>(clientSock));
 }
 
-BrowserCaptchaResolver::BrowserCaptchaResolver(QWidget *parentWindow, QObject *parent)
-    : QObject(parent), parentWindow(parentWindow)
+BrowserCaptchaResolver::BrowserCaptchaResolver(Shell &shell, QObject *parent)
+    : QObject(parent), shell(shell)
 {
 }
 
 BrowserCaptchaResolver::~BrowserCaptchaResolver()
 {
-    if (modal)
-        modal->deleteLater();
+    shuttingDown = true;
+    stopTtl();
+    teardownServer();
+    if (modal) {
+        auto *document = modal;
+        modal = nullptr;
+        document->RemoveEventListener("click", &modalListener);
+        document->RemoveEventListener("keydown", &modalListener);
+        document->Close();
+    }
+    auto cb = std::move(currentCb);
+    if (cb)
+        cb(std::nullopt);
+    for (auto &job : queue) {
+        if (job.cb)
+            job.cb(std::nullopt);
+    }
 }
 
 void BrowserCaptchaResolver::resolve(const Discord::CaptchaChallenge &challenge,
@@ -205,49 +221,17 @@ void BrowserCaptchaResolver::startNext()
         return;
     }
 
-    QDialog *dlg = new QDialog(parentWindow);
-    modal = dlg;
-    dlg->setWindowTitle(tr("Verification required"));
-    dlg->setModal(true);
-
-    QVBoxLayout *layout = new QVBoxLayout(dlg);
-    statusLabel = new QLabel(dlg);
-    statusLabel->setWordWrap(true);
-    statusLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(statusLabel);
-
-    openButton = new QPushButton(tr("Open in browser"), dlg);
-    layout->addWidget(openButton);
-    connect(openButton, &QPushButton::clicked, this, [this]() {
-        auto doOpen = [this]() {
-            QDesktopServices::openUrl(QUrl(harnessUrl()));
-            if (statusLabel)
-                statusLabel->setText(tr("Waiting for you to finish in your browser..."));
-        };
-
-        if (currentProxy.enabled()) {
-            Rml::showConfirmModal(
-                tr("Proxy will be bypassed"),
-                tr("This account connects through <b>%1</b>, but the captcha opens in your "
-                   "normal browser, which ignores that proxy.<br><br>"
-                   "The captcha provider will see your real IP address. Continue?")
-                        .arg(currentProxy.toDisplayString().toHtmlEscaped()),
-                tr("Open Anyway"),
-                doOpen,
-                nullptr,
-                true
-            );
-        } else {
-            doOpen();
-        }
-    });
-
-    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, dlg);
-    layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
-    connect(dlg, &QDialog::rejected, this, [this]() { cancelCurrent(); });
-
-    dlg->show();
+    state = State::Waiting;
+    if (!ensureModal()) {
+        qCWarning(LogUI) << "Unable to open captcha prompt";
+        cancelCurrent();
+        return;
+    }
+    proxyWarning = false;
+    modal->Show(::Rml::ModalFlag::Modal);
+    modal->PullToFront();
+    modal->SetClass("open", true);
+    view->requestRender();
 
     beginChallenge(false);
 }
@@ -293,15 +277,12 @@ void BrowserCaptchaResolver::beginChallenge(bool isRetry)
     timerId = Platform::Dispatcher::main().setTimer(std::chrono::milliseconds(20), true, [this]() {
         pollSockets();
     });
-    if (statusLabel) {
-        if (isRetry)
-            statusLabel->setText(tr("Failed. Click below to open your browser and try again."));
-        else
-            statusLabel->setText(tr("Discord wants you to complete a captcha to continue.\n"
-                                    "Click below to open it in your browser."));
-    }
-    if (openButton)
-        openButton->setEnabled(true);
+    proxyWarning = false;
+    updateModal(isRetry
+                    ? tr("Failed. Click below to open your browser and try again.")
+                    : tr("Discord wants you to complete a captcha to continue. "
+                         "Click below to open it in your browser."),
+                true);
 
     stopTtl();
     ttlTimer = new QTimer(this);
@@ -323,10 +304,8 @@ void BrowserCaptchaResolver::deliverSolution(const Discord::CaptchaSolution &sol
     teardownServer();
     stopTtl();
 
-    if (statusLabel)
-        statusLabel->setText(tr("Verifying..."));
-    if (openButton)
-        openButton->setEnabled(false);
+    proxyWarning = false;
+    updateModal(tr("Verifying..."), false);
 
     Discord::CaptchaResolver::Callback cb = std::move(currentCb);
     currentCb = nullptr;
@@ -469,6 +448,7 @@ void BrowserCaptchaResolver::handleClient(intptr_t clientSock)
         if (token.isEmpty()) {
             qCWarning(LogUI) << "Captcha harness reported an error:"
                              << obj.value("error").toString();
+            updateModal(tr("The captcha could not be completed. Open your browser and try again."), true);
             return;
         }
 
@@ -511,14 +491,140 @@ void BrowserCaptchaResolver::stopTtl()
     }
 }
 
+void BrowserCaptchaResolver::ModalListener::ProcessEvent(::Rml::Event &event)
+{
+    owner.processEvent(event);
+}
+
+void BrowserCaptchaResolver::ModalListener::OnDetach(::Rml::Element *element)
+{
+    owner.documentDetached(element);
+}
+
+void BrowserCaptchaResolver::documentDetached(::Rml::Element *element)
+{
+    if (element != modal)
+        return;
+    modal = nullptr;
+    if (!shuttingDown) {
+        QMetaObject::invokeMethod(this, [this]() {
+            if (!modal && state != State::Idle)
+                cancelCurrent();
+        }, Qt::QueuedConnection);
+    }
+}
+
+bool BrowserCaptchaResolver::ensureModal()
+{
+    if (modal)
+        return true;
+    if (viewDestroyed)
+        return false;
+    if (!view) {
+        view = shell.view();
+        if (view)
+            connect(view, &QObject::destroyed, this, [this]() { viewDestroyed = true; });
+    }
+    if (!view || !view->context())
+        return false;
+    modal = view->context()->LoadDocument(":/ui/captcha_modal.rml");
+    if (!modal)
+        return false;
+    modal->AddEventListener("click", &modalListener);
+    modal->AddEventListener("keydown", &modalListener);
+    return true;
+}
+
+void BrowserCaptchaResolver::updateModal(const QString &message, bool canOpen)
+{
+    currentMessage = message;
+    if (!modal)
+        return;
+    if (auto *title = modal->GetElementById("captcha-title"))
+        title->SetInnerRML(tr("Verification required").toHtmlEscaped().toStdString());
+    if (auto *element = modal->GetElementById("captcha-message"))
+        element->SetInnerRML(message.toHtmlEscaped().toStdString());
+    if (auto *button = modal->GetElementById("captcha-open")) {
+        button->SetClass("disabled", !canOpen);
+        button->SetPseudoClass("disabled", !canOpen);
+    }
+    if (auto *button = modal->GetElementById("captcha-open"))
+        button->SetInnerRML(tr("Open in browser").toHtmlEscaped().toStdString());
+    if (view)
+        view->requestRender();
+}
+
+void BrowserCaptchaResolver::openBrowser()
+{
+    if (state != State::Waiting)
+        return;
+    proxyWarning = false;
+    if (QDesktopServices::openUrl(QUrl(harnessUrl())))
+        updateModal(tr("Waiting for you to finish in your browser..."), true);
+    else
+        updateModal(tr("Could not open the browser. Please try again."), true);
+}
+
+void BrowserCaptchaResolver::processEvent(::Rml::Event &event)
+{
+    if (!modal || state == State::Idle)
+        return;
+    if (event.GetType() == "keydown") {
+        const int key = event.GetParameter<int>("key_identifier", 0);
+        if (key == ::Rml::Input::KI_ESCAPE) {
+            event.StopPropagation();
+            cancelCurrent();
+        } else if (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER || key == ::Rml::Input::KI_SPACE) {
+            auto *target = event.GetTargetElement();
+            if (target && (target->GetId() == "captcha-open" || target->GetId() == "captcha-cancel")) {
+                event.StopPropagation();
+                target->DispatchEvent("click", {});
+            }
+        }
+        return;
+    }
+    auto *target = event.GetTargetElement();
+    if (!target)
+        return;
+    const auto &id = target->GetId();
+    if (id == "captcha-cancel" || id == "captcha-backdrop") {
+        event.StopPropagation();
+        if (proxyWarning && id == "captcha-cancel") {
+            proxyWarning = false;
+            updateModal(currentMessage, true);
+        } else {
+            cancelCurrent();
+        }
+    } else if (id == "captcha-open" && state == State::Waiting) {
+        event.StopPropagation();
+        if (proxyWarning || !currentProxy.enabled()) {
+            openBrowser();
+            return;
+        }
+        proxyWarning = true;
+        if (auto *title = modal->GetElementById("captcha-title"))
+            title->SetInnerRML(tr("Proxy will be bypassed").toHtmlEscaped().toStdString());
+        if (auto *message = modal->GetElementById("captcha-message")) {
+            message->SetInnerRML(
+                tr("This account connects through <b>%1</b>, but the captcha opens in your "
+                   "normal browser, which ignores that proxy.<br/><br/>"
+                   "The captcha provider will see your real IP address. Continue?")
+                    .arg(currentProxy.toDisplayString().toHtmlEscaped()).toStdString());
+        }
+        target->SetInnerRML(tr("Open Anyway").toHtmlEscaped().toStdString());
+        if (view)
+            view->requestRender();
+    }
+}
+
 void BrowserCaptchaResolver::closeModal()
 {
-    statusLabel = nullptr;
-    openButton = nullptr;
+    proxyWarning = false;
     if (modal) {
-        modal->close();
-        modal->deleteLater();
-        modal = nullptr;
+        modal->SetClass("open", false);
+        modal->Hide();
+        if (view)
+            view->requestRender();
     }
 }
 

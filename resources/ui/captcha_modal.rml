@@ -1,0 +1,25 @@
+<rml>
+<head>
+    <title>Verification required</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="confirm_modal.rcss"/>
+    <link type="text/rcss" href="captcha_modal.rcss"/>
+</head>
+<body id="captcha-modal-root">
+    <div id="captcha-backdrop" class="modal-backdrop">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="captcha-title" class="modal-title">Verification required</h2>
+            </div>
+            <div class="modal-body">
+                <div id="captcha-message" class="modal-message"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="captcha-cancel" class="btn btn-cancel">Cancel</button>
+                <button id="captcha-open" class="btn btn-confirm">Open in browser</button>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

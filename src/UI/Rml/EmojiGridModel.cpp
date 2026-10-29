@@ -4,11 +4,7 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-EmojiGridModel::EmojiGridModel(QObject *parent) : QObject(parent)
-{
-}
-
-void EmojiGridModel::setSections(const QList<Core::PickerSection> &sections)
+void EmojiGridModel::setSections(const std::vector<Core::PickerSection> &sections)
 {
     shownSections = sections;
     active = Cell();
@@ -18,13 +14,13 @@ void EmojiGridModel::setSections(const QList<Core::PickerSection> &sections)
     notifyTopSection();
 }
 
-void EmojiGridModel::setCollapsedSections(const QSet<QString> &sectionIds)
+void EmojiGridModel::setCollapsedSections(const std::unordered_set<std::string> &sectionIds)
 {
     if (collapsed == sectionIds)
         return;
     collapsed = sectionIds;
     relayout();
-    emit collapsedSectionsChanged();
+    collapsedSectionsChanged();
 }
 
 void EmojiGridModel::toggleCollapsed(int section)
@@ -32,14 +28,14 @@ void EmojiGridModel::toggleCollapsed(int section)
     if (section < 0 || section >= shownSections.size())
         return;
 
-    const QString &id = shownSections.at(section).id;
+    const std::string &id = shownSections.at(section).id;
     if (collapsed.contains(id))
-        collapsed.remove(id);
+        collapsed.erase(id);
     else
         collapsed.insert(id);
 
     relayout();
-    emit collapsedSectionsChanged();
+    collapsedSectionsChanged();
 
     if (active.section == section && collapsed.contains(id))
         activateFirst();
@@ -61,7 +57,7 @@ void EmojiGridModel::setScrollY(int y)
         return;
     currentScrollY = clamped;
     notifyTopSection();
-    emit layoutChanged();
+    layoutChanged();
 }
 
 void EmojiGridModel::scrollToSection(int section)
@@ -69,13 +65,13 @@ void EmojiGridModel::scrollToSection(int section)
     if (section >= 0 && section < geometry.size()) {
         const int targetY = geometry.at(section).top;
         setScrollY(targetY);
-        emit scrollRequested(currentScrollY);
+        scrollRequested(currentScrollY);
     }
 }
 
 int EmojiGridModel::topSection() const
 {
-    return geometry.isEmpty() ? -1 : std::max(0, sectionAtY(currentScrollY));
+    return geometry.empty() ? -1 : std::max(0, sectionAtY(currentScrollY));
 }
 
 void EmojiGridModel::relayout()
@@ -85,14 +81,14 @@ void EmojiGridModel::relayout()
     for (const Core::PickerSection &section : shownSections) {
         SectionGeometry sectionGeometry;
         sectionGeometry.top = y;
-        sectionGeometry.headerHeight = section.title.isEmpty() ? 0 : HeaderHeight;
+        sectionGeometry.headerHeight = section.title.empty() ? 0 : HeaderHeight;
         sectionGeometry.rows = collapsed.contains(section.id) ? 0 : static_cast<int>((section.emojis.size() + Columns - 1) / Columns);
-        geometry.append(sectionGeometry);
+        geometry.push_back(sectionGeometry);
         y = sectionGeometry.bottom() + SectionGap;
     }
     totalContentHeight = y;
     currentScrollY = std::clamp(currentScrollY, 0, maxScrollY());
-    emit layoutChanged();
+    layoutChanged();
 }
 
 int EmojiGridModel::sectionAtY(int contentY) const
@@ -142,7 +138,7 @@ void EmojiGridModel::setActiveCell(const Cell &cell)
     if (active == cell)
         return;
     active = cell;
-    emit activeEmojiChanged();
+    activeEmojiChanged();
 }
 
 void EmojiGridModel::activateFirst()
@@ -217,10 +213,10 @@ void EmojiGridModel::ensureVisible(const Cell &cell)
 
     if (cellTop < visibleTop) {
         setScrollY(cellTop - sectionGeometry.headerHeight);
-        emit scrollRequested(currentScrollY);
+        scrollRequested(currentScrollY);
     } else if (cellTop + CellPx > visibleBottom) {
         setScrollY(cellTop + CellPx - viewHeight);
-        emit scrollRequested(currentScrollY);
+        scrollRequested(currentScrollY);
     }
 }
 
@@ -229,7 +225,7 @@ void EmojiGridModel::notifyTopSection()
     const int top = topSection();
     if (top != reportedTopSection) {
         reportedTopSection = top;
-        emit topSectionChanged(top);
+        topSectionChanged(top);
     }
 }
 
@@ -240,14 +236,14 @@ const EmojiGridModel::SectionGeometry *EmojiGridModel::geometryFor(int section) 
     return nullptr;
 }
 
-QRect EmojiGridModel::cellRect(const Cell &cell) const
+Platform::Rect EmojiGridModel::cellRect(const Cell &cell) const
 {
     if (!cell.isValid() || cell.section >= geometry.size())
         return {};
     const SectionGeometry &sectionGeometry = geometry.at(cell.section);
-    return QRect(SidePadding + (cell.index % Columns) * CellPx,
+    return Platform::Rect{SidePadding + (cell.index % Columns) * CellPx,
                  sectionGeometry.cellsTop() + (cell.index / Columns) * CellPx - currentScrollY,
-                 CellPx, CellPx);
+                 CellPx, CellPx};
 }
 
 int EmojiGridModel::stickyHeaderY(int section) const
@@ -259,22 +255,22 @@ int EmojiGridModel::stickyHeaderY(int section) const
                     sectionGeometry.bottom() - currentScrollY - sectionGeometry.headerHeight);
 }
 
-EmojiGridModel::Hit EmojiGridModel::hitTest(const QPoint &viewportPos) const
+EmojiGridModel::Hit EmojiGridModel::hitTest(const Platform::Point &viewportPos) const
 {
     Hit hit;
-    if (geometry.isEmpty())
+    if (geometry.empty())
         return hit;
 
     const int top = topSection();
     if (top >= 0 && top < geometry.size() && geometry.at(top).headerHeight > 0) {
         const int headerY = stickyHeaderY(top);
-        if (viewportPos.y() >= headerY && viewportPos.y() < headerY + HeaderHeight) {
+        if (viewportPos.y >= headerY && viewportPos.y < headerY + HeaderHeight) {
             hit.headerSection = top;
             return hit;
         }
     }
 
-    const int contentY = viewportPos.y() + currentScrollY;
+    const int contentY = viewportPos.y + currentScrollY;
     const int section = sectionAtY(contentY);
     if (section < 0)
         return hit;
@@ -285,7 +281,7 @@ EmojiGridModel::Hit EmojiGridModel::hitTest(const QPoint &viewportPos) const
         return hit;
     }
 
-    const int x = viewportPos.x() - SidePadding;
+    const int x = viewportPos.x - SidePadding;
     if (contentY >= sectionGeometry.bottom() || x < 0 || x >= Columns * CellPx)
         return hit;
 
@@ -295,27 +291,27 @@ EmojiGridModel::Hit EmojiGridModel::hitTest(const QPoint &viewportPos) const
     return hit;
 }
 
-void EmojiGridModel::mouseClick(const QPoint &viewportPos, Qt::KeyboardModifiers modifiers)
+void EmojiGridModel::mouseClick(const Platform::Point &viewportPos, bool keepOpen)
 {
     const Hit hit = hitTest(viewportPos);
     if (hit.headerSection >= 0) {
         toggleCollapsed(hit.headerSection);
     } else if (hit.cell.isValid()) {
-        clickCell(hit.cell, modifiers);
+        clickCell(hit.cell, keepOpen);
     }
 }
 
-void EmojiGridModel::clickCell(const Cell &cell, Qt::KeyboardModifiers modifiers)
+void EmojiGridModel::clickCell(const Cell &cell, bool keepOpen)
 {
     if (const Core::PickerEmoji *emoji = emojiAt(cell)) {
         setActiveCell(cell);
-        emit emojiClicked(*emoji, modifiers);
+        emojiClicked(*emoji, keepOpen);
     }
 }
 
-QList<EmojiGridModel::VirtualSection> EmojiGridModel::computeVirtualSections(int overscanPx) const
+std::vector<EmojiGridModel::VirtualSection> EmojiGridModel::computeVirtualSections(int overscanPx) const
 {
-    QList<VirtualSection> result;
+    std::vector<VirtualSection> result;
     const int viewportTop = std::max(0, currentScrollY - overscanPx);
     const int viewportBottom = currentScrollY + viewHeight + overscanPx;
 
@@ -336,12 +332,12 @@ QList<EmojiGridModel::VirtualSection> EmojiGridModel::computeVirtualSections(int
         if (geom.bottom() < viewportTop || geom.top > viewportBottom) {
             // Completely outside visible window
             vs.topSpacer = geom.rows * CellPx;
-            result.append(vs);
+            result.push_back(vs);
             continue;
         }
 
         if (isCollapsed || geom.rows == 0) {
-            result.append(vs);
+            result.push_back(vs);
             continue;
         }
 
@@ -359,11 +355,11 @@ QList<EmojiGridModel::VirtualSection> EmojiGridModel::computeVirtualSections(int
             vr.firstEmojiIndex = r * Columns;
             vr.emojiCount = std::min(Columns, totalEmojis - vr.firstEmojiIndex);
             if (vr.emojiCount > 0)
-                vs.visibleRows.append(vr);
+                vs.visibleRows.push_back(vr);
         }
 
         vs.bottomSpacer = (geom.rows - 1 - lastVisibleRow) * CellPx;
-        result.append(vs);
+        result.push_back(vs);
     }
 
     return result;

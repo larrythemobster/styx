@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Controller.hpp"
-#include <QString>
+#include <string>
 #include <functional>
 
 namespace Rml {
@@ -14,10 +14,10 @@ class Shell;
 namespace Rml {
 
 struct ConfirmOptions {
-    QString title;
-    QString body;
-    QString confirmText = QStringLiteral("Confirm");
-    QString cancelText = QStringLiteral("Cancel");
+    std::string title;
+    std::string body;
+    std::string confirmText = "Confirm";
+    std::string cancelText = "Cancel";
     bool danger = false;
     std::function<void()> onConfirm;
     std::function<void()> onCancel;
@@ -25,9 +25,8 @@ struct ConfirmOptions {
 
 class ConfirmModalController final : public Controller
 {
-    Q_OBJECT
 public:
-    explicit ConfirmModalController(Shell &shell, QObject *parent = nullptr);
+    explicit ConfirmModalController(Shell &shell);
     ~ConfirmModalController() override;
 
     void show(const ConfirmOptions &options);
@@ -48,9 +47,9 @@ void showConfirmModal(Shell &shell, const ConfirmOptions &options);
 void showConfirmModal(const ConfirmOptions &options);
 
 inline void showConfirmModal(Shell &shell,
-                             const QString &title,
-                             const QString &body,
-                             const QString &confirmText,
+                             const std::string &title,
+                             const std::string &body,
+                             const std::string &confirmText,
                              std::function<void()> onConfirm,
                              std::function<void()> onCancel = nullptr,
                              bool danger = false)
@@ -65,9 +64,9 @@ inline void showConfirmModal(Shell &shell,
     showConfirmModal(shell, opt);
 }
 
-inline void showConfirmModal(const QString &title,
-                             const QString &body,
-                             const QString &confirmText,
+inline void showConfirmModal(const std::string &title,
+                             const std::string &body,
+                             const std::string &confirmText,
                              std::function<void()> onConfirm,
                              std::function<void()> onCancel = nullptr,
                              bool danger = false)

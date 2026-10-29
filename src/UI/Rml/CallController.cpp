@@ -17,6 +17,8 @@
 #include <RmlUi/Core/Event.h>
 
 #include <algorithm>
+#include <format>
+#include <string_view>
 
 namespace Styx {
 namespace UI {
@@ -69,8 +71,8 @@ CallController::CallController(Shell &shell, ::Rml::Element *root, QObject *pare
 
         // 4. Watch stream
         if (auto *watchEl = closest(target, "data-action-watch")) {
-            QString idStr = attribute(watchEl, "data-action-watch");
-            if (!idStr.isEmpty()) {
+            std::string idStr = attribute(watchEl, "data-action-watch");
+            if (!idStr.empty()) {
                 onWatchClicked(Snowflake(idStr.toULongLong()));
                 return;
             }
@@ -78,8 +80,8 @@ CallController::CallController(Shell &shell, ::Rml::Element *root, QObject *pare
 
         // 5. Stop watch stream
         if (auto *stopEl = closest(target, "data-action-stop-watch")) {
-            QString idStr = attribute(stopEl, "data-action-stop-watch");
-            if (!idStr.isEmpty()) {
+            std::string idStr = attribute(stopEl, "data-action-stop-watch");
+            if (!idStr.empty()) {
                 onStopWatchClicked(Snowflake(idStr.toULongLong()));
                 return;
             }
@@ -87,8 +89,8 @@ CallController::CallController(Shell &shell, ::Rml::Element *root, QObject *pare
 
         // 6. Tile click to focus / unfocus
         if (auto *tileEl = closest(target, "data-user-id")) {
-            QString idStr = attribute(tileEl, "data-user-id");
-            if (!idStr.isEmpty()) {
+            std::string idStr = attribute(tileEl, "data-user-id");
+            if (!idStr.empty()) {
                 onTileClicked(Snowflake(idStr.toULongLong()));
                 return;
             }
@@ -178,7 +180,7 @@ void CallController::connectCurrentVoice()
                     updateDebounceTimer.start();
                 });
         connect(currentStreamManager, &Core::Stream::StreamManager::watchEnded,
-                this, [this](Snowflake userId, const QString &) {
+                this, [this](Snowflake userId, const std::string &) {
                     Rml::Runtime::instance().clearFrame(userId.toString());
                     if (focusedUserId == userId)
                         focusedUserId = Snowflake::Invalid;
@@ -269,7 +271,7 @@ void CallController::onWatchClicked(Snowflake userId)
         return;
 
     currentStreamManager->watchStream(userId);
-    currentStreamManager->setViewerSize(userId, QSize(1280, 720));
+    currentStreamManager->setViewerSize(userId, Platform::Size{1280, 720});
     focusedUserId = userId;
     shell.setCallOpen(true);
     updateDebounceTimer.start();
@@ -312,22 +314,22 @@ void CallController::updateCallView()
     }
 
     // 1. Channel title & info
-    QString channelName = tr("Voice Call");
+    std::string channelName = "Voice Call";
     Snowflake currentVoiceChannelId;
     if (currentVoiceManager) {
         currentVoiceChannelId = currentVoiceManager->currentChannelId();
         if (currentInstance && currentVoiceChannelId.isValid()) {
             if (auto ch = currentInstance->getChannel(currentVoiceChannelId)) {
-                if (ch->name.hasValue() && !ch->name->isEmpty())
+                if (ch->name.hasValue() && !ch->name->empty())
                     channelName = ch->name.get();
                 else if (ch->type.valueOr(Discord::ChannelType::DM) == Discord::ChannelType::DM)
-                    channelName = tr("Direct Call");
+                    channelName = "Direct Call";
             }
         }
     }
 
     // 2. Participants
-    QList<Core::Audio::VoiceParticipant> participants;
+    std::vector<Core::Audio::VoiceParticipant> participants;
     if (currentVoiceManager) {
         participants = currentVoiceManager->currentParticipants();
     }
@@ -343,25 +345,25 @@ void CallController::updateCallView()
 #endif
 
     // Helper lambda to render a single participant tile
-    auto renderTile = [&](const Core::Audio::VoiceParticipant &p, bool inStrip) -> QString {
+    auto renderTile = [&](const Core::Audio::VoiceParticipant &p, bool inStrip) -> std::string {
         Snowflake uid = p.userId;
         bool isSelf = (uid == selfId);
 
-        QString name = users ? users->getDisplayName(uid) : uid.toString();
-        if (name.isEmpty())
+        std::string name = users ? users->getDisplayName(uid) : uid.toString();
+        if (name.empty())
             name = uid.toString();
 
-        QUrl avatarUrl;
+        std::string avatarUrl;
         if (users) {
             if (auto u = users->getUser(uid)) {
-                if (u->avatar.hasValue() && !u->avatar->isEmpty())
+                if (u->avatar.hasValue() && !u->avatar->empty())
                     avatarUrl = Discord::Cdn::userAvatar(uid, u->avatar.get(), 128);
             }
         }
         if (!avatarUrl.isValid())
             avatarUrl = Discord::Cdn::defaultUserAvatar(uid, 128);
 
-        QString avatarSrc = shell.imageSource(avatarUrl, inStrip ? QSize(48, 48) : QSize(80, 80));
+        std::string avatarSrc = shell.imageSource(avatarUrl, inStrip ? Platform::Size{48, 48} : Platform::Size{80, 80});
 
         bool isSpeaking = p.speaking;
         bool isStreaming = p.streaming;
@@ -371,67 +373,67 @@ void CallController::updateCallView()
             isWatching = currentStreamManager->isWatching(uid);
 #endif
 
-        QString tileClasses = QStringLiteral("call-tile");
+        std::string tileClasses = "call-tile";
         if (isSpeaking)
-            tileClasses += QStringLiteral(" speaking");
+            tileClasses += " speaking";
 
-        QString tileContent;
+        std::string tileContent;
 
         if (isWatching) {
             // Render the live video frame
-            tileContent += QStringLiteral("<img class=\"call-video-frame\" src=\"frame:%1\"/>").arg(uid.toString());
-            tileContent += QStringLiteral(
-                "<div class=\"call-stop-watch-btn\" data-action-stop-watch=\"%1\">Stop Watching</div>"
-            ).arg(uid.toString());
+            tileContent += std::format("<img class=\"call-video-frame\" src=\"frame:{0}\"/>", uid.toString());
+            tileContent += std::format(
+                "<div class=\"call-stop-watch-btn\" data-action-stop-watch=\"{0}\">Stop Watching</div>"
+            , uid.toString());
         } else {
             // Avatar centred on background
-            tileContent += QStringLiteral(
+            tileContent += std::format(
                 "<div class=\"call-tile-avatar-center\">"
-                "  <img class=\"call-tile-avatar\" src=\"%1\"/>"
+                "  <img class=\"call-tile-avatar\" src=\"{0}\"/>"
                 "</div>"
-            ).arg(avatarSrc);
+            , avatarSrc);
 
             if (isSelf && isSelfStreaming) {
-                tileContent += QStringLiteral("<div class=\"call-self-preview-text\">You are streaming</div>");
+                tileContent += "<div class=\"call-self-preview-text\">You are streaming</div>";
             }
         }
 
         // Live badge
         if (isStreaming) {
-            tileContent += QStringLiteral("<div class=\"call-badge-live\">LIVE</div>");
+            tileContent += "<div class=\"call-badge-live\">LIVE</div>";
             if (!isWatching && !isSelf && !inStrip) {
                 // Watch stream overlay button
-                tileContent += QStringLiteral(
+                tileContent += std::format(
                     "<div class=\"call-stream-overlay\">"
-                    "  <div class=\"call-watch-btn\" data-action-watch=\"%1\">Watch Stream</div>"
+                    "  <div class=\"call-watch-btn\" data-action-watch=\"{0}\">Watch Stream</div>"
                     "</div>"
-                ).arg(uid.toString());
+                , uid.toString());
             }
         }
 
         // Name pill bottom-left
-        QString muteIcons;
+        std::string muteIcons;
         if (p.selfMute || p.serverMute) {
-            muteIcons += QStringLiteral("<img class=\"call-tile-icon\" src=\"icon:mic-off\"/>");
+            muteIcons += "<img class=\"call-tile-icon\" src=\"icon:mic-off\"/>";
         }
         if (p.selfDeaf || p.serverDeaf) {
-            muteIcons += QStringLiteral("<img class=\"call-tile-icon\" src=\"icon:headphone-off\"/>");
+            muteIcons += "<img class=\"call-tile-icon\" src=\"icon:headphone-off\"/>";
         }
 
-        tileContent += QStringLiteral(
+        tileContent += std::format(
             "<div class=\"call-tile-pill\">"
-            "  <div class=\"call-tile-name\">%1</div>"
-            "  <div class=\"call-tile-icons\">%2</div>"
+            "  <div class=\"call-tile-name\">{0}</div>"
+            "  <div class=\"call-tile-icons\">{1}</div>"
             "</div>"
-        ).arg(escape(name), muteIcons);
+        , escape(name), muteIcons);
 
-        return QStringLiteral(
-            "<div class=\"%1\" data-user-id=\"%2\">%3</div>"
-        ).arg(tileClasses, uid.toString(), tileContent);
+        return std::format(
+            "<div class=\"{0}\" data-user-id=\"{1}\">{2}</div>"
+        , tileClasses, uid.toString(), tileContent);
     };
 
     // 3. Assemble Tiles (Grid vs Focus Mode)
-    QString bodyHtml;
+    std::string bodyHtml;
     bool hasFocus = focusedUserId.isValid();
     const Core::Audio::VoiceParticipant *focusedPart = nullptr;
 
@@ -450,43 +452,43 @@ void CallController::updateCallView()
 
     if (hasFocus && focusedPart) {
         // Focus mode: 1 main large tile, horizontal strip at bottom
-        QString mainTile = renderTile(*focusedPart, false);
-        QString stripTiles;
+        std::string mainTile = renderTile(*focusedPart, false);
+        std::string stripTiles;
         for (const auto &p : participants) {
             if (p.userId != focusedUserId) {
                 stripTiles += renderTile(p, true);
             }
         }
 
-        bodyHtml = QStringLiteral(
+        bodyHtml = std::format(
             "<div class=\"call-focus-view\">"
-            "  <div class=\"call-focus-main\">%1</div>"
-            "  <div class=\"call-focus-strip\">%2</div>"
+            "  <div class=\"call-focus-main\">{0}</div>"
+            "  <div class=\"call-focus-strip\">{1}</div>"
             "</div>"
-        ).arg(mainTile, stripTiles);
+        , mainTile, stripTiles);
     } else {
         // Grid mode: responsive class tiles-1, tiles-2, tiles-3, etc.
         int count = participants.size();
-        QString gridClass = QStringLiteral("call-grid");
+        std::string gridClass = "call-grid";
         if (count <= 1)
-            gridClass += QStringLiteral(" tiles-1");
+            gridClass += " tiles-1";
         else if (count == 2)
-            gridClass += QStringLiteral(" tiles-2");
+            gridClass += " tiles-2";
         else if (count <= 4)
-            gridClass += QStringLiteral(" tiles-4");
+            gridClass += " tiles-4";
         else if (count <= 6)
-            gridClass += QStringLiteral(" tiles-6");
+            gridClass += " tiles-6";
         else
-            gridClass += QStringLiteral(" tiles-more");
+            gridClass += " tiles-more";
 
-        QString tilesHtml;
+        std::string tilesHtml;
         for (const auto &p : participants) {
             tilesHtml += renderTile(p, false);
         }
 
-        bodyHtml = QStringLiteral(
-            "<div class=\"%1\">%2</div>"
-        ).arg(gridClass, tilesHtml);
+        bodyHtml = std::format(
+            "<div class=\"{0}\">{1}</div>"
+        , gridClass, tilesHtml);
     }
 
     // 4. Header & Controls
@@ -499,45 +501,38 @@ void CallController::updateCallView()
         }
     }
 
-    QString muteBtnClass = selfMuted ? QStringLiteral("call-btn active") : QStringLiteral("call-btn");
-    QString muteIcon = selfMuted ? QStringLiteral("icon:mic-off") : QStringLiteral("icon:mic");
+    std::string muteBtnClass = selfMuted ? "call-btn active" : "call-btn";
+    std::string muteIcon = selfMuted ? "icon:mic-off" : "icon:mic";
 
-    QString deafBtnClass = selfDeafened ? QStringLiteral("call-btn active") : QStringLiteral("call-btn");
-    QString deafIcon = selfDeafened ? QStringLiteral("icon:headphone-off") : QStringLiteral("icon:headphones");
+    std::string deafBtnClass = selfDeafened ? "call-btn active" : "call-btn";
+    std::string deafIcon = selfDeafened ? "icon:headphone-off" : "icon:headphones";
 
-    QString shareBtnClass = isSelfStreaming ? QStringLiteral("call-btn active") : QStringLiteral("call-btn");
-    QString fullscreenIcon = isFullscreen ? QStringLiteral("icon:minimize") : QStringLiteral("icon:maximize");
+    std::string shareBtnClass = isSelfStreaming ? "call-btn active" : "call-btn";
+    std::string fullscreenIcon = isFullscreen ? "icon:minimize" : "icon:maximize";
 
-    QString rml = QStringLiteral(
+    std::string rml = std::format(
         "<div class=\"call-header\">"
         "  <div class=\"call-header-left\">"
         "    <img class=\"call-header-icon\" src=\"icon:volume-2\"/>"
-        "    <div class=\"call-header-title\">%1</div>"
+        "    <div class=\"call-header-title\">{0}</div>"
         "  </div>"
         "  <div class=\"call-header-right\">"
-        "    <div class=\"call-header-btn\" data-action-fullscreen=\"1\"><img src=\"%2\"/></div>"
+        "    <div class=\"call-header-btn\" data-action-fullscreen=\"1\"><img src=\"{1}\"/></div>"
         "    <div class=\"call-header-btn\" data-action-close=\"1\"><img src=\"icon:x\"/></div>"
         "  </div>"
         "</div>"
         "<div class=\"call-body\">"
-        "  %3"
+        "  {2}"
         "</div>"
         "<div class=\"call-controls\">"
-        "  <div class=\"%4\" data-action-mute=\"1\"><img src=\"%5\"/></div>"
-        "  <div class=\"%6\" data-action-deaf=\"1\"><img src=\"%7\"/></div>"
-        "  <div class=\"%8\" data-action-share=\"1\"><img src=\"icon:monitor\"/></div>"
+        "  <div class=\"{3}\" data-action-mute=\"1\"><img src=\"{4}\"/></div>"
+        "  <div class=\"{5}\" data-action-deaf=\"1\"><img src=\"{6}\"/></div>"
+        "  <div class=\"{7}\" data-action-share=\"1\"><img src=\"icon:monitor\"/></div>"
         "  <div class=\"call-btn-disconnect\" data-action-disconnect=\"1\"><img src=\"icon:phone-off\"/></div>"
         "</div>"
-    ).arg(escape(channelName),
-         fullscreenIcon,
-         bodyHtml,
-         muteBtnClass,
-         muteIcon,
-         deafBtnClass,
-         deafIcon,
-         shareBtnClass);
+    , escape(channelName), fullscreenIcon, bodyHtml, muteBtnClass, muteIcon, deafBtnClass, deafIcon, shareBtnClass);
 
-    regionRoot->SetInnerRML(rml.toUtf8().constData());
+    regionRoot->SetInnerRML(rml.c_str());
     requestRender();
 }
 

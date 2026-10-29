@@ -32,7 +32,6 @@
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/Input.h>
 
-#include <QAction>
 #include <QClipboard>
 #include <QCursor>
 #include <QDate>
@@ -43,7 +42,6 @@
 #include <utility>
 #include <QFileInfo>
 #include <QGuiApplication>
-#include <QMenu>
 
 namespace Styx {
 namespace UI {
@@ -1352,66 +1350,46 @@ void ChatController::showMessageContextMenu(Core::Snowflake messageId)
     Core::ClientInstance *instance = shell.currentInstance();
     bool isSelf = (instance && authorId == instance->accountId());
 
-    QMenu menu;
-    QAction *reactAction = menu.addAction(tr("Add Reaction"));
-    connect(reactAction, &QAction::triggered, this, [this, messageId]() {
-        openReactionPickerForMessage(messageId);
-    });
-
-    QAction *replyAction = menu.addAction(tr("Reply"));
-    connect(replyAction, &QAction::triggered, this, [this, messageId, idx]() {
-        QString author = idx.data(ChatModel::UsernameRole).toString();
-        QString snippet = idx.data(ChatModel::ContentRole).toString().left(50);
-        setReplyTarget(messageId, author, snippet);
-    });
-
+    const auto accountId = currentAccountId;
+    const auto channelId = currentChannelId;
+    const auto guildId = currentGuildId;
+    QPointer<Core::ClientInstance> instanceGuard(instance);
+    const QString author = idx.data(ChatModel::UsernameRole).toString();
+    std::vector<MenuItem> menu;
+    menu.push_back({ tr("Add Reaction"), [this, accountId, channelId, messageId] {
+        shell.openExpressionPickerForReaction(accountId, channelId, messageId, QRect(QCursor::pos(), QSize(1, 1)));
+    } });
+    menu.push_back({ tr("Reply"), [this, messageId, author, content, accountId, channelId] {
+        if (currentAccountId == accountId && currentChannelId == channelId)
+            setReplyTarget(messageId, author, content.left(50));
+    } });
     if (isSelf) {
-        QAction *editAction = menu.addAction(tr("Edit Message"));
-        connect(editAction, &QAction::triggered, this, [this, messageId, content]() {
-            setEditTarget(messageId, content);
-        });
-    }
-
-    bool canDelete = isSelf;
-    if (canDelete) {
-        QAction *deleteAction = menu.addAction(tr("Delete Message"));
-        connect(deleteAction, &QAction::triggered, this, [this, messageId, instance]() {
-            if (instance && instance->discord()) {
-                Rml::showConfirmModal(
-                    shell,
-                    tr("Delete Message"),
-                    tr("Are you sure you want to delete this message?"),
-                    tr("Delete"),
-                    [this, instance, messageId]() {
-                        instance->discord()->deleteMessage(currentChannelId, messageId);
-                    },
-                    nullptr,
-                    true);
+        menu.push_back({ tr("Edit Message"), [this, messageId, content, accountId, channelId] {
+            if (currentAccountId == accountId && currentChannelId == channelId)
+                setEditTarget(messageId, content);
+        } });
+        menu.push_back({ tr("Delete Message"), [this, messageId, instanceGuard, channelId] {
+            if (instanceGuard) {
+                showConfirmModal(shell, tr("Delete Message"),
+                    tr("Are you sure you want to delete this message?"), tr("Delete"),
+                    [instanceGuard, channelId, messageId] {
+                        if (instanceGuard)
+                            instanceGuard->discord()->deleteMessage(channelId, messageId);
+                    }, nullptr, true);
             }
-        });
+        }, true, true });
     }
-
-    menu.addSeparator();
-
-    QAction *copyTextAction = menu.addAction(tr("Copy Text"));
-    connect(copyTextAction, &QAction::triggered, this, [content]() {
-        QGuiApplication::clipboard()->setText(content);
-    });
-
-    QAction *copyLinkAction = menu.addAction(tr("Copy Message Link"));
-    connect(copyLinkAction, &QAction::triggered, this, [this, messageId]() {
-        QString guildPart = currentGuildId.isValid() ? QString::number(quint64(currentGuildId)) : QStringLiteral("@me");
-        QString link = QStringLiteral("https://discord.com/channels/%1/%2/%3")
-            .arg(guildPart, QString::number(quint64(currentChannelId)), QString::number(quint64(messageId)));
-        QGuiApplication::clipboard()->setText(link);
-    });
-
-    QAction *copyIdAction = menu.addAction(tr("Copy ID"));
-    connect(copyIdAction, &QAction::triggered, this, [messageId]() {
+    menu.push_back({ {}, {}, false, false, true });
+    menu.push_back({ tr("Copy Text"), [content] { QGuiApplication::clipboard()->setText(content); } });
+    menu.push_back({ tr("Copy Message Link"), [guildId, channelId, messageId] {
+        const QString guildPart = guildId.isValid() ? QString::number(quint64(guildId)) : QStringLiteral("@me");
+        QGuiApplication::clipboard()->setText(QStringLiteral("https://discord.com/channels/%1/%2/%3")
+            .arg(guildPart, QString::number(quint64(channelId)), QString::number(quint64(messageId))));
+    } });
+    menu.push_back({ tr("Copy ID"), [messageId] {
         QGuiApplication::clipboard()->setText(QString::number(quint64(messageId)));
-    });
-
-    menu.exec(QCursor::pos());
+    } });
+    shell.showContextMenu(std::move(menu));
 }
 
 void ChatController::openReactionPickerForMessage(Core::Snowflake messageId)

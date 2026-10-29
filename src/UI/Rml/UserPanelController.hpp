@@ -3,9 +3,9 @@
 #include "Controller.hpp"
 #include "Core/Snowflake.hpp"
 
-#include <QPointer>
-#include <QString>
-#include <QTimer>
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
+#include <vector>
 
 namespace Styx {
 namespace Core {
@@ -16,14 +16,12 @@ namespace Rml {
 
 class UserPanelController final : public Controller
 {
-    Q_OBJECT
 public:
-    UserPanelController(Shell &shell, ::Rml::Element *root, QObject *parent = nullptr);
-
-private slots:
-    void rebuild();
+    UserPanelController(Shell &shell, ::Rml::Element *root);
 
 private:
+    void rebuild();
+
     void renderVoicePanel();
     void renderUserPanel();
     void connectInstanceVoice(Core::ClientInstance *instance);
@@ -33,8 +31,10 @@ private:
 
     ::Rml::Element *voicePanel = nullptr;
     ::Rml::Element *userPanel = nullptr;
-    QTimer rebuildTimer;
-    QPointer<Core::ClientInstance> lastInstance;
+    void scheduleRebuild();
+    Platform::Timer rebuildTimer;
+    Platform::Guard<Core::ClientInstance> lastInstance;
+    std::vector<Platform::Connection> instanceConnections;
 };
 
 } // namespace Rml

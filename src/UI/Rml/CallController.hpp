@@ -3,9 +3,9 @@
 #include "Controller.hpp"
 #include "Core/Snowflake.hpp"
 
-#include <QPointer>
-#include <QSet>
-#include <QTimer>
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
+#include <vector>
 
 namespace Styx {
 namespace Core {
@@ -23,9 +23,8 @@ namespace Rml {
 
 class CallController final : public Controller
 {
-    Q_OBJECT
 public:
-    CallController(Shell &shell, ::Rml::Element *root, QObject *parent = nullptr);
+    CallController(Shell &shell, ::Rml::Element *root);
     ~CallController() override;
 
 private:
@@ -50,11 +49,13 @@ private:
     void onCloseClicked();
     void onFullscreenClicked();
 
-    QTimer updateDebounceTimer;
-    QPointer<Core::ClientInstance> currentInstance;
-    QPointer<Core::Audio::VoiceManager> currentVoiceManager;
+    void scheduleUpdate();
+    Platform::Timer updateDebounceTimer;
+    Platform::Guard<Core::ClientInstance> currentInstance;
+    Platform::Guard<Core::Audio::VoiceManager> currentVoiceManager;
+    std::vector<Platform::Connection> voiceConnections;
 #ifdef STYX_HAVE_SCREENSHARE
-    QPointer<Core::Stream::StreamManager> currentStreamManager;
+    Platform::Guard<Core::Stream::StreamManager> currentStreamManager;
 #endif
 
     Core::Snowflake focusedUserId;

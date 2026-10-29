@@ -2,6 +2,8 @@
 
 #include "Shell.hpp"
 #include "RmlView.hpp"
+#include "Platform/Native.hpp"
+#include "Platform/Utf8.hpp"
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
@@ -13,18 +15,14 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-static ConfirmModalController *s_activeConfirmController = nullptr;
 
-ConfirmModalController::ConfirmModalController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
+ConfirmModalController::ConfirmModalController(Shell &shell)
+    : Controller(shell, nullptr)
 {
-    s_activeConfirmController = this;
 }
 
 ConfirmModalController::~ConfirmModalController()
 {
-    if (s_activeConfirmController == this)
-        s_activeConfirmController = nullptr;
     if (modalDocument) {
         modalDocument->Close();
         modalDocument = nullptr;
@@ -36,7 +34,7 @@ void ConfirmModalController::ensureDocument()
     if (modalDocument || !shell.view() || !shell.view()->context())
         return;
 
-    modalDocument = shell.view()->context()->LoadDocument(":/ui/confirm_modal.rml");
+    modalDocument = shell.view()->context()->LoadDocument("ui/confirm_modal.rml");
     if (!modalDocument)
         return;
 
@@ -87,20 +85,20 @@ void ConfirmModalController::updateContent()
         return;
 
     if (auto *titleEl = modalDocument->GetElementById("confirm-title"))
-        titleEl->SetInnerRML(currentOptions.title.toHtmlEscaped().toStdString());
+        titleEl->SetInnerRML(Platform::htmlEscape(currentOptions.title));
 
     if (auto *msgEl = modalDocument->GetElementById("confirm-message")) {
-        // Convert basic Qt HTML linebreaks / paragraphs if present
-        QString rml = currentOptions.body;
-        rml.replace(QStringLiteral("<br>"), QStringLiteral("<br/>"));
-        msgEl->SetInnerRML(rml.toStdString());
+        auto rml = Platform::replace(currentOptions.body, "<br>", "<br/>");
+        msgEl->SetInnerRML(rml);
     }
 
-    if (auto *cancelBtn = modalDocument->GetElementById("confirm-cancel-btn"))
-        cancelBtn->SetInnerRML(currentOptions.cancelText.toHtmlEscaped().toStdString());
+    if (auto *cancelBtn = modalDocument->GetElementById("confirm-cancel-btn")) {
+        cancelBtn->SetInnerRML(Platform::htmlEscape(currentOptions.cancelText));
+        cancelBtn->SetProperty("display", currentOptions.cancelText.empty() ? "none" : "block");
+    }
 
     if (auto *actionBtn = modalDocument->GetElementById("confirm-action-btn")) {
-        actionBtn->SetInnerRML(currentOptions.confirmText.toHtmlEscaped().toStdString());
+        actionBtn->SetInnerRML(Platform::htmlEscape(currentOptions.confirmText));
         actionBtn->SetClass("danger", currentOptions.danger);
     }
 }
@@ -134,24 +132,14 @@ void ConfirmModalController::hide()
 
 void showConfirmModal(Shell &shell, const ConfirmOptions &options)
 {
-    if (s_activeConfirmController) {
-        s_activeConfirmController->show(options);
-        return;
-    }
-    // Fallback: search shell's controllers or construct
-    auto controller = std::make_unique<ConfirmModalController>(shell);
-    controller->show(options);
+    if (auto *controller = shell.confirmModalController())
+        controller->show(options);
 }
 
 void showConfirmModal(const ConfirmOptions &options)
 {
-    if (s_activeConfirmController) {
-        s_activeConfirmController->show(options);
-        return;
-    }
-    if (auto *primary = Shell::primaryShell()) {
+    if (auto *primary = Shell::primaryShell())
         showConfirmModal(*primary, options);
-    }
 }
 
 } // namespace Rml

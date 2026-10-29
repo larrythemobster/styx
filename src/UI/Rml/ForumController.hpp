@@ -4,11 +4,9 @@
 #include "Core/ForumManager.hpp"
 #include "Core/Snowflake.hpp"
 
-#include <QList>
-#include <QMetaObject>
-#include <QPointer>
-#include <QString>
-#include <QUrl>
+#include "Platform/Signal.hpp"
+#include <string>
+#include <vector>
 
 namespace Rml {
 class ElementDocument;
@@ -28,9 +26,8 @@ namespace Rml {
 
 class ForumController final : public Controller
 {
-    Q_OBJECT
 public:
-    explicit ForumController(Shell &shell, QObject *parent = nullptr);
+    explicit ForumController(Shell &shell);
     ~ForumController() override;
 
     void open(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake forumId);
@@ -40,7 +37,7 @@ public:
 
     void syncFolderState();
 
-private slots:
+private:
     void onPostsReset(Core::Snowflake forumId);
     void onPostsAppended(Core::Snowflake forumId, int startRow, int count);
     void onPostInserted(Core::Snowflake forumId, Core::Snowflake threadId, int row);
@@ -57,8 +54,8 @@ private:
     void renderPosts();
     void updateLoadingState();
 
-    QString buildPostCardHtml(const Discord::Channel &post);
-    [[nodiscard]] static QUrl thumbnailUrlOf(const Discord::Message *msg);
+    std::string buildPostCardHtml(const Discord::Channel &post);
+    [[nodiscard]] static std::string thumbnailUrlOf(const Discord::Message *msg);
 
     ::Rml::ElementDocument *forumDocument = nullptr;
     bool visible = false;
@@ -69,7 +66,7 @@ private:
     Core::Snowflake selectedTagId;
     Core::ForumSortMode currentSortMode = Core::ForumSortMode::LATEST_ACTIVITY;
 
-    QList<QMetaObject::Connection> managerConnections;
+    std::vector<Platform::Connection> managerConnections;
 };
 
 } // namespace Rml

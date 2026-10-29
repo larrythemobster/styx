@@ -1,12 +1,18 @@
 #pragma once
 
-#include <QtWidgets>
-#include <QCache>
-#include <QTextDocument>
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include "Platform/Trackable.hpp"
+#include "Platform/Native.hpp"
+#include "Platform/Image.hpp"
 #include "Core/Gifs/FavoriteGifRules.hpp"
 #include "Core/Session.hpp"
 #include "Core/MessageManager.hpp"
-#include "UI/AvatarRequestTracker.hpp"
+
 
 using Styx::Core::ClientInstance;
 
@@ -19,45 +25,45 @@ class ImageManager;
 struct AttachmentData
 {
     Snowflake id;
-    QUrl proxyUrl;
-    QUrl originalUrl;
-    QUrl animatedUrl;
+    std::string proxyUrl;
+    std::string originalUrl;
+    std::string animatedUrl;
     Core::FavoriteGifCandidate favoriteGif;
-    QSize displaySize;
-    QPixmap pixmap;
+    Platform::Size displaySize;
+    Platform::ImageBuffer pixmap;
     bool isLoading;
     bool isImage;
     bool isVideo = false;
     bool isAudio = false;
     bool isVoiceMessage = false;
-    qint64 durationMs = 0;
-    QString contentType;
-    QString filename;
-    qint64 fileSizeBytes;
+    int64_t durationMs = 0;
+    std::string contentType;
+    std::string filename;
+    int64_t fileSizeBytes;
     bool isSpoiler;
-    qint64 uploadSent = -1;
-    qint64 uploadTotal = -1;
+    int64_t uploadSent = -1;
+    int64_t uploadTotal = -1;
 
     [[nodiscard]] bool isMedia() const { return isImage || isVideo; }
 };
 
 struct EmbedFieldData
 {
-    QString name;
-    QString value;
-    QString nameParsed;
-    QString valueParsed;
+    std::string name;
+    std::string value;
+    std::string nameParsed;
+    std::string valueParsed;
     bool isInline = false;
 };
 
 struct EmbedImageData
 {
-    QUrl url;
-    QUrl originalUrl;
-    QUrl animatedUrl;
+    std::string url;
+    std::string originalUrl;
+    std::string animatedUrl;
     Core::FavoriteGifCandidate favoriteGif;
-    QPixmap pixmap;
-    QSize displaySize;
+    Platform::ImageBuffer pixmap;
+    Platform::Size displaySize;
 };
 
 enum class EmbedType {
@@ -89,32 +95,32 @@ struct ReplyData
 
     State state = State::None;
     Core::Snowflake referencedMessageId;
-    QString authorName;
-    QColor authorColor;
+    std::string authorName;
+    Platform::Color authorColor;
     Core::Snowflake authorId;
-    QString contentSnippet;
+    std::string contentSnippet;
 };
 
 struct ForwardOriginData
 {
     Core::Snowflake channelId;
-    QString text;
-    QUrl iconUrl;
-    QPixmap icon;
+    std::string text;
+    std::string iconUrl;
+    Platform::ImageBuffer icon;
 };
 
 struct ReactionData
 {
-    QString emojiName;
+    std::string emojiName;
     Core::Snowflake emojiId;
-    QUrl emojiUrl;
+    std::string emojiUrl;
     bool emojiAnimated = false;
     int count = 0;
     bool me = false;
     bool isBurst = false;
-    QPixmap emojiPixmap;
+    Platform::ImageBuffer emojiPixmap;
     bool isLoading = false;
-    QColor burstTintColor;
+    Platform::Color burstTintColor;
 
     [[nodiscard]] Discord::Emoji emoji() const
     {
@@ -127,153 +133,107 @@ struct StickerData
     static constexpr int DisplayPx = 160;
 
     Core::Snowflake id;
-    QString name;
-    QUrl stillUrl;
-    QUrl animatedUrl;
-    QPixmap still;
+    std::string name;
+    std::string stillUrl;
+    std::string animatedUrl;
+    Platform::ImageBuffer still;
     bool unavailable = false;
 
-    [[nodiscard]] bool isAnimated() const { return animatedUrl.isValid(); }
-    [[nodiscard]] bool hasRasterStill() const { return stillUrl.isValid(); }
+    [[nodiscard]] bool isAnimated() const { return !animatedUrl.empty(); }
+    [[nodiscard]] bool hasRasterStill() const { return !stillUrl.empty(); }
 };
 
 struct EmbedData
 {
     EmbedType type = EmbedType::Rich; // should this be default idk
-    QString title;
-    QString description;
-    QString titleParsed;
-    QString descriptionParsed;
-    QString url;
-    QDateTime timestamp;
-    QColor color;
+    std::string title;
+    std::string description;
+    std::string titleParsed;
+    std::string descriptionParsed;
+    std::string url;
+    Platform::DateTime timestamp;
+    Platform::Color color;
 
-    QString authorName;
-    QString authorUrl;
-    QUrl authorIconUrl;
-    QPixmap authorIcon;
+    std::string authorName;
+    std::string authorUrl;
+    std::string authorIconUrl;
+    Platform::ImageBuffer authorIcon;
 
-    QString footerText;
-    QUrl footerIconUrl;
-    QPixmap footerIcon;
+    std::string footerText;
+    std::string footerIconUrl;
+    Platform::ImageBuffer footerIcon;
 
-    QUrl thumbnailUrl;
-    QUrl thumbnailOriginalUrl;
-    QUrl thumbnailAnimatedUrl;
-    QPixmap thumbnail;
-    QSize thumbnailSize;
+    std::string thumbnailUrl;
+    std::string thumbnailOriginalUrl;
+    std::string thumbnailAnimatedUrl;
+    Platform::ImageBuffer thumbnail;
+    Platform::Size thumbnailSize;
 
-    QList<EmbedImageData> images;
+    std::vector<EmbedImageData> images;
 
-    QUrl videoThumbnailUrl;
-    QPixmap videoThumbnail;
-    QSize videoThumbnailSize;
+    std::string videoThumbnailUrl;
+    Platform::ImageBuffer videoThumbnail;
+    Platform::Size videoThumbnailSize;
 
-    QUrl videoUrl;
+    std::string videoUrl;
     bool videoPlayable = false;
-    QUrl loopingVideoUrl;
+    std::string loopingVideoUrl;
     Core::FavoriteGifCandidate favoriteGif;
 
-    QString providerName;
-    QString providerUrl;
+    std::string providerName;
+    std::string providerUrl;
 
-    QList<EmbedFieldData> fields;
+    std::vector<EmbedFieldData> fields;
 };
 
 namespace UI {
 
-struct DocCacheKey
-{
-    Snowflake messageId;
-    // 0 = body, then embed/field sub-documents encoded as:
-    // (embedIndex+1)*1000 + offset (0=title, 1=desc, 100+fieldIndex*2=fieldName, 100+fieldIndex*2+1=fieldValue)
-    int subId = 0;
-
-    bool operator==(const DocCacheKey &o) const
-    {
-        return messageId == o.messageId && subId == o.subId;
-    }
+struct ChatRow {
+    std::string content, username, html;
+    Snowflake userId, messageId;
+    Platform::ImageBuffer avatar;
+    Platform::DateTime timestamp, editedTimestamp;
+    Platform::Size cachedSize;
+    bool showHeader = false, dateSeparator = false;
+    std::vector<AttachmentData> attachments;
+    std::vector<EmbedData> embeds;
+    bool isPending = false, isErrored = false;
+    Platform::Color usernameColor;
+    ReplyData replyData;
+    std::vector<ReactionData> reactions;
+    bool isSystemMessage = false;
+    Discord::MessageType messageType{};
+    bool isForwarded = false;
+    ForwardOriginData forwardOrigin;
+    std::vector<StickerData> stickers;
 };
 
-inline size_t qHash(const DocCacheKey &k, size_t seed = 0)
+class ChatModel : public Platform::Trackable
 {
-    return qHashMulti(seed, quint64(k.messageId), k.subId);
-}
-
-inline DocCacheKey bodyDocKey(Snowflake msgId)
-{
-    return { msgId, 0 };
-}
-inline DocCacheKey embedTitleDocKey(Snowflake msgId, int embedIdx)
-{
-    return { msgId, (embedIdx + 1) * 1000 };
-}
-inline DocCacheKey embedDescDocKey(Snowflake msgId, int embedIdx)
-{
-    return { msgId, (embedIdx + 1) * 1000 + 1 };
-}
-inline DocCacheKey embedFieldNameDocKey(Snowflake msgId, int embedIdx, int fieldIdx)
-{
-    return { msgId, (embedIdx + 1) * 1000 + 100 + fieldIdx * 2 };
-}
-inline DocCacheKey embedFieldValueDocKey(Snowflake msgId, int embedIdx, int fieldIdx)
-{
-    return { msgId, (embedIdx + 1) * 1000 + 100 + fieldIdx * 2 + 1 };
-}
-
-class ChatModel : public QAbstractListModel
-{
-    Q_OBJECT
 public:
-    ChatModel(Core::ImageManager *imageManager, QObject *parent = nullptr);
-
-    enum Roles {
-        ContentRole = Qt::UserRole + 1,
-        UsernameRole,
-        UserIdRole,
-        AvatarRole,
-        TimestampRole,
-        EditedTimestampRole,
-        CachedSizeRole,
-        ShowHeaderRole,
-        DateSeparatorRole,
-        HtmlRole,
-        AttachmentsRole,
-        EmbedsRole,
-        IsPendingRole,
-        IsErroredRole,
-        UsernameColorRole,
-        MessageIdRole,
-        ReplyDataRole,
-        ReactionsRole,
-        IsSystemMessageRole,
-        MessageTypeRole,
-        IsForwardedRole,
-        ForwardOriginRole,
-        StickersRole,
-    };
+    explicit ChatModel(Core::ImageManager *imageManager);
 
     void setAccount(Snowflake accountId);
     [[nodiscard]] Snowflake getAccountId() const { return currentAccountId; }
 
-    using AvatarUrlResolver = std::function<QUrl(const Discord::User &author, Snowflake guildId)>;
+    using AvatarUrlResolver = std::function<std::string(const Discord::User &author, Snowflake guildId)>;
     void setAvatarUrlResolver(AvatarUrlResolver resolver);
 
-    using DisplayNameResolver = std::function<QString(const Discord::User &author, Snowflake guildId)>;
+    using DisplayNameResolver = std::function<std::string(const Discord::User &author, Snowflake guildId)>;
     void setDisplayNameResolver(DisplayNameResolver resolver);
 
-    using RoleColorResolver = std::function<QColor(Snowflake userId, Snowflake guildId)>;
+    using RoleColorResolver = std::function<Platform::Color(Snowflake userId, Snowflake guildId)>;
     void setRoleColorResolver(RoleColorResolver resolver);
 
-    using ChannelNameResolver = std::function<QString(Snowflake channelId)>;
+    using ChannelNameResolver = std::function<std::string(Snowflake channelId)>;
     void setChannelNameResolver(ChannelNameResolver resolver);
 
-    using GuildInfoResolver = std::function<QPair<QString, QUrl>(Snowflake guildId)>;
+    using GuildInfoResolver = std::function<std::pair<std::string, std::string>(Snowflake guildId)>;
     void setGuildInfoResolver(GuildInfoResolver resolver);
 
-    int rowCount(const QModelIndex &parent = {}) const override;
-    QVariant data(const QModelIndex &index, int role) const override;
-    bool setData(const QModelIndex &index, const QVariant &value, int role) override;
+    [[nodiscard]] int rowCount() const;
+    [[nodiscard]] ChatRow row(int index) const;
+    bool setCachedSize(int index, Platform::Size size);
 
     [[nodiscard]] Snowflake getOldestMessageId() const;
     [[nodiscard]] Snowflake getNewestMessageId() const;
@@ -284,54 +244,41 @@ public:
 
     [[nodiscard]] bool isAtLatest() const { return atLatest; }
 
-    void setVideoNativeSize(Snowflake attachmentId, const QSize &size);
+    void setVideoNativeSize(Snowflake attachmentId, const Platform::Size &size);
 
-    QTextDocument *getCachedDocument(const DocCacheKey &key) const;
-    void cacheDocument(const DocCacheKey &key, QTextDocument *doc) const;
-    void invalidateDocCache();
-    void invalidateDocCacheForMessage(Snowflake messageId);
     void invalidateLayout();
+    Platform::Signal<bool> atLatestChanged;
+    Platform::Signal<int, int> rowsChanged, rowsInserted, rowsRemoved;
+    Platform::Signal<> modelReset;
 
-signals:
-    void atLatestChanged(bool atLatest);
-
-public slots:
     void setActiveChannel(Snowflake channelId, Snowflake guildId = Snowflake::Invalid);
     void handleIncomingMessages(const Core::MessageRequestResult &result);
     void handleMessageDeleted(Snowflake channelId, Snowflake messageId);
-    void handleMessageErrored(const QString &nonce);
-    void handleUploadProgress(const QString &nonce, int fileIndex, qint64 sent, qint64 total);
-    void refreshUsersInView(const QList<Snowflake> &userIds);
+    void handleMessageErrored(const std::string &nonce);
+    void handleUploadProgress(const std::string &nonce, int fileIndex, int64_t sent, int64_t total);
+    void refreshUsersInView(const std::vector<Snowflake> &userIds);
     void revealSpoiler(Snowflake attachmentId);
 
-    void triggerResize(int row)
-    {
-        if (row < 0 || row >= rowCount())
-            return;
-        QModelIndex idx = index(row, 0);
-        emit dataChanged(idx, idx, { CachedSizeRole });
-    }
+    void triggerResize(int row) { if (row >= 0 && row < rowCount()) rowsChanged.publish(row, row); }
 
 private:
-    void resetMessages(const QVector<Discord::Message> &sortedIncoming);
-    void appendMessages(const QVector<Discord::Message> &sortedIncoming);
+    void resetMessages(const std::vector<Discord::Message> &sortedIncoming);
+    void appendMessages(const std::vector<Discord::Message> &sortedIncoming);
     void setAtLatest(bool value);
-    QString resolveAuthorName(const Discord::User &author) const;
-    QColor resolveAuthorColor(const Discord::User &author) const;
+    std::string resolveAuthorName(const Discord::User &author) const;
+    Platform::Color resolveAuthorColor(const Discord::User &author) const;
     ForwardOriginData forwardOrigin(const Discord::Message &msg) const;
-    QPixmap localPixmap(const QUrl &url, const QSize &displaySize) const;
-    QPixmap pixmapOrNullWhileLoading(const QUrl &url, const QSize &displaySize) const;
-    QPixmap previewPixmap(Snowflake attachmentId, const QImage &image, const QSize &displaySize) const;
+    Platform::ImageBuffer localPixmap(const std::string &url, const Platform::Size &displaySize) const;
+    Platform::ImageBuffer pixmapOrNullWhileLoading(const std::string &url, const Platform::Size &displaySize) const;
+    Platform::ImageBuffer previewPixmap(Snowflake attachmentId, const Platform::ImageBuffer &image, const Platform::Size &displaySize) const;
     void prunePreviewCaches(const Discord::Message &msg);
-    void refreshRowsShowingSticker(const QUrl &stickerUrl);
+    void refreshRowsShowingSticker(const std::string &stickerUrl);
 
     Core::ImageManager *imageManager;
-    QVector<Discord::Message> messages;
-    mutable QHash<Snowflake, QSize> sizeCache;
-    mutable QHash<Snowflake, QList<EmbedData>> embedCache;
-    mutable QHash<Snowflake, ForwardOriginData> forwardOriginCache;
-    mutable QCache<DocCacheKey, QTextDocument> docCache{ 500 };
-    mutable int docCacheWidth = 0;
+    std::vector<Discord::Message> messages;
+    mutable std::unordered_map<Snowflake, Platform::Size> sizeCache;
+    mutable std::unordered_map<Snowflake, std::vector<EmbedData>> embedCache;
+    mutable std::unordered_map<Snowflake, ForwardOriginData> forwardOriginCache;
 
     Snowflake currentChannelId = Snowflake::Invalid;
     Snowflake currentGuildId = Snowflake::Invalid;
@@ -344,14 +291,13 @@ private:
     ChannelNameResolver channelNameResolver;
     GuildInfoResolver guildInfoResolver;
 
-    mutable AvatarRequestTracker<QPersistentModelIndex> avatarTracker;
-    QSet<QString> pendingNonces;
-    QSet<QString> erroredNonces;
-    QHash<QString, QVector<QPair<qint64, qint64>>> uploadProgress; // by nonce
-    mutable QHash<QUrl, QPixmap> localPixmapCache; // file previews
-    mutable QHash<Snowflake, QPixmap> previewPixmapCache; // pasted bitmap previews by attachment id
-    mutable QSet<Snowflake> revealedSpoilers;
-    QHash<Snowflake, QSize> videoNativeSizes;
+    std::unordered_set<std::string> pendingNonces;
+    std::unordered_set<std::string> erroredNonces;
+    std::unordered_map<std::string, std::vector<std::pair<int64_t, int64_t>>> uploadProgress; // by nonce
+    mutable std::unordered_map<std::string, Platform::ImageBuffer> localPixmapCache; // file previews
+    mutable std::unordered_map<Snowflake, Platform::ImageBuffer> previewPixmapCache; // pasted bitmap previews by attachment id
+    mutable std::unordered_set<Snowflake> revealedSpoilers;
+    std::unordered_map<Snowflake, Platform::Size> videoNativeSizes;
 
     struct MediaFlags
     {
@@ -359,28 +305,16 @@ private:
         bool isVideo = false;
         bool isAudio = false;
         bool isVoiceMessage = false;
-        qint64 durationMs = 0;
-        QString contentType;
+        int64_t durationMs = 0;
+        std::string contentType;
     };
 
     [[nodiscard]] MediaFlags mediaFlagsFor(const Discord::Attachment &attachment, const Discord::Message &message) const;
 
-    mutable QHash<Snowflake, MediaFlags> mediaFlagsCache;
+    mutable std::unordered_map<Snowflake, MediaFlags> mediaFlagsCache;
     mutable bool suppressImageFetch = false;
 
 };
 } // namespace UI
 } // namespace Styx
 
-Q_DECLARE_METATYPE(Styx::ReplyData)
-Q_DECLARE_METATYPE(Styx::ForwardOriginData)
-Q_DECLARE_METATYPE(Styx::AttachmentData)
-Q_DECLARE_METATYPE(QList<Styx::AttachmentData>)
-Q_DECLARE_METATYPE(Styx::EmbedFieldData)
-Q_DECLARE_METATYPE(Styx::EmbedImageData)
-Q_DECLARE_METATYPE(Styx::EmbedData)
-Q_DECLARE_METATYPE(QList<Styx::EmbedData>)
-Q_DECLARE_METATYPE(Styx::StickerData)
-Q_DECLARE_METATYPE(QList<Styx::StickerData>)
-Q_DECLARE_METATYPE(Styx::ReactionData)
-Q_DECLARE_METATYPE(QList<Styx::ReactionData>)

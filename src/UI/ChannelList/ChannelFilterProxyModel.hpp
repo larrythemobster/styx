@@ -1,48 +1,32 @@
 #pragma once
 
-#include <QSortFilterProxyModel>
-
-#include "Core/Session.hpp"
 #include "Core/Snowflake.hpp"
+#include "Platform/Trackable.hpp"
+#include <vector>
 
-namespace Styx {
-namespace UI {
-
+namespace Styx::Core { class Session; }
+namespace Styx::UI {
 class ChannelTreeModel;
+struct ChannelNode;
 
-class ChannelFilterProxyModel : public QSortFilterProxyModel
-{
-    Q_OBJECT
+class ChannelFilterProxyModel : public Platform::Trackable {
 public:
-    enum Roles {
-        SelectedRole = Qt::UserRole,
-    };
-
-    explicit ChannelFilterProxyModel(Core::Session *session, QObject *parent = nullptr);
-
-    void setSourceModel(QAbstractItemModel *sourceModel) override;
-    QVariant data(const QModelIndex &index, int role) const override;
-
+    explicit ChannelFilterProxyModel(Core::Session *session);
+    void setSourceModel(ChannelTreeModel *sourceModel);
+    ChannelTreeModel *sourceModel() const { return channelModel; }
+    std::vector<ChannelNode *> children(ChannelNode *parent) const;
+    bool accepts(ChannelNode *node) const;
+    bool selected(ChannelNode *node) const;
     void setSelectedChannel(Core::Snowflake channelId, Core::Snowflake accountId);
     Core::Snowflake selectedChannel() const { return selectedChannelId; }
-
-public slots:
     void invalidateFilter();
-
-protected:
-    bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
-    bool lessThan(const QModelIndex &left, const QModelIndex &right) const override;
-
+    Platform::Signal<> changed;
 private:
-    bool hasVisibleChildren(const QModelIndex &parent) const;
-    Core::Snowflake getUserIdForNode(const QModelIndex &index) const;
-    bool hasChannelViewPermission(const QModelIndex &sourceIndex) const;
-
+    bool hasChannelViewPermission(ChannelNode *node) const;
+    static Core::Snowflake getUserIdForNode(ChannelNode *node);
     Core::Session *session;
-    ChannelTreeModel *channelModel;
+    ChannelTreeModel *channelModel = nullptr;
     Core::Snowflake selectedChannelId;
     Core::Snowflake selectedAccountId;
 };
-
-} // namespace UI
-} // namespace Styx
+}

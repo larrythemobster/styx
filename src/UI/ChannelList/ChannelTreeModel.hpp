@@ -1,6 +1,9 @@
 #pragma once
 
-#include <QtWidgets>
+#include <unordered_map>
+#include <vector>
+#include "Platform/Trackable.hpp"
+#include "Core/Presence/PresenceBadge.hpp"
 
 #include "ChannelNode.hpp"
 #include "Core/AccountInfo.hpp"
@@ -23,39 +26,16 @@ struct GuildFolder;
 
 namespace Styx {
 namespace UI {
-class ChannelTreeModel : public QAbstractItemModel
+class ChannelTreeModel : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    ChannelTreeModel(Session *session, QObject *parent = nullptr);
-
-    enum Roles {
-        IdRole = Qt::UserRole,
-        TypeRole = Qt::UserRole + 1,
-        PositionRole = Qt::UserRole + 2,
-        LastMessageIdRole = Qt::UserRole + 3,
-        IsUnreadRole = Qt::UserRole + 4,
-        MentionCountRole = Qt::UserRole + 5,
-        IsMutedRole = Qt::UserRole + 6,
-        CollapsedRole = Qt::UserRole + 7,
-        VoiceParticipantCountRole = Qt::UserRole + 8,
-        UserLimitRole = Qt::UserRole + 9,
-        IsVoiceMutedRole = Qt::UserRole + 10,
-        IsVoiceDeafenedRole = Qt::UserRole + 11,
-        IconHashRole = Qt::UserRole + 12,
-        FolderColorRole = Qt::UserRole + 13,
-        ThreadJoinedRole = Qt::UserRole + 14,
-        OwnerIdRole = Qt::UserRole + 15,
-        PresenceBadgeRole = Qt::UserRole + 16,
-        OwnMentionCountRole = Qt::UserRole + 17,
-    };
-
-    QModelIndex index(int row, int column, const QModelIndex &parentIndex) const override;
-    QModelIndex parent(const QModelIndex &childIndex) const override;
-    int rowCount(const QModelIndex &parentIndex) const override;
-    int columnCount(const QModelIndex &) const override;
-    QVariant data(const QModelIndex &index, int role) const override;
-    Qt::ItemFlags flags(const QModelIndex &index) const override;
+    explicit ChannelTreeModel(Session *session);
+    ChannelNode *rootNode() const { return root.get(); }
+    Platform::ImageBuffer avatar(ChannelNode *node) const;
+    Core::PresenceBadge presenceBadge(ChannelNode *node) const;
+    bool threadJoined(ChannelNode *node) const;
+    bool voiceMuted(ChannelNode *node) const;
+    bool voiceDeafened(ChannelNode *node) const;
 
     void addAccount(const Styx::Core::AccountInfo &account);
     void removeAccount(Snowflake accountId);
@@ -65,7 +45,6 @@ public:
     static ChannelNode *getAccountNodeFor(ChannelNode *node);
     static ChannelNode *findGuildNode(ChannelNode *node);
 
-    ChannelNode *nodeFromIndex(const QModelIndex &index) const;
     void addGuild(const Discord::GatewayGuild &guild, Snowflake accountId);
     void updateGuild(const Discord::Guild &guild, Snowflake accountId);
     void removeGuild(Snowflake accountId, Snowflake guildId);
@@ -75,13 +54,13 @@ public:
     void addThread(const Discord::Channel &thread, Snowflake accountId);
     void updateThread(const Discord::Channel &thread, Snowflake accountId);
     void removeThread(Snowflake threadId, Snowflake accountId);
-    void syncThreads(Snowflake guildId, const QList<Snowflake> &parentIds, const QList<Discord::Channel> &threads, Snowflake accountId);
+    void syncThreads(Snowflake guildId, const std::vector<Snowflake> &parentIds, const std::vector<Discord::Channel> &threads, Snowflake accountId);
     void showTemporaryThread(const Discord::Channel &thread, Snowflake accountId);
     void clearTemporaryThread(Snowflake exceptThreadId = Snowflake::Invalid);
     void promoteTemporaryThread(Snowflake threadId);
     void invalidateGuildData(Snowflake guildId);
     void updateReadState(Snowflake channelId, Snowflake accountId);
-    void updatePresence(Snowflake accountId, const QList<Snowflake> &userIds);
+    void updatePresence(Snowflake accountId, const std::vector<Snowflake> &userIds);
     void updateForumBadge(Snowflake forumId, Snowflake accountId);
     void updateForumThreads(Snowflake forumId, Snowflake accountId);
     void updateGuildSettings(Snowflake guildId, Snowflake accountId);
@@ -90,23 +69,24 @@ public:
     void setAccountVoiceChannel(Snowflake accountId, Snowflake channelId);
     void updateVoiceParticipant(Snowflake channelId, Snowflake userId, bool joined, Snowflake accountId);
     void updateVoiceParticipantState(Snowflake channelId, Snowflake userId, Snowflake accountId);
-    void toggleCollapsed(const QModelIndex &index);
-    void setCollapsed(const QModelIndex &index, bool collapsed);
+    void toggleCollapsed(ChannelNode *node);
+    void setCollapsed(ChannelNode *node, bool collapsed);
 
-    QList<Snowflake> getMarkableChannelIds(const QModelIndex &index);
+    std::vector<Snowflake> getMarkableChannelIds(ChannelNode *node);
     ChannelNode *findChannelTreeNode(Snowflake channelId);
     ChannelNode *findChannelTreeNode(Snowflake channelId, Snowflake accountId);
-    QModelIndex indexForNode(ChannelNode *node) const;
 
-    QModelIndex serverIndex(Snowflake accountId, Snowflake guildId);
-    QModelIndex folderIndex(Snowflake accountId, Snowflake folderId);
-    QModelIndex dmHeaderIndex(Snowflake accountId);
+    ChannelNode *serverNode(Snowflake accountId, Snowflake guildId);
+    ChannelNode *folderNode(Snowflake accountId, Snowflake folderId);
+    ChannelNode *dmHeaderNode(Snowflake accountId);
 
-signals:
-    void totalMentionCountChanged(int count, int previousCount);
+public:
+    Platform::Signal<ChannelNode *> changed;
+    Platform::Signal<> reset;
+    Platform::Signal<int, int> totalMentionCountChanged;
 
 private:
-    static void collectMarkableChannelIds(ChannelNode *node, QList<Snowflake> &out);
+    static void collectMarkableChannelIds(ChannelNode *node, std::vector<Snowflake> &out);
     static Core::ChannelReadState computeNodeReadState(ChannelNode *node, Core::ClientInstance *instance);
     static Core::ChannelReadState shownReadState(const ChannelNode *node);
     static void setSelfReadState(ChannelNode *node, const Core::ChannelReadState &state);
@@ -127,16 +107,17 @@ private:
     ChannelNode *findFolderNodeById(ChannelNode *accountNode, Snowflake folderId);
     ChannelNode *findCategoryNode(Snowflake categoryId, ChannelNode *guildNode);
     void insertChildAt(ChannelNode *parent, int row, std::unique_ptr<ChannelNode> node);
-    void emitDataChangedRecursive(const QModelIndex &index);
+    void emitDataChangedRecursive(ChannelNode *node);
 
 private:
     Session *session;
 
     std::unique_ptr<ChannelNode> root;
-    QHash<Snowflake, ChannelNode *> accountNodes;
-    QHash<Snowflake, Snowflake> accountVoiceChannels;
+    std::unordered_map<Snowflake, ChannelNode *> accountNodes;
+    std::unordered_map<Snowflake, Snowflake> accountVoiceChannels;
     int publishedMentionCount = 0;
-    mutable AvatarRequestTracker<QPersistentModelIndex> avatarTracker;
+    mutable AvatarRequestTracker<std::uint64_t> avatarTracker;
+    mutable std::uint64_t nextAvatarTarget = 1;
 
     Snowflake temporaryThreadId;
     Snowflake temporaryThreadAccount;

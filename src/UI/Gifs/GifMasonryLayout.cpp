@@ -1,8 +1,8 @@
 #include "UI/Gifs/GifMasonryLayout.hpp"
 
-#include <QtGlobal>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace Styx {
@@ -11,34 +11,34 @@ namespace GifMasonry {
 
 int gutterFor(int columns)
 {
-    return std::clamp(FewestColumns * RoomiestGutter / qMax(1, columns), TightestGutter, RoomiestGutter);
+    return std::clamp(FewestColumns * RoomiestGutter / std::max(1, columns), TightestGutter, RoomiestGutter);
 }
 
-QSize stillSizeFor(const QSize &naturalSize, int tileWidth)
+Platform::Size stillSizeFor(const Platform::Size &naturalSize, int tileWidth)
 {
     const int width = tileWidth <= DenseStillWidth ? DenseStillWidth : RoomyStillWidth;
-    const bool sized = naturalSize.width() > 0 && naturalSize.height() > 0;
-    return QSize(width, sized ? qMax(1, qRound(width * double(naturalSize.height()) / naturalSize.width())) : width);
+    const bool sized = naturalSize.width > 0 && naturalSize.height > 0;
+    return {width, sized ? std::max(1, int(std::lround(width * double(naturalSize.height) / naturalSize.width))) : width};
 }
 
-Arrangement arrange(const QList<QSize> &naturalSizes, int availableWidth, int requestedColumns)
+Arrangement arrange(const std::vector<Platform::Size> &naturalSizes, int availableWidth, int requestedColumns)
 {
-    const int columns = qMax(1, requestedColumns);
+    const int columns = std::max(1, requestedColumns);
     const int gutter = gutterFor(columns);
-    const int columnWidth = qMax(1, (availableWidth - 2 * gutter - gutter * (columns - 1)) / columns);
+    const int columnWidth = std::max(1, (availableWidth - 2 * gutter - gutter * (columns - 1)) / columns);
 
     Arrangement arrangement;
     arrangement.gutter = gutter;
     arrangement.tiles.reserve(naturalSizes.size());
     std::vector<int> columnBottoms(size_t(columns), gutter);
 
-    for (const QSize &natural : naturalSizes) {
-        const bool sized = natural.width() > 0 && natural.height() > 0;
-        const int height = sized ? qMax(1, qRound(columnWidth * double(natural.height()) / natural.width())) : columnWidth;
+    for (const Platform::Size &natural : naturalSizes) {
+        const bool sized = natural.width > 0 && natural.height > 0;
+        const int height = sized ? std::max(1, int(std::lround(columnWidth * double(natural.height) / natural.width))) : columnWidth;
 
         const auto shortest = std::min_element(columnBottoms.begin(), columnBottoms.end());
         const int column = int(shortest - columnBottoms.begin());
-        arrangement.tiles.append(QRect(gutter + column * (columnWidth + gutter), *shortest, columnWidth, height));
+        arrangement.tiles.push_back({float(gutter + column * (columnWidth + gutter)), float(*shortest), float(columnWidth), float(height)});
         *shortest += height + gutter;
     }
 
