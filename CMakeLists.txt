@@ -174,6 +174,7 @@ set(PROJECT_SOURCES
     src/Core/OrderedJson.cpp
     src/Core/ProxyConfig.cpp
     src/Core/ClientInstance.cpp
+    src/Core/Calls/CallStore.cpp
     src/Core/Session.cpp
     src/Core/Logging.cpp
     src/Core/MessageManager.cpp
@@ -232,7 +233,6 @@ set(PROJECT_SOURCES
     src/UI/Chat/EmojiTextObject.cpp
     src/UI/Chat/MessageTextDocument.cpp
     src/UI/Chat/MessageTextBrowser.cpp
-    src/UI/Dialogs/BasePopup.cpp
     src/UI/MemberList/MemberListModel.cpp
     src/UI/Gifs/GifMasonryLayout.cpp
     src/UI/Rml/EmojiGridModel.cpp
@@ -257,6 +257,7 @@ set(PROJECT_SOURCES
     src/Discord/RequestWorker.cpp
     src/Discord/CurlUtils.cpp
     src/Discord/CdnUrls.cpp
+    src/Discord/StreamKey.cpp
     src/Discord/ClientIdentity.cpp
     src/Discord/ContextProperties.cpp
     src/Proto/ProtoReader.cpp
@@ -268,6 +269,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/RmlRuntime.cpp
     src/UI/Rml/RmlView.cpp
     src/UI/Rml/Controller.cpp
+    src/UI/Rml/ContextMenu.cpp
     src/UI/Rml/Shell.cpp
     src/UI/Rml/RailController.cpp
     src/UI/Rml/ChannelListController.cpp
@@ -378,6 +380,24 @@ if(BUILD_TESTS)
     target_include_directories(TestOrderedJson PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME OrderedJsonTests COMMAND TestOrderedJson)
 
+    add_executable(TestCalls tests/tst_Calls.cpp src/Core/Calls/CallStore.cpp
+        src/Core/Snowflake.cpp src/Core/OrderedJson.cpp)
+    target_link_libraries(TestCalls PRIVATE Qt::Core Qt::Gui styx_platform Catch2::Catch2WithMain)
+    target_include_directories(TestCalls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(TestCalls PRIVATE /utf-8)
+    endif()
+    add_test(NAME CallTests COMMAND TestCalls)
+
+    add_executable(TestVoicePayloads tests/tst_VoicePayloads.cpp
+        src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
+    target_link_libraries(TestVoicePayloads PRIVATE Qt::Core Catch2::Catch2WithMain)
+    target_include_directories(TestVoicePayloads PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(TestVoicePayloads PRIVATE /utf-8)
+    endif()
+    add_test(NAME VoicePayloadTests COMMAND TestVoicePayloads)
+
     add_executable(TestProto tests/tst_Proto.cpp src/Proto/ProtoReader.cpp
         src/Proto/ProtoWriter.cpp src/Proto/FrecencySettings.cpp)
     target_link_libraries(TestProto PRIVATE styx_platform Catch2::Catch2WithMain)
@@ -403,8 +423,8 @@ if(BUILD_TESTS)
     target_include_directories(TestCdnUrls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME CdnUrlTests COMMAND TestCdnUrls)
 
-    qt_add_executable(TestRmlRender tests/tst_RmlRender.cpp
-        src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp
+    qt_add_executable(TestRmlRender tests/tst_RmlRender.cpp resources/resources.qrc
+        src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)

@@ -4,6 +4,11 @@
 add_library(styx_video_capture STATIC
     src/Core/Video/CameraCapture.cpp
     src/Core/Video/ScreenCapture.cpp
+    src/Core/Video/CardScaler.cpp
+    src/Core/Video/BroadcastPipeline.cpp
+    src/Core/Video/CameraPipeline.cpp
+    src/Core/Video/CameraSender.cpp
+    src/Core/Media/RgbScaler.cpp
     src/Core/Video/X11Capture.cpp
     src/Core/Video/PortalCapture.cpp
     src/Core/Audio/LoopbackCapture.cpp
@@ -12,7 +17,7 @@ target_include_directories(styx_video_capture PUBLIC "${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(styx_video_capture PUBLIC cxx_std_20)
 
 option(STYX_HARDWARE_TESTS "Enable capture tests that access physical devices" OFF)
-target_link_libraries(styx_video_capture PUBLIC styx_platform)
+target_link_libraries(styx_video_capture PUBLIC styx_platform styx_video_codecs styx_video_adaptation)
 
 target_link_libraries(styx_video_capture PUBLIC ffmpeg)
 target_compile_definitions(styx_video_capture PRIVATE STYX_HAVE_AVDEVICE=1)
@@ -47,4 +52,14 @@ if(BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     target_link_libraries(TestVideoCapture PRIVATE styx_video_capture Catch2::Catch2WithMain)
     target_include_directories(TestVideoCapture PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     add_test(NAME VideoCaptureTests COMMAND TestVideoCapture)
+
+    add_executable(TestLoopbackCapture tests/tst_LoopbackCapture.cpp)
+    target_link_libraries(TestLoopbackCapture PRIVATE styx_video_capture Catch2::Catch2WithMain)
+    target_include_directories(TestLoopbackCapture PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/vendor/miniaudio")
+    add_test(NAME LoopbackCaptureTests COMMAND TestLoopbackCapture)
+
+    add_executable(TestCameraCapture tests/tst_CameraCapture.cpp)
+    target_link_libraries(TestCameraCapture PRIVATE styx_video_capture Catch2::Catch2WithMain)
+    target_include_directories(TestCameraCapture PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    add_test(NAME CameraCaptureTests COMMAND TestCameraCapture)
 endif()

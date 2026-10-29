@@ -5,6 +5,8 @@ add_library(styx_video_protocol STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../src/Discord/Voice/Rtcp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../src/Discord/Voice/TransportFeedback.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../src/Discord/Voice/SendSideEstimator.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../src/Discord/Voice/VideoSender.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../src/Discord/Voice/RtpPacket.cpp
 )
 target_include_directories(styx_video_protocol PUBLIC ${CMAKE_CURRENT_LIST_DIR}/../src)
 target_compile_features(styx_video_protocol PUBLIC cxx_std_20)
@@ -16,7 +18,11 @@ if(BUILD_TESTS AND TARGET ffmpeg AND ENABLE_VOICE)
         add_executable(TestVideoProtocol
             ${CMAKE_CURRENT_LIST_DIR}/../tests/tst_RtpVideo.cpp
             ${CMAKE_CURRENT_LIST_DIR}/../tests/tst_SendSideEstimator.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/../tests/tst_VideoSend.cpp
         )
+        if(MSVC)
+            target_compile_options(TestVideoProtocol PRIVATE /utf-8)
+        endif()
         target_link_libraries(TestVideoProtocol PRIVATE styx_video_codecs styx_video_protocol Catch2::Catch2WithMain libdave MLSPP::mlspp MLSPP::bytes)
         target_include_directories(TestVideoProtocol PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../src)
         add_test(NAME VideoProtocolTests COMMAND TestVideoProtocol)
