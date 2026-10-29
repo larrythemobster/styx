@@ -101,6 +101,14 @@ Size fitWithin(Size source, Size bounds)
     const double scale = std::min(static_cast<double>(bounds.width) / source.width, static_cast<double>(bounds.height) / source.height);
     return {std::max(1, static_cast<int>(std::round(source.width * scale))), std::max(1, static_cast<int>(std::round(source.height * scale)))};
 }
+float primaryDevicePixelRatio()
+{
+#ifdef _WIN32
+    return static_cast<float>(GetDpiForSystem()) / 96.0f;
+#else
+    return 1.0f;
+#endif
+}
 Color Color::rgb(uint32_t value) { return {static_cast<uint8_t>(value >> 16), static_cast<uint8_t>(value >> 8), static_cast<uint8_t>(value), 255, true}; }
 Color Color::rgba(uint32_t value) { return {static_cast<uint8_t>(value >> 16), static_cast<uint8_t>(value >> 8), static_cast<uint8_t>(value), static_cast<uint8_t>(value >> 24), true}; }
 Color Color::parse(std::string_view text)

@@ -32,6 +32,7 @@ struct Rect {
     auto operator<=>(const Rect &) const = default;
 };
 Size fitWithin(Size source, Size bounds);
+float primaryDevicePixelRatio();
 
 struct Color {
     uint8_t r = 0, g = 0, b = 0, a = 255;

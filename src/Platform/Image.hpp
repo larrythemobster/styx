@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Native.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Styx::Platform {
@@ -25,6 +27,11 @@ public:
 
     // Decode image from file path to RGBA8.
     static std::optional<ImageBuffer> decodeFile(const std::filesystem::path &path);
+    // Read dimensions without decoding pixels.
+    static std::optional<Size> sizeFile(const std::filesystem::path &path);
+
+    static std::string encodePng(const ImageBuffer &image);
+    static bool isAnimated(const uint8_t *data, size_t size);
 
     // Scale image buffer to target dimensions using stb_image_resize2 linear filtering.
     static ImageBuffer scale(const ImageBuffer &src, int targetWidth, int targetHeight);
