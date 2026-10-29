@@ -1,71 +1,42 @@
 #pragma once
 
-#include <QHash>
-#include <QObject>
-#include <QPointer>
 #include <RmlUi/Core/EventListener.h>
+#include <cstdint>
 #include <deque>
 #include <optional>
+#include <string>
+#include <unordered_map>
 
 #include "Discord/CaptchaResolver.hpp"
+#include "Platform/Trackable.hpp"
+#include "Platform/Timer.hpp"
 
-class QTimer;
-
-namespace Rml {
-class Element;
-class ElementDocument;
-class Event;
-}
-
-namespace Styx {
-namespace UI {
-
+namespace Rml { class Element; class ElementDocument; class Event; }
+namespace Styx::UI {
 class Shell;
-namespace Rml {
-class View;
-}
+namespace Rml { class View; }
 
-class BrowserCaptchaResolver : public QObject, public Discord::CaptchaResolver
-{
-    Q_OBJECT
+class BrowserCaptchaResolver : public Platform::Trackable, public Discord::CaptchaResolver {
 public:
-    explicit BrowserCaptchaResolver(Shell &shell, QObject *parent = nullptr);
+    explicit BrowserCaptchaResolver(Shell &shell);
     ~BrowserCaptchaResolver() override;
-
-    void resolve(const Discord::CaptchaChallenge &challenge,
-                 const Core::ProxyConfig &proxy,
-                 Discord::CaptchaResolver::Callback cb) override;
+    void resolve(const Discord::CaptchaChallenge &, const Core::ProxyConfig &, Callback) override;
     void notifyConcluded() override;
-
 private:
-    enum class State {
-        Idle, // nothing is happening
-        Waiting, // modal open, waiting for a solution
-        Verifying, // token delivered, waiting for replay of original request
-    };
-
-    struct PendingJob
-    {
-        Discord::CaptchaChallenge challenge;
-        Core::ProxyConfig proxy;
-        Discord::CaptchaResolver::Callback cb;
-    };
-
+    enum class State { Idle, Waiting, Verifying };
+    struct PendingJob { Discord::CaptchaChallenge challenge; Core::ProxyConfig proxy; Callback cb; };
     void startNext();
     void beginChallenge(bool isRetry);
     void deliverSolution(const Discord::CaptchaSolution &solution);
     void cancelCurrent();
     void pollSockets();
     void handleClient(intptr_t clientSock);
-
     bool ensureModal();
-    void updateModal(const QString &message, bool canOpen);
+    void updateModal(const std::string &message, bool canOpen);
     void openBrowser();
     void processEvent(::Rml::Event &event);
     void documentDetached(::Rml::Element *element);
-
-    struct ModalListener final : ::Rml::EventListener
-    {
+    struct ModalListener final : ::Rml::EventListener {
         explicit ModalListener(BrowserCaptchaResolver &owner) : owner(owner) {}
         void ProcessEvent(::Rml::Event &event) override;
         void OnDetach(::Rml::Element *element) override;
@@ -74,34 +45,26 @@ private:
     void teardownServer();
     void stopTtl();
     void closeModal();
-
-    QByteArray buildHarnessHtml() const;
-    QString harnessUrl() const;
+    std::string buildHarnessHtml() const;
+    std::string harnessUrl() const;
 
     Shell &shell;
-
     std::deque<PendingJob> queue;
     State state = State::Idle;
-
     intptr_t serverSocket{-1};
     uint64_t timerId{0};
-    quint16 port = 0;
-    QString nonce;
+    uint16_t port = 0;
+    std::string nonce;
     Discord::CaptchaChallenge current;
     Core::ProxyConfig currentProxy;
-    Discord::CaptchaResolver::Callback currentCb;
-
+    Callback currentCb;
     ::Rml::ElementDocument *modal = nullptr;
-    QPointer<Rml::View> view;
-    bool viewDestroyed = false;
+    Rml::View *view = nullptr;
     ModalListener modalListener{*this};
     bool proxyWarning = false;
     bool shuttingDown = false;
-    QString currentMessage;
-    QTimer *ttlTimer = nullptr;
-
-    QHash<intptr_t, QByteArray> buffers;
+    std::string currentMessage;
+    Platform::Timer ttlTimer;
+    std::unordered_map<intptr_t, std::string> buffers;
 };
-
-} // namespace UI
-} // namespace Styx
+}

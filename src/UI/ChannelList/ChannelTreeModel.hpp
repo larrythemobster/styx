@@ -106,6 +106,7 @@ private:
     ChannelNode *findGuildNodeById(Snowflake guildId, ChannelNode *accountNode);
     ChannelNode *findFolderNodeById(ChannelNode *accountNode, Snowflake folderId);
     ChannelNode *findCategoryNode(Snowflake categoryId, ChannelNode *guildNode);
+    ChannelNode *accountNode(Snowflake accountId) const;
     void insertChildAt(ChannelNode *parent, int row, std::unique_ptr<ChannelNode> node);
     void emitDataChangedRecursive(ChannelNode *node);
 

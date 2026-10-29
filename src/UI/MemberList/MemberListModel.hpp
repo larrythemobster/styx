@@ -53,6 +53,7 @@ private:
     void notifyRows(const std::vector<int> &rows);
 
     Platform::Guard<Core::MemberListManager> manager;
+    Platform::Guard<Core::PresenceManager> presenceManager;
     mutable AvatarRequestTracker<Core::Snowflake> avatarTracker;
     Core::ImageManager *imageManager;
     Core::Snowflake accountId;

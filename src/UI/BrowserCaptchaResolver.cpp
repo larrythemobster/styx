@@ -1,12 +1,12 @@
 #include "BrowserCaptchaResolver.hpp"
 
-#include <QDesktopServices>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QRandomGenerator>
-#include <QTimer>
-#include <QUrl>
-#include <QUuid>
+#include <algorithm>
+#include <cctype>
+#include <sstream>
+#include <vector>
+#include <nlohmann/json.hpp>
+#include "Platform/Desktop.hpp"
+#include "Platform/Native.hpp"
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
@@ -18,6 +18,28 @@
 #include "Platform/Dispatcher.hpp"
 #include "UI/Rml/RmlView.hpp"
 #include "UI/Rml/Shell.hpp"
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using native_socket_t = SOCKET;
+constexpr native_socket_t kInvalidNativeSocket = INVALID_SOCKET;
+inline int closeNativeSocket(native_socket_t s) { return ::closesocket(s); }
+inline bool setNonBlocking(native_socket_t s) { u_long mode = 1; return ioctlsocket(s, FIONBIO, &mode) == 0; }
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+using native_socket_t = int;
+constexpr native_socket_t kInvalidNativeSocket = -1;
+inline int closeNativeSocket(native_socket_t s) { return ::close(s); }
+inline bool setNonBlocking(native_socket_t s) { int flags = fcntl(s, F_GETFL, 0); return fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0; }
+#endif
 
 namespace Styx {
 namespace UI {
@@ -72,67 +94,21 @@ var _poll = setInterval(function () {
 </html>
 )HTML";
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
-using native_socket_t = SOCKET;
-constexpr native_socket_t kInvalidNativeSocket = INVALID_SOCKET;
-inline int closeNativeSocket(native_socket_t s) { return ::closesocket(s); }
-inline bool setNonBlocking(native_socket_t s) {
-    u_long mode = 1;
-    return ioctlsocket(s, FIONBIO, &mode) == 0;
-}
-#else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <fcntl.h>
-using native_socket_t = int;
-constexpr native_socket_t kInvalidNativeSocket = -1;
-inline int closeNativeSocket(native_socket_t s) { return ::close(s); }
-inline bool setNonBlocking(native_socket_t s) {
-    int flags = fcntl(s, F_GETFL, 0);
-    return fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
-}
-#endif
 
-static void sendHttp(intptr_t clientSock, int code, const QByteArray &contentType,
-                     const QByteArray &body)
+static void sendHttp(intptr_t clientSock, int code, const std::string &contentType,
+                     const std::string &body)
 {
-    QByteArray status;
-    switch (code) {
-    case 200:
-        status = "200 OK";
-        break;
-    case 403:
-        status = "403 Forbidden";
-        break;
-    case 404:
-        status = "404 Not Found";
-        break;
-    default:
-        status = "400 Bad Request";
-        break;
-    }
-
-    QByteArray resp = "HTTP/1.1 " + status + "\r\n";
-    resp += "Content-Type: " + contentType + "\r\n";
-    resp += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
-    resp += "Cache-Control: no-store\r\n";
-    resp += "Connection: close\r\n";
-    resp += "\r\n";
-    resp += body;
-
-    ::send(static_cast<native_socket_t>(clientSock), resp.constData(), static_cast<int>(resp.size()), 0);
+    const char *status = code == 200 ? "200 OK" : code == 403 ? "403 Forbidden" :
+                         code == 404 ? "404 Not Found" : "400 Bad Request";
+    std::string resp = std::string("HTTP/1.1 ") + status + "\r\nContent-Type: " + contentType +
+                       "\r\nContent-Length: " + std::to_string(body.size()) +
+                       "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" + body;
+    ::send(static_cast<native_socket_t>(clientSock), resp.data(), static_cast<int>(resp.size()), 0);
     closeNativeSocket(static_cast<native_socket_t>(clientSock));
 }
 
-BrowserCaptchaResolver::BrowserCaptchaResolver(Shell &shell, QObject *parent)
-    : QObject(parent), shell(shell)
+BrowserCaptchaResolver::BrowserCaptchaResolver(Shell &shell)
+    : shell(shell)
 {
 }
 
@@ -161,41 +137,33 @@ void BrowserCaptchaResolver::resolve(const Discord::CaptchaChallenge &challenge,
                                      const Core::ProxyConfig &proxy,
                                      Discord::CaptchaResolver::Callback cb)
 {
-    QMetaObject::invokeMethod(
-            this,
-            [this, challenge, proxy, cb]() {
-                // reuse since it got rejected
-                if (state == State::Verifying) {
-                    current = challenge;
-                    currentProxy = proxy;
-                    currentCb = cb;
-                    beginChallenge(true);
-                    return;
-                }
-
-                queue.push_back({ challenge, proxy, cb });
-                if (state == State::Idle)
-                    startNext();
-            },
-            Qt::QueuedConnection);
+    Platform::Guard<BrowserCaptchaResolver> guard(this);
+    Platform::Dispatcher::main().post([guard, challenge, proxy, cb = std::move(cb)]() mutable {
+        if (!guard) return;
+        if (guard->state == State::Verifying) {
+            guard->current = challenge;
+            guard->currentProxy = proxy;
+            guard->currentCb = std::move(cb);
+            guard->beginChallenge(true);
+            return;
+        }
+        guard->queue.push_back({challenge, proxy, std::move(cb)});
+        if (guard->state == State::Idle) guard->startNext();
+    });
 }
 
 void BrowserCaptchaResolver::notifyConcluded()
 {
-    QMetaObject::invokeMethod(
-            this,
-            [this]() {
-                if (state != State::Verifying)
-                    return;
-                state = State::Idle;
-                currentCb = nullptr;
-                stopTtl();
-                teardownServer();
-                closeModal();
-                if (!queue.empty())
-                    startNext();
-            },
-            Qt::QueuedConnection);
+    Platform::Guard<BrowserCaptchaResolver> guard(this);
+    Platform::Dispatcher::main().post([guard]() {
+        if (!guard || guard->state != State::Verifying) return;
+        guard->state = State::Idle;
+        guard->currentCb = nullptr;
+        guard->stopTtl();
+        guard->teardownServer();
+        guard->closeModal();
+        if (!guard->queue.empty()) guard->startNext();
+    });
 }
 
 void BrowserCaptchaResolver::startNext()
@@ -211,8 +179,8 @@ void BrowserCaptchaResolver::startNext()
     currentCb = job.cb;
 
     // hcaptcha only for now
-    if (current.service != QLatin1String("hcaptcha")) {
-        qCWarning(LogUI) << "Unsupported captcha service:" << current.service;
+    if (current.service != "hcaptcha") {
+        Core::log(Core::LogLevel::Warning, LogUI) << "Unsupported captcha service:" << current.service;
         Discord::CaptchaResolver::Callback cb = std::move(currentCb);
         currentCb = nullptr;
         if (cb)
@@ -223,7 +191,7 @@ void BrowserCaptchaResolver::startNext()
 
     state = State::Waiting;
     if (!ensureModal()) {
-        qCWarning(LogUI) << "Unable to open captcha prompt";
+        Core::log(Core::LogLevel::Warning, LogUI) << "Unable to open captcha prompt";
         cancelCurrent();
         return;
     }
@@ -242,11 +210,11 @@ void BrowserCaptchaResolver::beginChallenge(bool isRetry)
     teardownServer();
 
     state = State::Waiting;
-    nonce = QUuid::createUuid().toString(QUuid::WithoutBraces) + QString::number(QRandomGenerator::global()->generate64(), 16);
+    nonce = Platform::randomUuid() + Platform::randomUuid();
 
     native_socket_t sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == kInvalidNativeSocket) {
-        qCWarning(LogUI) << "Failed to create captcha loopback socket";
+        Core::log(Core::LogLevel::Warning, LogUI) << "Failed to create captcha loopback socket";
         cancelCurrent();
         return;
     }
@@ -258,7 +226,7 @@ void BrowserCaptchaResolver::beginChallenge(bool isRetry)
 
     if (::bind(sock, reinterpret_cast<sockaddr *>(&bindAddr), sizeof(bindAddr)) != 0 ||
         ::listen(sock, 5) != 0) {
-        qCWarning(LogUI) << "Failed to bind/listen captcha loopback server";
+        Core::log(Core::LogLevel::Warning, LogUI) << "Failed to bind/listen captcha loopback server";
         closeNativeSocket(sock);
         cancelCurrent();
         return;
@@ -279,19 +247,13 @@ void BrowserCaptchaResolver::beginChallenge(bool isRetry)
     });
     proxyWarning = false;
     updateModal(isRetry
-                    ? tr("Failed. Click below to open your browser and try again.")
-                    : tr("Discord wants you to complete a captcha to continue. "
-                         "Click below to open it in your browser."),
+                    ? "Failed. Click below to open your browser and try again."
+                    : "Discord wants you to complete a captcha to continue. Click below to open it in your browser.",
                 true);
-
-    stopTtl();
-    ttlTimer = new QTimer(this);
-    ttlTimer->setSingleShot(true);
-    connect(ttlTimer, &QTimer::timeout, this, [this]() {
-        qCWarning(LogUI) << "Captcha timed out";
+    ttlTimer.start(std::chrono::seconds(120), false, [this]() {
+        Core::log(Core::LogLevel::Warning, LogUI) << "Captcha timed out";
         cancelCurrent();
     });
-    ttlTimer->start(120000);
 }
 
 void BrowserCaptchaResolver::deliverSolution(const Discord::CaptchaSolution &solution)
@@ -305,7 +267,7 @@ void BrowserCaptchaResolver::deliverSolution(const Discord::CaptchaSolution &sol
     stopTtl();
 
     proxyWarning = false;
-    updateModal(tr("Verifying..."), false);
+    updateModal("Verifying...", false);
 
     Discord::CaptchaResolver::Callback cb = std::move(currentCb);
     currentCb = nullptr;
@@ -348,10 +310,11 @@ void BrowserCaptchaResolver::pollSockets()
         if (client == kInvalidNativeSocket)
             break;
         setNonBlocking(client);
-        buffers.insert(static_cast<intptr_t>(client), QByteArray());
+        buffers.emplace(static_cast<intptr_t>(client), std::string());
     }
 
-    QList<intptr_t> clients = buffers.keys();
+    std::vector<intptr_t> clients;
+    for (const auto &[socket, buffer] : buffers) clients.push_back(socket);
     for (intptr_t clientSock : clients) {
         char buf[4096];
         int n = ::recv(static_cast<native_socket_t>(clientSock), buf, sizeof(buf), 0);
@@ -360,18 +323,18 @@ void BrowserCaptchaResolver::pollSockets()
             handleClient(clientSock);
         } else if (n == 0) {
             closeNativeSocket(static_cast<native_socket_t>(clientSock));
-            buffers.remove(clientSock);
+            buffers.erase(clientSock);
         } else {
 #ifdef _WIN32
             int err = WSAGetLastError();
             if (err != WSAEWOULDBLOCK) {
                 closeNativeSocket(static_cast<native_socket_t>(clientSock));
-                buffers.remove(clientSock);
+                buffers.erase(clientSock);
             }
 #else
             if (errno != EWOULDBLOCK && errno != EAGAIN) {
                 closeNativeSocket(static_cast<native_socket_t>(clientSock));
-                buffers.remove(clientSock);
+                buffers.erase(clientSock);
             }
 #endif
         }
@@ -380,51 +343,54 @@ void BrowserCaptchaResolver::pollSockets()
 
 void BrowserCaptchaResolver::handleClient(intptr_t clientSock)
 {
-    QByteArray &buf = buffers[clientSock];
-
+    auto &buf = buffers[clientSock];
     if (buf.size() > 64 * 1024) {
-        buffers.remove(clientSock);
+        buffers.erase(clientSock);
         sendHttp(clientSock, 400, "text/plain", "too large");
         return;
     }
-
-    const int headerEnd = buf.indexOf("\r\n\r\n");
-    if (headerEnd < 0)
-        return;
-
-    const QByteArray header = buf.left(headerEnd);
-    const QList<QByteArray> lines = header.split('\n');
-    if (lines.isEmpty())
-        return;
-
-    const QList<QByteArray> reqLine = lines.first().trimmed().split(' ');
-    if (reqLine.size() < 2) {
-        buffers.remove(clientSock);
+    const auto headerEnd = buf.find("\r\n\r\n");
+    if (headerEnd == std::string::npos) return;
+    std::istringstream headers(buf.substr(0, headerEnd));
+    std::string line, method, path;
+    if (!std::getline(headers, line)) return;
+    std::istringstream request(line);
+    if (!(request >> method >> path)) {
+        buffers.erase(clientSock);
         sendHttp(clientSock, 400, "text/plain", "bad request");
         return;
     }
-    const QByteArray method = reqLine[0];
-    const QByteArray path = reqLine[1];
-
-    int contentLength = 0;
-    QByteArray origin;
-    for (const QByteArray &line : lines) {
-        const QByteArray l = line.trimmed();
-        if (l.toLower().startsWith("content-length:"))
-            contentLength = l.mid(15).trimmed().toInt();
-        else if (l.toLower().startsWith("origin:"))
-            origin = l.mid(7).trimmed();
+    size_t contentLength = 0;
+    std::string origin;
+    while (std::getline(headers, line)) {
+        const auto colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        std::string key = line.substr(0, colon);
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+        auto value = line.substr(colon + 1);
+        const auto first = value.find_first_not_of(" \t\r");
+        const auto last = value.find_last_not_of(" \t\r");
+        value = first == std::string::npos ? "" : value.substr(first, last - first + 1);
+        if (key == "content-length") {
+            try { contentLength = std::stoull(value); }
+            catch (...) {
+                buffers.erase(clientSock);
+                sendHttp(clientSock, 400, "text/plain", "bad request");
+                return;
+            }
+            if (contentLength > 64 * 1024) {
+                buffers.erase(clientSock);
+                sendHttp(clientSock, 400, "text/plain", "too large");
+                return;
+            }
+        } else if (key == "origin") origin = value;
     }
-
-    const int bodyStart = headerEnd + 4;
-    if (buf.size() - bodyStart < contentLength)
-        return;
-
-    const QByteArray body = buf.mid(bodyStart, contentLength);
-    buffers.remove(clientSock);
-
-    const QByteArray expectedPath = "/" + nonce.toUtf8();
-    if (nonce.isEmpty() || !path.startsWith(expectedPath)) {
+    const auto bodyStart = headerEnd + 4;
+    if (buf.size() - bodyStart < contentLength) return;
+    const auto body = buf.substr(bodyStart, contentLength);
+    buffers.erase(clientSock);
+    const std::string expectedPath = "/" + nonce;
+    if (nonce.empty() || !path.starts_with(expectedPath)) {
         sendHttp(clientSock, 404, "text/plain", "not found");
         return;
     }
@@ -435,20 +401,20 @@ void BrowserCaptchaResolver::handleClient(intptr_t clientSock)
     }
 
     if (method == "POST" && path == expectedPath + "/token") {
-        const QByteArray expectedOrigin = "http://127.0.0.1:" + QByteArray::number(port);
-        if (!origin.isEmpty() && origin != expectedOrigin) {
+        const std::string expectedOrigin = "http://127.0.0.1:" + std::to_string(port);
+        if (!origin.empty() && origin != expectedOrigin) {
             sendHttp(clientSock, 403, "text/plain", "bad origin");
             return;
         }
 
         sendHttp(clientSock, 200, "application/json", "{\"ok\":true}");
 
-        const QJsonObject obj = QJsonDocument::fromJson(body).object();
-        const QString token = obj.value("token").toString();
-        if (token.isEmpty()) {
-            qCWarning(LogUI) << "Captcha harness reported an error:"
-                             << obj.value("error").toString();
-            updateModal(tr("The captcha could not be completed. Open your browser and try again."), true);
+        const auto obj = nlohmann::json::parse(body, nullptr, false);
+        const auto token = obj.is_object() && obj.contains("token") && obj["token"].is_string()
+            ? obj["token"].get<std::string>() : std::string();
+        if (token.empty()) {
+            Core::log(Core::LogLevel::Warning, LogUI) << "Captcha harness reported an error";
+            updateModal("The captcha could not be completed. Open your browser and try again.", true);
             return;
         }
 
@@ -469,7 +435,7 @@ void BrowserCaptchaResolver::teardownServer()
         Platform::Dispatcher::main().cancelTimer(timerId);
         timerId = 0;
     }
-    for (intptr_t clientSock : buffers.keys()) {
+    for (const auto &[clientSock, buffer] : buffers) {
         closeNativeSocket(static_cast<native_socket_t>(clientSock));
     }
     buffers.clear();
@@ -484,11 +450,7 @@ void BrowserCaptchaResolver::teardownServer()
 
 void BrowserCaptchaResolver::stopTtl()
 {
-    if (ttlTimer) {
-        ttlTimer->stop();
-        ttlTimer->deleteLater();
-        ttlTimer = nullptr;
-    }
+    ttlTimer.stop();
 }
 
 void BrowserCaptchaResolver::ModalListener::ProcessEvent(::Rml::Event &event)
@@ -507,10 +469,10 @@ void BrowserCaptchaResolver::documentDetached(::Rml::Element *element)
         return;
     modal = nullptr;
     if (!shuttingDown) {
-        QMetaObject::invokeMethod(this, [this]() {
-            if (!modal && state != State::Idle)
-                cancelCurrent();
-        }, Qt::QueuedConnection);
+        Platform::Guard<BrowserCaptchaResolver> guard(this);
+        Platform::Dispatcher::main().post([guard]() {
+            if (guard && !guard->modal && guard->state != State::Idle) guard->cancelCurrent();
+        });
     }
 }
 
@@ -518,13 +480,7 @@ bool BrowserCaptchaResolver::ensureModal()
 {
     if (modal)
         return true;
-    if (viewDestroyed)
-        return false;
-    if (!view) {
-        view = shell.view();
-        if (view)
-            connect(view, &QObject::destroyed, this, [this]() { viewDestroyed = true; });
-    }
+    view = shell.view();
     if (!view || !view->context())
         return false;
     modal = view->context()->LoadDocument(":/ui/captcha_modal.rml");
@@ -535,21 +491,21 @@ bool BrowserCaptchaResolver::ensureModal()
     return true;
 }
 
-void BrowserCaptchaResolver::updateModal(const QString &message, bool canOpen)
+void BrowserCaptchaResolver::updateModal(const std::string &message, bool canOpen)
 {
     currentMessage = message;
     if (!modal)
         return;
     if (auto *title = modal->GetElementById("captcha-title"))
-        title->SetInnerRML(tr("Verification required").toHtmlEscaped().toStdString());
+        title->SetInnerRML("Verification required");
     if (auto *element = modal->GetElementById("captcha-message"))
-        element->SetInnerRML(message.toHtmlEscaped().toStdString());
+        element->SetInnerRML(Platform::htmlEscape(message));
     if (auto *button = modal->GetElementById("captcha-open")) {
         button->SetClass("disabled", !canOpen);
         button->SetPseudoClass("disabled", !canOpen);
     }
     if (auto *button = modal->GetElementById("captcha-open"))
-        button->SetInnerRML(tr("Open in browser").toHtmlEscaped().toStdString());
+        button->SetInnerRML("Open in browser");
     if (view)
         view->requestRender();
 }
@@ -559,10 +515,10 @@ void BrowserCaptchaResolver::openBrowser()
     if (state != State::Waiting)
         return;
     proxyWarning = false;
-    if (QDesktopServices::openUrl(QUrl(harnessUrl())))
-        updateModal(tr("Waiting for you to finish in your browser..."), true);
+    if (Platform::openUrl(harnessUrl()))
+        updateModal("Waiting for you to finish in your browser...", true);
     else
-        updateModal(tr("Could not open the browser. Please try again."), true);
+        updateModal("Could not open the browser. Please try again.", true);
 }
 
 void BrowserCaptchaResolver::processEvent(::Rml::Event &event)
@@ -603,15 +559,14 @@ void BrowserCaptchaResolver::processEvent(::Rml::Event &event)
         }
         proxyWarning = true;
         if (auto *title = modal->GetElementById("captcha-title"))
-            title->SetInnerRML(tr("Proxy will be bypassed").toHtmlEscaped().toStdString());
+            title->SetInnerRML("Proxy will be bypassed");
         if (auto *message = modal->GetElementById("captcha-message")) {
             message->SetInnerRML(
-                tr("This account connects through <b>%1</b>, but the captcha opens in your "
-                   "normal browser, which ignores that proxy.<br/><br/>"
-                   "The captcha provider will see your real IP address. Continue?")
-                    .arg(currentProxy.toDisplayString().toHtmlEscaped()).toStdString());
+                "This account connects through <b>" + Platform::htmlEscape(currentProxy.toDisplayString()) +
+                "</b>, but the captcha opens in your normal browser, which ignores that proxy.<br/><br/>"
+                "The captcha provider will see your real IP address. Continue?");
         }
-        target->SetInnerRML(tr("Open Anyway").toHtmlEscaped().toStdString());
+        target->SetInnerRML("Open Anyway");
         if (view)
             view->requestRender();
     }
@@ -628,23 +583,20 @@ void BrowserCaptchaResolver::closeModal()
     }
 }
 
-QString BrowserCaptchaResolver::harnessUrl() const
+std::string BrowserCaptchaResolver::harnessUrl() const
 {
-    return QStringLiteral("http://127.0.0.1:%1/%2").arg(port).arg(nonce);
+    return "http://127.0.0.1:" + std::to_string(port) + "/" + nonce;
 }
 
-QByteArray BrowserCaptchaResolver::buildHarnessHtml() const
+std::string BrowserCaptchaResolver::buildHarnessHtml() const
 {
-    QJsonObject cfg;
-    cfg["sitekey"] = current.sitekey;
-    cfg["rqdata"] = current.rqdata;
-    cfg["invisible"] = current.shouldServeInvisible;
-    cfg["tokenUrl"] = QStringLiteral("http://127.0.0.1:%1/%2/token").arg(port).arg(nonce);
-
-    const QByteArray cfgJson = QJsonDocument(cfg).toJson(QJsonDocument::Compact);
-
-    QByteArray html = kHarnessTemplate;
-    html.replace(QByteArrayLiteral("__CONFIG_JSON__"), cfgJson);
+    nlohmann::json cfg = {{"sitekey", current.sitekey}, {"rqdata", current.rqdata},
+                          {"invisible", current.shouldServeInvisible}, {"tokenUrl", harnessUrl() + "/token"}};
+    auto json = cfg.dump();
+    for (size_t pos = 0; (pos = json.find('<', pos)) != std::string::npos; pos += 6)
+        json.replace(pos, 1, "\\u003c");
+    std::string html = kHarnessTemplate;
+    html.replace(html.find("__CONFIG_JSON__"), sizeof("__CONFIG_JSON__") - 1, json);
     return html;
 }
 

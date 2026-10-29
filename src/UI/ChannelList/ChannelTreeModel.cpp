@@ -174,13 +174,9 @@ void ChannelTreeModel::addAccount(const Styx::Core::AccountInfo &account)
     if (accountNodes.contains(account.id))
         return;
 
-    auto *instance = session->client(account.id);
-
-    beginInsertRows({}, root->children.size(), root->children.size());
-
     auto accNode = std::make_unique<ChannelNode>();
     accNode->id = account.id;
-    accNode->name = account.displayName.isEmpty() ? account.username : account.displayName;
+    accNode->name = account.displayName.empty() ? account.username : account.displayName;
     accNode->type = ChannelNode::Type::Account;
 
     auto dmNode = std::make_unique<ChannelNode>();
@@ -189,8 +185,8 @@ void ChannelTreeModel::addAccount(const Styx::Core::AccountInfo &account)
     accNode->addChild(std::move(dmNode));
 
     accountNodes[account.id] = root->addChild(std::move(accNode));
+    reset.publish();
 
-    endInsertRows();
 }
 
 void ChannelTreeModel::removeAccount(Snowflake accountId)
@@ -198,26 +194,18 @@ void ChannelTreeModel::removeAccount(Snowflake accountId)
     if (!accountNodes.contains(accountId))
         return;
 
-    ChannelNode *nodeToRemove = accountNodes[accountId];
-    QModelIndex idx = indexForNode(nodeToRemove);
-
-    if (idx.isValid()) {
-        beginRemoveRows(QModelIndex(), idx.row(), idx.row());
-        root->children.erase(root->children.begin() + idx.row());
-        accountNodes.remove(accountId);
-        endRemoveRows();
-    }
-    accountVoiceChannels.remove(accountId);
+    ChannelNode *nodeToRemove = accountNodes.at(accountId);
+    accountNodes.erase(accountId);
+    accountVoiceChannels.erase(accountId);
+    removeChildRow(root.get(), nodeToRemove);
     publishTotalMentionCount();
 }
 
 void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
 {
-    ChannelNode *accNode = accountNodes.value(ready.user->id, nullptr);
+    ChannelNode *accNode = accountNode(ready.user->id);
     if (!accNode)
         return;
-
-    QModelIndex accIndex = indexForNode(accNode);
 
     auto *instance = session->client(ready.user->id);
     if (!instance)
@@ -225,9 +213,9 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
 
     const auto &settings = instance->discord()->getSettings();
 
-    QHash<Core::Snowflake, const Discord::GatewayGuild *> guildMap;
+    std::unordered_map<Core::Snowflake, const Discord::GatewayGuild *> guildMap;
     for (const auto &guild : ready.guilds.get())
-        guildMap.insert(guild.properties->id, &guild);
+        guildMap.emplace(guild.properties->id.get(), &guild);
 
     // folders and unfolder'd guilds
     std::vector<std::unique_ptr<ChannelNode>> topLevelNodes;
@@ -235,7 +223,7 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
     if (settings.guildFolders.has_value() && !settings.guildFolders->folders.empty()) {
         const auto &folders = settings.guildFolders->folders;
 
-        QSet<Core::Snowflake> guildIdsInFolders;
+        std::unordered_set<Core::Snowflake> guildIdsInFolders;
         for (const auto &folder : folders)
             for (const auto &guildId : folder.guildIds)
                 guildIdsInFolders.insert(guildId);
@@ -265,7 +253,7 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
     } else if (settings.guildFolders.has_value() &&
                !settings.guildFolders->guildPositions.empty()) {
         const auto &positions = settings.guildFolders->guildPositions;
-        QSet<Core::Snowflake> positioned;
+        std::unordered_set<Core::Snowflake> positioned;
         for (const auto &id : positions)
             positioned.insert(id);
 
@@ -283,18 +271,10 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
             topLevelNodes.push_back(createGuildNode(*it, instance));
     }
 
-    if (topLevelNodes.empty())
-        return;
-
-    int startRow = accNode->children.size();
-    int endRow = startRow + topLevelNodes.size() - 1;
-
-    beginInsertRows(accIndex, startRow, endRow);
     for (auto &node : topLevelNodes)
         accNode->addChild(std::move(node));
-    endInsertRows();
 
-    if (ready.privateChannels.hasValue() && !ready.privateChannels->isEmpty()) {
+    if (ready.privateChannels.hasValue() && !ready.privateChannels->empty()) {
         ChannelNode *dmHeader = nullptr;
         for (const auto &child : accNode->children) {
             if (child->type == ChannelNode::Type::DMHeader) {
@@ -310,11 +290,6 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
 
         const auto &dms = ready.privateChannels.get();
 
-        QModelIndex dmHeaderIndex = indexForNode(dmHeader);
-        int dmStartRow = 0;
-        int dmEndRow = dms.size() - 1;
-
-        beginInsertRows(dmHeaderIndex, dmStartRow, dmEndRow);
         for (const auto &channel : dms) {
             auto dmNode = std::make_unique<ChannelNode>();
             dmNode->id = channel.id;
@@ -326,21 +301,21 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
 
             if (channel.recipients.hasValue()) {
                 for (const auto &user : channel.recipients.get())
-                    dmNode->recipientIds.append(user.id.get());
+                    dmNode->recipientIds.push_back(user.id.get());
             } else if (channel.recipientIds.hasValue()) {
                 dmNode->recipientIds = channel.recipientIds.get();
             }
 
             if (channel.type == Discord::ChannelType::DM && dmNode->recipientIds.size() == 1) {
-                dmNode->dmRecipientId = dmNode->recipientIds.first();
+                dmNode->dmRecipientId = dmNode->recipientIds.front();
 
-                if (channel.recipients.hasValue() && !channel.recipients->isEmpty()) {
-                    const auto &user = channel.recipients->first();
+                if (channel.recipients.hasValue() && !channel.recipients->empty()) {
+                    const auto &user = channel.recipients->front();
                     if (user.avatar.hasValue())
                         dmNode->dmAvatarHash = user.avatar.get();
                 }
 
-                if (dmNode->dmAvatarHash.isEmpty()) {
+                if (dmNode->dmAvatarHash.empty()) {
                     auto userOpt = userRepo.getUser(dmNode->dmRecipientId);
                     if (userOpt.has_value() && userOpt->avatar.hasValue())
                         dmNode->dmAvatarHash = userOpt->avatar.get();
@@ -352,10 +327,10 @@ void ChannelTreeModel::populateFromReady(const Discord::Ready &ready)
 
             dmHeader->addChild(std::move(dmNode));
         }
-        endInsertRows();
     }
 
     refreshReadStates(accNode, instance);
+    reset.publish();
     publishTotalMentionCount();
 }
 
@@ -379,8 +354,8 @@ std::unique_ptr<ChannelNode> ChannelTreeModel::createGuildNode(const Discord::Ga
     if (guild.properties->rulesChannelId.hasValue() && guild.properties->rulesChannelId->isValid())
         guildNode->rulesChannelId = guild.properties->rulesChannelId.get();
 
-    QHash<Snowflake, ChannelNode *> categoryMap;
-    QHash<Snowflake, ChannelNode *> textChannelMap;
+    std::unordered_map<Snowflake, ChannelNode *> categoryMap;
+    std::unordered_map<Snowflake, ChannelNode *> textChannelMap;
     std::vector<std::unique_ptr<ChannelNode>> categories;
     std::vector<std::unique_ptr<ChannelNode>> orphanChannels;
 
@@ -428,7 +403,7 @@ std::unique_ptr<ChannelNode> ChannelTreeModel::createGuildNode(const Discord::Ga
             placed = true;
         }
         if (placed && *nodeType == ChannelNode::Type::Channel)
-            textChannelMap.insert(channel.id.get(), rawNode);
+            textChannelMap.emplace(channel.id.get(), rawNode);
     }
 
     if (guild.threads.hasValue()) {
@@ -437,12 +412,12 @@ std::unique_ptr<ChannelNode> ChannelTreeModel::createGuildNode(const Discord::Ga
                 continue;
             if (instance && !instance->readState()->isThreadRelevant(thread))
                 continue;
-            auto it = textChannelMap.constFind(thread.parentId.get());
-            if (it != textChannelMap.constEnd())
-                it.value()->addChild(makeThreadNode(thread));
+            auto it = textChannelMap.find(thread.parentId.get());
+            if (it != textChannelMap.end())
+                it->second->addChild(makeThreadNode(thread));
         }
-        for (auto it = textChannelMap.begin(); it != textChannelMap.end(); ++it)
-            std::sort(it.value()->children.begin(), it.value()->children.end(),
+        for (auto &[id, channel] : textChannelMap)
+            std::sort(channel->children.begin(), channel->children.end(),
                       [](const auto &a, const auto &b) { return a->lastMessageId > b->lastMessageId; });
     }
 
@@ -465,7 +440,7 @@ std::unique_ptr<ChannelNode> ChannelTreeModel::makeThreadNode(const Discord::Cha
 {
     auto node = std::make_unique<ChannelNode>();
     node->id = thread.id;
-    node->name = thread.name.hasValue() ? thread.name.get() : QString();
+    node->name = thread.name.hasValue() ? thread.name.get() : std::string();
     node->type = ChannelNode::Type::Thread;
     node->parentId = thread.parentId.hasValue() ? thread.parentId.get() : Core::Snowflake();
     node->isArchived = thread.isArchived();
@@ -476,7 +451,7 @@ std::unique_ptr<ChannelNode> ChannelTreeModel::makeThreadNode(const Discord::Cha
 
 ChannelNode *ChannelTreeModel::insertThreadNode(const Discord::Channel &thread, Snowflake accountId, bool temporary)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode || !thread.parentId.hasValue())
         return nullptr;
 
@@ -503,9 +478,7 @@ ChannelNode *ChannelTreeModel::insertThreadNode(const Discord::Channel &thread, 
         updateNodeAggregates(parentChannel);
     }
 
-    QModelIndex parentIdx = indexForNode(parentChannel);
-    if (parentIdx.isValid())
-        emit dataChanged(parentIdx, parentIdx);
+    changed.publish(parentChannel);
 
     return raw;
 }
@@ -524,7 +497,7 @@ void ChannelTreeModel::addThread(const Discord::Channel &thread, Snowflake accou
 
 void ChannelTreeModel::updateThread(const Discord::Channel &thread, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -550,16 +523,14 @@ void ChannelTreeModel::updateThread(const Discord::Channel &thread, Snowflake ac
     if (thread.lastMessageId.hasValue())
         node->lastMessageId = thread.effectiveLastMessageId();
 
-    QModelIndex idx = indexForNode(node);
-    if (idx.isValid())
-        emit dataChanged(idx, idx, { Qt::DisplayRole, LastMessageIdRole });
+    changed.publish(node);
 
     resortThread(node);
 }
 
 void ChannelTreeModel::removeThread(Snowflake threadId, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -575,9 +546,7 @@ void ChannelTreeModel::removeThread(Snowflake threadId, Snowflake accountId)
         return;
 
     updateNodeAggregates(parent);
-    QModelIndex parentIdx = indexForNode(parent);
-    if (parentIdx.isValid())
-        emit dataChanged(parentIdx, parentIdx);
+    changed.publish(parent);
 }
 
 bool ChannelTreeModel::removeChildRow(ChannelNode *parent, ChannelNode *node)
@@ -586,9 +555,8 @@ bool ChannelTreeModel::removeChildRow(ChannelNode *parent, ChannelNode *node)
         if (parent->children[i].get() != node)
             continue;
         int row = static_cast<int>(i);
-        beginRemoveRows(indexForNode(parent), row, row);
         parent->children.erase(parent->children.begin() + row);
-        endRemoveRows();
+        reset.publish();
         return true;
     }
     return false;
@@ -622,19 +590,16 @@ void ChannelTreeModel::resortThread(ChannelNode *node)
     if (dest == row || dest == row + 1)
         return;
 
-    QModelIndex parentIdx = indexForNode(parent);
-    if (!beginMoveRows(parentIdx, row, row, parentIdx, dest))
-        return;
     auto moved = std::move(kids[row]);
     kids.erase(kids.begin() + row);
     kids.insert(kids.begin() + (dest > row ? dest - 1 : dest), std::move(moved));
-    endMoveRows();
+    reset.publish();
 }
 
-void ChannelTreeModel::syncThreads(Snowflake guildId, const QList<Snowflake> &parentIds,
-                                   const QList<Discord::Channel> &threads, Snowflake accountId)
+void ChannelTreeModel::syncThreads(Snowflake guildId, const std::vector<Snowflake> &parentIds,
+                                   const std::vector<Discord::Channel> &threads, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
     ChannelNode *guildNode = findGuildNodeById(guildId, accNode);
@@ -646,14 +611,14 @@ void ChannelTreeModel::syncThreads(Snowflake guildId, const QList<Snowflake> &pa
     for (const auto &thread : threads)
         updateThread(thread, accountId);
 
-    QSet<Snowflake> parentFilter(parentIds.begin(), parentIds.end());
-    QList<Snowflake> toRemove;
+    std::unordered_set<Snowflake> parentFilter(parentIds.begin(), parentIds.end());
+    std::vector<Snowflake> toRemove;
     std::function<void(ChannelNode *)> collect = [&](ChannelNode *node) {
         for (const auto &child : node->children) {
             if (child->type == ChannelNode::Type::Thread) {
                 if (node->type != ChannelNode::Type::Channel)
                     continue;
-                bool inScope = parentFilter.isEmpty() || parentFilter.contains(child->parentId);
+                bool inScope = parentFilter.empty() || parentFilter.contains(child->parentId);
                 if (!inScope || child->isTemporary)
                     continue;
                 bool keep = false;
@@ -662,7 +627,7 @@ void ChannelTreeModel::syncThreads(Snowflake guildId, const QList<Snowflake> &pa
                     keep = ch && instance->readState()->isThreadRelevant(*ch);
                 }
                 if (!keep)
-                    toRemove.append(child->id);
+                    toRemove.push_back(child->id);
             } else {
                 collect(child.get());
             }
@@ -682,7 +647,7 @@ void ChannelTreeModel::showTemporaryThread(const Discord::Channel &thread, Snowf
 
     clearTemporaryThread();
 
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -693,9 +658,7 @@ void ChannelTreeModel::showTemporaryThread(const Discord::Channel &thread, Snowf
             return;
     } else {
         node->isTemporary = true;
-        QModelIndex idx = indexForNode(node);
-        if (idx.isValid())
-            emit dataChanged(idx, idx);
+        changed.publish(node);
     }
 
     temporaryThreadId = threadId;
@@ -712,7 +675,7 @@ void ChannelTreeModel::clearTemporaryThread(Snowflake exceptThreadId)
     temporaryThreadId = Snowflake::Invalid;
     temporaryThreadAccount = Snowflake::Invalid;
 
-    ChannelNode *accNode = accountNodes.value(acc, nullptr);
+    ChannelNode *accNode = accountNode(acc);
     if (!accNode)
         return;
     ChannelNode *node = findChannelTreeNode(id, accNode);
@@ -728,7 +691,7 @@ void ChannelTreeModel::promoteTemporaryThread(Snowflake threadId)
     }
 
     for (auto it = accountNodes.begin(); it != accountNodes.end(); ++it) {
-        if (ChannelNode *node = findChannelTreeNode(threadId, it.value())) {
+        if (ChannelNode *node = findChannelTreeNode(threadId, it->second)) {
             node->isTemporary = false;
             return;
         }
@@ -739,35 +702,18 @@ std::unique_ptr<ChannelNode> ChannelTreeModel::createFolderNode(const Proto::Gui
 {
     auto folderNode = std::make_unique<ChannelNode>();
     folderNode->type = ChannelNode::Type::Folder;
-    folderNode->name = folder.name ? QString::fromStdString(*folder.name) : QStringLiteral("Unnamed Folder");
-    folderNode->folderName = folder.name ? std::optional(QString::fromStdString(*folder.name)) : std::nullopt;
+    folderNode->name = folder.name.value_or("Unnamed Folder");
+    folderNode->folderName = folder.name;
     if (folder.color != Discord::BLURPLE)
         folderNode->folderColor = folder.color;
     folderNode->id = Core::Snowflake(folder.id.value());
     return folderNode;
 }
 
-ChannelNode *ChannelTreeModel::nodeFromIndex(const QModelIndex &index) const
+ChannelNode *ChannelTreeModel::accountNode(Snowflake accountId) const
 {
-    if (!index.isValid())
-        return root.get();
-    return static_cast<ChannelNode *>(index.internalPointer());
-}
-QModelIndex ChannelTreeModel::indexForNode(ChannelNode *node) const
-{
-    if (!node || node == root.get())
-        return {};
-
-    ChannelNode *parent = node->parent;
-    if (!parent)
-        parent = root.get();
-
-    for (size_t i = 0; i < parent->children.size(); ++i) {
-        if (parent->children[i].get() == node) {
-            return createIndex(i, 0, node);
-        }
-    }
-    return {};
+    auto it = accountNodes.find(accountId);
+    return it == accountNodes.end() ? nullptr : it->second;
 }
 
 ChannelNode *ChannelTreeModel::findChannelTreeNode(Snowflake channelId)
@@ -777,7 +723,7 @@ ChannelNode *ChannelTreeModel::findChannelTreeNode(Snowflake channelId)
 
 ChannelNode *ChannelTreeModel::findChannelTreeNode(Snowflake channelId, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return nullptr;
     return findChannelTreeNode(channelId, accNode);
@@ -818,30 +764,25 @@ ChannelNode *ChannelTreeModel::findCategoryNode(Snowflake categoryId, ChannelNod
     return nullptr;
 }
 
-QModelIndex ChannelTreeModel::serverIndex(Snowflake accountId, Snowflake guildId)
+ChannelNode *ChannelTreeModel::serverNode(Snowflake accountId, Snowflake guildId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
-    if (!accNode)
-        return {};
-    ChannelNode *guildNode = findGuildNodeById(guildId, accNode);
-    return guildNode ? indexForNode(guildNode) : QModelIndex();
+    return findGuildNodeById(guildId, accountNode(accountId));
 }
 
-QModelIndex ChannelTreeModel::folderIndex(Snowflake accountId, Snowflake folderId)
+ChannelNode *ChannelTreeModel::folderNode(Snowflake accountId, Snowflake folderId)
 {
-    ChannelNode *folderNode = findFolderNodeById(accountNodes.value(accountId, nullptr), folderId);
-    return folderNode ? indexForNode(folderNode) : QModelIndex();
+    return findFolderNodeById(accountNode(accountId), folderId);
 }
 
-QModelIndex ChannelTreeModel::dmHeaderIndex(Snowflake accountId)
+ChannelNode *ChannelTreeModel::dmHeaderNode(Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
-        return {};
+        return nullptr;
     for (const auto &child : accNode->children)
         if (child->type == ChannelNode::Type::DMHeader)
-            return indexForNode(child.get());
-    return {};
+            return child.get();
+    return nullptr;
 }
 
 ChannelNode *ChannelTreeModel::findGuildNodeById(Snowflake guildId, ChannelNode *accountNode)
@@ -877,11 +818,9 @@ ChannelNode *ChannelTreeModel::findFolderNodeById(ChannelNode *accountNode, Snow
 
 void ChannelTreeModel::insertChildAt(ChannelNode *parent, int row, std::unique_ptr<ChannelNode> node)
 {
-    QModelIndex parentIdx = indexForNode(parent);
-    beginInsertRows(parentIdx, row, row);
     node->parent = parent;
     parent->children.insert(parent->children.begin() + row, std::move(node));
-    endInsertRows();
+    reset.publish();
 }
 
 void ChannelTreeModel::addGuild(const Discord::GatewayGuild &guild, Snowflake accountId)
@@ -889,7 +828,7 @@ void ChannelTreeModel::addGuild(const Discord::GatewayGuild &guild, Snowflake ac
     if (!guild.properties.hasValue())
         return;
 
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -905,23 +844,24 @@ void ChannelTreeModel::addGuild(const Discord::GatewayGuild &guild, Snowflake ac
 
     // handle a (potentially) unavailable guild coming back
     if (ChannelNode *existing = findGuildNodeById(guildId, accNode)) {
-        QModelIndex existingIdx = indexForNode(existing);
 
         if (!existing->unavailable) {
             existing->name = guildPtr->name;
             existing->TEMP_iconHash = guildPtr->TEMP_iconHash;
             if (guildPtr->rulesChannelId.isValid())
                 existing->rulesChannelId = guildPtr->rulesChannelId;
-            if (existingIdx.isValid())
-                emit dataChanged(existingIdx, existingIdx);
+            changed.publish(existing);
             return;
         }
 
         ChannelNode *parentNode = existing->parent;
-        if (!parentNode || !existingIdx.isValid())
+        if (!parentNode)
             return;
-
-        int existingRow = existingIdx.row();
+        auto existingIt = std::find_if(parentNode->children.begin(), parentNode->children.end(),
+                                       [existing](const auto &child) { return child.get() == existing; });
+        if (existingIt == parentNode->children.end())
+            return;
+        int existingRow = static_cast<int>(existingIt - parentNode->children.begin());
 
         if (!removeChildRow(parentNode, existing))
             return;
@@ -937,7 +877,7 @@ void ChannelTreeModel::addGuild(const Discord::GatewayGuild &guild, Snowflake ac
 
 void ChannelTreeModel::updateGuild(const Discord::Guild &guild, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -951,22 +891,19 @@ void ChannelTreeModel::updateGuild(const Discord::Guild &guild, Snowflake accoun
     node->ownerId = guild.ownerId;
     node->rulesChannelId = guild.rulesChannelId.hasValue() ? guild.rulesChannelId.get() : Snowflake();
 
-    QModelIndex idx = indexForNode(node);
-    if (idx.isValid())
-        emit dataChanged(idx, idx);
+    changed.publish(node);
 
     if (previousRulesChannel == node->rulesChannelId)
         return;
     for (Snowflake channelId : { previousRulesChannel, node->rulesChannelId }) {
-        const QModelIndex channelIndex = indexForNode(findChannelTreeNode(channelId, node));
-        if (channelIndex.isValid())
-            emit dataChanged(channelIndex, channelIndex);
+        if (auto *channelNode = findChannelTreeNode(channelId, node))
+            changed.publish(channelNode);
     }
 }
 
 void ChannelTreeModel::removeGuild(Snowflake accountId, Snowflake guildId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1042,7 +979,7 @@ void ChannelTreeModel::addChannel(const Discord::ChannelCreate &event, Snowflake
 
     const auto &channel = event.channel.get();
 
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1077,21 +1014,21 @@ void ChannelTreeModel::addChannel(const Discord::ChannelCreate &event, Snowflake
 
         if (channel.recipients.hasValue()) {
             for (const auto &user : channel.recipients.get())
-                dmNode->recipientIds.append(user.id.get());
+                dmNode->recipientIds.push_back(user.id.get());
         } else if (channel.recipientIds.hasValue()) {
             dmNode->recipientIds = channel.recipientIds.get();
         }
 
         if (channel.type == Discord::ChannelType::DM && dmNode->recipientIds.size() == 1) {
-            dmNode->dmRecipientId = dmNode->recipientIds.first();
+            dmNode->dmRecipientId = dmNode->recipientIds.front();
 
-            if (channel.recipients.hasValue() && !channel.recipients->isEmpty()) {
-                const auto &user = channel.recipients->first();
+            if (channel.recipients.hasValue() && !channel.recipients->empty()) {
+                const auto &user = channel.recipients->front();
                 if (user.avatar.hasValue())
                     dmNode->dmAvatarHash = user.avatar.get();
             }
 
-            if (dmNode->dmAvatarHash.isEmpty()) {
+            if (dmNode->dmAvatarHash.empty()) {
                 auto userOpt = userRepo.getUser(dmNode->dmRecipientId);
                 if (userOpt.has_value() && userOpt->avatar.hasValue())
                     dmNode->dmAvatarHash = userOpt->avatar.get();
@@ -1147,11 +1084,8 @@ void ChannelTreeModel::addChannel(const Discord::ChannelCreate &event, Snowflake
         insertChildAt(parentNode, static_cast<int>(parentNode->children.size()), std::move(node));
 
         // notify proxy to re-check category visibility
-        if (parentNode->type == ChannelNode::Type::Category) {
-            QModelIndex parentIdx = indexForNode(parentNode);
-            if (parentIdx.isValid())
-                emit dataChanged(parentIdx, parentIdx);
-        }
+        if (parentNode->type == ChannelNode::Type::Category)
+            changed.publish(parentNode);
     }
 }
 
@@ -1159,7 +1093,7 @@ void ChannelTreeModel::updateChannel(const Discord::ChannelUpdate &update, Snowf
 {
     const auto &channel = update.channel.get();
 
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1184,7 +1118,9 @@ void ChannelTreeModel::updateChannel(const Discord::ChannelUpdate &update, Snowf
         if (!guildNode)
             return;
 
-        QModelIndex oldParentIdx = indexForNode(oldParent);
+        ChannelNode *newParent = newParentId.isValid() ? findCategoryNode(newParentId, guildNode) : guildNode;
+        if (!oldParent || !newParent)
+            return;
         int oldRow = -1;
         for (size_t i = 0; i < oldParent->children.size(); ++i) {
             if (oldParent->children[i].get() == channelNode) {
@@ -1196,10 +1132,8 @@ void ChannelTreeModel::updateChannel(const Discord::ChannelUpdate &update, Snowf
         if (oldRow == -1)
             return;
 
-        beginRemoveRows(oldParentIdx, oldRow, oldRow);
         auto node = std::move(oldParent->children[oldRow]);
         oldParent->children.erase(oldParent->children.begin() + oldRow);
-        endRemoveRows();
 
         node->name = channel.name.get();
         node->position = channel.position.get();
@@ -1209,31 +1143,16 @@ void ChannelTreeModel::updateChannel(const Discord::ChannelUpdate &update, Snowf
         if (node->type == ChannelNode::Type::VoiceChannel && channel.userLimit.hasValue())
             node->userLimit = channel.userLimit.get();
 
-        ChannelNode *newParent = nullptr;
-        if (newParentId.isValid())
-            newParent = findCategoryNode(newParentId, guildNode);
-        else
-            newParent = guildNode;
-
-        if (!newParent) {
-            qCWarning(LogUI) << "Could not find new parent for channel:" << channel.id.get();
-            return;
-        }
-
-        // throw it wherever cuz the proxy will sort it
-        int insertRow = newParent->children.size();
-
-        QModelIndex newParentIdx = indexForNode(newParent);
-        beginInsertRows(newParentIdx, insertRow, insertRow);
         node->parent = newParent;
         newParent->children.push_back(std::move(node));
-        endInsertRows();
-
-        // notify proxy to re-check category visibility
-        if (oldParent->type == ChannelNode::Type::Category && oldParentIdx.isValid())
-            emit dataChanged(oldParentIdx, oldParentIdx);
-        if (newParent->type == ChannelNode::Type::Category && newParentIdx.isValid())
-            emit dataChanged(newParentIdx, newParentIdx);
+        reset.publish();
+        updateNodeAggregates(oldParent);
+        if (newParent != oldParent)
+            updateNodeAggregates(newParent);
+        if (oldParent->type == ChannelNode::Type::Category)
+            changed.publish(oldParent);
+        if (newParent->type == ChannelNode::Type::Category)
+            changed.publish(newParent);
     } else {
         channelNode->name = channel.name.get();
         channelNode->position = channel.position.get();
@@ -1247,11 +1166,7 @@ void ChannelTreeModel::updateChannel(const Discord::ChannelUpdate &update, Snowf
         if (channelNode->type == ChannelNode::Type::VoiceChannel && channel.userLimit.hasValue())
             channelNode->userLimit = channel.userLimit.get();
 
-        QModelIndex idx = indexForNode(channelNode);
-        if (idx.isValid())
-            emit dataChanged(idx, idx, { Qt::DisplayRole, PositionRole });
-
-        qCDebug(LogUI) << "Updated channel tree node:" << channel.id.get();
+        changed.publish(channelNode);
     }
 }
 
@@ -1262,7 +1177,7 @@ void ChannelTreeModel::deleteChannel(const Discord::ChannelDelete &event, Snowfl
 
     Core::Snowflake channelId = event.id.get();
 
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1279,26 +1194,15 @@ void ChannelTreeModel::deleteChannel(const Discord::ChannelDelete &event, Snowfl
 
     updateNodeAggregates(parent);
 
-    // notify proxy to re-check category visibility
-    QModelIndex parentIdx = indexForNode(parent);
-    if (parent->type == ChannelNode::Type::Category && parentIdx.isValid())
-        emit dataChanged(parentIdx, parentIdx);
-
-    qCDebug(LogUI) << "Deleted channel tree node:" << channelId;
+    if (parent->type == ChannelNode::Type::Category)
+        changed.publish(parent);
 }
 
 void ChannelTreeModel::invalidateGuildData(Snowflake guildId)
 {
-    for (auto it = accountNodes.begin(); it != accountNodes.end(); ++it) {
-        ChannelNode *accountNode = it.value();
-        ChannelNode *guildNode = findGuildNodeById(guildId, accountNode);
-        if (guildNode) {
-            QModelIndex guildIdx = indexForNode(guildNode);
-            if (guildIdx.isValid()) {
-                emitDataChangedRecursive(guildIdx);
-            }
-        }
-    }
+    for (const auto &[id, account] : accountNodes)
+        if (ChannelNode *guildNode = findGuildNodeById(guildId, account))
+            emitDataChangedRecursive(guildNode);
 }
 
 Core::ChannelReadState ChannelTreeModel::shownReadState(const ChannelNode *node)
@@ -1311,15 +1215,13 @@ bool ChannelTreeModel::notifyIfReadStateChanged(ChannelNode *node, const Core::C
     if (shownReadState(node) == before)
         return false;
 
-    QModelIndex idx = indexForNode(node);
-    if (idx.isValid())
-        emit dataChanged(idx, idx, { IsUnreadRole, MentionCountRole, IsMutedRole });
+    changed.publish(node);
     return true;
 }
 
 void ChannelTreeModel::updateReadState(Snowflake channelId, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1337,21 +1239,19 @@ void ChannelTreeModel::updateReadState(Snowflake channelId, Snowflake accountId)
         updateNodeAggregates(channelNode->parent);
 }
 
-void ChannelTreeModel::updatePresence(Snowflake accountId, const QList<Snowflake> &userIds)
+void ChannelTreeModel::updatePresence(Snowflake accountId, const std::vector<Snowflake> &userIds)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
-    if (!accNode || userIds.isEmpty())
+    ChannelNode *accNode = accountNode(accountId);
+    if (!accNode || userIds.empty())
         return;
 
-    const QSet<Snowflake> changed(userIds.cbegin(), userIds.cend());
+    const std::unordered_set<Snowflake> changedUsers(userIds.cbegin(), userIds.cend());
 
     std::function<void(ChannelNode *)> visit = [&](ChannelNode *node) {
         if ((node->type == ChannelNode::Type::DMChannel ||
              node->type == ChannelNode::Type::VoiceParticipant) &&
-            node->dmRecipientId.isValid() && changed.contains(node->dmRecipientId)) {
-            QModelIndex idx = indexForNode(node);
-            if (idx.isValid())
-                emit dataChanged(idx, idx, { PresenceBadgeRole });
+            node->dmRecipientId.isValid() && changedUsers.contains(node->dmRecipientId)) {
+            changed.publish(node);
         }
 
         for (const auto &child : node->children)
@@ -1363,7 +1263,7 @@ void ChannelTreeModel::updatePresence(Snowflake accountId, const QList<Snowflake
 
 void ChannelTreeModel::updateForumBadge(Snowflake forumId, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1381,14 +1281,12 @@ void ChannelTreeModel::updateForumBadge(Snowflake forumId, Snowflake accountId)
 
     node->forumBadgeCount = badge.count;
     node->forumBadgeIsNew = badge.isNew;
-    QModelIndex idx = indexForNode(node);
-    if (idx.isValid())
-        emit dataChanged(idx, idx);
+    changed.publish(node);
 }
 
 void ChannelTreeModel::updateForumThreads(Snowflake forumId, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1400,59 +1298,46 @@ void ChannelTreeModel::updateForumThreads(Snowflake forumId, Snowflake accountId
     if (!instance)
         return;
 
-    const QList<Discord::Channel> posts = instance->forums()->joinedPosts(forumId);
+    const auto posts = instance->forums()->joinedPosts(forumId);
 
-    if (posts.size() == static_cast<int>(forumNode->children.size())) {
+    if (posts.size() == forumNode->children.size()) {
         bool same = true;
-        for (int i = 0; i < posts.size() && same; i++)
+        for (size_t i = 0; i < posts.size() && same; i++)
             same = forumNode->children[i]->id == posts[i].id.get();
         if (same) {
-            for (int i = 0; i < posts.size(); i++) {
+            for (size_t i = 0; i < posts.size(); i++) {
                 ChannelNode *child = forumNode->children[i].get();
-                child->lastMessageId = posts[i].effectiveLastMessageId();
-                const QString name = posts[i].name.hasValue() ? posts[i].name.get() : QString();
-                if (child->name == name)
+                auto lastMessageId = posts[i].effectiveLastMessageId();
+                const std::string name = posts[i].name.hasValue() ? posts[i].name.get() : std::string();
+                if (child->name == name && child->lastMessageId == lastMessageId)
                     continue;
                 child->name = name;
-                QModelIndex idx = indexForNode(child);
-                if (idx.isValid())
-                    emit dataChanged(idx, idx);
+                child->lastMessageId = lastMessageId;
+                changed.publish(child);
             }
             return;
         }
     }
 
-    QModelIndex forumIdx = indexForNode(forumNode);
-    if (!forumIdx.isValid())
-        return;
-
-    if (!forumNode->children.empty()) {
-        beginRemoveRows(forumIdx, 0, static_cast<int>(forumNode->children.size()) - 1);
-        forumNode->children.clear();
-        endRemoveRows();
-    }
-
-    if (!posts.isEmpty()) {
-        beginInsertRows(forumIdx, 0, posts.size() - 1);
-        for (const auto &post : posts) {
+    forumNode->children.clear();
+    for (const auto &post : posts) {
             auto node = std::make_unique<ChannelNode>();
             node->id = post.id.get();
-            node->name = post.name.hasValue() ? post.name.get() : QString();
+            node->name = post.name.hasValue() ? post.name.get() : std::string();
             node->type = ChannelNode::Type::Thread;
             node->parentId = forumId;
             node->lastMessageId = post.effectiveLastMessageId();
             ChannelNode *added = forumNode->addChild(std::move(node));
             setSelfReadState(added, computeNodeReadState(added, instance));
         }
-        endInsertRows();
-    }
+    reset.publish();
 
     updateNodeAggregates(forumNode);
 }
 
 void ChannelTreeModel::updateGuildSettings(Snowflake guildId, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1476,9 +1361,7 @@ void ChannelTreeModel::updateGuildSettings(Snowflake guildId, Snowflake accountI
         return;
 
     refreshReadStates(targetNode, instance);
-    QModelIndex targetIdx = indexForNode(targetNode);
-    if (targetIdx.isValid())
-        emitDataChangedRecursive(targetIdx);
+    emitDataChangedRecursive(targetNode);
     updateNodeAggregates(targetNode->parent);
 }
 
@@ -1572,47 +1455,36 @@ void ChannelTreeModel::publishTotalMentionCount()
         return;
 
     int previous = std::exchange(publishedMentionCount, total);
-    emit totalMentionCountChanged(total, previous);
+    totalMentionCountChanged.publish(total, previous);
 }
 
-void ChannelTreeModel::emitDataChangedRecursive(const QModelIndex &index)
+void ChannelTreeModel::emitDataChangedRecursive(ChannelNode *node)
 {
-    if (!index.isValid())
-        return;
-
-    emit dataChanged(index, index);
-
-    int rows = rowCount(index);
-    for (int i = 0; i < rows; ++i) {
-        QModelIndex child = this->index(i, 0, index);
-        if (child.isValid())
-            emitDataChangedRecursive(child);
-    }
-}
-
-void ChannelTreeModel::toggleCollapsed(const QModelIndex &index)
-{
-    ChannelNode *node = nodeFromIndex(index);
     if (!node)
         return;
-
-    setCollapsed(index, !node->collapsed);
+    changed.publish(node);
+    for (const auto &child : node->children)
+        emitDataChangedRecursive(child.get());
 }
 
-void ChannelTreeModel::setCollapsed(const QModelIndex &index, bool collapsed)
+void ChannelTreeModel::toggleCollapsed(ChannelNode *node)
 {
-    ChannelNode *node = nodeFromIndex(index);
+    if (node)
+        setCollapsed(node, !node->collapsed);
+}
+
+void ChannelTreeModel::setCollapsed(ChannelNode *node, bool collapsed)
+{
     if (!node || node->collapsed == collapsed)
         return;
-
     node->collapsed = collapsed;
-    emit dataChanged(index, index, { CollapsedRole });
+    changed.publish(node);
 }
 
 void ChannelTreeModel::updateChannelLastMessageId(Snowflake channelId, Snowflake messageId,
                                                   Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1630,15 +1502,15 @@ void ChannelTreeModel::updateChannelLastMessageId(Snowflake channelId, Snowflake
 void ChannelTreeModel::setAccountVoiceChannel(Snowflake accountId, Snowflake channelId)
 {
     Snowflake previous = Snowflake::Invalid;
-    if (auto it = accountVoiceChannels.constFind(accountId); it != accountVoiceChannels.constEnd())
-        previous = it.value();
+    if (auto it = accountVoiceChannels.find(accountId); it != accountVoiceChannels.end())
+        previous = it->second;
     if (previous == channelId)
         return;
 
     if (channelId.isValid())
-        accountVoiceChannels.insert(accountId, channelId);
+        accountVoiceChannels[accountId] = channelId;
     else
-        accountVoiceChannels.remove(accountId);
+        accountVoiceChannels.erase(accountId);
 
     if (previous.isValid())
         updateReadState(previous, accountId);
@@ -1648,7 +1520,7 @@ void ChannelTreeModel::setAccountVoiceChannel(Snowflake accountId, Snowflake cha
 
 void ChannelTreeModel::updateVoiceCount(Snowflake channelId, int count, Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1661,15 +1533,13 @@ void ChannelTreeModel::updateVoiceCount(Snowflake channelId, int count, Snowflak
 
     channelNode->voiceParticipantCount = count;
 
-    QModelIndex idx = indexForNode(channelNode);
-    if (idx.isValid())
-        emit dataChanged(idx, idx, { VoiceParticipantCountRole });
+    changed.publish(channelNode);
 }
 
 void ChannelTreeModel::updateVoiceParticipant(Snowflake channelId, Snowflake userId, bool joined,
                                               Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1686,8 +1556,6 @@ void ChannelTreeModel::updateVoiceParticipant(Snowflake channelId, Snowflake use
         }
     }
 
-    QModelIndex channelIndex = indexForNode(channelNode);
-
     if (joined) {
         if (existingRow != -1)
             return;
@@ -1699,22 +1567,22 @@ void ChannelTreeModel::updateVoiceParticipant(Snowflake channelId, Snowflake use
         ChannelNode *guildNode = findGuildNode(channelNode);
         Snowflake guildId = guildNode ? guildNode->id : Snowflake::Invalid;
 
-        QString displayName;
-        QUrl avatarUrl = Discord::Cdn::defaultUserAvatar(userId, VoiceParticipantAvatarPx);
+        std::string displayName;
+        std::string avatarUrl = Discord::Cdn::defaultUserAvatar(userId, VoiceParticipantAvatarPx);
         auto user = instance->users()->getUser(userId);
         if (user) {
             displayName = instance->users()->getDisplayName(userId, guildId);
             avatarUrl = instance->users()->getAvatarUrl(*user, guildId, VoiceParticipantAvatarPx);
         }
-        if (displayName.isEmpty())
-            displayName = QString::number(static_cast<quint64>(userId));
+        if (displayName.empty())
+            displayName = userId.toString();
 
         int insertRow = 0;
         for (size_t i = 0; i < channelNode->children.size(); ++i) {
             const auto &child = channelNode->children[i];
             if (child->type != ChannelNode::Type::VoiceParticipant)
                 continue;
-            if (QString::compare(child->name, displayName, Qt::CaseInsensitive) < 0)
+            if (Platform::unicodeLower(child->name) < Platform::unicodeLower(displayName))
                 insertRow = static_cast<int>(i) + 1;
             else
                 break;
@@ -1729,23 +1597,18 @@ void ChannelTreeModel::updateVoiceParticipant(Snowflake channelId, Snowflake use
         participantNode->voiceParticipantAvatarUrl = avatarUrl;
         participantNode->parent = channelNode;
 
-        beginInsertRows(channelIndex, insertRow, insertRow);
-        channelNode->children.insert(channelNode->children.begin() + insertRow,
-                                     std::move(participantNode));
-        endInsertRows();
+        insertChildAt(channelNode, insertRow, std::move(participantNode));
     } else {
         if (existingRow == -1)
             return;
-        beginRemoveRows(channelIndex, existingRow, existingRow);
-        channelNode->children.erase(channelNode->children.begin() + existingRow);
-        endRemoveRows();
+        removeChildRow(channelNode, channelNode->children[existingRow].get());
     }
 }
 
 void ChannelTreeModel::updateVoiceParticipantState(Snowflake channelId, Snowflake userId,
                                                    Snowflake accountId)
 {
-    ChannelNode *accNode = accountNodes.value(accountId, nullptr);
+    ChannelNode *accNode = accountNode(accountId);
     if (!accNode)
         return;
 
@@ -1755,18 +1618,16 @@ void ChannelTreeModel::updateVoiceParticipantState(Snowflake channelId, Snowflak
 
     for (auto &child : channelNode->children) {
         if (child->type == ChannelNode::Type::VoiceParticipant && child->id == userId) {
-            QModelIndex idx = indexForNode(child.get());
-            if (idx.isValid())
-                emit dataChanged(idx, idx, { IsVoiceMutedRole, IsVoiceDeafenedRole });
+            changed.publish(child.get());
             return;
         }
     }
 }
 
-void ChannelTreeModel::collectMarkableChannelIds(ChannelNode *node, QList<Snowflake> &out)
+void ChannelTreeModel::collectMarkableChannelIds(ChannelNode *node, std::vector<Snowflake> &out)
 {
     if (node->opensChat())
-        out.append(node->id);
+        out.push_back(node->id);
     for (auto &child : node->children)
         collectMarkableChannelIds(child.get(), out);
 }
