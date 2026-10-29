@@ -1,7 +1,7 @@
 #pragma once
 
 #include <optional>
-#include <QList>
+#include <vector>
 
 #include "BaseRepository.hpp"
 #include "Core/Snowflake.hpp"
@@ -18,8 +18,8 @@ public:
 
     void saveUser(const Discord::User &user);
     void saveUser(const Discord::User &user, Platform::Database &db);
-    void saveUsers(const QList<Discord::User> &users);
-    void saveUsers(const QList<Discord::User> &users, Platform::Database &db);
+    void saveUsers(const std::vector<Discord::User> &users);
+    void saveUsers(const std::vector<Discord::User> &users, Platform::Database &db);
 
     std::optional<Discord::User> getUser(Core::Snowflake userId);
 };

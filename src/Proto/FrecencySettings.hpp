@@ -4,6 +4,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -43,21 +44,21 @@ struct FavoriteGif
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t order = 0;
-    std::vector<uint8_t> messageAsReceived;
+    std::string messageAsReceived;
 };
 
 struct FavoriteGifs
 {
     std::vector<FavoriteGif> gifs;
     bool hideTooltip = false;
-    std::vector<uint8_t> unknownFields;
+    std::string unknownFields;
 
     static FavoriteGifs fromProto(std::span<const uint8_t> bytes);
-    static FavoriteGifs fromProto(const std::vector<uint8_t> &bytes)
+    static FavoriteGifs fromProto(std::string_view bytes)
     {
-        return fromProto(std::span<const uint8_t>(bytes.data(), bytes.size()));
+        return fromProto(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
     }
-    [[nodiscard]] std::vector<uint8_t> toProto() const;
+    [[nodiscard]] std::string toProto() const;
 };
 
 // discord_protos.discord_users.v1.FrecencyUserSettings
@@ -71,7 +72,7 @@ struct FrecencyUserSettings
 
     static FrecencyUserSettings fromProto(ProtoReader &reader);
 
-    std::vector<uint8_t> toProtoPartial() const;
+    std::string toProtoPartial() const;
 };
 
 } // namespace Proto

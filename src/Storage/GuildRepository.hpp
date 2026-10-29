@@ -1,7 +1,6 @@
 #pragma once
 
 #include <optional>
-#include <QString>
 
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"

@@ -1,11 +1,11 @@
 #include "MessageRepository.hpp"
 
-#include <QJsonDocument>
-#include <QJsonArray>
 
 #include "DatabaseManager.hpp"
 #include "Transaction.hpp"
 #include "Core/Logging.hpp"
+#include <nlohmann/json.hpp>
+#include <unordered_map>
 
 namespace Styx {
 namespace Storage {
@@ -15,15 +15,15 @@ MessageRepository::MessageRepository(Core::Snowflake accountId)
 {
 }
 
-void MessageRepository::saveMessages(const QList<Discord::Message> &messages)
+void MessageRepository::saveMessages(const std::vector<Discord::Message> &messages)
 {
     auto &db = getDb();
     saveMessages(messages, db);
 }
 
-void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Platform::Database &db)
+void MessageRepository::saveMessages(const std::vector<Discord::Message> &messages, Platform::Database &db)
 {
-    if (messages.isEmpty())
+    if (messages.empty())
         return;
 
     Transaction txn(db);
@@ -44,19 +44,19 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
         )");
 
         // Collect referenced messages to save as their own rows
-        QList<Discord::Message> referencedMessages;
+        std::vector<Discord::Message> referencedMessages;
 
         for (const auto &message : messages) {
             qMsg.bind(":id", static_cast<int64_t>(message.id.get()));
             qMsg.bind(":channel_id", static_cast<int64_t>(message.channelId.get()));
             qMsg.bind(":author_id", static_cast<int64_t>(message.author->id.get()));
-            std::string content = message.content.get().toStdString();
+            std::string content = message.content.get();
             qMsg.bind(":content", std::string_view(content));
-            std::string ts = message.timestamp.get().toString(Qt::ISODateWithMs).toStdString();
+            std::string ts = message.timestamp.get().iso8601();
             qMsg.bind(":timestamp", std::string_view(ts));
 
             if (message.editedTimestamp.hasValue()) {
-                std::string ets = message.editedTimestamp->toString(Qt::ISODateWithMs).toStdString();
+                std::string ets = message.editedTimestamp->iso8601();
                 qMsg.bind(":edited_timestamp", std::string_view(ets));
             } else {
                 qMsg.bindNull(":edited_timestamp");
@@ -65,22 +65,22 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
             qMsg.bind(":type", static_cast<int64_t>(message.type.get()));
             qMsg.bind(":flags", static_cast<int64_t>(message.flags.get()));
 
-            if (!message.embedsJson.isEmpty()) {
-                std::string emb = message.embedsJson.toStdString();
+            if (!message.embedsJson.empty()) {
+                std::string emb = message.embedsJson;
                 qMsg.bind(":embeds", std::string_view(emb));
             } else {
                 qMsg.bindNull(":embeds");
             }
 
-            if (!message.reactionsJson.isEmpty()) {
-                std::string rct = message.reactionsJson.toStdString();
+            if (!message.reactionsJson.empty()) {
+                std::string rct = message.reactionsJson;
                 qMsg.bind(":reactions", std::string_view(rct));
             } else {
                 qMsg.bindNull(":reactions");
             }
 
-            if (!message.stickersJson.isEmpty()) {
-                std::string stk = message.stickersJson.toStdString();
+            if (!message.stickersJson.empty()) {
+                std::string stk = message.stickersJson;
                 qMsg.bind(":stickers", std::string_view(stk));
             } else {
                 qMsg.bindNull(":stickers");
@@ -88,7 +88,7 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
 
             if (message.referencedMessage) {
                 qMsg.bind(":ref_msg_id", static_cast<int64_t>(message.referencedMessage->id.get()));
-                referencedMessages.append(*message.referencedMessage);
+                referencedMessages.push_back(*message.referencedMessage);
             } else if (message.messageReference.hasValue() && message.messageReference->messageId.hasValue()) {
                 qMsg.bind(":ref_msg_id", static_cast<int64_t>(message.messageReference->messageId.get()));
             } else {
@@ -111,8 +111,8 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
             else
                 qMsg.bindNull(":ref_guild_id");
 
-            if (!message.snapshotJson.isEmpty()) {
-                std::string snp = message.snapshotJson.toStdString();
+            if (!message.snapshotJson.empty()) {
+                std::string snp = message.snapshotJson;
                 qMsg.bind(":snapshot", std::string_view(snp));
             } else {
                 qMsg.bindNull(":snapshot");
@@ -126,13 +126,13 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
                 for (const auto &att : *message.attachments) {
                     qAtt.bind(":id", static_cast<int64_t>(att.id.get()));
                     qAtt.bind(":message_id", static_cast<int64_t>(message.id.get()));
-                    std::string fn = att.filename.get().toStdString();
+                    std::string fn = att.filename.get();
                     qAtt.bind(":filename", std::string_view(fn));
                     bindOptional(qAtt, ":content_type", att.contentType);
                     qAtt.bind(":size", static_cast<int64_t>(att.size.get()));
-                    std::string url = att.url.get().toStdString();
+                    std::string url = att.url.get();
                     qAtt.bind(":url", std::string_view(url));
-                    std::string purl = att.proxyUrl.get().toStdString();
+                    std::string purl = att.proxyUrl.get();
                     qAtt.bind(":proxy_url", std::string_view(purl));
                     bindOptional(qAtt, ":width", att.width);
                     bindOptional(qAtt, ":height", att.height);
@@ -150,7 +150,7 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
 
         // Save referenced messages as their own rows (INSERT OR IGNORE to not overwrite
         // a potentially more complete version already in the DB)
-        if (!referencedMessages.isEmpty()) {
+        if (!referencedMessages.empty()) {
             auto qRef = db.prepare(R"(
                 INSERT OR IGNORE INTO messages
                 (id, channel_id, author_id, content, timestamp, edited_timestamp, type, flags, embeds, stickers, deleted,
@@ -163,13 +163,13 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
                 qRef.bind(":id", static_cast<int64_t>(ref.id.get()));
                 qRef.bind(":channel_id", static_cast<int64_t>(ref.channelId.get()));
                 qRef.bind(":author_id", static_cast<int64_t>(ref.author->id.get()));
-                std::string content = ref.content.get().toStdString();
+                std::string content = ref.content.get();
                 qRef.bind(":content", std::string_view(content));
-                std::string ts = ref.timestamp.get().toString(Qt::ISODateWithMs).toStdString();
+                std::string ts = ref.timestamp.get().iso8601();
                 qRef.bind(":timestamp", std::string_view(ts));
 
                 if (ref.editedTimestamp.hasValue()) {
-                    std::string ets = ref.editedTimestamp->toString(Qt::ISODateWithMs).toStdString();
+                    std::string ets = ref.editedTimestamp->iso8601();
                     qRef.bind(":edited_timestamp", std::string_view(ets));
                 } else {
                     qRef.bindNull(":edited_timestamp");
@@ -178,15 +178,15 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
                 qRef.bind(":type", static_cast<int64_t>(ref.type.get()));
                 qRef.bind(":flags", static_cast<int64_t>(ref.flags.get()));
 
-                if (!ref.embedsJson.isEmpty()) {
-                    std::string emb = ref.embedsJson.toStdString();
+                if (!ref.embedsJson.empty()) {
+                    std::string emb = ref.embedsJson;
                     qRef.bind(":embeds", std::string_view(emb));
                 } else {
                     qRef.bindNull(":embeds");
                 }
 
-                if (!ref.stickersJson.isEmpty()) {
-                    std::string stk = ref.stickersJson.toStdString();
+                if (!ref.stickersJson.empty()) {
+                    std::string stk = ref.stickersJson;
                     qRef.bind(":stickers", std::string_view(stk));
                 } else {
                     qRef.bindNull(":stickers");
@@ -197,8 +197,8 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
                 else
                     qRef.bindNull(":ref_type");
 
-                if (!ref.snapshotJson.isEmpty()) {
-                    std::string snp = ref.snapshotJson.toStdString();
+                if (!ref.snapshotJson.empty()) {
+                    std::string snp = ref.snapshotJson;
                     qRef.bind(":snapshot", std::string_view(snp));
                 } else {
                     qRef.bindNull(":snapshot");
@@ -212,7 +212,7 @@ void MessageRepository::saveMessages(const QList<Discord::Message> &messages, Pl
 
         txn.commit();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MessageRepository: saveMessages failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: saveMessages failed:" << e.what();
     }
 }
 
@@ -224,7 +224,7 @@ void MessageRepository::markMessageDeleted(Core::Snowflake messageId)
         q.bind(":id", static_cast<int64_t>(messageId));
         execLogged(q, "MessageRepository: Mark message deleted");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MessageRepository: Mark message deleted failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: Mark message deleted failed:" << e.what();
     }
 }
 
@@ -238,18 +238,18 @@ void MessageRepository::updateMessageContent(const Discord::Message &message)
             WHERE id = :id
         )");
 
-        std::string content = message.content.get().toStdString();
+        std::string content = message.content.get();
         q.bind(":content", std::string_view(content));
 
         if (message.editedTimestamp.hasValue()) {
-            std::string ets = message.editedTimestamp->toString(Qt::ISODateWithMs).toStdString();
+            std::string ets = message.editedTimestamp->iso8601();
             q.bind(":edited_timestamp", std::string_view(ets));
         } else {
             q.bindNull(":edited_timestamp");
         }
 
-        if (!message.embedsJson.isEmpty()) {
-            std::string emb = message.embedsJson.toStdString();
+        if (!message.embedsJson.empty()) {
+            std::string emb = message.embedsJson;
             q.bind(":embeds", std::string_view(emb));
         } else {
             q.bindNull(":embeds");
@@ -257,8 +257,8 @@ void MessageRepository::updateMessageContent(const Discord::Message &message)
 
         q.bind(":flags", static_cast<int64_t>(message.flags.get()));
 
-        if (!message.snapshotJson.isEmpty()) {
-            std::string snp = message.snapshotJson.toStdString();
+        if (!message.snapshotJson.empty()) {
+            std::string snp = message.snapshotJson;
             q.bind(":snapshot", std::string_view(snp));
         } else {
             q.bindNull(":snapshot");
@@ -268,17 +268,17 @@ void MessageRepository::updateMessageContent(const Discord::Message &message)
 
         execLogged(q, "MessageRepository: Update message content");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MessageRepository: Update message content failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: Update message content failed:" << e.what();
     }
 }
 
-void MessageRepository::updateReactionsJson(Core::Snowflake messageId, const QString &reactionsJson)
+void MessageRepository::updateReactionsJson(Core::Snowflake messageId, const std::string &reactionsJson)
 {
     auto &db = getDb();
     try {
         auto q = db.prepare("UPDATE messages SET reactions = :reactions WHERE id = :id");
-        if (!reactionsJson.isEmpty()) {
-            std::string rct = reactionsJson.toStdString();
+        if (!reactionsJson.empty()) {
+            std::string rct = reactionsJson;
             q.bind(":reactions", std::string_view(rct));
         } else {
             q.bindNull(":reactions");
@@ -287,11 +287,11 @@ void MessageRepository::updateReactionsJson(Core::Snowflake messageId, const QSt
 
         execLogged(q, "MessageRepository: Update reactions");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MessageRepository: Update reactions failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: Update reactions failed:" << e.what();
     }
 }
 
-QString MessageRepository::getReactionsJson(Core::Snowflake messageId)
+std::string MessageRepository::getReactionsJson(Core::Snowflake messageId)
 {
     auto &db = getDb();
     try {
@@ -301,9 +301,9 @@ QString MessageRepository::getReactionsJson(Core::Snowflake messageId)
         if (!q.step())
             return {};
 
-        return QString::fromStdString(q.getText(0));
+        return q.getText(0);
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MessageRepository: getReactionsJson failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: getReactionsJson failed:" << e.what();
         return {};
     }
 }
@@ -331,20 +331,20 @@ std::optional<Discord::Message> MessageRepository::getMessage(Core::Snowflake me
         if (!q.step())
             return std::nullopt;
 
-        QList<Discord::Message> single{ readMessageFromQuery(q) };
+        std::vector<Discord::Message> single{ readMessageFromQuery(q) };
         loadAttachmentsForMessages(single, db);
-        return single.first();
+        return single.front();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MessageRepository: getMessage failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: getMessage failed:" << e.what();
         return std::nullopt;
     }
 }
 
-QList<Discord::Message> MessageRepository::getMessagesInRange(Core::Snowflake channelId, Core::Snowflake fromId, Core::Snowflake toId)
+std::vector<Discord::Message> MessageRepository::getMessagesInRange(Core::Snowflake channelId, Core::Snowflake fromId, Core::Snowflake toId)
 {
     auto &db = getDb();
 
-    QList<Discord::Message> messages;
+    std::vector<Discord::Message> messages;
     try {
         auto q = db.prepare(R"(
             SELECT m.id, m.channel_id, m.author_id, m.content, m.timestamp, m.edited_timestamp, m.type, m.flags, m.embeds, m.reactions,
@@ -368,45 +368,48 @@ QList<Discord::Message> MessageRepository::getMessagesInRange(Core::Snowflake ch
 
         while (q.step()) {
             Discord::Message message = readMessageFromQuery(q);
-            messages.append(message);
+            messages.push_back(message);
         }
 
         loadAttachmentsForMessages(messages, db);
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MessageRepository: getMessagesInRange failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: getMessagesInRange failed:" << e.what();
     }
 
     return messages;
 }
 
 template <typename Entity>
-static QList<Entity> parseEntityArray(const QString &json)
+static std::vector<Entity> parseEntityArray(const std::string &json)
 {
-    QList<Entity> entities;
-    for (const QJsonValue &val : QJsonDocument::fromJson(json.toUtf8()).array())
-        entities.append(Entity::fromJson(val.toObject()));
+    std::vector<Entity> entities;
+    auto doc = nlohmann::json::parse(json, nullptr, false);
+    if (doc.is_array()) {
+        for (const auto &val : doc)
+            entities.push_back(Entity::fromJson(val.is_object() ? val : nlohmann::json::object()));
+    }
     return entities;
 }
 
-static void readEmbeds(Discord::Message &message, const QString &embedsJson)
+static void readEmbeds(Discord::Message &message, const std::string &embedsJson)
 {
-    if (embedsJson.isEmpty())
+    if (embedsJson.empty())
         return;
     message.embedsJson = embedsJson;
     message.embeds = parseEntityArray<Discord::Embed>(embedsJson);
 }
 
-static void readReactions(Discord::Message &message, const QString &reactionsJson)
+static void readReactions(Discord::Message &message, const std::string &reactionsJson)
 {
-    if (reactionsJson.isEmpty())
+    if (reactionsJson.empty())
         return;
     message.reactionsJson = reactionsJson;
     message.reactions = parseEntityArray<Discord::Reaction>(reactionsJson);
 }
 
-static void readStickers(Discord::Message &message, const QString &stickersJson)
+static void readStickers(Discord::Message &message, const std::string &stickersJson)
 {
-    if (stickersJson.isEmpty())
+    if (stickersJson.empty())
         return;
     message.stickersJson = stickersJson;
     message.stickerItems = parseEntityArray<Discord::StickerItem>(stickersJson);
@@ -426,33 +429,35 @@ Discord::Message MessageRepository::readMessageFromQuery(const Platform::Stateme
     Discord::Message message;
     message.id = static_cast<Core::Snowflake>(q.getInt64(0));
     message.channelId = static_cast<Core::Snowflake>(q.getInt64(1));
-    message.content = QString::fromStdString(q.getText(3));
-    message.timestamp = QDateTime::fromString(QString::fromStdString(q.getText(4)), Qt::ISODateWithMs);
+    message.content = q.getText(3);
+    message.timestamp = Platform::DateTime::parse(q.getText(4));
     if (!q.isNull(5))
-        message.editedTimestamp = QDateTime::fromString(QString::fromStdString(q.getText(5)), Qt::ISODateWithMs);
+        message.editedTimestamp = Platform::DateTime::parse(q.getText(5));
     message.type = static_cast<Discord::MessageType>(q.getInt64(6));
     message.flags = static_cast<Discord::MessageFlags>(static_cast<int>(q.getInt64(7)));
 
     if (!q.isNull(8))
-        readEmbeds(message, QString::fromStdString(q.getText(8)));
+        readEmbeds(message, q.getText(8));
     if (!q.isNull(9))
-        readReactions(message, QString::fromStdString(q.getText(9)));
+        readReactions(message, q.getText(9));
     if (!q.isNull(36))
-        readStickers(message, QString::fromStdString(q.getText(36)));
+        readStickers(message, q.getText(36));
 
     message.author->id = static_cast<Core::Snowflake>(q.getInt64(10));
-    message.author->username = QString::fromStdString(q.getText(11));
+    message.author->username = q.getText(11);
     if (!q.isNull(12))
-        message.author->globalName = QString::fromStdString(q.getText(12));
+        message.author->globalName = q.getText(12);
     if (!q.isNull(13))
-        message.author->avatar = QString::fromStdString(q.getText(13));
+        message.author->avatar = q.getText(13);
     if (!q.isNull(14))
         message.author->bot = q.getInt(14) != 0;
 
     if (!q.isNull(33)) {
-        QString snapshotJson = QString::fromStdString(q.getText(33));
-        if (!snapshotJson.isEmpty())
-            message.setSnapshot(QJsonDocument::fromJson(snapshotJson.toUtf8()).object());
+        std::string snapshotJson = q.getText(33);
+        if (!snapshotJson.empty()) {
+            auto snapshot = nlohmann::json::parse(snapshotJson, nullptr, false);
+            message.setSnapshot(snapshot.is_object() ? snapshot : nlohmann::json::object());
+        }
     }
 
     // Load referenced message from the self-join
@@ -473,25 +478,25 @@ Discord::Message MessageRepository::readMessageFromQuery(const Platform::Stateme
             auto refMsg = std::make_shared<Discord::Message>();
             refMsg->id = static_cast<Core::Snowflake>(q.getInt64(16));
             refMsg->channelId = static_cast<Core::Snowflake>(q.getInt64(17));
-            refMsg->content = QString::fromStdString(q.getText(19));
-            refMsg->timestamp = QDateTime::fromString(QString::fromStdString(q.getText(20)), Qt::ISODateWithMs);
+            refMsg->content = q.getText(19);
+            refMsg->timestamp = Platform::DateTime::parse(q.getText(20));
             if (!q.isNull(21))
-                refMsg->editedTimestamp = QDateTime::fromString(QString::fromStdString(q.getText(21)), Qt::ISODateWithMs);
+                refMsg->editedTimestamp = Platform::DateTime::parse(q.getText(21));
             refMsg->type = static_cast<Discord::MessageType>(q.getInt64(22));
             refMsg->flags = static_cast<Discord::MessageFlags>(static_cast<int>(q.getInt64(23)));
 
             if (!q.isNull(24))
-                readEmbeds(*refMsg, QString::fromStdString(q.getText(24)));
+                readEmbeds(*refMsg, q.getText(24));
             if (!q.isNull(37))
-                readStickers(*refMsg, QString::fromStdString(q.getText(37)));
+                readStickers(*refMsg, q.getText(37));
 
             if (!q.isNull(25)) {
                 refMsg->author->id = static_cast<Core::Snowflake>(q.getInt64(25));
-                refMsg->author->username = QString::fromStdString(q.getText(26));
+                refMsg->author->username = q.getText(26);
                 if (!q.isNull(27))
-                    refMsg->author->globalName = QString::fromStdString(q.getText(27));
+                    refMsg->author->globalName = q.getText(27);
                 if (!q.isNull(28))
-                    refMsg->author->avatar = QString::fromStdString(q.getText(28));
+                    refMsg->author->avatar = q.getText(28);
                 if (!q.isNull(29))
                     refMsg->author->bot = q.getInt(29) != 0;
             }
@@ -503,9 +508,11 @@ Discord::Message MessageRepository::readMessageFromQuery(const Platform::Stateme
             }
 
             if (!q.isNull(35)) {
-                QString refSnapshotJson = QString::fromStdString(q.getText(35));
-                if (!refSnapshotJson.isEmpty())
-                    refMsg->setSnapshot(QJsonDocument::fromJson(refSnapshotJson.toUtf8()).object());
+                std::string refSnapshotJson = q.getText(35);
+                if (!refSnapshotJson.empty()) {
+                    auto snapshot = nlohmann::json::parse(refSnapshotJson, nullptr, false);
+                    refMsg->setSnapshot(snapshot.is_object() ? snapshot : nlohmann::json::object());
+                }
             }
 
             message.referencedMessage = refMsg;
@@ -515,15 +522,15 @@ Discord::Message MessageRepository::readMessageFromQuery(const Platform::Stateme
     return message;
 }
 
-void MessageRepository::loadAttachmentsForMessages(QList<Discord::Message> &messages,
+void MessageRepository::loadAttachmentsForMessages(std::vector<Discord::Message> &messages,
                                                    Platform::Database &db)
 {
-    if (messages.isEmpty())
+    if (messages.empty())
         return;
 
-    QHash<qint64, int> messageIndexMap;
+    std::unordered_map<int64_t, int> messageIndexMap;
     for (int i = 0; i < messages.size(); ++i) {
-        messageIndexMap.insert(static_cast<qint64>(messages[i].id.get()), i);
+        messageIndexMap.emplace(static_cast<int64_t>(messages[i].id.get()), i);
     }
 
     std::string placeholders;
@@ -542,19 +549,20 @@ void MessageRepository::loadAttachmentsForMessages(QList<Discord::Message> &mess
         }
 
         while (q.step()) {
-            qint64 messageId = q.getInt64(1);
-            int idx = messageIndexMap.value(messageId, -1);
-            if (idx < 0)
+            int64_t messageId = q.getInt64(1);
+            auto it = messageIndexMap.find(messageId);
+            if (it == messageIndexMap.end())
                 continue;
+            int idx = it->second;
 
             Discord::Attachment att;
             att.id = static_cast<Core::Snowflake>(q.getInt64(0));
-            att.filename = QString::fromStdString(q.getText(2));
+            att.filename = q.getText(2);
             if (!q.isNull(3))
-                att.contentType = QString::fromStdString(q.getText(3));
-            att.size = static_cast<quint64>(q.getInt64(4));
-            att.url = QString::fromStdString(q.getText(5));
-            att.proxyUrl = QString::fromStdString(q.getText(6));
+                att.contentType = q.getText(3);
+            att.size = static_cast<uint64_t>(q.getInt64(4));
+            att.url = q.getText(5);
+            att.proxyUrl = q.getText(6);
             if (!q.isNull(7))
                 att.width = q.getInt(7);
             if (!q.isNull(8))
@@ -565,11 +573,11 @@ void MessageRepository::loadAttachmentsForMessages(QList<Discord::Message> &mess
                 att.flags = static_cast<Discord::AttachmentFlags>(q.getInt(10));
 
             if (!messages[idx].attachments.hasValue())
-                messages[idx].attachments = QList<Discord::Attachment>();
-            messages[idx].attachments->append(att);
+                messages[idx].attachments = std::vector<Discord::Attachment>();
+            messages[idx].attachments->push_back(att);
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MessageRepository: Load attachments failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: Load attachments failed:" << e.what();
     }
 }
 

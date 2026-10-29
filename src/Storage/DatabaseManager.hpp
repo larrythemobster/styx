@@ -4,7 +4,6 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <QString>
 
 #include "Core/Snowflake.hpp"
 #include "Platform/Sqlite.hpp"
@@ -23,12 +22,12 @@ public:
     bool init();
     void shutdown();
 
-    QString openCacheDatabase(Core::Snowflake accountId);
+    std::string openCacheDatabase(Core::Snowflake accountId);
     void closeCacheDatabase(Core::Snowflake accountId);
-    static QString getCacheConnectionName(Core::Snowflake accountId);
+    static std::string getCacheConnectionName(Core::Snowflake accountId);
 
     // Get Database reference by connection name
-    Platform::Database &getDatabase(const QString &connName);
+    Platform::Database &getDatabase(const std::string &connName);
     Platform::Database &getPersistentDatabase();
 
 private:

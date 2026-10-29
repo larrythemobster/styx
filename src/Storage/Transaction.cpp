@@ -23,7 +23,7 @@ Transaction::Transaction(Platform::Database &db)
         activeTransactions.insert(dbHandle);
         owns = true;
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "Failed to begin transaction:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "Failed to begin transaction:" << e.what();
     }
 }
 
@@ -35,7 +35,7 @@ Transaction::~Transaction()
     try {
         db.execute("ROLLBACK");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "Failed to rollback transaction:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "Failed to rollback transaction:" << e.what();
     }
     activeTransactions.erase(dbHandle);
 }
@@ -52,7 +52,7 @@ bool Transaction::commit()
         db.execute("COMMIT");
         return true;
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "Failed to commit transaction:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "Failed to commit transaction:" << e.what();
         try {
             db.execute("ROLLBACK");
         } catch (...) {

@@ -1,6 +1,6 @@
 #include "DatabaseManager.hpp"
 
-#include <QSettings>
+#include "Platform/Settings.hpp"
 
 #include "Core/Logging.hpp"
 #include "Platform/Paths.hpp"
@@ -18,7 +18,7 @@ bool columnExists(Platform::Database &db, const std::string &table, const std::s
                 return true;
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "columnExists check failed for" << table.c_str() << ":" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "columnExists check failed for" << table << ":" << e.what();
     }
     return false;
 }
@@ -41,7 +41,7 @@ bool DatabaseManager::init()
 
     try {
         if (!m_persistentDb.open(persistentPath)) {
-            qCCritical(LogDB) << "Persistent DB init failed to open" << persistentPath.string().c_str();
+            Core::log(Core::LogLevel::Error, LogDB) << "Persistent DB init failed to open" << persistentPath.string();
             return false;
         }
 
@@ -51,7 +51,7 @@ bool DatabaseManager::init()
         setupPersistentTables();
         return true;
     } catch (const Platform::SqliteError &e) {
-        qCCritical(LogDB) << "Persistent DB init exception:" << e.what();
+        Core::log(Core::LogLevel::Error, LogDB) << "Persistent DB init exception:" << e.what();
         return false;
     }
 }
@@ -63,40 +63,34 @@ void DatabaseManager::shutdown()
     m_persistentDb.close();
 }
 
-QString DatabaseManager::openCacheDatabase(Core::Snowflake accountId)
+std::string DatabaseManager::openCacheDatabase(Core::Snowflake accountId)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    QString connName = getCacheConnectionName(accountId);
-    std::string key = connName.toStdString();
+    std::string key = getCacheConnectionName(accountId);
 
     auto it = m_cacheDbs.find(key);
     if (it != m_cacheDbs.end() && it->second && it->second->isOpen())
-        return connName;
+        return key;
 
     auto db = std::make_unique<Platform::Database>();
-    bool inMemory = QSettings().value("general/in_memory_cache", false).toBool();
+    bool inMemory = Platform::Settings::instance().getBool("general/in_memory_cache", false);
 
     try {
         if (inMemory) {
             if (!db->open(":memory:")) {
-                qCCritical(LogDB) << "Cache DB init failed to open in-memory database";
+                Core::log(Core::LogLevel::Error, LogDB) << "Cache DB init failed to open in-memory database";
                 return "";
             }
         } else {
             auto dataDir = Platform::Paths::dataDir();
             Platform::Paths::ensureDirExists(dataDir);
 
-            std::string fileName = "cache_" + std::to_string(static_cast<quint64>(accountId)) + ".sqlite";
+            std::string fileName = "cache_" + accountId.toString() + ".sqlite";
             auto dbPath = dataDir / fileName;
 
-            std::error_code ec;
-            std::filesystem::remove(dbPath, ec);
-            std::filesystem::remove(dataDir / (fileName + "-wal"), ec);
-            std::filesystem::remove(dataDir / (fileName + "-shm"), ec);
-
             if (!db->open(dbPath)) {
-                qCCritical(LogDB) << "Cache DB init failed to open" << dbPath.string().c_str();
+                Core::log(Core::LogLevel::Error, LogDB) << "Cache DB init failed to open" << dbPath.string();
                 return "";
             }
 
@@ -106,9 +100,9 @@ QString DatabaseManager::openCacheDatabase(Core::Snowflake accountId)
 
         setupCacheTables(*db);
         m_cacheDbs[key] = std::move(db);
-        return connName;
+        return key;
     } catch (const Platform::SqliteError &e) {
-        qCCritical(LogDB) << "Cache DB init exception:" << e.what();
+        Core::log(Core::LogLevel::Error, LogDB) << "Cache DB init exception:" << e.what();
         return "";
     }
 }
@@ -117,8 +111,7 @@ void DatabaseManager::closeCacheDatabase(Core::Snowflake accountId)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    QString connName = getCacheConnectionName(accountId);
-    std::string key = connName.toStdString();
+    std::string key = getCacheConnectionName(accountId);
 
     auto it = m_cacheDbs.find(key);
     if (it != m_cacheDbs.end()) {
@@ -128,9 +121,9 @@ void DatabaseManager::closeCacheDatabase(Core::Snowflake accountId)
     }
 }
 
-QString DatabaseManager::getCacheConnectionName(Core::Snowflake accountId)
+std::string DatabaseManager::getCacheConnectionName(Core::Snowflake accountId)
 {
-    return QString("Styx_Cache_%1").arg(accountId.toString());
+    return "Styx_Cache_" + accountId.toString();
 }
 
 Platform::Database &DatabaseManager::getPersistentDatabase()
@@ -138,14 +131,13 @@ Platform::Database &DatabaseManager::getPersistentDatabase()
     return m_persistentDb;
 }
 
-Platform::Database &DatabaseManager::getDatabase(const QString &connName)
+Platform::Database &DatabaseManager::getDatabase(const std::string &connName)
 {
     if (connName == PERSISTENT_CONN_NAME)
         return m_persistentDb;
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::string key = connName.toStdString();
-    auto it = m_cacheDbs.find(key);
+    auto it = m_cacheDbs.find(connName);
     if (it != m_cacheDbs.end() && it->second)
         return *(it->second);
 

@@ -8,11 +8,11 @@ namespace Styx {
 namespace Storage {
 
 namespace {
-Core::ProxyConfig parseProxy(const QString &stored, Core::Snowflake accountId)
+Core::ProxyConfig parseProxy(const std::string &stored, Core::Snowflake accountId)
 {
     std::optional<Core::ProxyConfig> parsed = Core::ProxyConfig::parse(stored);
     if (!parsed) {
-        qCWarning(LogDB) << "AccountRepository: Ignoring malformed proxy for account" << accountId.toString();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Ignoring malformed proxy for account" << accountId.toString();
         return {};
     }
 
@@ -24,7 +24,7 @@ void AccountRepository::saveAccount(const Core::AccountInfo &acc)
 {
     auto &db = DatabaseManager::instance().getPersistentDatabase();
     if (!db.isOpen()) {
-        qCWarning(LogDB) << "AccountRepository: Persistent DB not open!";
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Persistent DB not open!";
         return;
     }
 
@@ -46,30 +46,24 @@ void AccountRepository::saveAccount(const Core::AccountInfo &acc)
         )");
 
         query.bind(":id", static_cast<int64_t>(acc.id));
-        std::string u = acc.username.toStdString();
-        query.bind(":username", std::string_view(u));
-        std::string d = acc.displayName.toStdString();
-        query.bind(":display_name", std::string_view(d));
-        std::string av = acc.avatar.toStdString();
-        query.bind(":avatar", std::string_view(av));
-        std::string gw = acc.gatewayUrl.toStdString();
-        query.bind(":gateway_url", std::string_view(gw));
-        std::string ru = acc.restUrl.toStdString();
-        query.bind(":rest_url", std::string_view(ru));
-        std::string cdn = acc.cdnUrl.toStdString();
-        query.bind(":cdn_url", std::string_view(cdn));
+        query.bind(":username", std::string_view(acc.username));
+        query.bind(":display_name", std::string_view(acc.displayName));
+        query.bind(":avatar", std::string_view(acc.avatar));
+        query.bind(":gateway_url", std::string_view(acc.gatewayUrl));
+        query.bind(":rest_url", std::string_view(acc.restUrl));
+        query.bind(":cdn_url", std::string_view(acc.cdnUrl));
         query.bind(":display_order", acc.displayOrder);
         query.bind(":auto_connect", acc.autoConnect ? 1 : 0);
-        std::string pr = acc.proxy.toString().toStdString();
+        std::string pr = acc.proxy.toString();
         query.bind(":proxy_url", std::string_view(pr));
 
         query.execute();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Save failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Save failed:" << e.what();
     }
 }
 
-Core::AccountInfo AccountRepository::getAccount(quint64 id)
+Core::AccountInfo AccountRepository::getAccount(std::uint64_t id)
 {
     auto &db = DatabaseManager::instance().getPersistentDatabase();
     if (!db.isOpen())
@@ -84,32 +78,32 @@ Core::AccountInfo AccountRepository::getAccount(quint64 id)
         query.bind(":id", static_cast<int64_t>(id));
 
         if (!query.step()) {
-            qCWarning(LogDB) << "AccountRepository: Account not found";
+            Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Account not found";
             return {};
         }
 
         Core::AccountInfo acc;
         acc.id = static_cast<Core::Snowflake>(query.getInt64(0));
-        acc.username = QString::fromStdString(query.getText(1));
-        acc.displayName = QString::fromStdString(query.getText(2));
-        acc.avatar = QString::fromStdString(query.getText(3));
-        acc.gatewayUrl = QString::fromStdString(query.getText(4));
-        acc.restUrl = QString::fromStdString(query.getText(5));
-        acc.cdnUrl = QString::fromStdString(query.getText(6));
+        acc.username = query.getText(1);
+        acc.displayName = query.getText(2);
+        acc.avatar = query.getText(3);
+        acc.gatewayUrl = query.getText(4);
+        acc.restUrl = query.getText(5);
+        acc.cdnUrl = query.getText(6);
         acc.displayOrder = query.getInt(7);
         acc.autoConnect = query.getInt(8) != 0;
-        acc.proxy = parseProxy(QString::fromStdString(query.getText(9)), acc.id);
+        acc.proxy = parseProxy(query.getText(9), acc.id);
 
         return acc;
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Get failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Get failed:" << e.what();
         return {};
     }
 }
 
-QVector<Core::AccountInfo> AccountRepository::getAllAccounts()
+std::vector<Core::AccountInfo> AccountRepository::getAllAccounts()
 {
-    QVector<Core::AccountInfo> results;
+    std::vector<Core::AccountInfo> results;
     auto &db = DatabaseManager::instance().getPersistentDatabase();
 
     if (!db.isOpen())
@@ -124,29 +118,29 @@ QVector<Core::AccountInfo> AccountRepository::getAllAccounts()
         while (query.step()) {
             Core::AccountInfo acc;
 
-            acc.id = static_cast<quint64>(query.getInt64(0));
-            acc.username = QString::fromStdString(query.getText(1));
-            acc.displayName = QString::fromStdString(query.getText(2));
-            acc.avatar = QString::fromStdString(query.getText(3));
-            acc.gatewayUrl = QString::fromStdString(query.getText(4));
-            acc.restUrl = QString::fromStdString(query.getText(5));
-            acc.cdnUrl = QString::fromStdString(query.getText(6));
+            acc.id = static_cast<std::uint64_t>(query.getInt64(0));
+            acc.username = query.getText(1);
+            acc.displayName = query.getText(2);
+            acc.avatar = query.getText(3);
+            acc.gatewayUrl = query.getText(4);
+            acc.restUrl = query.getText(5);
+            acc.cdnUrl = query.getText(6);
             acc.displayOrder = query.getInt(7);
             acc.autoConnect = query.getInt(8) != 0;
-            acc.proxy = parseProxy(QString::fromStdString(query.getText(9)), acc.id);
+            acc.proxy = parseProxy(query.getText(9), acc.id);
 
             acc.state = Core::ConnectionState::Disconnected;
 
-            results.append(acc);
+            results.push_back(acc);
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: getAllAccounts failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: getAllAccounts failed:" << e.what();
     }
 
     return results;
 }
 
-void AccountRepository::removeAccount(quint64 id)
+void AccountRepository::removeAccount(std::uint64_t id)
 {
     Core::TokenStore::deleteToken(Core::Snowflake(id));
 
@@ -156,11 +150,11 @@ void AccountRepository::removeAccount(quint64 id)
         query.bind(":id", static_cast<int64_t>(id));
         query.execute();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Remove failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Remove failed:" << e.what();
     }
 }
 
-void AccountRepository::updateDisplayOrder(quint64 id, int order)
+void AccountRepository::updateDisplayOrder(std::uint64_t id, int order)
 {
     auto &db = DatabaseManager::instance().getPersistentDatabase();
     try {
@@ -169,25 +163,25 @@ void AccountRepository::updateDisplayOrder(quint64 id, int order)
         query.bind(":id", static_cast<int64_t>(id));
         query.execute();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Update display order failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Update display order failed:" << e.what();
     }
 }
 
-void AccountRepository::updateProxy(quint64 id, const Core::ProxyConfig &proxy)
+void AccountRepository::updateProxy(std::uint64_t id, const Core::ProxyConfig &proxy)
 {
     auto &db = DatabaseManager::instance().getPersistentDatabase();
     try {
         auto query = db.prepare("UPDATE accounts SET proxy_url = :proxy_url WHERE id = :id");
-        std::string pr = proxy.toString().toStdString();
+        std::string pr = proxy.toString();
         query.bind(":proxy_url", std::string_view(pr));
         query.bind(":id", static_cast<int64_t>(id));
         query.execute();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Update proxy failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Update proxy failed:" << e.what();
     }
 }
 
-std::optional<Discord::HeartbeatSession> AccountRepository::getHeartbeatSession(quint64 id)
+std::optional<Discord::HeartbeatSession> AccountRepository::getHeartbeatSession(std::uint64_t id)
 {
     auto &db = DatabaseManager::instance().getPersistentDatabase();
     try {
@@ -201,17 +195,17 @@ std::optional<Discord::HeartbeatSession> AccountRepository::getHeartbeatSession(
             return std::nullopt;
 
         Discord::HeartbeatSession session;
-        session.id = QString::fromStdString(query.getText(0));
+        session.id = query.getText(0);
         session.createdAtMs = query.getInt64(1);
         session.lastUsedAtMs = query.getInt64(2);
         return session;
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Get heartbeat session failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Get heartbeat session failed:" << e.what();
         return std::nullopt;
     }
 }
 
-void AccountRepository::updateHeartbeatSession(quint64 id, const Discord::HeartbeatSession &session)
+void AccountRepository::updateHeartbeatSession(std::uint64_t id, const Discord::HeartbeatSession &session)
 {
     auto &db = DatabaseManager::instance().getPersistentDatabase();
     try {
@@ -222,18 +216,18 @@ void AccountRepository::updateHeartbeatSession(quint64 id, const Discord::Heartb
                 heartbeat_session_last_used_at = :last_used_at
             WHERE id = :id
         )");
-        std::string sid = session.id.toStdString();
+        std::string sid = session.id;
         query.bind(":session_id", std::string_view(sid));
         query.bind(":created_at", session.createdAtMs);
         query.bind(":last_used_at", session.lastUsedAtMs);
         query.bind(":id", static_cast<int64_t>(id));
         query.execute();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Update heartbeat session failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Update heartbeat session failed:" << e.what();
     }
 }
 
-void AccountRepository::clearHeartbeatSession(quint64 id)
+void AccountRepository::clearHeartbeatSession(std::uint64_t id)
 {
     auto &db = DatabaseManager::instance().getPersistentDatabase();
     try {
@@ -247,11 +241,11 @@ void AccountRepository::clearHeartbeatSession(quint64 id)
         query.bind(":id", static_cast<int64_t>(id));
         query.execute();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Clear heartbeat session failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Clear heartbeat session failed:" << e.what();
     }
 }
 
-void AccountRepository::updateAutoConnect(quint64 id, bool autoConnect)
+void AccountRepository::updateAutoConnect(std::uint64_t id, bool autoConnect)
 {
     auto &db = DatabaseManager::instance().getPersistentDatabase();
     try {
@@ -260,7 +254,7 @@ void AccountRepository::updateAutoConnect(quint64 id, bool autoConnect)
         query.bind(":id", static_cast<int64_t>(id));
         query.execute();
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "AccountRepository: Update auto_connect failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "AccountRepository: Update auto_connect failed:" << e.what();
     }
 }
 

@@ -10,7 +10,7 @@ void ProtoWriter::writeRawVarint(uint64_t value)
         value >>= 7;
         if (value)
             byte |= 0x80;
-        buffer.push_back(byte);
+        buffer.push_back(static_cast<char>(byte));
     } while (value);
 }
 
@@ -33,14 +33,22 @@ void ProtoWriter::writeInt32(uint32_t fieldNumber, int32_t value)
 
 void ProtoWriter::writeString(uint32_t fieldNumber, std::string_view value)
 {
-    writeBytes(fieldNumber, std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(value.data()), value.size()));
+    writeBytes(fieldNumber, value);
 }
 
 void ProtoWriter::writeBytes(uint32_t fieldNumber, std::span<const uint8_t> value)
 {
     writeTag(fieldNumber, WireType::LENGTH_DELIMITED);
     writeRawVarint(static_cast<uint64_t>(value.size()));
-    buffer.insert(buffer.end(), value.begin(), value.end());
+    if (!value.empty())
+        buffer.append(reinterpret_cast<const char *>(value.data()), value.size());
+}
+
+void ProtoWriter::writeBytes(uint32_t fieldNumber, std::string_view value)
+{
+    writeTag(fieldNumber, WireType::LENGTH_DELIMITED);
+    writeRawVarint(static_cast<uint64_t>(value.size()));
+    buffer.append(value);
 }
 
 void ProtoWriter::writePackedVarints(uint32_t fieldNumber, std::span<const uint64_t> values)

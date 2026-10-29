@@ -3,9 +3,6 @@
 #include "DatabaseManager.hpp"
 #include "Core/Logging.hpp"
 
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 
 namespace Styx {
 namespace Storage {
@@ -18,7 +15,7 @@ static Discord::Channel readChannelFromQuery(const Platform::Statement &q)
     if (!q.isNull(2))
         channel.position = q.getInt(2);
     if (!q.isNull(3))
-        channel.name = QString::fromStdString(q.getText(3));
+        channel.name = q.getText(3);
     if (!q.isNull(4))
         channel.guildId = static_cast<Core::Snowflake>(q.getInt64(4));
     if (!q.isNull(5))
@@ -26,19 +23,19 @@ static Discord::Channel readChannelFromQuery(const Platform::Statement &q)
     if (!q.isNull(6))
         channel.lastMessageId = static_cast<Core::Snowflake>(q.getInt64(6));
     if (!q.isNull(7))
-        channel.icon = QString::fromStdString(q.getText(7));
+        channel.icon = q.getText(7);
     if (!q.isNull(8))
         channel.ownerId = static_cast<Core::Snowflake>(q.getInt64(8));
     if (!q.isNull(9))
         channel.rateLimitPerUser = q.getInt(9);
     if (!q.isNull(10)) {
-        channel.availableTagsJson = QString::fromStdString(q.getText(10));
-        QJsonDocument doc = QJsonDocument::fromJson(channel.availableTagsJson.toUtf8());
-        if (doc.isArray()) {
-            QList<Discord::ForumTag> tags;
-            for (const QJsonValue &val : doc.array())
-                tags.append(Discord::ForumTag::fromJson(val.toObject()));
-            channel.availableTags = tags;
+        channel.availableTagsJson = q.getText(10);
+        auto doc = nlohmann::json::parse(channel.availableTagsJson, nullptr, false);
+        if (doc.is_array()) {
+            std::vector<Discord::ForumTag> tags;
+            for (const auto &val : doc)
+                tags.push_back(Discord::ForumTag::fromJson(val.is_object() ? val : nlohmann::json::object()));
+            channel.availableTags = std::move(tags);
         }
     }
     if (!q.isNull(11))
@@ -46,7 +43,7 @@ static Discord::Channel readChannelFromQuery(const Platform::Statement &q)
     if (!q.isNull(12))
         channel.flags = Discord::ChannelFlags::fromInt(q.getInt(12));
     if (!q.isNull(13))
-        channel.topic = QString::fromStdString(q.getText(13));
+        channel.topic = q.getText(13);
     return channel;
 }
 
@@ -91,8 +88,8 @@ void ChannelRepository::saveChannel(const Discord::Channel &channel, Platform::D
         bindOptional(q, ":owner_id", channel.ownerId);
         bindOptional(q, ":rate_limit_per_user", channel.rateLimitPerUser);
 
-        if (!channel.availableTagsJson.isEmpty()) {
-            std::string tags = channel.availableTagsJson.toStdString();
+        if (!channel.availableTagsJson.empty()) {
+            std::string tags = channel.availableTagsJson;
             q.bind(":available_tags", std::string_view(tags));
         } else {
             q.bindNull(":available_tags");
@@ -109,7 +106,7 @@ void ChannelRepository::saveChannel(const Discord::Channel &channel, Platform::D
 
         execLogged(q, "ChannelRepository: Save");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: Save failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: Save failed:" << e.what();
     }
 }
 
@@ -134,12 +131,12 @@ void ChannelRepository::deleteChannel(Core::Snowflake channelId, Platform::Datab
         q3.bind(":id", static_cast<int64_t>(channelId));
         execLogged(q3, "ChannelRepository: Delete channel");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: Delete failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: Delete failed:" << e.what();
     }
 }
 
 void ChannelRepository::savePermissionOverwrites(
-        Core::Snowflake channelId, const QList<Discord::PermissionOverwrite> &overwrites,
+        Core::Snowflake channelId, const std::vector<Discord::PermissionOverwrite> &overwrites,
         Platform::Database &db)
 {
     try {
@@ -147,7 +144,7 @@ void ChannelRepository::savePermissionOverwrites(
         delQ.bind(":channel_id", static_cast<int64_t>(channelId));
         execLogged(delQ, "ChannelRepository: Delete overwrites");
 
-        if (overwrites.isEmpty())
+        if (overwrites.empty())
             return;
 
         auto q = db.prepare(R"(
@@ -166,12 +163,12 @@ void ChannelRepository::savePermissionOverwrites(
             execLogged(q, "ChannelRepository: Save overwrite");
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: savePermissionOverwrites failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: savePermissionOverwrites failed:" << e.what();
     }
 }
 
 void ChannelRepository::saveChannelRecipients(Core::Snowflake channelId,
-                                              const QList<Core::Snowflake> &recipientIds,
+                                              const std::vector<Core::Snowflake> &recipientIds,
                                               Platform::Database &db)
 {
     try {
@@ -179,7 +176,7 @@ void ChannelRepository::saveChannelRecipients(Core::Snowflake channelId,
         delQ.bind(":channel_id", static_cast<int64_t>(channelId));
         execLogged(delQ, "ChannelRepository: Delete recipients");
 
-        if (recipientIds.isEmpty())
+        if (recipientIds.empty())
             return;
 
         auto q = db.prepare(R"(
@@ -195,14 +192,14 @@ void ChannelRepository::saveChannelRecipients(Core::Snowflake channelId,
             execLogged(q, "ChannelRepository: Save recipient");
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: saveChannelRecipients failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: saveChannelRecipients failed:" << e.what();
     }
 }
 
-QList<Discord::PermissionOverwrite> ChannelRepository::getPermissionOverwrites(
+std::vector<Discord::PermissionOverwrite> ChannelRepository::getPermissionOverwrites(
         Core::Snowflake channelId)
 {
-    QList<Discord::PermissionOverwrite> overwrites;
+    std::vector<Discord::PermissionOverwrite> overwrites;
     auto &db = getDb();
     try {
         auto q = db.prepare(R"(
@@ -212,17 +209,17 @@ QList<Discord::PermissionOverwrite> ChannelRepository::getPermissionOverwrites(
         q.bind(":channel_id", static_cast<int64_t>(channelId));
 
         while (q.step())
-            overwrites.append(readOverwrite(q, 0));
+            overwrites.push_back(readOverwrite(q, 0));
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: getPermissionOverwrites failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: getPermissionOverwrites failed:" << e.what();
     }
 
     return overwrites;
 }
 
-QList<Core::Snowflake> ChannelRepository::getChannelRecipientIds(Core::Snowflake channelId)
+std::vector<Core::Snowflake> ChannelRepository::getChannelRecipientIds(Core::Snowflake channelId)
 {
-    QList<Core::Snowflake> recipientIds;
+    std::vector<Core::Snowflake> recipientIds;
     auto &db = getDb();
     try {
         auto q = db.prepare(R"(
@@ -232,29 +229,29 @@ QList<Core::Snowflake> ChannelRepository::getChannelRecipientIds(Core::Snowflake
         q.bind(":channel_id", static_cast<int64_t>(channelId));
 
         while (q.step())
-            recipientIds.append(static_cast<Core::Snowflake>(q.getInt64(0)));
+            recipientIds.push_back(static_cast<Core::Snowflake>(q.getInt64(0)));
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: getChannelRecipientIds failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: getChannelRecipientIds failed:" << e.what();
     }
 
     return recipientIds;
 }
 
-QHash<Core::Snowflake, QList<Discord::PermissionOverwrite>> ChannelRepository::
+std::unordered_map<Core::Snowflake, std::vector<Discord::PermissionOverwrite>> ChannelRepository::
         getPermissionOverwritesForGuild(Core::Snowflake guildId)
 {
-    QHash<Core::Snowflake, QList<Discord::PermissionOverwrite>> result;
+    std::unordered_map<Core::Snowflake, std::vector<Discord::PermissionOverwrite>> result;
     auto &db = getDb();
 
     try {
         auto channelIdsQuery = db.prepare("SELECT id FROM channels WHERE guild_id = :guild_id");
         channelIdsQuery.bind(":guild_id", static_cast<int64_t>(guildId));
 
-        QList<Core::Snowflake> channelIds;
+        std::vector<Core::Snowflake> channelIds;
         while (channelIdsQuery.step())
-            channelIds.append(static_cast<Core::Snowflake>(channelIdsQuery.getInt64(0)));
+            channelIds.push_back(static_cast<Core::Snowflake>(channelIdsQuery.getInt64(0)));
 
-        if (channelIds.isEmpty())
+        if (channelIds.empty())
             return result;
 
         std::string placeholders;
@@ -272,10 +269,10 @@ QHash<Core::Snowflake, QList<Discord::PermissionOverwrite>> ChannelRepository::
 
         while (q.step()) {
             Core::Snowflake channelId = static_cast<Core::Snowflake>(q.getInt64(0));
-            result[channelId].append(readOverwrite(q, 1));
+            result[channelId].push_back(readOverwrite(q, 1));
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: getPermissionOverwritesForGuild failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: getPermissionOverwritesForGuild failed:" << e.what();
     }
 
     return result;
@@ -303,7 +300,7 @@ std::optional<Discord::Channel> ChannelRepository::getChannel(Core::Snowflake ch
 
         return channel;
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: getChannel failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: getChannel failed:" << e.what();
         return std::nullopt;
     }
 }
@@ -327,14 +324,14 @@ ChannelRepository::findDmChannelWithUser(Core::Snowflake userId)
 
         return static_cast<Core::Snowflake>(q.getInt64(0));
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: findDmChannelWithUser failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: findDmChannelWithUser failed:" << e.what();
         return std::nullopt;
     }
 }
 
-QList<Discord::Channel> ChannelRepository::getChannelsForGuild(Core::Snowflake guildId)
+std::vector<Discord::Channel> ChannelRepository::getChannelsForGuild(Core::Snowflake guildId)
 {
-    QList<Discord::Channel> channels;
+    std::vector<Discord::Channel> channels;
     auto &db = getDb();
 
     try {
@@ -345,10 +342,10 @@ QList<Discord::Channel> ChannelRepository::getChannelsForGuild(Core::Snowflake g
         q.bind(":guild_id", static_cast<int64_t>(guildId));
 
         while (q.step()) {
-            channels.append(readChannelFromQuery(q));
+            channels.push_back(readChannelFromQuery(q));
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "ChannelRepository: Get channels for guild failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "ChannelRepository: Get channels for guild failed:" << e.what();
     }
 
     return channels;

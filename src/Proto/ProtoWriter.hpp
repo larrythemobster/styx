@@ -4,6 +4,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "ProtoReader.hpp"
@@ -18,6 +19,7 @@ public:
     void writeInt32(uint32_t fieldNumber, int32_t value);
     void writeString(uint32_t fieldNumber, std::string_view value);
     void writeBytes(uint32_t fieldNumber, std::span<const uint8_t> value);
+    void writeBytes(uint32_t fieldNumber, std::string_view value);
     void writeBytes(uint32_t fieldNumber, const std::vector<uint8_t> &value)
     {
         writeBytes(fieldNumber, std::span<const uint8_t>(value.data(), value.size()));
@@ -28,14 +30,14 @@ public:
         writePackedVarints(fieldNumber, std::span<const uint64_t>(values.data(), values.size()));
     }
 
-    const std::vector<uint8_t> &bytes() const { return buffer; }
-    std::vector<uint8_t> takeBytes() { return std::move(buffer); }
+    const std::string &bytes() const { return buffer; }
+    std::string takeBytes() { return std::move(buffer); }
 
 private:
     void writeTag(uint32_t fieldNumber, WireType wireType);
     void writeRawVarint(uint64_t value);
 
-    std::vector<uint8_t> buffer;
+    std::string buffer;
 };
 
 } // namespace Proto

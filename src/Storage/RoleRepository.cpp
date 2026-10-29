@@ -2,8 +2,6 @@
 #include "DatabaseManager.hpp"
 #include "Core/Logging.hpp"
 
-#include <QJsonDocument>
-#include <QJsonObject>
 
 namespace Styx {
 namespace Storage {
@@ -12,7 +10,7 @@ static Discord::Role readRoleFromQuery(const Platform::Statement &q)
 {
     Discord::Role role;
     role.id = static_cast<Core::Snowflake>(q.getInt64(0));
-    role.name = QString::fromStdString(q.getText(1));
+    role.name = q.getText(1);
     role.permissions = Discord::Permissions::fromInt(q.getInt64(2));
     role.position = q.getInt(3);
     if (!q.isNull(4))
@@ -20,9 +18,9 @@ static Discord::Role readRoleFromQuery(const Platform::Statement &q)
     if (!q.isNull(5))
         role.hoist = q.getInt(5) != 0;
     if (!q.isNull(6))
-        role.icon = QString::fromStdString(q.getText(6));
+        role.icon = q.getText(6);
     if (!q.isNull(7))
-        role.unicodeEmoji = QString::fromStdString(q.getText(7));
+        role.unicodeEmoji = q.getText(7);
     if (!q.isNull(8))
         role.managed = q.getInt(8) != 0;
     if (!q.isNull(9))
@@ -43,8 +41,9 @@ static Discord::Role readRoleFromQuery(const Platform::Statement &q)
     if (!q.isNull(13))
         role.flags = q.getInt(13);
     if (!q.isNull(14)) {
-        role.tagsJson = QString::fromStdString(q.getText(14));
-        role.tags = Discord::RoleTags::fromJson(QJsonDocument::fromJson(role.tagsJson.toUtf8()).object());
+        role.tagsJson = q.getText(14);
+        auto tags = nlohmann::json::parse(role.tagsJson, nullptr, false);
+        role.tags = Discord::RoleTags::fromJson(tags.is_object() ? tags : nlohmann::json::object());
     }
     return role;
 }
@@ -72,7 +71,7 @@ void RoleRepository::bindRole(Platform::Statement &q, Core::Snowflake guildId, c
 {
     q.bind(":id", static_cast<int64_t>(role.id.get()));
     q.bind(":guild_id", static_cast<int64_t>(guildId));
-    std::string name = role.name.get().toStdString();
+    std::string name = role.name.get();
     q.bind(":name", std::string_view(name));
     q.bind(":permissions", static_cast<int64_t>(role.permissions.get()));
     q.bind(":position", static_cast<int>(role.position.get()));
@@ -101,8 +100,8 @@ void RoleRepository::bindRole(Platform::Statement &q, Core::Snowflake guildId, c
 
     bindOptional(q, ":flags", role.flags);
 
-    if (!role.tagsJson.isEmpty()) {
-        std::string t = role.tagsJson.toStdString();
+    if (!role.tagsJson.empty()) {
+        std::string t = role.tagsJson;
         q.bind(":tags", std::string_view(t));
     } else {
         q.bindNull(":tags");
@@ -122,20 +121,20 @@ void RoleRepository::saveRole(Core::Snowflake guildId, const Discord::Role &role
         bindRole(q, guildId, role);
         execLogged(q, "RoleRepository: Save role");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "RoleRepository: Save role failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "RoleRepository: Save role failed:" << e.what();
     }
 }
 
-void RoleRepository::saveRoles(Core::Snowflake guildId, const QList<Discord::Role> &roles)
+void RoleRepository::saveRoles(Core::Snowflake guildId, const std::vector<Discord::Role> &roles)
 {
     auto &db = getDb();
     saveRoles(guildId, roles, db);
 }
 
-void RoleRepository::saveRoles(Core::Snowflake guildId, const QList<Discord::Role> &roles,
+void RoleRepository::saveRoles(Core::Snowflake guildId, const std::vector<Discord::Role> &roles,
                                Platform::Database &db)
 {
-    if (roles.isEmpty())
+    if (roles.empty())
         return;
 
     try {
@@ -146,7 +145,7 @@ void RoleRepository::saveRoles(Core::Snowflake guildId, const QList<Discord::Rol
             q.reset();
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "RoleRepository: Save roles failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "RoleRepository: Save roles failed:" << e.what();
     }
 }
 
@@ -165,14 +164,14 @@ std::optional<Discord::Role> RoleRepository::getRole(Core::Snowflake guildId,
 
         return readRoleFromQuery(q);
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "RoleRepository: getRole failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "RoleRepository: getRole failed:" << e.what();
         return std::nullopt;
     }
 }
 
-QList<Discord::Role> RoleRepository::getRolesForGuild(Core::Snowflake guildId)
+std::vector<Discord::Role> RoleRepository::getRolesForGuild(Core::Snowflake guildId)
 {
-    QList<Discord::Role> roles;
+    std::vector<Discord::Role> roles;
     auto &db = getDb();
     try {
         std::string sql = std::string("SELECT ") + ROLE_COLUMNS + " FROM roles WHERE guild_id = :guild_id ORDER BY position ASC";
@@ -180,9 +179,9 @@ QList<Discord::Role> RoleRepository::getRolesForGuild(Core::Snowflake guildId)
         q.bind(":guild_id", static_cast<int64_t>(guildId));
 
         while (q.step())
-            roles.append(readRoleFromQuery(q));
+            roles.push_back(readRoleFromQuery(q));
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "RoleRepository: Get roles failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "RoleRepository: Get roles failed:" << e.what();
     }
 
     return roles;
@@ -202,7 +201,7 @@ void RoleRepository::deleteRole(Core::Snowflake guildId, Core::Snowflake roleId,
         q.bind(":id", static_cast<int64_t>(roleId));
         execLogged(q, "RoleRepository: Delete role");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "RoleRepository: Delete role failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "RoleRepository: Delete role failed:" << e.what();
     }
 }
 
@@ -219,7 +218,7 @@ void RoleRepository::deleteRolesForGuild(Core::Snowflake guildId, Platform::Data
         q.bind(":guild_id", static_cast<int64_t>(guildId));
         execLogged(q, "RoleRepository: Delete roles for guild");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "RoleRepository: Delete roles for guild failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "RoleRepository: Delete roles for guild failed:" << e.what();
     }
 }
 

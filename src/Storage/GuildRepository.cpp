@@ -2,6 +2,7 @@
 
 #include "DatabaseManager.hpp"
 #include "Core/Logging.hpp"
+#include "Platform/Utf8.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -60,13 +61,18 @@ void GuildRepository::saveGuild(const Discord::Guild &guild, Platform::Database 
         )");
 
         q.bind(":id", static_cast<int64_t>(guild.id.get()));
-        std::string name = guild.name.get().toStdString();
+        std::string name = guild.name.get();
         q.bind(":name", std::string_view(name));
         bindOptional(q, ":icon", guild.icon);
         q.bind(":owner_id", static_cast<int64_t>(guild.ownerId.get()));
 
         if (guild.features.hasValue()) {
-            std::string feat = QStringList(guild.features.get()).join(',').toStdString();
+            std::string feat;
+            for (const auto &feature : guild.features.get()) {
+                if (!feat.empty())
+                    feat += ',';
+                feat += feature;
+            }
             q.bind(":features", std::string_view(feat));
         } else {
             q.bindNull(":features");
@@ -82,14 +88,14 @@ void GuildRepository::saveGuild(const Discord::Guild &guild, Platform::Database 
 
         const Discord::GuildIncidentsData incidents = guild.incidentsData.valueOr({});
         if (incidents.invitesDisabledUntil.hasValue()) {
-            std::string inv = incidents.invitesDisabledUntil->toString(Qt::ISODateWithMs).toStdString();
+            std::string inv = incidents.invitesDisabledUntil->iso8601();
             q.bind(":invites_disabled_until", std::string_view(inv));
         } else {
             q.bindNull(":invites_disabled_until");
         }
 
         if (incidents.dmsDisabledUntil.hasValue()) {
-            std::string dms = incidents.dmsDisabledUntil->toString(Qt::ISODateWithMs).toStdString();
+            std::string dms = incidents.dmsDisabledUntil->iso8601();
             q.bind(":dms_disabled_until", std::string_view(dms));
         } else {
             q.bindNull(":dms_disabled_until");
@@ -128,7 +134,7 @@ void GuildRepository::saveGuild(const Discord::Guild &guild, Platform::Database 
 
         execLogged(q, "GuildRepository: Save");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "GuildRepository: Save failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "GuildRepository: Save failed:" << e.what();
     }
 }
 
@@ -145,7 +151,7 @@ void GuildRepository::deleteGuild(Core::Snowflake guildId, Platform::Database &d
         q.bind(":id", static_cast<int64_t>(guildId));
         execLogged(q, "GuildRepository: Delete");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "GuildRepository: Delete failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "GuildRepository: Delete failed:" << e.what();
     }
 }
 
@@ -169,13 +175,18 @@ std::optional<Discord::Guild> GuildRepository::getGuild(Core::Snowflake guildId)
 
         Discord::Guild guild;
         guild.id = static_cast<Core::Snowflake>(q.getInt64(0));
-        guild.name = QString::fromStdString(q.getText(1));
+        guild.name = q.getText(1);
         if (!q.isNull(2))
-            guild.icon = QString::fromStdString(q.getText(2));
+            guild.icon = q.getText(2);
         guild.ownerId = static_cast<Core::Snowflake>(q.getInt64(3));
 
-        if (!q.isNull(4))
-            guild.features = QString::fromStdString(q.getText(4)).split(',', Qt::SkipEmptyParts);
+        if (!q.isNull(4)) {
+            const auto text = q.getText(4);
+            std::vector<std::string> features;
+            for (auto part : Platform::split(text, ',', true))
+                features.emplace_back(part);
+            guild.features = std::move(features);
+        }
         if (!q.isNull(5))
             guild.premiumTier = static_cast<Discord::PremiumTier>(q.getInt(5));
         if (!q.isNull(6))
@@ -188,9 +199,9 @@ std::optional<Discord::Guild> GuildRepository::getGuild(Core::Snowflake guildId)
         if (!q.isNull(8))
             guild.defaultMessageNotifications = static_cast<Discord::MessageNotificationLevel>(q.getInt(8));
         if (!q.isNull(9))
-            guild.description = QString::fromStdString(q.getText(9));
+            guild.description = q.getText(9);
         if (!q.isNull(10))
-            guild.banner = QString::fromStdString(q.getText(10));
+            guild.banner = q.getText(10);
         if (!q.isNull(11))
             guild.afkChannelId = static_cast<Core::Snowflake>(q.getInt64(11));
         if (!q.isNull(12))
@@ -218,14 +229,14 @@ std::optional<Discord::Guild> GuildRepository::getGuild(Core::Snowflake guildId)
         }
 
         if (!q.isNull(21))
-            guild.splash = QString::fromStdString(q.getText(21));
+            guild.splash = q.getText(21);
 
         if (!q.isNull(22) || !q.isNull(23) || !q.isNull(24)) {
             Discord::GuildIncidentsData incidents;
             if (!q.isNull(22))
-                incidents.invitesDisabledUntil = QDateTime::fromString(QString::fromStdString(q.getText(22)), Qt::ISODateWithMs);
+                incidents.invitesDisabledUntil = Platform::DateTime::parse(q.getText(22));
             if (!q.isNull(23))
-                incidents.dmsDisabledUntil = QDateTime::fromString(QString::fromStdString(q.getText(23)), Qt::ISODateWithMs);
+                incidents.dmsDisabledUntil = Platform::DateTime::parse(q.getText(23));
             if (!q.isNull(24))
                 incidents.lockdownDurationHours = q.getInt(24);
             guild.incidentsData = incidents;
@@ -233,7 +244,7 @@ std::optional<Discord::Guild> GuildRepository::getGuild(Core::Snowflake guildId)
 
         return guild;
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "GuildRepository: getGuild failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "GuildRepository: getGuild failed:" << e.what();
         return std::nullopt;
     }
 }

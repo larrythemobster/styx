@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QString>
 #include <string>
 #include <optional>
 #include <type_traits>
@@ -9,6 +8,7 @@
 #include "Platform/Sqlite.hpp"
 #include "Core/Logging.hpp"
 #include "Core/JsonUtils.hpp"
+#include "Platform/Native.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -16,7 +16,7 @@ namespace Storage {
 class BaseRepository
 {
 public:
-    explicit BaseRepository(const QString &connName);
+    explicit BaseRepository(const std::string &connName);
 
 protected:
     Platform::Database &getDb() const;
@@ -69,15 +69,10 @@ protected:
         stmt.bind(name, val);
     }
 
-    static void bindValue(Platform::Statement &stmt, std::string_view name, const QString &val)
-    {
-        std::string s = val.toStdString();
-        stmt.bind(name, std::string_view(s));
-    }
 
-    static void bindValue(Platform::Statement &stmt, std::string_view name, const QDateTime &val)
+    static void bindValue(Platform::Statement &stmt, std::string_view name, const Platform::DateTime &val)
     {
-        std::string s = val.toString(Qt::ISODateWithMs).toStdString();
+        std::string s = val.iso8601();
         stmt.bind(name, std::string_view(s));
     }
 
@@ -115,10 +110,10 @@ protected:
 
     static void bindValue(Platform::Statement &stmt, std::string_view name, Core::Snowflake val)
     {
-        stmt.bind(name, static_cast<int64_t>(static_cast<quint64>(val)));
+        stmt.bind(name, static_cast<int64_t>(static_cast<uint64_t>(val)));
     }
 
-    QString connName;
+    std::string connName;
 };
 
 } // namespace Storage

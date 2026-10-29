@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QString>
 #include "Platform/Sqlite.hpp"
 
 namespace Styx {

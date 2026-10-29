@@ -1,7 +1,7 @@
 #pragma once
 
 #include <optional>
-#include <QList>
+#include <vector>
 
 #include "BaseRepository.hpp"
 #include "Core/Snowflake.hpp"
@@ -19,16 +19,16 @@ public:
     void saveMember(Core::Snowflake guildId, Core::Snowflake userId, const Discord::Member &member);
     void saveMember(Core::Snowflake guildId, Core::Snowflake userId, const Discord::Member &member,
                     Platform::Database &db);
-    void saveMembers(Core::Snowflake guildId, const QList<Discord::Member> &members);
+    void saveMembers(Core::Snowflake guildId, const std::vector<Discord::Member> &members);
     void deleteMembersForGuild(Core::Snowflake guildId, Platform::Database &db);
     void deleteMember(Core::Snowflake guildId, Core::Snowflake userId);
 
     std::optional<Discord::Member> getMember(Core::Snowflake guildId, Core::Snowflake userId);
-    QList<Discord::Member> getMembersWithUsers(Core::Snowflake guildId);
+    std::vector<Discord::Member> getMembersWithUsers(Core::Snowflake guildId);
 
 private:
-    static QString rolesToJson(const QList<Core::Snowflake> &roles);
-    static QList<Core::Snowflake> rolesFromJson(const QString &json);
+    static std::string rolesToJson(const std::vector<Core::Snowflake> &roles);
+    static std::vector<Core::Snowflake> rolesFromJson(const std::string &json);
     static Discord::Member readMember(const Platform::Statement &q, int firstColumn);
 };
 

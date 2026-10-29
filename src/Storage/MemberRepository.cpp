@@ -1,11 +1,11 @@
 #include "MemberRepository.hpp"
 
-#include <QJsonArray>
-#include <QJsonDocument>
 
 #include "DatabaseManager.hpp"
 #include "Transaction.hpp"
 #include "Core/Logging.hpp"
+#include <charconv>
+#include <nlohmann/json.hpp>
 
 namespace Styx {
 namespace Storage {
@@ -30,7 +30,7 @@ void MemberRepository::deleteMembersForGuild(Core::Snowflake guildId, Platform::
         q.bind(":guild_id", static_cast<int64_t>(guildId));
         execLogged(q, "MemberRepository: Delete members for guild");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MemberRepository: Delete members for guild failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MemberRepository: Delete members for guild failed:" << e.what();
     }
 }
 
@@ -43,28 +43,35 @@ void MemberRepository::deleteMember(Core::Snowflake guildId, Core::Snowflake use
         q.bind(":user_id", static_cast<int64_t>(userId));
         execLogged(q, "MemberRepository: Delete member");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MemberRepository: Delete member failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MemberRepository: Delete member failed:" << e.what();
     }
 }
 
-QString MemberRepository::rolesToJson(const QList<Core::Snowflake> &roles)
+std::string MemberRepository::rolesToJson(const std::vector<Core::Snowflake> &roles)
 {
-    QJsonArray arr;
+    auto arr = nlohmann::json::array();
     for (const auto &role : roles)
-        arr.append(QString::number(static_cast<quint64>(role)));
-
-    return QJsonDocument(arr).toJson(QJsonDocument::Compact);
+        arr.push_back(role.toString());
+    return arr.dump();
 }
 
-QList<Core::Snowflake> MemberRepository::rolesFromJson(const QString &json)
+std::vector<Core::Snowflake> MemberRepository::rolesFromJson(const std::string &json)
 {
-    QList<Core::Snowflake> roles;
-    QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
-    if (!doc.isArray())
+    std::vector<Core::Snowflake> roles;
+    auto doc = nlohmann::json::parse(json, nullptr, false);
+    if (!doc.is_array())
         return roles;
 
-    for (const auto &val : doc.array())
-        roles.append(static_cast<Core::Snowflake>(val.toString().toULongLong()));
+    for (const auto &val : doc) {
+        uint64_t id = 0;
+        if (val.is_string()) {
+            const auto &text = val.get_ref<const std::string &>();
+            const auto result = std::from_chars(text.data(), text.data() + text.size(), id);
+            if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+                id = 0;
+        }
+        roles.emplace_back(id);
+    }
 
     return roles;
 }
@@ -94,7 +101,7 @@ void MemberRepository::saveMember(Core::Snowflake guildId, Core::Snowflake userI
         bindOptional(q, ":avatar", member.avatar);
 
         if (member.roles.hasValue()) {
-            std::string r = rolesToJson(member.roles.get()).toStdString();
+            std::string r = rolesToJson(member.roles.get());
             q.bind(":roles", std::string_view(r));
         } else {
             q.bindNull(":roles");
@@ -110,13 +117,13 @@ void MemberRepository::saveMember(Core::Snowflake guildId, Core::Snowflake userI
 
         execLogged(q, "MemberRepository: Save member");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MemberRepository: Save member failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MemberRepository: Save member failed:" << e.what();
     }
 }
 
-void MemberRepository::saveMembers(Core::Snowflake guildId, const QList<Discord::Member> &members)
+void MemberRepository::saveMembers(Core::Snowflake guildId, const std::vector<Discord::Member> &members)
 {
-    if (members.isEmpty())
+    if (members.empty())
         return;
 
     auto &db = getDb();
@@ -144,7 +151,7 @@ std::optional<Discord::Member> MemberRepository::getMember(Core::Snowflake guild
         }
         return readMember(q, 0);
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MemberRepository: getMember failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MemberRepository: getMember failed:" << e.what();
         return std::nullopt;
     }
 }
@@ -153,15 +160,15 @@ Discord::Member MemberRepository::readMember(const Platform::Statement &q, int f
 {
     Discord::Member member;
     if (!q.isNull(firstColumn + 0))
-        member.nick = QString::fromStdString(q.getText(firstColumn + 0));
+        member.nick = q.getText(firstColumn + 0);
     if (!q.isNull(firstColumn + 1))
-        member.avatar = QString::fromStdString(q.getText(firstColumn + 1));
+        member.avatar = q.getText(firstColumn + 1);
     if (!q.isNull(firstColumn + 2))
-        member.roles = rolesFromJson(QString::fromStdString(q.getText(firstColumn + 2)));
+        member.roles = rolesFromJson(q.getText(firstColumn + 2));
     if (!q.isNull(firstColumn + 3))
-        member.joinedAt = QDateTime::fromString(QString::fromStdString(q.getText(firstColumn + 3)), Qt::ISODateWithMs);
+        member.joinedAt = Platform::DateTime::parse(q.getText(firstColumn + 3));
     if (!q.isNull(firstColumn + 4))
-        member.premiumSince = QDateTime::fromString(QString::fromStdString(q.getText(firstColumn + 4)), Qt::ISODateWithMs);
+        member.premiumSince = Platform::DateTime::parse(q.getText(firstColumn + 4));
     if (!q.isNull(firstColumn + 5))
         member.deaf = q.getInt(firstColumn + 5) != 0;
     if (!q.isNull(firstColumn + 6))
@@ -171,13 +178,13 @@ Discord::Member MemberRepository::readMember(const Platform::Statement &q, int f
     if (!q.isNull(firstColumn + 8))
         member.pending = q.getInt(firstColumn + 8) != 0;
     if (!q.isNull(firstColumn + 9))
-        member.communicationDisabledUntil = QDateTime::fromString(QString::fromStdString(q.getText(firstColumn + 9)), Qt::ISODateWithMs);
+        member.communicationDisabledUntil = Platform::DateTime::parse(q.getText(firstColumn + 9));
     return member;
 }
 
-QList<Discord::Member> MemberRepository::getMembersWithUsers(Core::Snowflake guildId)
+std::vector<Discord::Member> MemberRepository::getMembersWithUsers(Core::Snowflake guildId)
 {
-    QList<Discord::Member> members;
+    std::vector<Discord::Member> members;
     auto &db = getDb();
     try {
         std::string sql = "SELECT m.user_id, " + MemberColumns +
@@ -191,22 +198,22 @@ QList<Discord::Member> MemberRepository::getMembersWithUsers(Core::Snowflake gui
             Discord::User user;
             user.id = static_cast<Core::Snowflake>(q.getInt64(0));
             member.userId = user.id.get();
-            user.username = QString::fromStdString(q.getText(FirstUserColumn));
+            user.username = q.getText(FirstUserColumn);
             if (q.isNull(FirstUserColumn + 1))
                 user.globalName = nullptr;
             else
-                user.globalName = QString::fromStdString(q.getText(FirstUserColumn + 1));
+                user.globalName = q.getText(FirstUserColumn + 1);
             if (q.isNull(FirstUserColumn + 2))
                 user.avatar = nullptr;
             else
-                user.avatar = QString::fromStdString(q.getText(FirstUserColumn + 2));
+                user.avatar = q.getText(FirstUserColumn + 2);
             if (!q.isNull(FirstUserColumn + 3))
                 user.bot = q.getInt(FirstUserColumn + 3) != 0;
             member.user = user;
-            members.append(member);
+            members.push_back(member);
         }
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "MemberRepository: Get members with users failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "MemberRepository: Get members with users failed:" << e.what();
     }
     return members;
 }

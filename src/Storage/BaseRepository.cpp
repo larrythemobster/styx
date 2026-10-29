@@ -3,7 +3,7 @@
 namespace Styx {
 namespace Storage {
 
-BaseRepository::BaseRepository(const QString &connName) : connName(connName) {}
+BaseRepository::BaseRepository(const std::string &connName) : connName(connName) {}
 
 Platform::Database &BaseRepository::getDb() const
 {
@@ -16,7 +16,7 @@ bool BaseRepository::execLogged(Platform::Statement &stmt, const char *context)
         stmt.execute();
         return true;
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << context << "failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << context << "failed:" << e.what();
         return false;
     }
 }

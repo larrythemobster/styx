@@ -35,19 +35,19 @@ void UserRepository::saveUser(const Discord::User &user, Platform::Database &db)
 
         execLogged(q, "UserRepository: Save user");
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "UserRepository: Save user failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "UserRepository: Save user failed:" << e.what();
     }
 }
 
-void UserRepository::saveUsers(const QList<Discord::User> &users)
+void UserRepository::saveUsers(const std::vector<Discord::User> &users)
 {
     auto &db = getDb();
     saveUsers(users, db);
 }
 
-void UserRepository::saveUsers(const QList<Discord::User> &users, Platform::Database &db)
+void UserRepository::saveUsers(const std::vector<Discord::User> &users, Platform::Database &db)
 {
-    if (users.isEmpty())
+    if (users.empty())
         return;
 
     Transaction txn(db);
@@ -72,17 +72,17 @@ std::optional<Discord::User> UserRepository::getUser(Core::Snowflake userId)
 
         Discord::User user;
         user.id = static_cast<Core::Snowflake>(q.getInt64(0));
-        user.username = QString::fromStdString(q.getText(1));
+        user.username = q.getText(1);
         if (!q.isNull(2))
-            user.globalName = QString::fromStdString(q.getText(2));
+            user.globalName = q.getText(2);
         if (!q.isNull(3))
-            user.avatar = QString::fromStdString(q.getText(3));
+            user.avatar = q.getText(3);
         if (!q.isNull(4))
             user.bot = q.getInt(4) != 0;
 
         return user;
     } catch (const Platform::SqliteError &e) {
-        qCWarning(LogDB) << "UserRepository: getUser failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogDB) << "UserRepository: getUser failed:" << e.what();
         return std::nullopt;
     }
 }

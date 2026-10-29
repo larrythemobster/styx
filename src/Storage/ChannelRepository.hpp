@@ -1,8 +1,8 @@
 #pragma once
 
 #include <optional>
-#include <QList>
-#include <QHash>
+#include <vector>
+#include <unordered_map>
 
 #include "BaseRepository.hpp"
 #include "Core/Snowflake.hpp"
@@ -22,19 +22,19 @@ public:
     void deleteChannel(Core::Snowflake channelId, Platform::Database &db);
     void deleteChannel(Core::Snowflake channelId);
     void savePermissionOverwrites(Core::Snowflake channelId,
-                                  const QList<Discord::PermissionOverwrite> &overwrites,
+                                  const std::vector<Discord::PermissionOverwrite> &overwrites,
                                   Platform::Database &db);
     void saveChannelRecipients(Core::Snowflake channelId,
-                               const QList<Core::Snowflake> &recipientIds,
+                               const std::vector<Core::Snowflake> &recipientIds,
                                Platform::Database &db);
-    QList<Discord::PermissionOverwrite> getPermissionOverwrites(Core::Snowflake channelId);
-    QList<Core::Snowflake> getChannelRecipientIds(Core::Snowflake channelId);
+    std::vector<Discord::PermissionOverwrite> getPermissionOverwrites(Core::Snowflake channelId);
+    std::vector<Core::Snowflake> getChannelRecipientIds(Core::Snowflake channelId);
 
-    QHash<Core::Snowflake, QList<Discord::PermissionOverwrite>> getPermissionOverwritesForGuild(
+    std::unordered_map<Core::Snowflake, std::vector<Discord::PermissionOverwrite>> getPermissionOverwritesForGuild(
             Core::Snowflake guildId);
 
     std::optional<Discord::Channel> getChannel(Core::Snowflake channelId);
-    QList<Discord::Channel> getChannelsForGuild(Core::Snowflake guildId);
+    std::vector<Discord::Channel> getChannelsForGuild(Core::Snowflake guildId);
     std::optional<Core::Snowflake> findDmChannelWithUser(Core::Snowflake userId);
 };
 

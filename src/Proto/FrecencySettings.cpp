@@ -35,7 +35,7 @@ FrecencyItem
     int32 score = 4;
 }
 */
-std::vector<uint8_t> writeFrecencyItem(const FrecencyItem &item)
+std::string writeFrecencyItem(const FrecencyItem &item)
 {
     ProtoWriter writer;
     if (item.totalUses)
@@ -54,7 +54,7 @@ EmojiFrecency
     map<string, FrecencyItem> emojis = 1;
 }
 */
-std::vector<uint8_t> writeEmojiFrecency(const EmojiFrecency &frecency)
+std::string writeEmojiFrecency(const EmojiFrecency &frecency)
 {
     ProtoWriter writer;
     for (const auto &[key, item] : frecency.emojis) {
@@ -96,7 +96,7 @@ void readEmojiEntry(ProtoReader &reader, EmojiFrecency &frecency)
         frecency.emojis.insert_or_assign(std::move(key), std::move(item));
 }
 
-std::vector<uint8_t> writeFavoriteGif(const FavoriteGif &gif)
+std::string writeFavoriteGif(const FavoriteGif &gif)
 {
     ProtoWriter writer;
     if (gif.format != GifType::None)
@@ -114,7 +114,7 @@ std::vector<uint8_t> writeFavoriteGif(const FavoriteGif &gif)
 
 void readFavoriteGif(std::span<const uint8_t> bytes, FavoriteGif &gif)
 {
-    gif.messageAsReceived.assign(bytes.begin(), bytes.end());
+    gif.messageAsReceived.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
 
     ProtoReader reader(bytes);
     Tag tag;
@@ -291,16 +291,14 @@ FavoriteGifs FavoriteGifs::fromProto(std::span<const uint8_t> bytes)
             if (!reader.skipField(tag.wireType))
                 break;
             const size_t fieldLen = reader.position() - fieldStart;
-            favorites.unknownFields.insert(favorites.unknownFields.end(),
-                                           bytes.data() + fieldStart,
-                                           bytes.data() + fieldStart + fieldLen);
+            favorites.unknownFields.append(reinterpret_cast<const char *>(bytes.data() + fieldStart), fieldLen);
         }
     }
 
     return favorites;
 }
 
-std::vector<uint8_t> FavoriteGifs::toProto() const
+std::string FavoriteGifs::toProto() const
 {
     ProtoWriter writer;
     for (const FavoriteGif &gif : gifs) {
@@ -311,8 +309,8 @@ std::vector<uint8_t> FavoriteGifs::toProto() const
     }
     if (hideTooltip)
         writer.writeVarint(2, 1);
-    std::vector<uint8_t> res = writer.takeBytes();
-    res.insert(res.end(), unknownFields.begin(), unknownFields.end());
+    std::string res = writer.takeBytes();
+    res.append(unknownFields);
     return res;
 }
 
@@ -356,7 +354,7 @@ FrecencyUserSettings FrecencyUserSettings::fromProto(ProtoReader &reader)
     return settings;
 }
 
-std::vector<uint8_t> FrecencyUserSettings::toProtoPartial() const
+std::string FrecencyUserSettings::toProtoPartial() const
 {
     ProtoWriter writer;
     if (favoriteGifs)
