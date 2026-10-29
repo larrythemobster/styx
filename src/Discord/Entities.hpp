@@ -124,7 +124,7 @@ struct ActivityParty : Core::JsonUtils::JsonObject
         ActivityParty party;
 
         const nlohmann::json size = obj.value("size", nlohmann::json());
-        if (size.size() >= 2) {
+        if (size.is_array() && size.size() >= 2) {
             party.currentSize = size[0].get<int>();
             party.maxSize = size[1].get<int>();
         }
@@ -450,10 +450,8 @@ struct Role : Core::JsonUtils::JsonObject
         Role role;
         get(obj, "id", role.id);
         get(obj, "name", role.name);
-        if (obj.contains("permissions")) {
-            std::string permStr = obj["permissions"].get<std::string>();
-            role.permissions = Permissions::fromInt(permStr.get<uint64_t>());
-        }
+        if (const auto it = obj.find("permissions"); it != obj.end() && !it->is_null())
+            role.permissions = Permissions::fromInt(it->is_string() ? std::stoull(it->get<std::string>()) : it->get<std::uint64_t>());
         get(obj, "position", role.position);
         get(obj, "color", role.color);
         get(obj, "colors", role.colors);
@@ -478,7 +476,7 @@ struct Role : Core::JsonUtils::JsonObject
 
     Platform::Color getColor() const
     {
-        return hasColor() ? Platform::Color::fromRgb(color.get()) : Platform::Color();
+        return hasColor() ? Platform::Color::rgb(color.get()) : Platform::Color();
     }
 };
 
@@ -498,16 +496,11 @@ struct PermissionOverwrite : Core::JsonUtils::JsonObject
     {
         PermissionOverwrite overwrite;
         get(obj, "id", overwrite.id);
-        if (obj.contains("type"))
-            overwrite.type = static_cast<Type>(obj["type"].get<int>());
-        if (obj.contains("allow")) {
-            std::string allowStr = obj["allow"].get<std::string>();
-            overwrite.allow = Permissions::fromInt(allowStr.get<uint64_t>());
-        }
-        if (obj.contains("deny")) {
-            std::string denyStr = obj["deny"].get<std::string>();
-            overwrite.deny = Permissions::fromInt(denyStr.get<uint64_t>());
-        }
+        get(obj, "type", overwrite.type);
+        if (const auto it = obj.find("allow"); it != obj.end() && !it->is_null())
+            overwrite.allow = Permissions::fromInt(it->is_string() ? std::stoull(it->get<std::string>()) : it->get<std::uint64_t>());
+        if (const auto it = obj.find("deny"); it != obj.end() && !it->is_null())
+            overwrite.deny = Permissions::fromInt(it->is_string() ? std::stoull(it->get<std::string>()) : it->get<std::uint64_t>());
         return overwrite;
     }
 };
@@ -636,7 +629,7 @@ struct Channel : Core::JsonUtils::JsonObject
 
     Core::Snowflake effectiveLastMessageId() const
     {
-        if (lastMessageId.hasValue() && lastMessageId->valid())
+        if (lastMessageId.hasValue() && lastMessageId->isValid())
             return lastMessageId.get();
         return id.get();
     }
@@ -711,7 +704,7 @@ struct Emoji : Core::JsonUtils::JsonObject
 
     std::string reactionKey() const
     {
-        return isUnicode() ? name.get() : name.get() + ":" + id.get().get<std::string>();
+        return isUnicode() ? name.get() : name.get() + ":" + id->toString();
     }
 
     std::string getImageUrl(bool animatedFrames = false) const
@@ -809,7 +802,7 @@ struct Guild : Core::JsonUtils::JsonObject
 
     [[nodiscard]] bool hasFeature(const std::string &feature) const
     {
-        return features.hasValue() && features->contains(feature);
+        return features.hasValue() && std::find(features->begin(), features->end(), feature) != features->end();
     }
 
     [[nodiscard]] bool invitesPaused() const
@@ -818,7 +811,7 @@ struct Guild : Core::JsonUtils::JsonObject
             return true;
         return incidentsData.hasValue() &&
                incidentsData->invitesDisabledUntil.hasValue() &&
-               incidentsData->invitesDisabledUntil.get() > Platform::DateTime::currentDateTimeUtc();
+               incidentsData->invitesDisabledUntil.get() > Platform::DateTime::now();
     }
 };
 
@@ -907,7 +900,7 @@ struct Invite : Core::JsonUtils::JsonObject
         if (expiresAt.hasValue() && expiresAt->valid())
             return expiresAt.get();
         if (maxAge.valueOr(0) > 0 && createdAt.hasValue())
-            return createdAt->addSecs(maxAge.get());
+            return createdAt->addSeconds(maxAge.get());
         return {};
     }
 
@@ -1130,7 +1123,7 @@ struct Embed : Core::JsonUtils::JsonObject
         const bool videoIsProxied = sizedVideo && video->proxyUrl.hasValue();
         const bool showsImage = (image.hasValue() && image->hasSize()) || (isImage && sizedThumbnail);
         const bool videoHasPoster = (isGifv && sizedThumbnail) || videoIsProxied;
-        const bool showsVideo = sizedVideo && videoHasPoster && (videoIsProxied || video->url->startsWith("https:"));
+        const bool showsVideo = sizedVideo && videoHasPoster && (videoIsProxied || video->url->starts_with("https:"));
         if (!showsImage && !showsVideo)
             return false;
 
@@ -1174,7 +1167,7 @@ struct Attachment : Core::JsonUtils::JsonObject
     {
         if (!contentType.hasValue())
             return false;
-        return contentType->startsWith("image/");
+        return contentType->starts_with("image/");
     }
 
     bool isSpoiler() const
@@ -1253,11 +1246,13 @@ struct Reaction : Core::JsonUtils::JsonObject
         float maxSaturation = -1;
 
         for (const std::string &hex : *burstColors) {
-            Platform::Color color(hex);
-            if (!color.valid())
+            Platform::Color color = Platform::Color::parse(hex);
+            if (!color.valid)
                 continue;
-            if (color.saturationF() > maxSaturation) {
-                maxSaturation = color.saturationF();
+            const auto [minChannel, maxChannel] = std::minmax({color.r, color.g, color.b});
+            const float saturation = maxChannel == 0 ? 0.0f : float(maxChannel - minChannel) / maxChannel;
+            if (saturation > maxSaturation) {
+                maxSaturation = saturation;
                 best = color;
             }
         }
@@ -1347,7 +1342,7 @@ struct Message : Core::JsonUtils::JsonObject
 
     [[nodiscard]] bool hidesLinkBehindItsEmbed() const
     {
-        return contentIsSingleLink && embeds.hasValue() && embeds->size() == 1 && embeds->first().isBareMedia();
+        return contentIsSingleLink && embeds.hasValue() && embeds->size() == 1 && embeds->front().isBareMedia();
     }
 
     void setSnapshot(const nlohmann::json &snapshotObj)
@@ -1358,21 +1353,25 @@ struct Message : Core::JsonUtils::JsonObject
 
     static std::string compactArrayJson(const nlohmann::json &obj, const std::string &key)
     {
-        const auto found = obj.constFind(key);
-        if (found == obj.constEnd())
+        const auto found = obj.find(key);
+        if (found == obj.end())
             return {};
-        return found.value().dump();
+        return found->is_array() ? found->dump() : "[]";
     }
 
     static Message fromJson(const nlohmann::json &obj)
     {
         Message message;
 
-        const std::vector<std::string> keys = obj.keys();
-        message.presentKeys = std::unordered_set<std::string>(keys.cbegin(), keys.cend());
+        if (obj.is_object())
+            for (auto it = obj.begin(); it != obj.end(); ++it)
+                message.presentKeys.insert(it.key());
 
         get(obj, "id", message.id);
-        get(obj, "nonce", message.nonce);
+        if (const auto nonce = obj.find("nonce"); nonce != obj.end() && nonce->is_number_integer())
+            message.nonce = nonce->dump();
+        else
+            get(obj, "nonce", message.nonce);
         get(obj, "channel_id", message.channelId);
         get(obj, "author", message.author);
         get(obj, "content", message.content);
@@ -1392,16 +1391,19 @@ struct Message : Core::JsonUtils::JsonObject
         get(obj, "guild_id", message.guildId);
         get(obj, "channel_type", message.channelType);
 
-        const nlohmann::json snapshots = obj.value("message_snapshots", nlohmann::json());
-        if (!snapshots.empty())
-            message.setSnapshot(snapshots.front().value("message", nlohmann::json()));
+        const auto snapshots = obj.find("message_snapshots");
+        if (snapshots != obj.end() && snapshots->is_array() && !snapshots->empty() && snapshots->front().is_object()) {
+            const auto snapshot = snapshots->front().find("message");
+            if (snapshot != snapshots->front().end() && snapshot->is_object())
+                message.setSnapshot(*snapshot);
+        }
 
         // referenced_message: manually handle tri-state (absent / null / object)
         auto refIt = obj.find("referenced_message");
         if (refIt != obj.end()) {
-            if (refIt.value().isNull()) {
+            if (refIt->is_null()) {
                 message.referencedMessageNull = true;
-            } else {
+            } else if (refIt->is_object()) {
                 message.referencedMessage =
                         std::make_shared<Message>(fromJson(refIt.value()));
             }
@@ -1440,6 +1442,10 @@ struct Message : Core::JsonUtils::JsonObject
             attachments = update.attachments;
         if (present.contains("message_reference"))
             messageReference = update.messageReference;
+        if (present.contains("referenced_message")) {
+            referencedMessage = update.referencedMessage;
+            referencedMessageNull = update.referencedMessageNull;
+        }
 
         if (present.contains("message_snapshots")) {
             snapshotMessage = update.snapshotMessage;
@@ -1754,8 +1760,8 @@ struct UserProfile : Core::JsonUtils::JsonObject
 struct AuditLogChange
 {
     std::string key;
-    nlohmann::json oldValue = nlohmann::json(nlohmann::json::Undefined);
-    nlohmann::json newValue = nlohmann::json(nlohmann::json::Undefined);
+    std::optional<nlohmann::json> oldValue;
+    std::optional<nlohmann::json> newValue;
 };
 
 struct AuditLogEntry : Core::JsonUtils::JsonObject
@@ -1776,11 +1782,24 @@ struct AuditLogEntry : Core::JsonUtils::JsonObject
         get(obj, "user_id", entry.userId);
         get(obj, "target_id", entry.targetId);
         get(obj, "reason", entry.reason);
-        for (const nlohmann::json &value : obj.value("changes", nlohmann::json())) {
-            const nlohmann::json change = value;
-            entry.changes.push_back({ change.value("key", nlohmann::json()).get<std::string>(), change.value("old_value", nlohmann::json()), change.value("new_value", nlohmann::json()) });
+        if (const auto changes = obj.find("changes"); changes != obj.end() && changes->is_array()) {
+            for (const auto &change : *changes) {
+                if (!change.is_object())
+                    continue;
+                AuditLogChange parsed;
+                if (const auto key = change.find("key"); key != change.end() && key->is_string())
+                    parsed.key = key->get<std::string>();
+                if (const auto oldValue = change.find("old_value"); oldValue != change.end())
+                    parsed.oldValue = *oldValue;
+                if (const auto newValue = change.find("new_value"); newValue != change.end())
+                    parsed.newValue = *newValue;
+                entry.changes.push_back(std::move(parsed));
+            }
         }
-        entry.options = obj.value("options", nlohmann::json());
+        if (const auto options = obj.find("options"); options != obj.end() && options->is_object())
+            entry.options = *options;
+        else
+            entry.options = nlohmann::json::object();
         return entry;
     }
 };
@@ -1799,16 +1818,24 @@ struct AuditLog
     static AuditLog fromJson(const nlohmann::json &obj)
     {
         AuditLog log;
-        for (const nlohmann::json &value : obj.value("audit_log_entries", nlohmann::json()))
-            log.entries.push_back(AuditLogEntry::fromJson(value));
-        for (const nlohmann::json &value : obj.value("users", nlohmann::json()))
-            log.users.push_back(User::fromJson(value));
-        log.integrations = obj.value("integrations", nlohmann::json());
-        log.webhooks = obj.value("webhooks", nlohmann::json());
-        log.guildScheduledEvents = obj.value("guild_scheduled_events", nlohmann::json());
-        log.autoModerationRules = obj.value("auto_moderation_rules", nlohmann::json());
-        log.threads = obj.value("threads", nlohmann::json());
-        log.applicationCommands = obj.value("application_commands", nlohmann::json());
+        if (const auto entries = obj.find("audit_log_entries"); entries != obj.end() && entries->is_array())
+            for (const auto &value : *entries)
+                if (value.is_object())
+                    log.entries.push_back(AuditLogEntry::fromJson(value));
+        if (const auto users = obj.find("users"); users != obj.end() && users->is_array())
+            for (const auto &value : *users)
+                if (value.is_object())
+                    log.users.push_back(User::fromJson(value));
+        const auto array = [&obj](const char *key) {
+            const auto it = obj.find(key);
+            return it != obj.end() && it->is_array() ? *it : nlohmann::json::array();
+        };
+        log.integrations = array("integrations");
+        log.webhooks = array("webhooks");
+        log.guildScheduledEvents = array("guild_scheduled_events");
+        log.autoModerationRules = array("auto_moderation_rules");
+        log.threads = array("threads");
+        log.applicationCommands = array("application_commands");
         return log;
     }
 };

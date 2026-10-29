@@ -143,6 +143,7 @@ void VoiceClient::cleanupTransport()
         m_keepaliveTimerId = 0;
     }
 
+    daveEnabled = false;
     encryption.reset();
 
     daveSession.reset();
@@ -175,14 +176,14 @@ void VoiceClient::onGatewayDisconnected(VoiceCloseCode code, const std::string &
 
 void VoiceClient::onGatewayReady(const VoiceReady &data)
 {
-    Core::log(Core::LogLevel::Info,LogVoice) << "Voice Ready: SSRC =" << data.ssrc
-                     << "server =" << data.ip << ":" << data.port
+    Core::log(Core::LogLevel::Info,LogVoice) << "Voice Ready: SSRC =" << data.ssrc.get()
+                     << "server =" << data.ip.get() << ":" << data.port.get()
                     ;
 
-    localSsrc = data.ssrc;
-    serverIp = data.ip;
-    serverPort = data.port;
-    serverModes = data.modes;
+    localSsrc = data.ssrc.get();
+    serverIp = data.ip.get();
+    serverPort = data.port.get();
+    serverModes = data.modes.get();
 
     static const std::array preferred = {
         EncryptionMode::AEAD_AES256_GCM_RTPSIZE,
@@ -219,11 +220,11 @@ void VoiceClient::onGatewayReady(const VoiceReady &data)
 
 void VoiceClient::onSessionDescription(const SessionDescription &desc)
 {
-    Core::log(Core::LogLevel::Info,LogVoice) << "Session established: mode =" << desc.mode
+    Core::log(Core::LogLevel::Info,LogVoice) << "Session established: mode =" << desc.mode.get()
                      << "key length =" << desc.secretKey->size();
 
-    sessionKey = desc.secretKey;
-    selectedMode = desc.mode;
+    sessionKey = desc.secretKey.get();
+    selectedMode = desc.mode.get();
 
     EncryptionMode mode = encryptionModeFromString(selectedMode);
     encryption = std::make_unique<VoiceEncryption>(mode, sessionKey);
@@ -454,7 +455,7 @@ void VoiceClient::onDatagram(const std::string &data)
 
 bool VoiceClient::isDaveEnabled() const
 {
-    return daveSession && daveSession->isDaveEnabled();
+    return daveEnabled.load();
 }
 
 void VoiceClient::requestVerificationCode(Core::Snowflake targetUserId,
@@ -599,6 +600,7 @@ void VoiceClient::ensureDaveSession(uint16_t protocolVersion)
         if (gateway) gateway->sendDaveInvalidCommitWelcome(id);
     }));
     track(daveSession->daveStateChanged.connect([this](bool enabled) {
+        daveEnabled = enabled;
         if (enabled) {
             auto auth = daveSession->lastEpochAuthenticator();
             privacyCodeChanged.publish(auth.empty() ? std::string{} : formatDisplayableCode(auth));

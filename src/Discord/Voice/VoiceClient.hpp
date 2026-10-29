@@ -102,6 +102,7 @@ private:
     std::chrono::steady_clock::time_point lastAudioSendTime;
     bool newTalkspurt = false;
     std::unique_ptr<DaveSession> daveSession;
+    std::atomic<bool> daveEnabled{false};
     std::set<std::string> connectedUserIds;
     std::unordered_map<uint32_t, uint64_t> ssrcToUserIdMap;
     static constexpr int KEEPALIVE_INTERVAL_MS = 10000;

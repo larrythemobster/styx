@@ -8,8 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include <optional>
-
+#include "Enums.hpp"
 #include "Core/JsonUtils.hpp"
 #include "Core/OrderedJson.hpp"
 

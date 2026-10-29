@@ -3,8 +3,8 @@
 #include "Discord/CurlUtils.hpp"
 #include "Core/Logging.hpp"
 
-#include <QJsonDocument>
-#include <QDateTime>
+#include "Platform/WorkerLoop.hpp"
+#include "Platform/Dispatcher.hpp"
 
 #include <cstdlib>
 
@@ -12,20 +12,19 @@ namespace Styx {
 namespace Discord {
 namespace Voice {
 
-VoiceGateway::VoiceGateway(const QString &endpoint, Core::Snowflake serverId,
+VoiceGateway::VoiceGateway(const std::string &endpoint, Core::Snowflake serverId,
                            Core::Snowflake channelId, Core::Snowflake userId,
-                           const QString &sessionId, const QString &token,
-                           const Core::ProxyConfig &proxy, QObject *parent)
-    : QObject(parent),
-      endpoint(endpoint),
+                           const std::string &sessionId, const std::string &token,
+                           const Core::ProxyConfig &proxy, Platform::WorkerLoop *ownerLoop)
+    : endpoint(endpoint),
       serverId(serverId),
       channelId(channelId),
       userId(userId),
       sessionId(sessionId),
       token(token),
-      proxy(proxy)
+      proxy(proxy),
+      ownerLoop(ownerLoop)
 {
-    connect(this, &VoiceGateway::payloadReceived, this, &VoiceGateway::onPayloadReceived);
 }
 
 VoiceGateway::~VoiceGateway()
@@ -33,10 +32,20 @@ VoiceGateway::~VoiceGateway()
     hardStop();
 }
 
+void VoiceGateway::dispatch(std::function<void()> task)
+{
+    Platform::Guard<VoiceGateway> guard(this);
+    auto guarded = [guard, task = std::move(task)] { if (guard) task(); };
+    if (ownerLoop)
+        ownerLoop->post(std::move(guarded));
+    else
+        Platform::Dispatcher::main().post(std::move(guarded));
+}
+
 void VoiceGateway::start()
 {
     if (running) {
-        qCWarning(LogVoice) << "Attempt to start already running voice gateway";
+        Core::log(Core::LogLevel::Warning, LogVoice) << "Attempt to start already running voice gateway";
         return;
     }
 
@@ -47,8 +56,8 @@ void VoiceGateway::start()
 
 void VoiceGateway::stop()
 {
-    wantToClose = true;
     closeTime = std::chrono::steady_clock::now();
+    wantToClose = true;
 }
 
 void VoiceGateway::hardStop()
@@ -63,7 +72,7 @@ void VoiceGateway::hardStop()
         heartbeatThread.join();
 }
 
-void VoiceGateway::sendSelectProtocol(const QString &address, int port, const QString &mode)
+void VoiceGateway::sendSelectProtocol(const std::string &address, int port, const std::string &mode)
 {
     Codec opus;
     opus.name = "opus";
@@ -75,20 +84,20 @@ void VoiceGateway::sendSelectProtocol(const QString &address, int port, const QS
     data.address = address;
     data.port = port;
     data.mode = mode;
-    data.codecs = { opus };
+    data.codecs = std::vector<Codec>{ opus };
 
     sendPayload(VoiceOpCode::SELECT_PROTOCOL, data.toJson());
 }
 
-void VoiceGateway::sendSelectProtocolWebRtc(const QString &sdp, const QList<Codec> &codecs,
-                                           const QString &rtcConnectionId)
+void VoiceGateway::sendSelectProtocolWebRtc(const std::string &sdp, const std::vector<Codec> &codecs,
+                                           const std::string &rtcConnectionId)
 {
     Core::OrderedJson::Array codecArray;
     for (const Codec &codec : codecs)
         codecArray.append(codec.toJson());
 
     Core::OrderedJson d;
-    d.insert("protocol", QStringLiteral("webrtc"));
+    d.insert("protocol", "webrtc");
     d.insert("data", sdp);
     d.insert("sdp", sdp);
     d.insert("codecs", codecArray);
@@ -106,25 +115,25 @@ void VoiceGateway::sendMediaSinkWants(const Core::OrderedJson &d)
     sendPayload(VoiceOpCode::MEDIA_SINK_WANTS, d);
 }
 
-void VoiceGateway::sendSpeaking(int flags, int delay, quint32 ssrc)
+void VoiceGateway::sendSpeaking(int flags, int delay, uint32_t ssrc)
 {
     Core::OrderedJson d;
     d.insert("speaking", flags);
     d.insert("delay", delay);
-    d.insert("ssrc", static_cast<qint64>(ssrc));
+    d.insert("ssrc", static_cast<int64_t>(ssrc));
     sendPayload(VoiceOpCode::SPEAKING, d);
 }
 
-void VoiceGateway::sendBinaryPayload(int opcode, const QByteArray &data)
+void VoiceGateway::sendBinaryPayload(int opcode, const std::string &data)
 {
-    QByteArray frame;
+    std::string frame;
     frame.reserve(1 + data.size());
-    frame.append(static_cast<char>(opcode));
+    frame.push_back(static_cast<char>(opcode));
     frame.append(data);
 
-    qCDebug(LogVoice) << "Voice binary >>> opcode =" << opcode << "size =" << data.size();
+    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice binary >>> opcode =" << opcode << "size =" << data.size();
 
-    CurlUtils::wsSend(curl, curlMutex, frame.constData(), frame.size(), CURLWS_BINARY, "voice binary");
+    CurlUtils::wsSend(curl, curlMutex, frame.data(), frame.size(), CURLWS_BINARY, "voice binary");
 }
 
 void VoiceGateway::sendDaveReadyForTransition(int transitionId)
@@ -147,79 +156,79 @@ void VoiceGateway::sendPayload(VoiceOpCode op, const Core::OrderedJson &d)
     obj.insert("op", static_cast<int>(op));
     obj.insert("d", d);
 
-    QByteArray json = obj.toBytes();
-    qCDebug(LogVoice) << "Voice >>>" << json;
+    std::string json = obj.toBytes();
+    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice >>>" << json;
     sendPayload(json);
 }
 
-void VoiceGateway::sendPayload(const QByteArray &data)
+void VoiceGateway::sendPayload(const std::string &data)
 {
-    CurlUtils::wsSend(curl, curlMutex, data.constData(), data.size(), CURLWS_TEXT, "voice");
+    CurlUtils::wsSend(curl, curlMutex, data.data(), data.size(), CURLWS_TEXT, "voice");
 }
 
-void VoiceGateway::onPayloadReceived(const QJsonObject &root)
+void VoiceGateway::onPayloadReceived(const nlohmann::json &root)
 {
-    qCDebug(LogVoice) << "Voice <<<" << QJsonDocument(root).toJson(QJsonDocument::Compact);
+    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice <<<" << root.dump();
 
-    if (root.contains("seq") && !root["seq"].isNull())
-        lastReceivedSeq = root["seq"].toInt();
+    if (root.contains("seq") && root["seq"].is_number_integer())
+        lastReceivedSeq = root["seq"].get<int>();
 
-    int op = root["op"].toInt(-1);
-    QJsonValue d = root["d"];
+    int op = root.value("op", -1);
+    const auto d = root.value("d", nlohmann::json{});
 
     switch (static_cast<VoiceOpCode>(op)) {
     case VoiceOpCode::HELLO:
-        handleHello(d.toObject());
+        handleHello(d);
         break;
     case VoiceOpCode::READY:
-        handleReady(d.toObject());
+        handleReady(d);
         break;
     case VoiceOpCode::SESSION_DESCRIPTION:
-        handleSessionDescription(d.toObject());
+        handleSessionDescription(d);
         break;
     case VoiceOpCode::SPEAKING:
-        handleSpeaking(d.toObject());
+        handleSpeaking(d);
         break;
     case VoiceOpCode::HEARTBEAT_ACK:
-        handleHeartbeatAck(static_cast<quint64>(d.toDouble()));
+        handleHeartbeatAck(static_cast<uint64_t>(d.get<double>()));
         break;
     case VoiceOpCode::RESUMED:
         handleResumed();
         break;
     case VoiceOpCode::CLIENT_CONNECT:
-        handleClientsConnected(d.toObject());
+        handleClientsConnected(d);
         break;
     case VoiceOpCode::SESSION_UPDATE:
-        handleClientConnect(d.toObject());
+        handleClientConnect(d);
         break;
     case VoiceOpCode::CLIENT_DISCONNECT:
-        handleClientDisconnect(d.toObject());
+        handleClientDisconnect(d);
         break;
     case VoiceOpCode::DAVE_PROTOCOL_PREPARE_TRANSITION:
-        handleDavePrepareTransition(d.toObject());
+        handleDavePrepareTransition(d);
         break;
     case VoiceOpCode::DAVE_PROTOCOL_EXECUTE_TRANSITION:
-        handleDaveExecuteTransition(d.toObject());
+        handleDaveExecuteTransition(d);
         break;
     case VoiceOpCode::DAVE_PROTOCOL_PREPARE_EPOCH:
-        handleDavePrepareEpoch(d.toObject());
+        handleDavePrepareEpoch(d);
         break;
     case VoiceOpCode::VIDEO:
-        emit videoReceived(VideoData::fromJson(d.toObject()));
+        videoReceived.publish(VideoData::fromJson(d));
         break;
     default:
-        qCDebug(LogVoice) << "Unhandled voice opcode:" << op;
+        Core::log(Core::LogLevel::Debug, LogVoice) << "Unhandled voice opcode:" << op;
         break;
     }
 }
 
-void VoiceGateway::handleHello(const QJsonObject &data)
+void VoiceGateway::handleHello(const nlohmann::json &data)
 {
     VoiceHello hello = VoiceHello::fromJson(data);
 
-    qCInfo(LogVoice) << "Voice Hello, heartbeat interval:" << hello.heartbeatInterval << "ms";
+    Core::log(Core::LogLevel::Info, LogVoice) << "Voice Hello, heartbeat interval:" << hello.heartbeatInterval.get() << "ms";
 
-    heartbeatInterval = hello.heartbeatInterval;
+    heartbeatInterval = hello.heartbeatInterval.get();
     heartbeatAckReceived = true;
 
     if (isResuming && canResume)
@@ -233,96 +242,97 @@ void VoiceGateway::handleHello(const QJsonObject &data)
     if (!heartbeatThread.joinable())
         heartbeatThread = std::thread(&VoiceGateway::heartbeatLoop, this);
 
-    emit helloReceived(hello.heartbeatInterval);
+    helloReceived.publish(hello.heartbeatInterval.get());
 }
 
-void VoiceGateway::handleReady(const QJsonObject &data)
+void VoiceGateway::handleReady(const nlohmann::json &data)
 {
     VoiceReady ready = VoiceReady::fromJson(data);
     canResume = true;
-    emit readyReceived(ready);
+    readyReceived.publish(ready);
 }
 
-void VoiceGateway::handleSessionDescription(const QJsonObject &data)
+void VoiceGateway::handleSessionDescription(const nlohmann::json &data)
 {
     SessionDescription desc = SessionDescription::fromJson(data);
-    emit sessionDescriptionReceived(desc);
+    sessionDescriptionReceived.publish(desc);
 }
 
-void VoiceGateway::handleSpeaking(const QJsonObject &data)
+void VoiceGateway::handleSpeaking(const nlohmann::json &data)
 {
     SpeakingData speaking = SpeakingData::fromJson(data);
 
-    qCDebug(LogVoice) << "Speaking: user =" << speaking.userId.get()
-                      << "ssrc =" << speaking.ssrc
-                      << "flags =" << speaking.speaking;
+    Core::log(Core::LogLevel::Debug, LogVoice) << "Speaking: user =" << speaking.userId.get()
+                      << "ssrc =" << speaking.ssrc.get()
+                      << "flags =" << speaking.speaking.get();
 
-    emit speakingReceived(speaking);
+    speakingReceived.publish(speaking);
 }
 
-void VoiceGateway::handleHeartbeatAck(quint64 nonce)
+void VoiceGateway::handleHeartbeatAck(uint64_t nonce)
 {
     heartbeatAckReceived = true;
 
-    qCDebug(LogVoice) << "Voice heartbeat ACK, nonce:" << nonce;
+    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice heartbeat ACK, nonce:" << nonce;
 }
 
 void VoiceGateway::handleResumed()
 {
-    qCInfo(LogVoice) << "Voice session resumed";
+    Core::log(Core::LogLevel::Info, LogVoice) << "Voice session resumed";
     canResume = true;
-    emit resumed();
+    resumed.publish();
 }
 
-void VoiceGateway::handleClientConnect(const QJsonObject &data)
+void VoiceGateway::handleClientConnect(const nlohmann::json &data)
 {
     ClientConnectData client = ClientConnectData::fromJson(data);
 
-    qCInfo(LogVoice) << "Client connected: user =" << client.userId.get()
-                     << "audio_ssrc =" << client.audioSsrc
-                     << "video_ssrc =" << client.videoSsrc;
+    Core::log(Core::LogLevel::Info, LogVoice) << "Client connected: user =" << client.userId.get()
+                     << "audio_ssrc =" << client.audioSsrc.get()
+                     << "video_ssrc =" << client.videoSsrc.get();
 
-    emit clientConnected(client);
+    clientConnected.publish(client);
 }
 
-void VoiceGateway::handleClientDisconnect(const QJsonObject &data)
+void VoiceGateway::handleClientDisconnect(const nlohmann::json &data)
 {
-    Core::Snowflake userId = data["user_id"].toString().toULongLong();
+    Core::Snowflake userId = Core::Snowflake(std::strtoull(data.value("user_id", std::string{}).c_str(), nullptr, 10));
 
-    qCInfo(LogVoice) << "Client disconnected: user =" << userId;
+    Core::log(Core::LogLevel::Info, LogVoice) << "Client disconnected: user =" << userId;
 
-    emit clientDisconnected(userId);
+    clientDisconnected.publish(userId);
 }
 
-void VoiceGateway::handleClientsConnected(const QJsonObject &data)
+void VoiceGateway::handleClientsConnected(const nlohmann::json &data)
 {
-    QStringList userIds;
-    for (const auto &val : data["user_ids"].toArray())
-        userIds.append(val.toString());
+    std::vector<std::string> userIds;
+    if (auto it = data.find("user_ids"); it != data.end() && it->is_array())
+        for (const auto &val : *it)
+            if (val.is_string()) userIds.push_back(val.get<std::string>());
 
-    qCInfo(LogVoice) << "Clients connected:" << userIds;
+    Core::log(Core::LogLevel::Info, LogVoice) << "Clients connected:" << userIds.size();
 
-    emit clientsConnected(userIds);
+    clientsConnected.publish(userIds);
 }
 
-void VoiceGateway::handleDavePrepareTransition(const QJsonObject &data)
+void VoiceGateway::handleDavePrepareTransition(const nlohmann::json &data)
 {
-    emit daveTransitionPrepare(data["protocol_version"].toInt(), data["transition_id"].toInt());
+    daveTransitionPrepare.publish(data.value("protocol_version", 0), data.value("transition_id", 0));
 }
 
-void VoiceGateway::handleDaveExecuteTransition(const QJsonObject &data)
+void VoiceGateway::handleDaveExecuteTransition(const nlohmann::json &data)
 {
-    emit daveTransitionExecute(data["transition_id"].toInt());
+    daveTransitionExecute.publish(data.value("transition_id", 0));
 }
 
-void VoiceGateway::handleDavePrepareEpoch(const QJsonObject &data)
+void VoiceGateway::handleDavePrepareEpoch(const nlohmann::json &data)
 {
-    emit daveEpochPrepare(data["protocol_version"].toInt(), data["epoch"].toInt());
+    daveEpochPrepare.publish(data.value("protocol_version", 0), data.value("epoch", 0));
 }
 
 void VoiceGateway::identify()
 {
-    qCInfo(LogVoice) << "Sending voice Identify for server" << serverId;
+    Core::log(Core::LogLevel::Info, LogVoice) << "Sending voice Identify for server" << serverId;
 
     VoiceIdentifyData id;
     if (channelId.isValid())
@@ -338,7 +348,7 @@ void VoiceGateway::identify()
 
 void VoiceGateway::resume()
 {
-    qCInfo(LogVoice) << "Sending voice Resume";
+    Core::log(Core::LogLevel::Info, LogVoice) << "Sending voice Resume";
 
     VoiceResumeData data;
     data.token = token;
@@ -366,30 +376,30 @@ bool VoiceGateway::isFatalCloseCode(VoiceCloseCode code) const
 void VoiceGateway::networkLoop()
 {
     VoiceCloseCode lastCloseCode = VoiceCloseCode::INTERNAL;
-    QString lastCloseReason;
+    std::string lastCloseReason;
     bool terminalEmitted = false;
 
     do {
         shouldReconnect = false;
 
-        QString connectUrl = QStringLiteral("wss://%1/?v=%2")
-                                     .arg(endpoint)
-                                     .arg(VOICE_GATEWAY_VERSION);
+        std::string connectUrl = "wss://" + endpoint + "/?v=" + std::to_string(VOICE_GATEWAY_VERSION);
 
         curl = curl_easy_init();
         if (!curl) {
-            qCCritical(LogVoice) << "Failed to initialize curl for voice gateway";
+            Core::log(Core::LogLevel::Error, LogVoice) << "Failed to initialize curl for voice gateway";
+            running = false;
+            dispatch([this] { disconnected.publish(VoiceCloseCode::INTERNAL, "Failed to initialize curl for voice gateway"); });
             return;
         }
 
-        curl_easy_setopt(curl, CURLOPT_URL, connectUrl.toUtf8().constData());
+        curl_easy_setopt(curl, CURLOPT_URL, connectUrl.c_str());
         curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 2L);
         CurlUtils::applyCommonOptions(curl);
         CurlUtils::applyProxy(curl, proxy);
 
         CURLcode res = curl_easy_perform(curl);
         if (res != CURLE_OK) {
-            qCWarning(LogVoice) << "Failed to connect to voice gateway:"
+            Core::log(Core::LogLevel::Warning, LogVoice) << "Failed to connect to voice gateway:"
                                 << curl_easy_strerror(res);
 
             if (isResuming && reconnectAttempts < maxReconnectAttempts) {
@@ -399,27 +409,32 @@ void VoiceGateway::networkLoop()
 
                 reconnectAttempts++;
                 int delay = 1000 + (std::rand() % 4000);
-                qCInfo(LogVoice) << "Voice reconnect attempt" << reconnectAttempts
+                Core::log(Core::LogLevel::Info, LogVoice) << "Voice reconnect attempt" << reconnectAttempts.load()
                                  << "in" << delay << "ms";
                 std::this_thread::sleep_for(std::chrono::milliseconds(delay));
                 shouldReconnect = true;
                 continue;
             }
 
-            emit disconnected(VoiceCloseCode::INTERNAL,
-                              QString("Failed to connect to voice gateway: ") + curl_easy_strerror(res));
+            {
+                std::lock_guard lock(curlMutex);
+                curl_easy_cleanup(curl);
+                curl = nullptr;
+            }
+            running = false;
+            dispatch([this, reason = std::string("Failed to connect to voice gateway: ") + curl_easy_strerror(res)] { disconnected.publish(VoiceCloseCode::INTERNAL, reason); });
             return;
         }
 
-        qCInfo(LogVoice) << "Voice WebSocket connected to" << endpoint;
+        Core::log(Core::LogLevel::Info, LogVoice) << "Voice WebSocket connected to" << endpoint;
         generation++;
-        emit connected();
+        dispatch([this] { connected.publish(); });
 
         char chunk[8192];
-        size_t rlen;
-        const curl_ws_frame *meta;
-        QByteArray frameBuffer;
-        QByteArray binaryFrameBuffer;
+        size_t rlen = 0;
+        const curl_ws_frame *meta = nullptr;
+        std::string frameBuffer;
+        std::string binaryFrameBuffer;
 
         bool closeSent = false;
         while (running) {
@@ -441,7 +456,7 @@ void VoiceGateway::networkLoop()
                     auto now = std::chrono::steady_clock::now();
                     if (now - closeTime > closeTimeout) {
                         running = false;
-                        qCDebug(LogVoice) << "Voice gateway close timeout";
+                        Core::log(Core::LogLevel::Debug, LogVoice) << "Voice gateway close timeout";
                         break;
                     }
                 }
@@ -460,15 +475,15 @@ void VoiceGateway::networkLoop()
 
             if (meta->flags & CURLWS_CLOSE) {
                 int closeCode = 1000;
-                QString closeReason;
+                std::string closeReason;
 
                 if (rlen >= 2) {
                     closeCode = (uint8_t(chunk[0]) << 8) | uint8_t(chunk[1]);
                     if (rlen > 2)
-                        closeReason = QString::fromUtf8(chunk + 2, rlen - 2);
+                        closeReason = std::string(chunk + 2, rlen - 2);
                 }
 
-                qCInfo(LogVoice) << "Voice connection closed with code" << closeCode
+                Core::log(Core::LogLevel::Info, LogVoice) << "Voice connection closed with code" << closeCode
                                  << "reason:" << closeReason;
 
                 VoiceCloseCode cc = static_cast<VoiceCloseCode>(closeCode);
@@ -479,7 +494,7 @@ void VoiceGateway::networkLoop()
                     shouldReconnect = true;
                 } else {
                     terminalEmitted = true;
-                    emit disconnected(cc, closeReason);
+                    dispatch([this, cc, closeReason] { disconnected.publish(cc, closeReason); });
                 }
                 break;
             }
@@ -492,14 +507,14 @@ void VoiceGateway::networkLoop()
 
                 if (meta->bytesleft == 0) {
                     if (binaryFrameBuffer.size() >= 3) {
-                        const auto *raw = reinterpret_cast<const uint8_t *>(binaryFrameBuffer.constData());
+                        const auto *raw = reinterpret_cast<const uint8_t *>(binaryFrameBuffer.data());
                         // uint16_t seq = (raw[0] << 8) | raw[1];
                         int opcode = raw[2];
-                        QByteArray payload = binaryFrameBuffer.mid(3);
+                        std::string payload = binaryFrameBuffer.substr(3);
 
-                        qCDebug(LogVoice) << "Voice binary frame: opcode =" << opcode
+                        Core::log(Core::LogLevel::Debug, LogVoice) << "Voice binary frame: opcode =" << opcode
                                           << "payload size =" << payload.size();
-                        emit binaryPayloadReceived(opcode, payload);
+                        dispatch([this, opcode, payload = std::move(payload)] { binaryPayloadReceived.publish(opcode, payload); });
                     }
                     binaryFrameBuffer.clear();
                 }
@@ -509,15 +524,16 @@ void VoiceGateway::networkLoop()
             frameBuffer.append(chunk, rlen);
 
             if (meta->bytesleft == 0) {
-                QJsonParseError error;
-                QJsonDocument doc = QJsonDocument::fromJson(frameBuffer, &error);
+                auto doc = nlohmann::json::parse(frameBuffer, nullptr, false);
                 frameBuffer.clear();
-
-                if (error.error != QJsonParseError::NoError) {
-                    qCWarning(LogVoice) << "Failed to parse voice payload:"
-                                        << error.errorString();
-                } else if (doc.isObject()) {
-                    emit payloadReceived(doc.object());
+                if (doc.is_discarded()) {
+                    Core::log(Core::LogLevel::Warning, LogVoice) << "Failed to parse voice payload";
+                } else if (doc.is_object()) {
+                    dispatch([this, doc = std::move(doc)] {
+                        Platform::Guard<VoiceGateway> guard(this);
+                        payloadReceived.publish(doc);
+                        if (guard) onPayloadReceived(doc);
+                    });
                 }
             }
         }
@@ -538,16 +554,16 @@ void VoiceGateway::networkLoop()
             }
 
             int delay = 1000 + (std::rand() % 4000);
-            qCInfo(LogVoice) << "Voice reconnecting in" << delay << "ms (attempt"
-                             << reconnectAttempts << ")";
-            emit reconnecting(reconnectAttempts, maxReconnectAttempts);
+            Core::log(Core::LogLevel::Info, LogVoice) << "Voice reconnecting in" << delay << "ms (attempt"
+                             << reconnectAttempts.load() << ")";
+            dispatch([this, attempt = reconnectAttempts.load()] { reconnecting.publish(attempt, maxReconnectAttempts); });
             std::this_thread::sleep_for(std::chrono::milliseconds(delay));
         }
 
     } while (shouldReconnect && running && reconnectAttempts < maxReconnectAttempts);
 
     if (running && !wantToClose && !terminalEmitted)
-        emit disconnected(lastCloseCode, lastCloseReason);
+        dispatch([this, lastCloseCode, lastCloseReason] { disconnected.publish(lastCloseCode, lastCloseReason); });
 
     running = false;
     heartbeatCv.notify_all();
@@ -557,12 +573,12 @@ void VoiceGateway::networkLoop()
 
 void VoiceGateway::heartbeatLoop()
 {
-    qCDebug(LogVoice) << "Voice heartbeat loop started, interval:" << heartbeatInterval;
+    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice heartbeat loop started, interval:" << heartbeatInterval.load();
 
     // wait before first heartbeat
     {
         std::unique_lock lock(heartbeatMutex);
-        bool stop = heartbeatCv.wait_for(lock, std::chrono::milliseconds(heartbeatInterval),
+        bool stop = heartbeatCv.wait_for(lock, std::chrono::milliseconds(heartbeatInterval.load()),
                                          [this] { return !running || shouldReconnect.load(); });
         if (stop)
             return;
@@ -570,23 +586,23 @@ void VoiceGateway::heartbeatLoop()
 
     while (running) {
         if (!heartbeatAckReceived) {
-            qCWarning(LogVoice) << "No voice heartbeat ACK — zombie connection";
+            Core::log(Core::LogLevel::Warning, LogVoice) << "No voice heartbeat ACK — zombie connection";
             shouldReconnect = true;
             break;
         }
         heartbeatAckReceived = false;
 
-        quint64 nonce = static_cast<quint64>(QDateTime::currentMSecsSinceEpoch());
+        uint64_t nonce = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
         lastSentNonce = nonce;
 
         Core::OrderedJson d;
-        d.insert("t", static_cast<qint64>(nonce));
+        d.insert("t", static_cast<int64_t>(nonce));
         d.insert("seq_ack", lastReceivedSeq.load());
         sendPayload(VoiceOpCode::HEARTBEAT, d);
 
         {
             std::unique_lock lock(heartbeatMutex);
-            bool stop = heartbeatCv.wait_for(lock, std::chrono::milliseconds(heartbeatInterval),
+            bool stop = heartbeatCv.wait_for(lock, std::chrono::milliseconds(heartbeatInterval.load()),
                                              [this] { return !running || shouldReconnect.load(); });
             if (stop)
                 break;

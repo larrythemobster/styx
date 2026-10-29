@@ -272,12 +272,12 @@ CURL *RequestWorker::buildEasyHandle(TransferContext *ctx)
             break;
         case HttpClient::Method::POST:
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, desc.body.size());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(desc.body.size()));
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.data());
             break;
         case HttpClient::Method::PATCH:
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PATCH");
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, desc.body.size());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(desc.body.size()));
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.data());
             break;
         case HttpClient::Method::PUT:
@@ -287,17 +287,24 @@ CURL *RequestWorker::buildEasyHandle(TransferContext *ctx)
                 curl_easy_setopt(curl, CURLOPT_READDATA, ctx->uploadFile);
                 curl_easy_setopt(curl, CURLOPT_SEEKFUNCTION, seekCallback);
                 curl_easy_setopt(curl, CURLOPT_SEEKDATA, ctx->uploadFile);
-                curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(std::filesystem::file_size(std::filesystem::u8path(desc.uploadFilePath))));
+                std::error_code error;
+                const auto size = std::filesystem::file_size(std::filesystem::u8path(desc.uploadFilePath), error);
+                if (error) {
+                    Core::log(Core::LogLevel::Warning, LogNetwork) << "Failed to get upload file size:" << error.message();
+                    curl_easy_cleanup(curl);
+                    return nullptr;
+                }
+                curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(size));
             } else {
                 curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, desc.body.size());
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(desc.body.size()));
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.data());
             }
             break;
         case HttpClient::Method::DELETE_:
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
             if (!desc.body.empty()) {
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, desc.body.size());
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(desc.body.size()));
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.data());
             }
             break;

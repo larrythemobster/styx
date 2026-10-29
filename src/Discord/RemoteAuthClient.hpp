@@ -1,27 +1,25 @@
 #pragma once
 
-#include <QObject>
-#include <QString>
-#include <QByteArray>
-
-#include <curl/curl.h>
-
-#include "CaptchaResolver.hpp"
+#include "ClientIdentity.hpp"
+#include "HttpClient.hpp"
 #include "Core/OrderedJson.hpp"
 #include "Core/ProxyConfig.hpp"
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
 
 #include <atomic>
-#include <condition_variable>
+#include <cstdint>
 #include <mutex>
+#include <string>
+#include <memory>
 #include <thread>
+#include <nlohmann/json.hpp>
+#include <curl/curl.h>
 
 struct evp_pkey_st;
 struct evp_pkey_ctx_st;
 
-class QJsonObject;
-
-namespace Styx {
-namespace Discord {
+namespace Styx::Discord {
 
 enum class RemoteAuthError {
     KeyGenerationFailed,
@@ -32,67 +30,54 @@ enum class RemoteAuthError {
     LoginFailed,
 };
 
-class RemoteAuthClient : public QObject
-{
-    Q_OBJECT
+class RemoteAuthClient : public Platform::Trackable {
 public:
-    explicit RemoteAuthClient(const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver = nullptr, QObject *parent = nullptr);
-    ~RemoteAuthClient();
+    explicit RemoteAuthClient(const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver = nullptr);
+    ~RemoteAuthClient() override;
 
     void start();
     void stop();
 
-signals:
-    void fingerprintReady(const QString &fingerprint);
-    void pendingTicket(const QString &userId, const QString &username, const QString &avatar);
-    void authenticated(const QString &token);
-    void failed(RemoteAuthError error);
-    void canceled();
+    Platform::Signal<const std::string &> fingerprintReady;
+    Platform::Signal<const std::string &, const std::string &, const std::string &> pendingTicket;
+    Platform::Signal<const std::string &> authenticated;
+    Platform::Signal<RemoteAuthError> failed;
+    Platform::Signal<> canceled;
 
 private:
     bool generateKey();
     void freeKey();
-    QByteArray publicKeyDer() const;
-    QByteArray decrypt(const QByteArray &in) const;
-
-    void networkLoop();
-    void heartbeatLoop();
-
-    void handleMessage(const QString &text);
-    void handleHello(const QJsonObject &obj);
-    void handleNonceProof(const QJsonObject &obj);
-    void handlePendingRemoteInit(const QJsonObject &obj);
-    void handlePendingTicket(const QJsonObject &obj);
-    void handlePendingLogin(const QJsonObject &obj);
-    void postLogin(const QString &ticket, std::optional<CaptchaSolution> solution, int attempt);
-
+    std::string publicKeyDer() const;
+    std::string decrypt(const std::string &in) const;
+    void networkLoop(uint64_t generation);
+    void handleMessage(const std::string &text);
+    void handleHello(const nlohmann::json &obj);
+    void handleNonceProof(const nlohmann::json &obj);
+    void handlePendingRemoteInit(const nlohmann::json &obj);
+    void handlePendingTicket(const nlohmann::json &obj);
+    void handlePendingLogin(const nlohmann::json &obj);
     void send(const Core::OrderedJson &obj);
-
     void fail(RemoteAuthError error);
-    void succeed(const QString &token);
+    void succeed(const std::string &token);
     void cancel();
+    void finish();
 
     evp_pkey_st *pkey = nullptr;
     evp_pkey_ctx_st *keyCtx = nullptr;
     evp_pkey_ctx_st *decCtx = nullptr;
-
-    std::atomic<bool> running{ false };
-    std::atomic<bool> done{ false };
-
+    std::atomic<bool> running{false};
+    bool done = false;
+    bool loginPending = false;
+    uint64_t generation = 0;
     std::mutex curlMutex;
     CURL *curl = nullptr;
     std::thread networkThread;
-
-    std::atomic<int> heartbeatInterval{ 0 };
-    std::mutex heartbeatMutex;
-    std::condition_variable heartbeatCv;
-    std::thread heartbeatThread;
-
-    std::thread httpThread;
-
+    Platform::Timer heartbeatTimer;
+    Platform::Timer timeoutTimer;
     Core::ProxyConfig proxy;
-    CaptchaResolver *captchaResolver = nullptr;
+    CaptchaResolver *captchaResolver;
+    ClientIdentity identity;
+    std::unique_ptr<HttpClient> http;
 };
 
-} // namespace Discord
-} // namespace Styx
+} // namespace Styx::Discord

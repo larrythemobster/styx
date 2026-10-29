@@ -1,18 +1,20 @@
 #pragma once
 
-#include <QHash>
-#include <QObject>
-#include <QString>
+#include "Platform/Trackable.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 
 #include "Core/ProxyConfig.hpp"
 #include "Core/Snowflake.hpp"
 #include "Discord/Voice/VoiceEntities.hpp"
 #include "Discord/Voice/VoiceEnums.hpp"
+
+namespace Styx::Platform { class WorkerLoop; }
 
 namespace Styx {
 namespace Discord {
@@ -28,13 +30,13 @@ class VideoReceiver;
 
 struct StreamSessionInfo
 {
-    QString streamKey;
-    QString endpoint;
-    QString token;
+    std::string streamKey;
+    std::string endpoint;
+    std::string token;
     Core::Snowflake rtcServerId;
     Core::Snowflake selfUserId;
     Core::Snowflake streamerUserId;
-    QString voiceSessionId;
+    std::string voiceSessionId;
     int maxBitrate = 0; // sender: peak video bitrate
 };
 
@@ -49,73 +51,71 @@ struct VideoAttributes
 // One Go Live media session: its own voice gateway (identified with video), a WebRTC
 // transport and its own DAVE group. A sender pushes encoded frames in; a viewer gets
 // decrypted H264 access units and Opus packets out.
-class StreamConnection : public QObject
+class StreamConnection : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     enum class Role {
         Sender,
         Viewer,
     };
-    Q_ENUM(Role)
-
-    StreamConnection(Role role, const StreamSessionInfo &info, const Core::ProxyConfig &proxy, QObject *parent = nullptr);
+    StreamConnection(Role role, const StreamSessionInfo &info, const Core::ProxyConfig &proxy,
+                     Platform::WorkerLoop *ownerLoop = nullptr);
     ~StreamConnection() override;
 
     void start();
     void stop();
 
     [[nodiscard]] Role role() const { return connectionRole; }
-    [[nodiscard]] const QString &streamKey() const { return info.streamKey; }
+    [[nodiscard]] const std::string &streamKey() const { return info.streamKey; }
     [[nodiscard]] bool isReady() const { return ready; }
     [[nodiscard]] bool isDaveEnabled() const;
 
     // Sender
     void setVideoAttributes(bool active, const VideoAttributes &attributes);
     void setSoundshare(bool active);
-    void sendVideoFrame(const QByteArray &annexB, std::chrono::microseconds pts);
-    void sendAudioFrame(const QByteArray &opus, std::chrono::microseconds pts);
+    void sendVideoFrame(const std::string &annexB, std::chrono::microseconds pts);
+    void sendAudioFrame(const std::string &opus, std::chrono::microseconds pts);
 
     // Viewer
     void requestKeyframe();
 
-signals:
-    void readyChanged(bool ready);
-    void closed(const QString &reason);
+    Platform::Signal<bool> readyChanged;
+    Platform::Signal<const std::string &> closed;
 
     // Sender
-    void keyframeRequested();
-    void bandwidthEstimate(unsigned int bitsPerSecond);
+    Platform::Signal<> keyframeRequested;
+    Platform::Signal<unsigned int> bandwidthEstimate;
 
     // Viewer
-    void videoFrame(const QByteArray &annexB, quint32 rtpTimestamp, bool keyframe);
-    void audioPacket(quint32 ssrc, quint16 sequence, quint32 rtpTimestamp, const QByteArray &opus);
+    Platform::Signal<const std::string &, uint32_t, bool> videoFrame;
+    Platform::Signal<uint32_t, uint16_t, uint32_t, const std::string &> audioPacket;
 
 private:
     void onReady(const Voice::VoiceReady &data);
     void onSessionDescription(const Voice::SessionDescription &desc);
     void onVideo(const Voice::VideoData &data);
     void onTransportConnected();
-    void onGatewayDisconnected(Voice::VoiceCloseCode code, const QString &reason);
+    void onGatewayDisconnected(Voice::VoiceCloseCode code, const std::string &reason);
     void ensureDaveSession(uint16_t protocolVersion);
     void sendVideoState();
-    void mapSsrc(quint32 ssrc, Core::Snowflake userId);
+    void mapSsrc(uint32_t ssrc, Core::Snowflake userId);
 
-    QByteArray daveEncrypt(bool video, quint32 ssrc, const QByteArray &frame);
-    bool daveDecrypt(bool video, quint32 ssrc, QByteArray &frame);
+    std::string daveEncrypt(bool video, uint32_t ssrc, const std::string &frame);
+    bool daveDecrypt(bool video, uint32_t ssrc, std::string &frame);
 
     Role connectionRole;
     StreamSessionInfo info;
     Core::ProxyConfig proxy;
+    Platform::WorkerLoop *ownerLoop;
 
-    Voice::VoiceGateway *gateway = nullptr;
-    StreamTransport *transport = nullptr;
-    VideoReceiver *receiver = nullptr;
+    std::unique_ptr<Voice::VoiceGateway> gateway;
+    std::unique_ptr<StreamTransport> transport;
+    std::unique_ptr<VideoReceiver> receiver;
     std::unique_ptr<Voice::DaveSession> daveSession;
 
-    quint32 audioSsrc = 0;
-    quint32 videoSsrc = 0;
-    quint32 rtxSsrc = 0;
+    uint32_t audioSsrc = 0;
+    uint32_t videoSsrc = 0;
+    uint32_t rtxSsrc = 0;
     bool ready = false;
     bool stopped = false;
 
@@ -123,12 +123,12 @@ private:
     VideoAttributes attributes;
 
     // the streamer's SSRCs, for a viewer
-    quint32 remoteAudioSsrc = 0;
-    quint32 remoteVideoSsrc = 0;
-    quint32 remoteRtxSsrc = 0;
+    uint32_t remoteAudioSsrc = 0;
+    uint32_t remoteVideoSsrc = 0;
+    uint32_t remoteRtxSsrc = 0;
 
     std::set<std::string> connectedUserIds;
-    QHash<quint32, uint64_t> ssrcToUserId;
+    std::unordered_map<uint32_t, uint64_t> ssrcToUserId;
 };
 
 } // namespace Stream

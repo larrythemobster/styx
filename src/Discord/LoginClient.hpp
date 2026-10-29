@@ -5,6 +5,7 @@
 #include "HttpClient.hpp"
 #include "Core/ProxyConfig.hpp"
 #include "Platform/Trackable.hpp"
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -28,14 +29,15 @@ public:
     Platform::Signal<LoginError> failed;
     Platform::Signal<bool> smsSent;
 private:
-    void fetchFingerprintThen(std::function<void()> next);
-    void postLogin(const std::string &login, const std::string &password);
+    void fetchFingerprintThen(uint64_t generation, std::function<void()> next);
+    void postLogin(uint64_t generation, const std::string &login, const std::string &password);
     void handleLoginResponse(const HttpResponse &response);
     void handleMfaResponse(const HttpResponse &response);
     [[nodiscard]] std::optional<LoginError> commonFailure(const HttpResponse &response, const nlohmann::json &root) const;
     ClientIdentity identity;
     HttpClient http;
     bool haveFingerprint = false;
+    uint64_t generation = 0;
     std::string mfaTicket;
     std::string mfaLoginInstanceId;
 };

@@ -1,17 +1,23 @@
 #include "ClientIdentity.hpp"
 #include "CurlUtils.hpp"
 
-#include <QDateTime>
-#include <QMutexLocker>
-#include <QUuid>
+#include "Platform/Native.hpp"
+
+#include <chrono>
 
 namespace Styx {
 namespace Discord {
 
 namespace {
-constexpr qint64 HeartbeatSessionIdleMs = 30 * 60 * 1000;
+constexpr int64_t HeartbeatSessionIdleMs = 30 * 60 * 1000;
 
-bool isExpired(const HeartbeatSession &session, qint64 nowMs)
+int64_t nowMillis()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+bool isExpired(const HeartbeatSession &session, int64_t nowMs)
 {
     return nowMs - session.lastUsedAtMs >= HeartbeatSessionIdleMs;
 }
@@ -19,33 +25,33 @@ bool isExpired(const HeartbeatSession &session, qint64 nowMs)
 
 ClientIdentity::ClientIdentity()
 {
-    launchId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    launchId = Platform::randomUuid();
     launchSignature = generateLaunchSignature();
 }
 
-QString ClientIdentity::clientLaunchId() const
+std::string ClientIdentity::clientLaunchId() const
 {
     return launchId;
 }
 
 std::optional<HeartbeatSession> ClientIdentity::heartbeatSession() const
 {
-    QMutexLocker locker(&mutex);
-    if (!clientHeartbeatSession || isExpired(*clientHeartbeatSession, QDateTime::currentMSecsSinceEpoch()))
+    std::lock_guard locker(mutex);
+    if (!clientHeartbeatSession || isExpired(*clientHeartbeatSession, nowMillis()))
         return std::nullopt;
     return clientHeartbeatSession;
 }
 
 void ClientIdentity::restoreHeartbeatSession(const std::optional<HeartbeatSession> &stored)
 {
-    QMutexLocker locker(&mutex);
+    std::lock_guard locker(mutex);
     clientHeartbeatSession = stored;
 }
 
 HeartbeatSessionUpdate ClientIdentity::touchHeartbeatSession()
 {
-    QMutexLocker locker(&mutex);
-    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    std::lock_guard locker(mutex);
+    int64_t now = nowMillis();
     bool expired = !clientHeartbeatSession || isExpired(*clientHeartbeatSession, now);
 
     if (!appFocused && !rtcConnected) {
@@ -57,7 +63,7 @@ HeartbeatSessionUpdate ClientIdentity::touchHeartbeatSession()
 
     if (expired) {
         HeartbeatSession session;
-        session.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        session.id = Platform::randomUuid();
         session.createdAtMs = now;
         session.lastUsedAtMs = now;
         clientHeartbeatSession = session;
@@ -68,50 +74,53 @@ HeartbeatSessionUpdate ClientIdentity::touchHeartbeatSession()
     return HeartbeatSessionUpdate::Touched;
 }
 
-void ClientIdentity::setDiscordLocale(const QString &newLocale)
+void ClientIdentity::setDiscordLocale(const std::string &newLocale)
 {
-    QMutexLocker locker(&mutex);
-    if (!newLocale.isEmpty())
+    std::lock_guard locker(mutex);
+    if (!newLocale.empty())
         locale = newLocale;
 }
 
-QString ClientIdentity::discordLocale() const
+std::string ClientIdentity::discordLocale() const
 {
-    QMutexLocker locker(&mutex);
+    std::lock_guard locker(mutex);
     return locale;
 }
 
 void ClientIdentity::setActivity(bool focused, bool newRtcConnected)
 {
-    QMutexLocker locker(&mutex);
+    std::lock_guard locker(mutex);
     appFocused = focused;
     rtcConnected = newRtcConnected;
 }
 
-QString ClientIdentity::generateLaunchSignature()
+std::string ClientIdentity::generateLaunchSignature()
 {
-    QUuid uuid = QUuid::createUuid();
-    QByteArray bytes = uuid.toRfc4122();
-
-    static constexpr quint8 mask[16] = {
+    std::string uuid = Platform::randomUuid();
+    static constexpr unsigned char mask[16] = {
         0xff, 0x7f, 0xef, 0xef, 0xf7, 0xef, 0xf7, 0xff,
         0xdf, 0x7e, 0xff, 0xbf, 0xfe, 0xff, 0xf7, 0xff
     };
-
-    for (int i = 0; i < 16; i++)
-        bytes[i] = static_cast<char>(static_cast<quint8>(bytes[i]) & static_cast<quint8>(mask[i]));
-
-    QUuid signature = QUuid::fromRfc4122(bytes);
-    return signature.toString(QUuid::WithoutBraces);
+    static constexpr char hex[] = "0123456789abcdef";
+    size_t byte = 0;
+    for (size_t i = 0; i + 1 < uuid.size();) {
+        if (uuid[i] == '-') { ++i; continue; }
+        auto digit = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
+        unsigned value = ((digit(uuid[i]) << 4) | digit(uuid[i + 1])) & mask[byte++];
+        uuid[i] = hex[value >> 4];
+        uuid[i + 1] = hex[value & 15];
+        i += 2;
+    }
+    return uuid;
 }
 
 ClientProperties ClientIdentity::buildClientProperties(
         const ClientPropertiesBuildParams &params) const
 {
-    QString userAgent = CurlUtils::getUserAgent();
+    std::string userAgent = CurlUtils::getUserAgent();
     CurlUtils::UserAgentProps props = CurlUtils::getUserAgentProps();
 
-    QMutexLocker locker(&mutex);
+    std::lock_guard locker(mutex);
 
     ClientProperties properties;
     properties.os = props.os;
@@ -141,7 +150,7 @@ ClientProperties ClientIdentity::buildClientProperties(
 
     if (params.includeClientHeartbeatSessionId &&
         clientHeartbeatSession &&
-        !isExpired(*clientHeartbeatSession, QDateTime::currentMSecsSinceEpoch()))
+        !isExpired(*clientHeartbeatSession, nowMillis()))
         properties.clientHeartbeatSessionId = clientHeartbeatSession->id;
 
     return properties;

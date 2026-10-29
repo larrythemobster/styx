@@ -1,5 +1,6 @@
 #include "IngestThread.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <utility>
@@ -55,6 +56,7 @@ void IngestThread::reset()
 void IngestThread::threadLoop()
 {
     uint64_t activeGeneration = generation.load();
+    std::string compressedTail;
     while (true) {
         TaggedData item;
         {
@@ -72,6 +74,7 @@ void IngestThread::threadLoop()
             }
             std::memset(&stream, 0, sizeof(stream));
             decompressedBuffer.clear();
+            compressedTail.clear();
             activeGeneration = item.generation;
         }
         if (item.data.empty())
@@ -83,8 +86,19 @@ void IngestThread::threadLoop()
             }
             streamActive = true;
         }
-        const auto len = item.data.size();
-        const bool hasSuffix = len >= 4 && item.data.compare(len - 4, 4, "\x00\x00\xff\xff", 4) == 0;
+        std::string suffix = compressedTail;
+        suffix.append(item.data, 0, std::min<std::size_t>(item.data.size(), 4));
+        const bool splitSuffix = item.data.size() < 4 &&
+            suffix.size() >= 4 && suffix.compare(suffix.size() - 4, 4, "\x00\x00\xff\xff", 4) == 0;
+        const bool hasSuffix = splitSuffix ||
+            (item.data.size() >= 4 && item.data.compare(item.data.size() - 4, 4, "\x00\x00\xff\xff", 4) == 0);
+        if (item.data.size() >= 3)
+            compressedTail.assign(item.data, item.data.size() - 3, 3);
+        else {
+            compressedTail += item.data;
+            if (compressedTail.size() > 3)
+                compressedTail.erase(0, compressedTail.size() - 3);
+        }
         stream.next_in = reinterpret_cast<Bytef *>(item.data.data());
         stream.avail_in = static_cast<uInt>(item.data.size());
         std::array<char, 32768> out;
@@ -98,6 +112,7 @@ void IngestThread::threadLoop()
                 inflateEnd(&stream);
                 streamActive = false;
                 decompressedBuffer.clear();
+                compressedTail.clear();
                 break;
             }
             decompressedBuffer.append(out.data(), out.size() - stream.avail_out);

@@ -18,6 +18,7 @@ class PeerConnection;
 class Track;
 class RtpPacketizationConfig;
 } // namespace rtc
+namespace Styx::Platform { class WorkerLoop; }
 
 namespace Styx {
 namespace Discord {
@@ -34,8 +35,8 @@ inline constexpr uint32_t OPUS_CLOCK_RATE = 48000;
 // one audio (mid 0) and one video (mid 1) m-line. The media server is ICE-lite and only ever
 // hands back fragments of an SDP, so the answer is rebuilt from them (applyServerSdp).
 //
-// Lives on the stream thread. libdatachannel calls back on its own threads; everything that
-// reaches the main dispatcher is queued. send*() are safe from any thread.
+// Lives on the stream thread. libdatachannel callbacks are queued to its owner loop.
+// send*() are safe from any thread.
 class StreamTransport : public Platform::Trackable
 {
 public:
@@ -44,7 +45,7 @@ public:
         Viewer,
     };
 
-    explicit StreamTransport(Role role);
+    explicit StreamTransport(Role role, Platform::WorkerLoop *ownerLoop = nullptr);
     ~StreamTransport() override;
 
     // Codecs offered in SELECT_PROTOCOL. Only H264 is offered so every stream we watch is
@@ -87,6 +88,7 @@ private:
     void postToThread(std::function<void()> fn);
 
     Role role;
+    Platform::WorkerLoop *ownerLoop;
     std::shared_ptr<rtc::PeerConnection> pc;
     std::shared_ptr<rtc::Track> audioTrack;
     std::shared_ptr<rtc::Track> videoTrack;

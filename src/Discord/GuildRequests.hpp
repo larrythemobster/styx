@@ -7,10 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "Platform/Utf8.hpp"
-#include <optional>
-#include <regex>
-
 #include "Entities.hpp"
 
 namespace Styx {
@@ -66,22 +62,27 @@ struct GuildProfileEdit
     static GuildProfileEdit fromProfile(const nlohmann::json &profile)
     {
         GuildProfileEdit edit;
-        edit.name = profile.value("name", nlohmann::json()).get<std::string>();
-        edit.description = profile.value("description", nlohmann::json()).get<std::string>();
+        if (const auto it = profile.find("name"); it != profile.end() && it->is_string())
+            edit.name = it->get<std::string>();
+        if (const auto it = profile.find("description"); it != profile.end() && it->is_string())
+            edit.description = it->get<std::string>();
         edit.icon = profile.value("icon_hash", nlohmann::json());
         edit.customBanner = profile.value("custom_banner_hash", nlohmann::json());
         edit.visibility = profile.value("visibility", nlohmann::json());
         const nlohmann::json brandColor = profile.value("brand_color_primary", nlohmann::json());
-        edit.brandColorPrimary = brandColor.get<std::string>().empty() ? nlohmann::json(nlohmann::json()) : brandColor;
+        edit.brandColorPrimary = brandColor.is_string() && !brandColor.get_ref<const std::string &>().empty() ? brandColor : nlohmann::json(nullptr);
 
-        for (int i = 0; i < TraitSlots; i++)
-            edit.traits.push_back(Trait{});
-        for (const nlohmann::json &value : profile.value("traits", nlohmann::json())) {
-            const nlohmann::json trait = value;
-            const int position = trait.value("position", -1).get<int>();
-            if (position < 0 || position >= TraitSlots)
-                continue;
-            edit.traits[position] = { trait.value("label", nlohmann::json()).get<std::string>(), trait.value("emoji_id", nlohmann::json()), trait.value("emoji_name", nlohmann::json()), trait.value("emoji_animated", nlohmann::json()) };
+        edit.traits.assign(TraitSlots, Trait{});
+        if (const auto traits = profile.find("traits"); traits != profile.end() && traits->is_array()) {
+            for (const nlohmann::json &trait : *traits) {
+                const int position = trait.value("position", -1);
+                if (position < 0 || position >= TraitSlots)
+                    continue;
+                edit.traits[position] = { trait.value("label", std::string()),
+                                          trait.value("emoji_id", nlohmann::json()),
+                                          trait.value("emoji_name", nlohmann::json()),
+                                          trait.value("emoji_animated", nlohmann::json()) };
+            }
         }
         edit.gameApplicationIds = profile.value("game_application_ids", nlohmann::json());
         return edit;
@@ -92,20 +93,20 @@ struct GuildProfileEdit
         Core::OrderedJson obj;
         obj.insert("name", name);
         obj.insert("description", description);
-        obj.insert("icon", icon ? nlohmann::json(nlohmann::json()) : icon);
-        obj.insert("custom_banner", customBanner ? nlohmann::json(nlohmann::json()) : customBanner);
-        if (!visibility.isNull() && !visibility)
+        obj.insert("icon", icon);
+        obj.insert("custom_banner", customBanner);
+        if (!visibility.is_null())
             obj.insert("visibility", visibility);
-        obj.insert("brand_color_primary", brandColorPrimary ? nlohmann::json(nlohmann::json()) : brandColorPrimary);
+        obj.insert("brand_color_primary", brandColorPrimary);
 
         Core::OrderedJson::Array traitArray;
-        for (int i = 0; i < traits.size(); i++) {
+        for (std::size_t i = 0; i < traits.size(); i++) {
             const Trait &trait = traits[i];
             if (trait.label.empty())
                 continue;
             Core::OrderedJson entry;
             auto insertIfSet = [&entry](const std::string &key, const nlohmann::json &value) {
-                if (!value.isNull() && !value)
+                if (!value.is_null())
                     entry.insert(key, value);
             };
             entry.insert("label", trait.label);
@@ -113,7 +114,7 @@ struct GuildProfileEdit
             insertIfSet("emoji_id", trait.emojiId);
             insertIfSet("emoji_name", trait.emojiName);
             insertIfSet("emoji_animated", trait.emojiAnimated);
-            traitArray.push_back(entry);
+            traitArray.append(entry);
         }
         obj.insert("traits", traitArray);
         obj.insert("game_application_ids", gameApplicationIds);

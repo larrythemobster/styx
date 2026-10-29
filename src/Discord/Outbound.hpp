@@ -113,9 +113,9 @@ struct GuildSubscriptionsBulkData : Core::JsonUtils::JsonObject
                 Core::OrderedJson channelsObj;
                 for (auto it = channels.begin(); it != channels.end(); ++it) {
                     Core::OrderedJson::Array ranges;
-                    for (const auto &range : it.value())
-                        ranges.push_back(Core::OrderedJson::Array().push_back(range.first).push_back(range.second));
-                    channelsObj.insert(std::to_string(it.key()), ranges);
+                    for (const auto &range : it->second)
+                        ranges.append(Core::OrderedJson::Array().append(range.first).append(range.second));
+                    channelsObj.insert(it->first.toString(), ranges);
                 }
                 obj.insert("channels", channelsObj);
             }
@@ -152,11 +152,11 @@ struct RequestForumUnreadsData : Core::JsonUtils::JsonObject
         Core::OrderedJson::Array arr;
         for (const auto &[threadId, ackMessageId] : threads) {
             Core::OrderedJson t;
-            t.insert("thread_id", std::to_string(threadId));
+            t.insert("thread_id", threadId.toString());
             t.insert("ack_message_id", ackMessageId.isValid()
-                                               ? nlohmann::json(std::to_string(ackMessageId))
-                                               : nlohmann::json(nlohmann::json()));
-            arr.push_back(t);
+                                               ? nlohmann::json(ackMessageId.toString())
+                                               : nlohmann::json(nullptr));
+            arr.append(t);
         }
         obj.insert("threads", arr);
         return obj;
@@ -175,7 +175,7 @@ struct RequestGuildMembersData : Core::JsonUtils::JsonObject
     Core::OrderedJson toJson() const
     {
         Core::OrderedJson obj;
-        obj.insert("guild_id", Core::OrderedJson::Array().push_back(std::to_string(guildId.get())));
+        obj.insert("guild_id", Core::OrderedJson::Array().append(guildId.get().toString()));
         insert(obj, "query", query);
         insert(obj, "limit", limit);
         insert(obj, "user_ids", userIds);

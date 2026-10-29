@@ -9,6 +9,8 @@
 #include <map>
 #include <optional>
 
+namespace Styx::Platform { class WorkerLoop; }
+
 namespace Styx {
 namespace Discord {
 namespace Stream {
@@ -23,7 +25,8 @@ namespace Stream {
 class VideoReceiver : public Platform::Trackable
 {
 public:
-    VideoReceiver();
+    explicit VideoReceiver(Platform::WorkerLoop *ownerLoop = nullptr);
+    ~VideoReceiver() override;
 
     void setSsrcs(uint32_t videoSsrc, uint32_t rtxSsrc, uint32_t audioSsrc);
     void setLocalSsrc(uint32_t ssrc) { localSsrc = ssrc; }
@@ -90,6 +93,8 @@ private:
     int64_t lastPliMs = -100000;
 
     std::chrono::steady_clock::time_point clock = std::chrono::steady_clock::now();
+    Platform::WorkerLoop *ownerLoop;
+    uint64_t workerTimer = 0;
     Platform::Timer tick;
     Stats counters;
 

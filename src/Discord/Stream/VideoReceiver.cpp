@@ -3,6 +3,7 @@
 #include "StreamTransport.hpp"
 
 #include "Core/Logging.hpp"
+#include "Platform/WorkerLoop.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -77,9 +78,19 @@ bool parseRtp(const std::string &packet, ParsedRtp &out)
 
 } // namespace
 
-VideoReceiver::VideoReceiver()
+VideoReceiver::VideoReceiver(Platform::WorkerLoop *ownerLoop)
+    : ownerLoop(ownerLoop)
 {
-    tick.start(std::chrono::milliseconds(20), true, [this] { onTick(); });
+    if (ownerLoop)
+        workerTimer = ownerLoop->setTimer(std::chrono::milliseconds(20), true, [this] { onTick(); });
+    else
+        tick.start(std::chrono::milliseconds(20), true, [this] { onTick(); });
+}
+
+VideoReceiver::~VideoReceiver()
+{
+    if (ownerLoop && workerTimer)
+        ownerLoop->cancelTimer(workerTimer);
 }
 
 void VideoReceiver::setSsrcs(uint32_t video, uint32_t rtx, uint32_t audio)

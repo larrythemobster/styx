@@ -5,6 +5,7 @@
 #include <rtc/rtc.hpp>
 
 #include "Platform/Dispatcher.hpp"
+#include "Platform/WorkerLoop.hpp"
 #include "Platform/Utf8.hpp"
 #include <sstream>
 
@@ -154,8 +155,8 @@ std::string sdpLine(const std::string &sdp, std::string_view prefix)
 
 } // namespace
 
-StreamTransport::StreamTransport(Role role)
-    : role(role), guard(std::make_shared<Guard>())
+StreamTransport::StreamTransport(Role role, Platform::WorkerLoop *ownerLoop)
+    : role(role), ownerLoop(ownerLoop), guard(std::make_shared<Guard>())
 {
 }
 
@@ -194,7 +195,11 @@ void StreamTransport::setLocalSsrcs(uint32_t audio, uint32_t video, uint32_t rtx
 void StreamTransport::postToThread(std::function<void()> fn)
 {
     auto weak = lifetime();
-    Platform::Dispatcher::main().post([weak, fn = std::move(fn)] { if (!weak.expired()) fn(); });
+    auto task = [weak, fn = std::move(fn)] { if (!weak.expired()) fn(); };
+    if (ownerLoop)
+        ownerLoop->post(std::move(task));
+    else
+        Platform::Dispatcher::main().post(std::move(task));
 }
 
 void StreamTransport::createOffer()

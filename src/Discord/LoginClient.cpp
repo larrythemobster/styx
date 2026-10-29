@@ -48,14 +48,15 @@ LoginClient::LoginClient(const Core::ProxyConfig &proxy, CaptchaResolver *resolv
     http.setReferer("https://discord.com/login");
 }
 void LoginClient::login(const std::string &login, const std::string &password) {
+    const auto run = ++generation;
     mfaTicket.clear(); mfaLoginInstanceId.clear();
-    if (haveFingerprint) postLogin(login, password);
-    else fetchFingerprintThen([this, login, password] { postLogin(login, password); });
+    if (haveFingerprint) postLogin(run, login, password);
+    else fetchFingerprintThen(run, [this, run, login, password] { postLogin(run, login, password); });
 }
-void LoginClient::fetchFingerprintThen(std::function<void()> next) {
+void LoginClient::fetchFingerprintThen(uint64_t run, std::function<void()> next) {
     Platform::Guard<LoginClient> self(this);
-    http.get("/experiments", {{"with_guild_experiments", "true"}}, [self, next = std::move(next)](const HttpResponse &response) {
-        if (!self) return;
+    http.get("/experiments", {{"with_guild_experiments", "true"}}, [self, run, next = std::move(next)](const HttpResponse &response) {
+        if (!self || self->generation != run) return;
         const auto fingerprint = str(parseObject(response.body), "fingerprint");
         if (response.success && !fingerprint.empty()) {
             self->http.setFingerprint(fingerprint); self->haveFingerprint = true;
@@ -63,10 +64,10 @@ void LoginClient::fetchFingerprintThen(std::function<void()> next) {
         next();
     });
 }
-void LoginClient::postLogin(const std::string &login, const std::string &password) {
+void LoginClient::postLogin(uint64_t run, const std::string &login, const std::string &password) {
     Json body = {{"login", login}, {"password", password}, {"undelete", false}, {"login_source", nullptr}, {"gift_code_sku_id", nullptr}};
     Platform::Guard<LoginClient> self(this);
-    http.post("/auth/login", body, [self](const HttpResponse &r) { if (self) self->handleLoginResponse(r); });
+    http.post("/auth/login", body, [self, run](const HttpResponse &r) { if (self && self->generation == run) self->handleLoginResponse(r); });
 }
 void LoginClient::handleLoginResponse(const HttpResponse &response) {
     const auto root = parseObject(response.body);
@@ -99,8 +100,9 @@ void LoginClient::handleLoginResponse(const HttpResponse &response) {
 void LoginClient::submitMfa(MfaMethod method, const std::string &code) {
     if (mfaTicket.empty() || code.empty()) return;
     Json body = {{"code", code}, {"ticket", mfaTicket}, {"login_source", nullptr}, {"gift_code_sku_id", nullptr}, {"login_instance_id", mfaLoginInstanceId.empty() ? Json(nullptr) : Json(mfaLoginInstanceId)}};
+    const auto run = generation;
     Platform::Guard<LoginClient> self(this);
-    http.post(mfaEndpoint(method), body, [self](const HttpResponse &r) { if (self) self->handleMfaResponse(r); });
+    http.post(mfaEndpoint(method), body, [self, run](const HttpResponse &r) { if (self && self->generation == run) self->handleMfaResponse(r); });
 }
 void LoginClient::handleMfaResponse(const HttpResponse &response) {
     const auto root = parseObject(response.body);
@@ -119,9 +121,10 @@ void LoginClient::handleMfaResponse(const HttpResponse &response) {
 }
 void LoginClient::requestSmsCode() {
     if (mfaTicket.empty()) return;
+    const auto run = generation;
     Platform::Guard<LoginClient> self(this);
-    http.post("/auth/mfa/sms/send", Json{{"ticket", mfaTicket}}, [self](const HttpResponse &response) {
-        if (!self) return;
+    http.post("/auth/mfa/sms/send", Json{{"ticket", mfaTicket}}, [self, run](const HttpResponse &response) {
+        if (!self || self->generation != run) return;
         if (!response.success) Core::log(Core::LogLevel::Warning, LogDiscord) << "Login: SMS send failed, HTTP " << response.statusCode << " " << response.error;
         self->smsSent.publish(response.success);
     });

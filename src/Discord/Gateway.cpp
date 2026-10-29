@@ -12,7 +12,7 @@
 #include "Proto/ProtoReader.hpp"
 #include "Proto/UserSettings.hpp"
 
-#include <QUrl>
+#include "Platform/Dispatcher.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -32,9 +32,9 @@ static int abort_when_closing(void *userdata, curl_off_t, curl_off_t, curl_off_t
     return static_cast<std::atomic<bool> *>(userdata)->load() ? 1 : 0;
 }
 
-Gateway::Gateway(const QString &token, const QString &gatewayUrl, ClientIdentity &identity,
-                 const Core::ProxyConfig &proxy, QObject *parent)
-    : QObject(parent), token(token), gatewayUrl(gatewayUrl), identity(identity), proxy(proxy), running(false)
+Gateway::Gateway(const std::string &token, const std::string &gatewayUrl, ClientIdentity &identity,
+                 const Core::ProxyConfig &proxy)
+    : token(token), gatewayUrl(gatewayUrl), identity(identity), proxy(proxy), running(false)
 {
 }
 
@@ -46,7 +46,7 @@ Gateway::~Gateway()
 void Gateway::start()
 {
     if (running) {
-        qCWarning(LogDiscord) << "Attempt to start already running gateway";
+        Core::log(Core::LogLevel::Warning, LogDiscord) << "Attempt to start already running gateway";
         return;
     }
 
@@ -57,8 +57,15 @@ void Gateway::start()
     reconnectAttempts = 0;
     isResuming = false;
 
-    ingest = new IngestThread(this);
-    connect(ingest, &IngestThread::payloadReceived, this, &Gateway::onPayloadReceived);
+    ingest = std::make_unique<IngestThread>();
+    auto epoch = ingestEpoch;
+    const auto currentEpoch = ++*epoch;
+    ingest->payloadReceived.connect(this, [this, epoch, currentEpoch](nlohmann::json payload, uint64_t generation) {
+        Platform::postToMain([this, epoch, currentEpoch, generation, payload = std::move(payload)] {
+            if (epoch->load() == currentEpoch && ingest && generation == ingest->currentGeneration())
+                onPayloadReceived(payload);
+        });
+    });
 
     ingest->start();
 
@@ -68,41 +75,44 @@ void Gateway::start()
 
 void Gateway::stop()
 {
-    wantToClose = true;
     closeTime = std::chrono::steady_clock::now();
+    wantToClose = true;
 }
 
 void Gateway::hardStop()
 {
+    wantToClose = true;
     shouldReconnect = false;
     teardown();
 }
 
 void Gateway::teardown()
 {
+    ++*ingestEpoch;
     running = false;
 
     heartbeatCv.notify_all();
     if (networkThread.joinable())
         networkThread.join();
-    if (heartbeatThread.joinable())
-        heartbeatThread.join();
+    {
+        std::lock_guard lock(heartbeatThreadMutex);
+        if (heartbeatThread.joinable())
+            heartbeatThread.join();
+    }
 
-    delete ingest;
-    ingest = nullptr;
+    ingest.reset();
 }
 
-void Gateway::subscribeToGuild(Core::Snowflake guildId, Core::Snowflake channelId, const QList<QPair<int, int>> &ranges)
+void Gateway::subscribeToGuild(Core::Snowflake guildId, Core::Snowflake channelId, const std::vector<std::pair<int, int>> &ranges)
 {
     GuildSubscriptionsBulk data;
     GuildSubscriptionsBulk::SubscriptionData guild;
     guild.typing = true;
     guild.activities = true;
     guild.threads = true;
-    guild.channels.insert(channelId, ranges);
-    data.subscriptions.get().insert(guildId, guild);
+    guild.channels[channelId] = ranges;
+    data.subscriptions.get()[guildId] = guild;
 
-    qCDebug(LogDiscord) << "Subscribing to channel" << channelId << "with ranges" << ranges;
 
     sendPayload(data.toJson());
 }
@@ -112,7 +122,7 @@ void Gateway::setMemberUpdatesSubscription(Core::Snowflake guildId, bool subscri
     GuildSubscriptionsBulk data;
     GuildSubscriptionsBulk::SubscriptionData guild;
     guild.memberUpdates = subscribed;
-    data.subscriptions.get().insert(guildId, guild);
+    data.subscriptions.get()[guildId] = guild;
 
     sendPayload(data.toJson());
 }
@@ -122,14 +132,14 @@ void Gateway::sendPayload(const Core::OrderedJson &obj)
     sendPayload(obj.toBytes());
 }
 
-void Gateway::sendPayload(const QByteArray &data)
+void Gateway::sendPayload(const std::string &data)
 {
-    CurlUtils::wsSend(curl, curlMutex, data.constData(), data.size(), CURLWS_TEXT, "gateway");
+    CurlUtils::wsSend(curl, curlMutex, data.data(), data.size(), CURLWS_TEXT, "gateway");
 }
 
-void Gateway::onPayloadReceived(const QJsonObject &root)
+void Gateway::onPayloadReceived(const nlohmann::json &root)
 {
-    qCDebug(LogDiscord) << "Received payload" << root;
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "Received payload" << root.dump();
 
     Inbound msg = Inbound::fromJson(root);
 
@@ -140,6 +150,9 @@ void Gateway::onPayloadReceived(const QJsonObject &root)
     case OpCode::DISPATCH:
         handleDispatch(msg);
         break;
+    case OpCode::HEARTBEAT:
+        sendHeartbeat();
+        break;
     case OpCode::HELLO:
         handleHello(msg);
         break;
@@ -147,12 +160,12 @@ void Gateway::onPayloadReceived(const QJsonObject &root)
         heartbeatAckReceived = true;
         break;
     case OpCode::RECONNECT:
-        qCInfo(LogDiscord) << "Server requested reconnect";
+        Core::log(Core::LogLevel::Info, LogDiscord) << "Server requested reconnect";
         shouldReconnect = true;
         break;
     case OpCode::INVALID_SESSION: {
-        bool resumable = msg.data.toBool();
-        qCInfo(LogDiscord) << "Invalid session, resumable:" << resumable;
+        bool resumable = msg.data.is_boolean() && msg.data.get<bool>();
+        Core::log(Core::LogLevel::Info, LogDiscord) << "Invalid session, resumable:" << resumable;
         if (!resumable) {
             canResume = false;
             sessionId.clear();
@@ -167,8 +180,8 @@ void Gateway::onPayloadReceived(const QJsonObject &root)
 
 void Gateway::handleDispatch(const Inbound &data)
 {
-    QString t = data.t.value_or("");
-    qCDebug(LogDiscord) << "Received dispatch event" << t;
+    std::string t = data.t.value_or("");
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "Received dispatch event" << t;
 
     GatewayEvent event = parseGatewayEvent(t);
 
@@ -312,16 +325,16 @@ void Gateway::handleDispatch(const Inbound &data)
         handleCallDelete(data);
         break;
     case GatewayEvent::STREAM_CREATE:
-        emit gatewayStreamCreate(data.getData<StreamCreate>());
+        gatewayStreamCreate.publish(data.getData<StreamCreate>());
         break;
     case GatewayEvent::STREAM_UPDATE:
-        emit gatewayStreamUpdate(data.getData<StreamUpdate>());
+        gatewayStreamUpdate.publish(data.getData<StreamUpdate>());
         break;
     case GatewayEvent::STREAM_SERVER_UPDATE:
-        emit gatewayStreamServerUpdate(data.getData<StreamServerUpdate>());
+        gatewayStreamServerUpdate.publish(data.getData<StreamServerUpdate>());
         break;
     case GatewayEvent::STREAM_DELETE:
-        emit gatewayStreamDelete(data.getData<StreamDelete>());
+        gatewayStreamDelete.publish(data.getData<StreamDelete>());
         break;
     case GatewayEvent::RELATIONSHIP_ADD:
         handleRelationshipAdd(data);
@@ -348,141 +361,144 @@ void Gateway::handleDispatch(const Inbound &data)
         handleSessionsReplace(data);
         break;
     case GatewayEvent::UNKNOWN:
-        qCInfo(LogDiscord) << "Unknown gateway event: " << t;
+        Core::log(Core::LogLevel::Info, LogDiscord) << "Unknown gateway event: " << t;
         break;
     default:
-        qCInfo(LogDiscord) << "Parsed but unhandled gateway event: " << t;
+        Core::log(Core::LogLevel::Info, LogDiscord) << "Parsed but unhandled gateway event: " << t;
     }
 }
 
 void Gateway::handleReady(const Inbound &data)
 {
-    qCDebug(LogDiscord) << "Received ready event";
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "Received ready event";
 
     Ready msg = data.getData<Ready>();
 
-    if (msg.sessionId.hasValue())
-        sessionId = msg.sessionId.get();
-    if (msg.resumeGatewayUrl.hasValue())
-        resumeGatewayUrl = msg.resumeGatewayUrl.get();
-    canResume = !sessionId.isEmpty();
+    {
+        std::lock_guard lock(sessionMutex);
+        if (msg.sessionId.hasValue())
+            sessionId = msg.sessionId.get();
+        if (msg.resumeGatewayUrl.hasValue())
+            resumeGatewayUrl = msg.resumeGatewayUrl.get();
+        canResume = !sessionId.empty();
+    }
     reconnectAttempts = 0;
     sessionEstablished = true;
 
-    emit gatewayReady(msg);
+    gatewayReady.publish(msg);
 
     sendUpdateTimeSpentSessionId();
 }
 
 void Gateway::handleReadySupplemental(const Inbound &data)
 {
-    qCDebug(LogDiscord) << "Received ready supplemental event";
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "Received ready supplemental event";
 
     ReadySupplemental msg = data.getData<ReadySupplemental>();
 
-    emit gatewayReadySupplemental(msg);
+    gatewayReadySupplemental.publish(msg);
 }
 
 void Gateway::handleMessageCreate(const Inbound &data)
 {
     Message msg = data.getData<Message>();
 
-    emit gatewayMessageCreate(msg);
+    gatewayMessageCreate.publish(msg);
 }
 
 void Gateway::handleMessageUpdate(const Inbound &data)
 {
     Message msg = data.getData<Message>();
 
-    emit gatewayMessageUpdate(msg);
+    gatewayMessageUpdate.publish(msg);
 }
 
 void Gateway::handleMessageDelete(const Inbound &data)
 {
     MessageDelete event = data.getData<MessageDelete>();
 
-    emit gatewayMessageDelete(event);
+    gatewayMessageDelete.publish(event);
 }
 
 void Gateway::handleTypingStart(const Inbound &data)
 {
     TypingStart event = data.getData<TypingStart>();
 
-    emit gatewayTypingStart(event);
+    gatewayTypingStart.publish(event);
 }
 
 void Gateway::handleChannelCreate(const Inbound &data)
 {
     ChannelCreate event = data.getData<ChannelCreate>();
 
-    emit gatewayChannelCreate(event);
+    gatewayChannelCreate.publish(event);
 }
 
 void Gateway::handleChannelUpdate(const Inbound &data)
 {
     ChannelUpdate event = data.getData<ChannelUpdate>();
 
-    emit gatewayChannelUpdate(event);
+    gatewayChannelUpdate.publish(event);
 }
 
 void Gateway::handleChannelDelete(const Inbound &data)
 {
     ChannelDelete event = data.getData<ChannelDelete>();
 
-    emit gatewayChannelDelete(event);
+    gatewayChannelDelete.publish(event);
 }
 
 void Gateway::handleThreadCreate(const Inbound &data)
 {
     ChannelCreate event = data.getData<ChannelCreate>();
 
-    emit gatewayThreadCreate(event);
+    gatewayThreadCreate.publish(event);
 }
 
 void Gateway::handleThreadUpdate(const Inbound &data)
 {
     ChannelUpdate event = data.getData<ChannelUpdate>();
 
-    emit gatewayThreadUpdate(event);
+    gatewayThreadUpdate.publish(event);
 }
 
 void Gateway::handleThreadDelete(const Inbound &data)
 {
     ThreadDelete event = data.getData<ThreadDelete>();
 
-    emit gatewayThreadDelete(event);
+    gatewayThreadDelete.publish(event);
 }
 
 void Gateway::handleThreadListSync(const Inbound &data)
 {
     ThreadListSync event = data.getData<ThreadListSync>();
 
-    emit gatewayThreadListSync(event);
+    gatewayThreadListSync.publish(event);
 }
 
 void Gateway::handleThreadMemberUpdate(const Inbound &data)
 {
     ThreadMemberUpdate event = data.getData<ThreadMemberUpdate>();
 
-    emit gatewayThreadMemberUpdate(event);
+    gatewayThreadMemberUpdate.publish(event);
 }
 
 void Gateway::handleThreadMembersUpdate(const Inbound &data)
 {
     ThreadMembersUpdate event = data.getData<ThreadMembersUpdate>();
 
-    emit gatewayThreadMembersUpdate(event);
+    gatewayThreadMembersUpdate.publish(event);
 }
 
 void Gateway::handleForumUnreads(const Inbound &data)
 {
     ForumUnreads event = data.getData<ForumUnreads>();
 
-    emit gatewayForumUnreads(event);
+    gatewayForumUnreads.publish(event);
 }
 
 void Gateway::requestForumUnreads(Core::Snowflake guildId, Core::Snowflake forumId,
-                                  const QList<QPair<Core::Snowflake, Core::Snowflake>> &threads)
+                                  const std::vector<std::pair<Core::Snowflake, Core::Snowflake>> &threads)
 {
     RequestForumUnreads request;
     request.guildId = guildId;
@@ -496,175 +512,175 @@ void Gateway::handleGuildCreate(const Inbound &data)
 {
     GatewayGuild guild = data.getData<GatewayGuild>();
 
-    emit gatewayGuildCreate(guild);
+    gatewayGuildCreate.publish(guild);
 }
 
 void Gateway::handleGuildUpdate(const Inbound &data)
 {
     Guild guild = data.getData<Guild>();
 
-    emit gatewayGuildUpdate(guild);
+    gatewayGuildUpdate.publish(guild);
 }
 
 void Gateway::handleGuildMembersChunk(const Inbound &data)
 {
     GuildMembersChunk chunk = data.getData<GuildMembersChunk>();
 
-    emit gatewayGuildMembersChunk(chunk);
+    gatewayGuildMembersChunk.publish(chunk);
 }
 
 void Gateway::handleGuildMemberAdd(const Inbound &data)
 {
     GuildMemberAdd event = data.getData<GuildMemberAdd>();
 
-    emit gatewayGuildMemberAdd(event);
+    gatewayGuildMemberAdd.publish(event);
 }
 
 void Gateway::handleGuildMemberUpdate(const Inbound &data)
 {
     GuildMemberUpdate event = data.getData<GuildMemberUpdate>();
 
-    emit gatewayGuildMemberUpdate(event);
+    gatewayGuildMemberUpdate.publish(event);
 }
 
 void Gateway::handleGuildMemberRemove(const Inbound &data)
 {
     GuildMemberRemove event = data.getData<GuildMemberRemove>();
 
-    emit gatewayGuildMemberRemove(event);
+    gatewayGuildMemberRemove.publish(event);
 }
 
 void Gateway::handleGuildRoleCreate(const Inbound &data)
 {
     GuildRoleCreate event = data.getData<GuildRoleCreate>();
 
-    emit gatewayGuildRoleCreate(event);
+    gatewayGuildRoleCreate.publish(event);
 }
 
 void Gateway::handleGuildRoleUpdate(const Inbound &data)
 {
     GuildRoleUpdate event = data.getData<GuildRoleUpdate>();
 
-    emit gatewayGuildRoleUpdate(event);
+    gatewayGuildRoleUpdate.publish(event);
 }
 
 void Gateway::handleGuildRoleDelete(const Inbound &data)
 {
     GuildRoleDelete event = data.getData<GuildRoleDelete>();
 
-    emit gatewayGuildRoleDelete(event);
+    gatewayGuildRoleDelete.publish(event);
 }
 
 void Gateway::handleGuildEmojisUpdate(const Inbound &data)
 {
     GuildEmojisUpdate event = data.getData<GuildEmojisUpdate>();
 
-    emit gatewayGuildEmojisUpdate(event);
+    gatewayGuildEmojisUpdate.publish(event);
 }
 
 void Gateway::handleGuildStickersUpdate(const Inbound &data)
 {
     GuildStickersUpdate event = data.getData<GuildStickersUpdate>();
 
-    emit gatewayGuildStickersUpdate(event);
+    gatewayGuildStickersUpdate.publish(event);
 }
 
 void Gateway::handleGuildBanAdd(const Inbound &data)
 {
     GuildBanEvent event = data.getData<GuildBanEvent>();
 
-    emit gatewayGuildBanAdd(event);
+    gatewayGuildBanAdd.publish(event);
 }
 
 void Gateway::handleGuildBanRemove(const Inbound &data)
 {
     GuildBanEvent event = data.getData<GuildBanEvent>();
 
-    emit gatewayGuildBanRemove(event);
+    gatewayGuildBanRemove.publish(event);
 }
 
 void Gateway::handleGuildPruneUpdate(const Inbound &data)
 {
     GuildPruneUpdate event = data.getData<GuildPruneUpdate>();
 
-    emit gatewayGuildPruneUpdate(event);
+    gatewayGuildPruneUpdate.publish(event);
 }
 
 void Gateway::handleGuildDelete(const Inbound &data)
 {
     GuildDelete event = data.getData<GuildDelete>();
 
-    emit gatewayGuildDelete(event);
+    gatewayGuildDelete.publish(event);
 }
 
 void Gateway::handleMessageAck(const Inbound &data)
 {
     MessageAck event = data.getData<MessageAck>();
 
-    emit gatewayMessageAck(event);
+    gatewayMessageAck.publish(event);
 }
 
 void Gateway::handleMessageReactionAdd(const Inbound &data)
 {
     MessageReactionAdd event = data.getData<MessageReactionAdd>();
 
-    emit gatewayMessageReactionAdd(event);
+    gatewayMessageReactionAdd.publish(event);
 }
 
 void Gateway::handleMessageReactionAddMany(const Inbound &data)
 {
     MessageReactionAddMany event = data.getData<MessageReactionAddMany>();
 
-    emit gatewayMessageReactionAddMany(event);
+    gatewayMessageReactionAddMany.publish(event);
 }
 
 void Gateway::handleMessageReactionRemove(const Inbound &data)
 {
     MessageReactionRemove event = data.getData<MessageReactionRemove>();
 
-    emit gatewayMessageReactionRemove(event);
+    gatewayMessageReactionRemove.publish(event);
 }
 
 void Gateway::handleMessageReactionRemoveAll(const Inbound &data)
 {
     MessageReactionRemoveAll event = data.getData<MessageReactionRemoveAll>();
 
-    emit gatewayMessageReactionRemoveAll(event);
+    gatewayMessageReactionRemoveAll.publish(event);
 }
 
 void Gateway::handleMessageReactionRemoveEmoji(const Inbound &data)
 {
     MessageReactionRemoveEmoji event = data.getData<MessageReactionRemoveEmoji>();
 
-    emit gatewayMessageReactionRemoveEmoji(event);
+    gatewayMessageReactionRemoveEmoji.publish(event);
 }
 
 void Gateway::handleUserGuildSettingsUpdate(const Inbound &data)
 {
     UserGuildSettings settings = data.getData<UserGuildSettings>();
 
-    emit gatewayUserGuildSettingsUpdate(settings);
+    gatewayUserGuildSettingsUpdate.publish(settings);
 }
 
 void Gateway::handleNotificationSettingsUpdate(const Inbound &data)
 {
     NotificationSettings settings = data.getData<NotificationSettings>();
 
-    emit gatewayNotificationSettingsUpdate(settings);
+    gatewayNotificationSettingsUpdate.publish(settings);
 }
 
 void Gateway::handleGuildMemberListUpdate(const Inbound &data)
 {
     GuildMemberListUpdate update = data.getData<GuildMemberListUpdate>();
 
-    emit gatewayGuildMemberListUpdate(update);
+    gatewayGuildMemberListUpdate.publish(update);
 }
 
 void Gateway::handleVoiceStateUpdate(const Inbound &data)
 {
     VoiceState event = data.getData<VoiceState>();
 
-    emit gatewayVoiceStateUpdate(event);
+    gatewayVoiceStateUpdate.publish(event);
 }
 
 void Gateway::handleVoiceStateUpdateBatch(const Inbound &data)
@@ -674,106 +690,108 @@ void Gateway::handleVoiceStateUpdateBatch(const Inbound &data)
         return;
 
     for (const VoiceState &state : batch.voiceStates.get())
-        emit gatewayVoiceStateUpdate(state);
+        gatewayVoiceStateUpdate.publish(state);
 }
 
 void Gateway::handleVoiceServerUpdate(const Inbound &data)
 {
     VoiceServerUpdate event = data.getData<VoiceServerUpdate>();
 
-    emit gatewayVoiceServerUpdate(event);
+    gatewayVoiceServerUpdate.publish(event);
 }
 
 void Gateway::handleCallCreate(const Inbound &data)
 {
-    emit gatewayCallCreate(data.getData<CallCreate>());
+    gatewayCallCreate.publish(data.getData<CallCreate>());
 }
 
 void Gateway::handleCallUpdate(const Inbound &data)
 {
-    emit gatewayCallUpdate(data.getData<CallUpdate>());
+    gatewayCallUpdate.publish(data.getData<CallUpdate>());
 }
 
 void Gateway::handleCallDelete(const Inbound &data)
 {
-    emit gatewayCallDelete(data.getData<CallDelete>());
+    gatewayCallDelete.publish(data.getData<CallDelete>());
 }
 
 void Gateway::handleRelationshipAdd(const Inbound &data)
 {
     Relationship event = data.getData<Relationship>();
-    emit gatewayRelationshipAdd(event);
+    gatewayRelationshipAdd.publish(event);
 }
 
 void Gateway::handleRelationshipUpdate(const Inbound &data)
 {
     RelationshipPartial event = data.getData<RelationshipPartial>();
-    emit gatewayRelationshipUpdate(event);
+    gatewayRelationshipUpdate.publish(event);
 }
 
 void Gateway::handleRelationshipRemove(const Inbound &data)
 {
     RelationshipPartial event = data.getData<RelationshipPartial>();
-    emit gatewayRelationshipRemove(event);
+    gatewayRelationshipRemove.publish(event);
 }
 
 void Gateway::handleUserNoteUpdate(const Inbound &data)
 {
     UserNoteUpdate event = data.getData<UserNoteUpdate>();
-    emit gatewayUserNoteUpdate(event);
+    gatewayUserNoteUpdate.publish(event);
 }
 
 void Gateway::handleUserSettingsProtoUpdate(const Inbound &data)
 {
     UserSettingsProtoUpdate event = data.getData<UserSettingsProtoUpdate>();
 
-    emit gatewayUserSettingsProtoUpdate(event);
+    gatewayUserSettingsProtoUpdate.publish(event);
 }
 
 void Gateway::handlePresenceUpdate(const Inbound &data)
 {
     Presence event = data.getData<Presence>();
-    emit gatewayPresenceUpdate(event);
+    gatewayPresenceUpdate.publish(event);
 }
 
 void Gateway::handlePresencesReplace(const Inbound &data)
 {
-    const QJsonArray array = data.data.toArray();
+    const auto &array = data.data;
+    if (!array.is_array()) return;
 
-    QList<Presence> presences;
+    std::vector<Presence> presences;
     presences.reserve(array.size());
-    for (const QJsonValue &value : array)
-        presences.append(Presence::fromJson(value.toObject()));
+    for (const auto &value : array)
+        presences.push_back(Presence::fromJson(value));
 
-    qCDebug(LogDiscord) << "PRESENCES_REPLACE:" << presences.size() << "presences";
-    emit gatewayPresencesReplace(presences);
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "PRESENCES_REPLACE:" << presences.size() << "presences";
+    gatewayPresencesReplace.publish(presences);
 }
 
 void Gateway::handleSessionsReplace(const Inbound &data)
 {
-    const QJsonArray array = data.data.toArray();
+    const auto &array = data.data;
+    if (!array.is_array()) return;
 
-    QList<UserSession> sessions;
+    std::vector<UserSession> sessions;
     sessions.reserve(array.size());
-    for (const QJsonValue &value : array)
-        sessions.append(UserSession::fromJson(value.toObject()));
+    for (const auto &value : array)
+        sessions.push_back(UserSession::fromJson(value));
 
-    qCDebug(LogDiscord) << "SESSIONS_REPLACE:" << sessions.size() << "sessions";
-    emit gatewaySessionsReplace(sessions);
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "SESSIONS_REPLACE:" << sessions.size() << "sessions";
+    gatewaySessionsReplace.publish(sessions);
 }
 
-void Gateway::requestGuildMembers(Core::Snowflake guildId, const QList<Core::Snowflake> &userIds, bool presences)
+void Gateway::requestGuildMembers(Core::Snowflake guildId, const std::vector<Core::Snowflake> &userIds, bool presences)
 {
-    for (qsizetype start = 0; start < userIds.size(); start += 100) {
+    for (size_t start = 0; start < userIds.size(); start += 100) {
         RequestGuildMembers request;
         request.guildId = guildId;
-        request.userIds = userIds.mid(start, 100);
+        request.userIds = std::vector<Core::Snowflake>(userIds.begin() + start, userIds.begin() + std::min(start + size_t{100}, userIds.size()));
         request.presences = presences;
         sendPayload(request.toJson());
     }
 }
 
-void Gateway::queryGuildMembers(Core::Snowflake guildId, const QString &query, int limit, bool presences)
+void Gateway::queryGuildMembers(Core::Snowflake guildId, const std::string &query, int limit, bool presences)
 {
     RequestGuildMembers request;
     request.guildId = guildId;
@@ -811,7 +829,7 @@ void Gateway::sendCallConnect(Core::Snowflake channelId)
 void Gateway::sendStreamCreate(Core::Snowflake guildId, Core::Snowflake channelId)
 {
     StreamCreateRequest msg;
-    msg.type = guildId.isValid() ? QStringLiteral("guild") : QStringLiteral("call");
+    msg.type = guildId.isValid() ? "guild" : "call";
     if (guildId.isValid())
         msg.guildId = guildId;
     else
@@ -820,21 +838,21 @@ void Gateway::sendStreamCreate(Core::Snowflake guildId, Core::Snowflake channelI
     sendPayload(msg.toJson());
 }
 
-void Gateway::sendStreamDelete(const QString &streamKey)
+void Gateway::sendStreamDelete(const std::string &streamKey)
 {
     StreamDeleteRequest msg;
     msg.streamKey = streamKey;
     sendPayload(msg.toJson());
 }
 
-void Gateway::sendStreamWatch(const QString &streamKey)
+void Gateway::sendStreamWatch(const std::string &streamKey)
 {
     StreamWatchRequest msg;
     msg.streamKey = streamKey;
     sendPayload(msg.toJson());
 }
 
-void Gateway::sendStreamSetPaused(const QString &streamKey, bool paused)
+void Gateway::sendStreamSetPaused(const std::string &streamKey, bool paused)
 {
     StreamSetPausedRequest msg;
     msg.streamKey = streamKey;
@@ -844,7 +862,7 @@ void Gateway::sendStreamSetPaused(const QString &streamKey, bool paused)
 
 void Gateway::handleHello(const Inbound &data)
 {
-    qCDebug(LogDiscord) << "Received hello";
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "Received hello";
 
     Hello msg = data.getData<Hello>();
 
@@ -859,10 +877,13 @@ void Gateway::handleHello(const Inbound &data)
     reconnectAttempts = 0;
     isResuming = false;
 
-    if (!heartbeatThread.joinable())
-        heartbeatThread = std::thread(&Gateway::heartbeatLoop, this);
+    {
+        std::lock_guard lock(heartbeatThreadMutex);
+        if (running && !heartbeatThread.joinable())
+            heartbeatThread = std::thread(&Gateway::heartbeatLoop, this);
+    }
 
-    emit gatewayHello();
+    gatewayHello.publish();
 }
 
 void Gateway::identify()
@@ -891,24 +912,20 @@ void Gateway::identify()
     sendPayload(identify.toJson());
 }
 
-static int curlDebug(CURL *, curl_infotype type, char *data, size_t size, void *)
-{
-    if (type == CURLINFO_TEXT || type == CURLINFO_SSL_DATA_IN || type == CURLINFO_SSL_DATA_OUT) {
-        qDebug().noquote() << QByteArray(data, size);
-    }
-    return 0;
-}
-
 void Gateway::networkLoop()
 {
     runConnection();
 
+    ++*ingestEpoch;
     running = false;
     heartbeatCv.notify_all();
-    if (heartbeatThread.joinable())
-        heartbeatThread.join();
+    {
+        std::lock_guard lock(heartbeatThreadMutex);
+        if (heartbeatThread.joinable())
+            heartbeatThread.join();
+    }
 
-    emit finished();
+    finished.publish();
 }
 
 void Gateway::runConnection()
@@ -919,26 +936,33 @@ void Gateway::runConnection()
         // Choose URL: use resumeGatewayUrl if resuming, else gatewayUrl.
         // resumeGatewayUrl from READY is a bare host (e.g. wss://gateway-us-east1-b.discord.gg)
         // without query parameters — append them from the original gatewayUrl.
-        QString connectUrl = gatewayUrl;
-        if (isResuming && canResume && !resumeGatewayUrl.isEmpty()) {
-            QUrl resumeUrl(resumeGatewayUrl);
-            QUrl originalUrl(gatewayUrl);
-            resumeUrl.setQuery(originalUrl.query());
-            connectUrl = resumeUrl.toString();
+        std::string connectUrl = gatewayUrl;
+        {
+            std::lock_guard lock(sessionMutex);
+            if (isResuming && canResume && !resumeGatewayUrl.empty()) {
+                connectUrl = resumeGatewayUrl;
+                auto query = gatewayUrl.find('?');
+                if (query != std::string::npos) {
+                    auto existingQuery = connectUrl.find('?');
+                    if (existingQuery != std::string::npos)
+                        connectUrl.erase(existingQuery);
+                    connectUrl += gatewayUrl.substr(query);
+                }
+            }
         }
 
         curl = curl_easy_init();
         if (!curl) {
-            qCCritical(LogDiscord) << "Failed to initialize curl";
+            Core::log(Core::LogLevel::Error, LogDiscord) << "Failed to initialize curl";
             running = false;
-            emit disconnected(CloseCode::INTERNAL, "Failed to initialize curl");
+            disconnected.publish(CloseCode::INTERNAL, "Failed to initialize curl");
             return;
         }
 
         curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
         printf("SSL backend: %s\n", info->ssl_version);
 
-        curl_easy_setopt(curl, CURLOPT_URL, connectUrl.toUtf8().constData());
+        curl_easy_setopt(curl, CURLOPT_URL, connectUrl.c_str());
         curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 2L);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 20L);
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
@@ -956,22 +980,24 @@ void Gateway::runConnection()
                     curl = nullptr;
                 }
                 running = false;
-                emit disconnected(CloseCode::CONNECTION_REQUEST_CANCELED,
+                disconnected.publish(CloseCode::CONNECTION_REQUEST_CANCELED,
                                   "Connection cancelled");
                 return;
             }
 
-            qWarning() << "Failed to connect to gateway:" << curl_easy_strerror(res);
+            Core::log(Core::LogLevel::Warning, LogDiscord) << "Failed to connect to gateway:" << curl_easy_strerror(res);
 
             // On connect failure during reconnect, retry with backoff
-            if (isResuming && reconnectAttempts < maxReconnectAttempts) {
-                std::lock_guard lock(curlMutex);
-                curl_easy_cleanup(curl);
-                curl = nullptr;
+            if (reconnectAttempts > 0 && reconnectAttempts < maxReconnectAttempts) {
+                {
+                    std::lock_guard lock(curlMutex);
+                    curl_easy_cleanup(curl);
+                    curl = nullptr;
+                }
 
                 reconnectAttempts++;
                 int delay = 1000 + (std::rand() % 4000);
-                qCInfo(LogDiscord) << "Reconnect attempt" << reconnectAttempts
+                Core::log(Core::LogLevel::Info, LogDiscord) << "Reconnect attempt" << reconnectAttempts.load()
                                    << "in" << delay << "ms";
                 for (int waited = 0; waited < delay && !wantToClose; waited += 100)
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -986,12 +1012,12 @@ void Gateway::runConnection()
                 curl = nullptr;
             }
             running = false;
-            emit disconnected(CloseCode::INTERNAL,
-                              QString("Failed to connect to gateway: ") + curl_easy_strerror(res));
+            disconnected.publish(CloseCode::INTERNAL,
+                              std::string("Failed to connect to gateway: ") + curl_easy_strerror(res));
             return;
         }
 
-        emit connected();
+        connected.publish();
 
         char chunk[8192];
         size_t rlen = 0;
@@ -1017,7 +1043,7 @@ void Gateway::runConnection()
                     auto now = std::chrono::steady_clock::now();
                     if (now - closeTime > closeTimeout) {
                         running = false;
-                        qCDebug(LogDiscord) << "Gateway close timeout";
+                        Core::log(Core::LogLevel::Debug, LogDiscord) << "Gateway close timeout";
                         break;
                     }
                 }
@@ -1027,7 +1053,7 @@ void Gateway::runConnection()
                 res = curl_ws_recv(curl, chunk, sizeof(chunk), &rlen, &meta);
             }
 
-            if (res == CURLE_AGAIN || res == CURLE_GOT_NOTHING) {
+            if (res == CURLE_AGAIN) {
                 CurlUtils::wsRecvWait(curl, curlMutex);
 
                 if (shouldReconnect)
@@ -1037,7 +1063,7 @@ void Gateway::runConnection()
             }
 
             if (res != CURLE_OK) {
-                qCWarning(LogDiscord) << "curl_ws_recv failed:" << curl_easy_strerror(res);
+                Core::log(Core::LogLevel::Warning, LogDiscord) << "curl_ws_recv failed:" << curl_easy_strerror(res);
                 if (!wantToClose && canResume)
                     shouldReconnect = true;
                 break;
@@ -1048,27 +1074,31 @@ void Gateway::runConnection()
 
             if (meta->flags & CURLWS_CLOSE) {
                 int closeCode = 1000;
-                QString closeReason;
+                std::string closeReason;
 
                 if (rlen >= 2) {
                     closeCode = (uint8_t(chunk[0]) << 8) | uint8_t(chunk[1]);
                     if (rlen > 2)
-                        closeReason = QString::fromUtf8(chunk + 2, rlen - 2);
+                        closeReason = std::string(chunk + 2, rlen - 2);
                 }
 
-                qCInfo(LogDiscord) << "Connection closed with code" << closeCode
+                Core::log(Core::LogLevel::Info, LogDiscord) << "Connection closed with code" << closeCode
                                    << "reason:" << closeReason;
                 CloseCode cc = static_cast<CloseCode>(closeCode);
-                emit disconnected(cc, closeReason);
-                if (!wantToClose && !isFatalCloseCode(cc) && canResume)
+                disconnected.publish(cc, closeReason);
+                if (!wantToClose && !isFatalCloseCode(cc)) {
+                    if (cc == CloseCode::INVALID_SEQ || cc == CloseCode::SESSION_TIMED_OUT ||
+                        cc == CloseCode::SESSION_NO_LONGER_VALID)
+                        canResume = false;
                     shouldReconnect = true;
+                }
                 break;
             }
 
             if (meta->flags & (CURLWS_PING | CURLWS_PONG))
                 continue;
 
-            ingest->push(QByteArray(chunk, rlen));
+            ingest->push(std::string(chunk, rlen));
         }
 
         // Clean up current connection
@@ -1083,13 +1113,16 @@ void Gateway::runConnection()
         // or by zombie detection), prepare for reconnection
         if (shouldReconnect && running && reconnectAttempts < maxReconnectAttempts) {
             reconnectAttempts++;
-            isResuming = canResume;
+            isResuming = canResume.load();
 
             // Join the heartbeat thread if it exited (e.g. zombie detection broke the loop)
             // so handleHello can start a fresh one on reconnect
-            if (heartbeatThread.joinable()) {
-                heartbeatCv.notify_all();
-                heartbeatThread.join();
+            {
+                std::lock_guard lock(heartbeatThreadMutex);
+                if (heartbeatThread.joinable()) {
+                    heartbeatCv.notify_all();
+                    heartbeatThread.join();
+                }
             }
 
             // Reset the IngestThread's zlib stream — the new connection starts a fresh
@@ -1097,23 +1130,26 @@ void Gateway::runConnection()
             ingest->reset();
 
             int delay = 1000 + (std::rand() % 4000);
-            qCInfo(LogDiscord) << "Reconnecting in" << delay << "ms (attempt"
-                               << reconnectAttempts << ")";
-            emit reconnecting(reconnectAttempts, maxReconnectAttempts);
+            Core::log(Core::LogLevel::Info, LogDiscord) << "Reconnecting in" << delay << "ms (attempt"
+                               << reconnectAttempts.load() << ")";
+            reconnecting.publish(reconnectAttempts.load(), maxReconnectAttempts);
             for (int waited = 0; waited < delay && !wantToClose; waited += 100)
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+        else if (reconnectAttempts >= maxReconnectAttempts) {
+            shouldReconnect = false;
+        }
 
-    } while (shouldReconnect && running && reconnectAttempts < maxReconnectAttempts);
+    } while (shouldReconnect && running && !wantToClose && reconnectAttempts <= maxReconnectAttempts);
 }
 
 void Gateway::heartbeatLoop()
 {
-    qCDebug(LogDiscord) << "Heartbeat loop started, interval:" << heartbeatInterval;
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "Heartbeat loop started, interval:" << heartbeatInterval.load();
 
     while (running) {
         if (!heartbeatAckReceived) {
-            qCWarning(LogDiscord) << "No heartbeat ACK received — zombie connection detected";
+            Core::log(Core::LogLevel::Warning, LogDiscord) << "No heartbeat ACK received — zombie connection detected";
             shouldReconnect = true;
             break;
         }
@@ -1123,7 +1159,7 @@ void Gateway::heartbeatLoop()
 
         {
             std::unique_lock lock(heartbeatMutex);
-            bool stop = heartbeatCv.wait_for(lock, std::chrono::milliseconds(heartbeatInterval),
+            bool stop = heartbeatCv.wait_for(lock, std::chrono::milliseconds(heartbeatInterval.load()),
                                              [this] { return !running || shouldReconnect.load(); });
 
             if (stop)
@@ -1135,7 +1171,7 @@ void Gateway::heartbeatLoop()
 void Gateway::sendHeartbeat()
 {
     QoSHeartbeat heartbeat;
-    heartbeat.seq = lastReceivedSequence;
+    heartbeat.seq = lastReceivedSequence.load();
     heartbeat.qos = consumeQoSPayload();
     sendPayload(heartbeat.toJson());
 }
@@ -1158,11 +1194,11 @@ void Gateway::sendUpdateTimeSpentSessionId()
     sendHeartbeat();
 }
 
-static QoSPayload makeQoSPayload(const QList<QString> &reasons)
+static QoSPayload makeQoSPayload(const std::vector<std::string> &reasons)
 {
     QoSPayload payload;
     payload.ver = 30;
-    payload.active = !reasons.isEmpty();
+    payload.active = !reasons.empty();
     payload.reasons = reasons;
     return payload;
 }
@@ -1179,11 +1215,11 @@ QoSPayload Gateway::consumeQoSPayload()
 
 void Gateway::setActiveState(bool focused, bool rtcConnected)
 {
-    QList<QString> reasons;
+    std::vector<std::string> reasons;
     if (focused)
-        reasons.append("foregrounded");
+        reasons.push_back("foregrounded");
     if (rtcConnected)
-        reasons.append("rtc_connected");
+        reasons.push_back("rtc_connected");
     QoSPayload state = makeQoSPayload(reasons);
 
     // this is awkward but it mimics what discord does
@@ -1194,10 +1230,10 @@ void Gateway::setActiveState(bool focused, bool rtcConnected)
         if (!currentQoS.has_value())
             currentQoS = state;
         if (state.active.get()) {
-            QList<QString> merged = currentQoS->reasons.get();
-            for (const QString &reason : reasons)
-                if (!merged.contains(reason))
-                    merged.append(reason);
+            std::vector<std::string> merged = currentQoS->reasons.get();
+            for (const std::string &reason : reasons)
+                if (std::find(merged.begin(), merged.end(), reason) == merged.end())
+                    merged.push_back(reason);
             std::sort(merged.begin(), merged.end());
 
             currentQoS->active = true;
@@ -1213,13 +1249,13 @@ void Gateway::setActiveState(bool focused, bool rtcConnected)
 
 void Gateway::debugForceReconnect()
 {
-    qCInfo(LogDiscord) << "DEBUG: Forcing reconnect (simulating op 7 RECONNECT)";
+    Core::log(Core::LogLevel::Info, LogDiscord) << "DEBUG: Forcing reconnect (simulating op 7 RECONNECT)";
     shouldReconnect = true;
 }
 
 void Gateway::resume()
 {
-    qCInfo(LogDiscord) << "Sending RESUME";
+    Core::log(Core::LogLevel::Info, LogDiscord) << "Sending RESUME";
     Resume resumeMsg;
     resumeMsg.token = token;
     resumeMsg.sessionId = sessionId;

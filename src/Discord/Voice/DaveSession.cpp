@@ -32,8 +32,11 @@ void DaveSession::init(uint16_t version)
 
 void DaveSession::reinit()
 {
+    const bool wasEnabled = daveEnabled;
     daveEnabled = false;
     daveDowngraded = false;
+    if (wasEnabled)
+        daveStateChanged.publish(false);
 
     connectedUserIds.insert(std::to_string(static_cast<uint64_t>(userId)));
 

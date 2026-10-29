@@ -24,7 +24,7 @@ struct VoiceHello : Core::JsonUtils::JsonObject
 {
     Field<int> heartbeatInterval;
 
-    static VoiceHello fromJson(const QJsonObject &obj)
+    static VoiceHello fromJson(const nlohmann::json &obj)
     {
         VoiceHello hello;
         get(obj, "heartbeat_interval", hello.heartbeatInterval);
@@ -35,7 +35,7 @@ struct VoiceHello : Core::JsonUtils::JsonObject
 // One simulcast layer of a media session. Go Live sessions get one ("screen", rid "100").
 struct StreamResolution : Core::JsonUtils::JsonObject
 {
-    Field<QString> type;
+    Field<std::string> type;
     Field<int> width;
     Field<int> height;
 
@@ -48,7 +48,7 @@ struct StreamResolution : Core::JsonUtils::JsonObject
         return obj;
     }
 
-    static StreamResolution fromJson(const QJsonObject &obj)
+    static StreamResolution fromJson(const nlohmann::json &obj)
     {
         StreamResolution resolution;
         get(obj, "type", resolution.type);
@@ -62,12 +62,12 @@ struct StreamResolution : Core::JsonUtils::JsonObject
 // VIDEO (opcode 12) announces it.
 struct StreamDescription : Core::JsonUtils::JsonObject
 {
-    Field<QString> type;
-    Field<QString> rid;
-    Field<quint32, true> ssrc;
+    Field<std::string> type;
+    Field<std::string> rid;
+    Field<std::uint32_t, true> ssrc;
     Field<bool, true> active;
     Field<int, true> quality;
-    Field<quint32, true> rtxSsrc;
+    Field<std::uint32_t, true> rtxSsrc;
     Field<int, true> maxBitrate;
     Field<int, true> maxFramerate;
     Field<StreamResolution, true> maxResolution;
@@ -87,7 +87,7 @@ struct StreamDescription : Core::JsonUtils::JsonObject
         return obj;
     }
 
-    static StreamDescription fromJson(const QJsonObject &obj)
+    static StreamDescription fromJson(const nlohmann::json &obj)
     {
         StreamDescription stream;
         get(obj, "type", stream.type);
@@ -107,13 +107,13 @@ using MediaStreamInfo = StreamDescription;
 
 struct VoiceReady : Core::JsonUtils::JsonObject
 {
-    Field<quint32> ssrc;
-    Field<QString> ip;
+    Field<std::uint32_t> ssrc;
+    Field<std::string> ip;
     Field<int> port;
-    Field<QStringList> modes;
-    Field<QList<StreamDescription>, true> streams;
+    Field<std::vector<std::string>> modes;
+    Field<std::vector<StreamDescription>, true> streams;
 
-    static VoiceReady fromJson(const QJsonObject &obj)
+    static VoiceReady fromJson(const nlohmann::json &obj)
     {
         VoiceReady ready;
         get(obj, "ssrc", ready.ssrc);
@@ -129,12 +129,12 @@ struct VoiceReady : Core::JsonUtils::JsonObject
 struct VideoData : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake, true> userId;
-    Field<quint32> audioSsrc;
-    Field<quint32> videoSsrc;
-    Field<quint32, true> rtxSsrc;
-    Field<QList<StreamDescription>, true> streams;
+    Field<std::uint32_t> audioSsrc;
+    Field<std::uint32_t> videoSsrc;
+    Field<std::uint32_t, true> rtxSsrc;
+    Field<std::vector<StreamDescription>, true> streams;
 
-    static VideoData fromJson(const QJsonObject &obj)
+    static VideoData fromJson(const nlohmann::json &obj)
     {
         VideoData data;
         get(obj, "user_id", data.userId);
@@ -148,8 +148,8 @@ struct VideoData : Core::JsonUtils::JsonObject
 
 struct Codec : Core::JsonUtils::JsonObject
 {
-    Field<QString> name;
-    Field<QString> type;
+    Field<std::string> name;
+    Field<std::string> type;
     Field<int> priority;
     Field<int> payloadType;
     Field<int, true> rtxPayloadType;
@@ -161,8 +161,8 @@ struct Codec : Core::JsonUtils::JsonObject
     static Codec opus()
     {
         Codec codec;
-        codec.name = QStringLiteral("opus");
-        codec.type = QStringLiteral("audio");
+        codec.name = "opus";
+        codec.type = "audio";
         codec.priority = 1000;
         codec.payloadType = OPUS_PAYLOAD_TYPE;
         return codec;
@@ -184,13 +184,13 @@ struct Codec : Core::JsonUtils::JsonObject
 
 struct SelectProtocolData : Core::JsonUtils::JsonObject
 {
-    Field<QString> protocol = QStringLiteral("udp");
-    Field<QString> address;
+    Field<std::string> protocol = "udp";
+    Field<std::string> address;
     Field<int> port;
-    Field<QString> mode;
-    Field<QList<Codec>> codecs;
-    Field<QString, true> rtcConnectionId;
-    Field<QStringList, true> experiments;
+    Field<std::string> mode;
+    Field<std::vector<Codec>> codecs;
+    Field<std::string, true> rtcConnectionId;
+    Field<std::vector<std::string>, true> experiments;
 
     Core::OrderedJson toJson() const
     {
@@ -214,17 +214,23 @@ struct SelectProtocolData : Core::JsonUtils::JsonObject
 
 struct SessionDescription : Core::JsonUtils::JsonObject
 {
-    Field<QString> mode;
-    Field<QByteArray> secretKey;
+    Field<std::string> mode;
+    Field<std::string> secretKey;
     Field<int, true> daveProtocolVersion;
-    Field<QString, true> sdp; // only for protocol "webrtc"
-    Field<QString, true> videoCodec;
+    Field<std::string, true> sdp; // only for protocol "webrtc"
+    Field<std::string, true> videoCodec;
 
-    static SessionDescription fromJson(const QJsonObject &obj)
+    static SessionDescription fromJson(const nlohmann::json &obj)
     {
         SessionDescription desc;
         get(obj, "mode", desc.mode);
-        get(obj, "secret_key", desc.secretKey);
+        if (auto it = obj.find("secret_key"); it != obj.end() && it->is_array()) {
+            std::string key;
+            key.reserve(it->size());
+            for (const auto &byte : *it)
+                key.push_back(static_cast<char>(byte.get<int>()));
+            desc.secretKey = key;
+        }
         get(obj, "dave_protocol_version", desc.daveProtocolVersion);
         get(obj, "sdp", desc.sdp);
         get(obj, "video_codec", desc.videoCodec);
@@ -235,12 +241,12 @@ struct SessionDescription : Core::JsonUtils::JsonObject
 // SESSION_UPDATE (opcode 14) from the server: any of these may change mid-session.
 struct SessionUpdate : Core::JsonUtils::JsonObject
 {
-    Field<QString, true> audioCodec;
-    Field<QString, true> videoCodec;
-    Field<QString, true> mediaSessionId;
+    Field<std::string, true> audioCodec;
+    Field<std::string, true> videoCodec;
+    Field<std::string, true> mediaSessionId;
     Field<int, true> keyframeInterval;
 
-    static SessionUpdate fromJson(const QJsonObject &obj)
+    static SessionUpdate fromJson(const nlohmann::json &obj)
     {
         SessionUpdate update;
         get(obj, "audio_codec", update.audioCodec);
@@ -254,10 +260,10 @@ struct SessionUpdate : Core::JsonUtils::JsonObject
 // VIDEO (opcode 12) to the server: what this client is sending.
 struct LocalVideoState : Core::JsonUtils::JsonObject
 {
-    Field<quint32> audioSsrc;
-    Field<quint32> videoSsrc;
-    Field<quint32> rtxSsrc;
-    Field<QList<StreamDescription>> streams;
+    Field<std::uint32_t> audioSsrc;
+    Field<std::uint32_t> videoSsrc;
+    Field<std::uint32_t> rtxSsrc;
+    Field<std::vector<StreamDescription>> streams;
 
     Core::OrderedJson toJson() const
     {
@@ -333,10 +339,10 @@ struct SpeakingData : Core::JsonUtils::JsonObject
 {
     Field<int> speaking;
     Field<int> delay;
-    Field<quint32> ssrc;
+    Field<std::uint32_t> ssrc;
     Field<Core::Snowflake, true> userId;
 
-    static SpeakingData fromJson(const QJsonObject &obj)
+    static SpeakingData fromJson(const nlohmann::json &obj)
     {
         SpeakingData data;
         get(obj, "speaking", data.speaking);
@@ -360,11 +366,11 @@ struct SpeakingData : Core::JsonUtils::JsonObject
 struct ClientConnectData : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> userId;
-    Field<quint32> audioSsrc;
-    Field<quint32> videoSsrc;
-    Field<QList<StreamDescription>, true> streams;
+    Field<std::uint32_t> audioSsrc;
+    Field<std::uint32_t> videoSsrc;
+    Field<std::vector<StreamDescription>, true> streams;
 
-    static ClientConnectData fromJson(const QJsonObject &obj)
+    static ClientConnectData fromJson(const nlohmann::json &obj)
     {
         ClientConnectData data;
         get(obj, "user_id", data.userId);
@@ -380,11 +386,11 @@ struct VoiceIdentifyData : Core::JsonUtils::JsonObject
     Field<Core::Snowflake, true> channelId;
     Field<Core::Snowflake> serverId;
     Field<Core::Snowflake> userId;
-    Field<QString> sessionId;
-    Field<QString> token;
+    Field<std::string> sessionId;
+    Field<std::string> token;
     Field<int> maxDaveProtocolVersion = 1;
     Field<bool, true> video;
-    Field<QList<StreamDescription>, true> streams;
+    Field<std::vector<StreamDescription>, true> streams;
 
     Core::OrderedJson toJson() const
     {
@@ -401,8 +407,8 @@ struct VoiceIdentifyData : Core::JsonUtils::JsonObject
         } else if (video.hasValue() && video.get()) {
             // the one simulcast layer every Discord client asks for on a Go Live session
             Core::OrderedJson layer;
-            layer.insert("type", QStringLiteral("screen"));
-            layer.insert("rid", QStringLiteral("100"));
+            layer.insert("type", "screen");
+            layer.insert("rid", "100");
             layer.insert("quality", 100);
             Core::OrderedJson::Array s;
             s.append(layer);
@@ -416,23 +422,23 @@ struct VoiceIdentifyData : Core::JsonUtils::JsonObject
 // Go Live stream connection speak the same protocol and differ only in these values.
 struct ConnectionParams
 {
-    QString endpoint;
+    std::string endpoint;
     // Discord's voice gateways are only reached over TLS. A test's stand-in server is not.
-    QString gatewayScheme = QStringLiteral("wss");
-    QString token;
+    std::string gatewayScheme = "wss";
+    std::string token;
     Core::Snowflake serverId;
     Core::Snowflake channelId;
     Core::Snowflake userId;
-    QString sessionId;
+    std::string sessionId;
     Core::ProxyConfig proxy;
 
     // What IDENTIFY declares about video. Left unset, the server treats the connection as
     // audio-only.
     std::optional<bool> video;
-    QList<StreamDescription> streams;
+    std::vector<StreamDescription> streams;
     // The video codecs SELECT_PROTOCOL offers after Opus, in preference order. Incoming video is
     // told apart by the payload types given here.
-    QList<Codec> videoCodecs;
+    std::vector<Codec> videoCodecs;
     // A stream's viewer has no microphone on that connection and sends no audio at all, not
     // even the silence a voice connection opens with. Its owner sends the sound that is shared
     // with it, if any is.
@@ -442,17 +448,17 @@ struct ConnectionParams
     bool streamContext = false;
 };
 
-inline QList<StreamDescription> cameraStreams(bool withSecondLayer)
+inline std::vector<StreamDescription> cameraStreams(bool withSecondLayer)
 {
     StreamDescription full;
-    full.type = QStringLiteral("video");
-    full.rid = QStringLiteral("100");
+    full.type = "video";
+    full.rid = "100";
     full.quality = 100;
     if (!withSecondLayer)
         return { full };
 
     StreamDescription second = full;
-    second.rid = QStringLiteral("50");
+    second.rid = "50";
     second.quality = 50;
     return { full, second };
 }
@@ -460,8 +466,8 @@ inline QList<StreamDescription> cameraStreams(bool withSecondLayer)
 
 struct VoiceResumeData : Core::JsonUtils::JsonObject
 {
-    Field<QString> token;
-    Field<QString> sessionId;
+    Field<std::string> token;
+    Field<std::string> sessionId;
     Field<Core::Snowflake> serverId;
     Field<Core::Snowflake, true> channelId;
     Field<int> seqAck;

@@ -136,7 +136,7 @@ private:
     void sendPayload(const Core::OrderedJson &obj);
     void sendPayload(const std::string &data);
 
-    // this function is called by the network thread
+    // Payloads are delivered on the main dispatcher.
     void onPayloadReceived(const nlohmann::json &root);
     void handleDispatch(const Inbound &data);
     void handleReady(const Inbound &data);
@@ -232,20 +232,22 @@ private:
     std::mutex heartbeatMutex;
     std::condition_variable heartbeatCv;
     std::thread heartbeatThread;
+    std::mutex heartbeatThreadMutex;
 
     std::mutex qosMutex;
     std::optional<QoSPayload> currentQoS;
     std::optional<QoSPayload> upcomingQoS;
     std::atomic<bool> sessionEstablished{ false };
 
+    std::mutex sessionMutex;
     std::string sessionId;
     std::string resumeGatewayUrl;
 
     std::atomic<bool> heartbeatAckReceived{ true };
     std::atomic<bool> shouldReconnect{ false };
-    bool canResume = false;
-    bool isResuming = false;
-    int reconnectAttempts = 0;
+    std::atomic<bool> canResume{ false };
+    std::atomic<bool> isResuming{ false };
+    std::atomic<int> reconnectAttempts{ 0 };
     static constexpr int maxReconnectAttempts = 5;
 };
 

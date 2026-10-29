@@ -45,7 +45,7 @@ struct Ready : Core::JsonUtils::JsonObject
     Field<std::vector<Relationship>> relationships;
     Field<std::string> sessionId;
     Field<std::string> resumeGatewayUrl;
-    Field<QHash<Core::Snowflake, std::string>> notes;
+    Field<std::unordered_map<Core::Snowflake, std::string>> notes;
 
     static Ready fromJson(const nlohmann::json &obj)
     {
@@ -385,8 +385,7 @@ struct GuildPruneUpdate : Core::JsonUtils::JsonObject
         get(obj, "guild_id", event.guildId);
         const nlohmann::json prune = obj.value("prune", nlohmann::json());
         get(prune, "days", event.days);
-        if (prune.contains("prune_count"))
-            event.pruneCount = prune.value("prune_count", nlohmann::json()).get<int>();
+        get(prune, "prune_count", event.pruneCount);
         get(prune, "is_preview", event.isPreview);
         get(prune, "is_finished", event.isFinished);
         get(prune, "include_roles", event.includeRoles);
@@ -764,7 +763,7 @@ struct CallDescription : Core::JsonUtils::JsonObject
     // Null and absent both mean the call has no voice region yet.
     std::optional<std::string> region;
     // `ongoing_rings`: who is being rung, mapped to who rang them.
-    QHash<Core::Snowflake, Core::Snowflake> ongoingRings;
+    std::unordered_map<Core::Snowflake, Core::Snowflake> ongoingRings;
 
 protected:
     void read(const nlohmann::json &obj)
@@ -772,14 +771,18 @@ protected:
         get(obj, "channel_id", channelId);
         get(obj, "message_id", messageId);
 
-        const nlohmann::json regionValue = obj.value("region", nlohmann::json()))
-        if (regionValue.isString())
-            region = regionValue.get<std::string>();
+        const auto regionValue = obj.find("region");
+        if (regionValue != obj.end() && regionValue->is_string())
+            region = regionValue->get<std::string>();
 
-        const nlohmann::json rings = obj.value("ongoing_rings", nlohmann::json()))
-        for (auto it = rings.constBegin(); it != rings.constEnd(); ++it) {
-            const std::uint64_t ringer = it.value().get<std::string>().empty() ? 0 : std::stoull(it.value().get<std::string>());
-            ongoingRings.insert(Core::Snowflake(it.key().get<uint64_t>()), ringer != 0 ? Core::Snowflake(ringer) : Core::Snowflake::Invalid);
+        const auto rings = obj.find("ongoing_rings");
+        if (rings != obj.end() && rings->is_object()) {
+            for (auto it = rings->begin(); it != rings->end(); ++it) {
+                const auto ringer = it.value().is_string()
+                        ? Core::JsonUtils::detail::snowflake(it.value().get_ref<const std::string &>())
+                        : Core::Snowflake::Invalid;
+                ongoingRings.emplace(Core::JsonUtils::detail::snowflake(it.key()), ringer);
+            }
         }
     }
 };
