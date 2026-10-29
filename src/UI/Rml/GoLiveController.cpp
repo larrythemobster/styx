@@ -8,8 +8,14 @@
 #include "Core/Stream/StreamManager.hpp"
 #include "Platform/Dispatcher.hpp"
 
-#include <QCoreApplication>
-#include <QSettings>
+#include "Platform/Settings.hpp"
+
+#include <charconv>
+#include <chrono>
+#include <utility>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
@@ -22,15 +28,15 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-GoLiveController::GoLiveController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
+GoLiveController::GoLiveController(Shell &shell)
+    : Controller(shell, nullptr)
 {
 }
 
 GoLiveController::~GoLiveController()
 {
     stopThumbnailCapture();
-    for (const QString &key : std::as_const(registeredFrames)) {
+    for (const auto &key : registeredFrames) {
         Runtime::instance().clearFrame(key);
     }
     registeredFrames.clear();
@@ -83,14 +89,16 @@ void GoLiveController::setupEventListeners()
 
         // Tab click
         if (auto *tabEl = closest(target, "data-tab")) {
-            QString tabName = attribute(tabEl, "data-tab");
-            switchTab(tabName == QLatin1String("screens") ? Tab::Screens : Tab::Applications);
+            const auto tabName = attribute(tabEl, "data-tab");
+            switchTab(tabName == "screens" ? Tab::Screens : Tab::Applications);
             return;
         }
 
         // Source card click
         if (auto *cardEl = closest(target, "data-index")) {
-            int idx = attribute(cardEl, "data-index").toInt();
+            const auto text = attribute(cardEl, "data-index");
+            int idx = -1;
+            std::from_chars(text.data(), text.data() + text.size(), idx);
             selectSource(idx);
             return;
         }
@@ -112,7 +120,9 @@ void GoLiveController::setupEventListeners()
     listen("dblclick", [this](::Rml::Event &event) {
         auto *target = event.GetTargetElement();
         if (auto *cardEl = closest(target, "data-index")) {
-            int idx = attribute(cardEl, "data-index").toInt();
+            const auto text = attribute(cardEl, "data-index");
+            int idx = -1;
+            std::from_chars(text.data(), text.data() + text.size(), idx);
             selectSource(idx);
             goLive();
         }
@@ -123,7 +133,7 @@ void GoLiveController::setupEventListeners()
         if (target && target->GetId() == "quality-select") {
             auto *sel = rmlui_dynamic_cast<::Rml::ElementFormControlSelect *>(target);
             if (sel) {
-                selectedQualityId = QString::fromStdString(sel->GetValue());
+                selectedQualityId = sel->GetValue();
             }
         }
     }, modalDoc);
@@ -160,7 +170,7 @@ void GoLiveController::close()
 {
     stopThumbnailCapture();
 
-    for (const QString &key : std::as_const(registeredFrames)) {
+    for (const auto &key : registeredFrames) {
         Runtime::instance().clearFrame(key);
     }
     registeredFrames.clear();
@@ -177,50 +187,53 @@ void GoLiveController::close()
 void GoLiveController::populate()
 {
     const auto sources = Core::Stream::enumerateCaptureSources();
-    const qint64 ownPid = QCoreApplication::applicationPid();
+#ifdef _WIN32
+    const auto ownPid = GetCurrentProcessId();
+#endif
 
     screenSources.clear();
     appSources.clear();
 
     for (const auto &source : sources) {
+#ifdef _WIN32
         if (source.kind == Core::Stream::CaptureSource::Kind::Window &&
-            source.processId == static_cast<quint32>(ownPid)) {
+            source.processId == ownPid) {
             continue; // Sharing ourselves only shows recursive previews
         }
+#endif
         if (source.kind == Core::Stream::CaptureSource::Kind::Monitor) {
-            screenSources.append(source);
+            screenSources.push_back(source);
         } else {
-            appSources.append(source);
+            appSources.push_back(source);
         }
     }
 
-    if (currentTab == Tab::Applications && appSources.isEmpty() && !screenSources.isEmpty()) {
+    if (currentTab == Tab::Applications && appSources.empty() && !screenSources.empty()) {
         currentTab = Tab::Screens;
     }
 
     // Default source selection
     selectedSourceIndex = -1;
-    const auto &curSources = (currentTab == Tab::Screens) ? screenSources : appSources;
     if (currentTab == Tab::Screens) {
-        for (int i = 0; i < screenSources.size(); ++i) {
+        for (size_t i = 0; i < screenSources.size(); ++i) {
             if (screenSources[i].primary) {
-                selectedSourceIndex = i;
+                selectedSourceIndex = static_cast<int>(i);
                 break;
             }
         }
-        if (selectedSourceIndex < 0 && !screenSources.isEmpty())
+        if (selectedSourceIndex < 0 && !screenSources.empty())
             selectedSourceIndex = 0;
     } else {
-        if (!appSources.isEmpty())
+        if (!appSources.empty())
             selectedSourceIndex = 0;
     }
 
     // Load saved settings
-    QSettings settings;
-    selectedQualityId = settings.value(QStringLiteral("stream/quality"), QStringLiteral("720p30")).toString();
+    auto &settings = Platform::Settings::instance();
+    selectedQualityId = settings.getString("stream/quality", "720p30");
 
     audioSupported = Core::Stream::LoopbackCapture::isSupported();
-    audioEnabled = audioSupported && settings.value(QStringLiteral("stream/audio"), true).toBool();
+    audioEnabled = audioSupported && settings.getBool("stream/audio", true);
 
     // Update Tab UI
     if (auto *appTab = modalDoc->GetElementById("tab-applications"))
@@ -243,40 +256,34 @@ void GoLiveController::renderSources()
         return;
 
     const auto &sources = (currentTab == Tab::Screens) ? screenSources : appSources;
-    if (sources.isEmpty()) {
+    if (sources.empty()) {
         container->SetInnerRML("<div class=\"golive-empty\">No capture sources available</div>");
         return;
     }
 
-    QString rml;
-    for (int i = 0; i < sources.size(); ++i) {
+    std::string rml;
+    for (size_t i = 0; i < sources.size(); ++i) {
         const auto &s = sources[i];
-        const QString frameKey = QStringLiteral("golive_thumb_%1_%2")
-                                     .arg(s.kind == Core::Stream::CaptureSource::Kind::Monitor ? "mon" : "win")
-                                     .arg(s.handle);
+        const std::string frameKey = "golive_thumb_" +
+            std::string(s.kind == Core::Stream::CaptureSource::Kind::Monitor ? "mon_" : "win_") +
+            std::to_string(s.handle);
         registeredFrames.insert(frameKey);
 
-        const bool isSelected = (i == selectedSourceIndex);
-        QString title = s.title;
-        if (title.isEmpty()) {
-            title = (s.kind == Core::Stream::CaptureSource::Kind::Monitor)
-                        ? QStringLiteral("Screen %1").arg(i + 1)
-                        : QStringLiteral("Application");
+        const bool isSelected = static_cast<int>(i) == selectedSourceIndex;
+        std::string title = s.title;
+        if (title.empty()) {
+            title = s.kind == Core::Stream::CaptureSource::Kind::Monitor
+                ? "Screen " + std::to_string(i + 1) : "Application";
         }
 
-        rml += QStringLiteral(
-                   "<div class=\"golive-card%1\" data-index=\"%2\">"
-                   "  <div class=\"golive-thumb-wrap\">"
-                   "    <img class=\"golive-thumb-img\" src=\"frame:%3\"/>"
-                   "  </div>"
-                   "  <div class=\"golive-card-title\">%4</div>"
-                   "</div>")
-                   .arg(isSelected ? QStringLiteral(" selected") : QString())
-                   .arg(i)
-                   .arg(frameKey, escape(title));
+        rml += "<div class=\"golive-card" + std::string(isSelected ? " selected" : "") +
+            "\" data-index=\"" + std::to_string(i) +
+            "\"><div class=\"golive-thumb-wrap\"><img class=\"golive-thumb-img\" src=\"frame:" +
+            frameKey + "\"/></div><div class=\"golive-card-title\">" +
+            Platform::htmlEscape(title) + "</div></div>";
     }
 
-    container->SetInnerRML(rml.toUtf8().constData());
+    container->SetInnerRML(rml);
 }
 
 void GoLiveController::renderQualityPresets()
@@ -287,21 +294,22 @@ void GoLiveController::renderQualityPresets()
     if (!selectEl)
         return;
 
-    QString optionsRml;
+    std::string optionsRml;
     bool found = false;
-    for (const auto &preset : Core::Stream::StreamQuality::presets()) {
-        const bool selected = (preset.id == selectedQualityId);
+    const auto presets = Core::Stream::StreamQuality::presets();
+    for (const auto &preset : presets) {
+        const bool selected = preset.id == selectedQualityId;
         if (selected)
             found = true;
-        optionsRml += QStringLiteral("<option value=\"%1\"%2>%3</option>")
-                          .arg(preset.id, selected ? QStringLiteral(" selected") : QString(), preset.label());
+        optionsRml += "<option value=\"" + Platform::htmlEscape(preset.id) + "\"" +
+            (selected ? " selected" : "") + ">" + Platform::htmlEscape(preset.label()) + "</option>";
     }
 
-    if (!found && !Core::Stream::StreamQuality::presets().isEmpty()) {
-        selectedQualityId = Core::Stream::StreamQuality::presets().first().id;
+    if (!found && !presets.empty()) {
+        selectedQualityId = presets.front().id;
     }
 
-    selectEl->SetInnerRML(optionsRml.toUtf8().constData());
+    selectEl->SetInnerRML(optionsRml);
 }
 
 void GoLiveController::updateAudioUi()
@@ -332,10 +340,10 @@ void GoLiveController::updateGoLiveButton()
     auto *inst = shell.currentInstance();
     auto *streamMgr = inst ? inst->streams() : nullptr;
 
-    QString reason;
+    std::string reason;
     const bool canStream = streamMgr && streamMgr->canStream(&reason);
     const auto &sources = (currentTab == Tab::Screens) ? screenSources : appSources;
-    const bool hasSelection = (selectedSourceIndex >= 0 && selectedSourceIndex < sources.size());
+    const bool hasSelection = selectedSourceIndex >= 0 && static_cast<size_t>(selectedSourceIndex) < sources.size();
 
     const bool enabled = canStream && hasSelection;
 
@@ -344,8 +352,8 @@ void GoLiveController::updateGoLiveButton()
     }
 
     if (statusEl) {
-        if (!canStream && !reason.isEmpty()) {
-            statusEl->SetInnerRML(escape(reason).toUtf8().constData());
+        if (!canStream && !reason.empty()) {
+            statusEl->SetInnerRML(Platform::htmlEscape(reason));
         } else {
             statusEl->SetInnerRML("");
         }
@@ -364,11 +372,11 @@ void GoLiveController::switchTab(Tab tab)
         screenTab->SetClass("active", currentTab == Tab::Screens);
 
     const auto &sources = (currentTab == Tab::Screens) ? screenSources : appSources;
-    selectedSourceIndex = sources.isEmpty() ? -1 : 0;
+    selectedSourceIndex = sources.empty() ? -1 : 0;
     if (currentTab == Tab::Screens) {
-        for (int i = 0; i < screenSources.size(); ++i) {
+        for (size_t i = 0; i < screenSources.size(); ++i) {
             if (screenSources[i].primary) {
-                selectedSourceIndex = i;
+                selectedSourceIndex = static_cast<int>(i);
                 break;
             }
         }
@@ -386,7 +394,7 @@ void GoLiveController::switchTab(Tab tab)
 void GoLiveController::selectSource(int index)
 {
     const auto &sources = (currentTab == Tab::Screens) ? screenSources : appSources;
-    if (index < 0 || index >= sources.size())
+    if (index < 0 || static_cast<size_t>(index) >= sources.size())
         return;
 
     selectedSourceIndex = index;
@@ -395,7 +403,9 @@ void GoLiveController::selectSource(int index)
         ::Rml::ElementList cards;
         modalDoc->GetElementsByClassName(cards, "golive-card");
         for (auto *card : cards) {
-            int cardIdx = attribute(card, "data-index").toInt();
+            const auto text = attribute(card, "data-index");
+            int cardIdx = -1;
+            std::from_chars(text.data(), text.data() + text.size(), cardIdx);
             card->SetClass("selected", cardIdx == selectedSourceIndex);
         }
     }
@@ -420,7 +430,7 @@ void GoLiveController::toggleAudio()
 void GoLiveController::goLive()
 {
     const auto &sources = (currentTab == Tab::Screens) ? screenSources : appSources;
-    if (selectedSourceIndex < 0 || selectedSourceIndex >= sources.size())
+    if (selectedSourceIndex < 0 || static_cast<size_t>(selectedSourceIndex) >= sources.size())
         return;
 
     auto *inst = shell.currentInstance();
@@ -430,16 +440,17 @@ void GoLiveController::goLive()
     if (!streamMgr)
         return;
 
-    QString reason;
+    std::string reason;
     if (!streamMgr->canStream(&reason))
         return;
 
     const auto source = sources[selectedSourceIndex];
     const auto quality = Core::Stream::StreamQuality::byId(selectedQualityId);
 
-    QSettings settings;
-    settings.setValue(QStringLiteral("stream/quality"), quality.id);
-    settings.setValue(QStringLiteral("stream/audio"), audioEnabled);
+    auto &settings = Platform::Settings::instance();
+    settings.setString("stream/quality", quality.id);
+    settings.setBool("stream/audio", audioEnabled);
+    settings.save();
 
     close();
 
@@ -452,10 +463,10 @@ void GoLiveController::startThumbnailCapture()
 
     updateThumbnailSources();
     thumbnailRunning = true;
-    const QPointer<GoLiveController> guard(this);
+    const Platform::Guard<GoLiveController> guard(this);
     thumbnailThread = std::thread([this, guard]() {
         while (thumbnailRunning.load()) {
-            QList<Core::Stream::CaptureSource> currentList;
+            std::vector<Core::Stream::CaptureSource> currentList;
             std::uint64_t generation;
             {
                 std::lock_guard<std::mutex> lock(thumbnailMutex);
@@ -463,19 +474,19 @@ void GoLiveController::startThumbnailCapture()
                 generation = thumbnailGeneration;
             }
 
-            for (int i = 0; i < currentList.size() && thumbnailRunning.load(); ++i) {
+            for (size_t i = 0; i < currentList.size() && thumbnailRunning.load(); ++i) {
                 {
                     std::lock_guard<std::mutex> lock(thumbnailMutex);
                     if (generation != thumbnailGeneration)
                         break;
                 }
                 const auto &s = currentList[i];
-                const QString frameKey = QStringLiteral("golive_thumb_%1_%2")
-                                             .arg(s.kind == Core::Stream::CaptureSource::Kind::Monitor ? "mon" : "win")
-                                             .arg(s.handle);
-                QImage img = Core::Stream::captureThumbnail(s, QSize(320, 180));
-                if (!img.isNull() && thumbnailRunning.load()) {
-                    Platform::postToMain([guard, generation, frameKey, img]() {
+                const std::string frameKey = "golive_thumb_" +
+                    std::string(s.kind == Core::Stream::CaptureSource::Kind::Monitor ? "mon_" : "win_") +
+                    std::to_string(s.handle);
+                auto img = Core::Stream::captureThumbnail(s, {320, 180});
+                if (!img.empty() && thumbnailRunning.load()) {
+                    Platform::postToMain([guard, generation, frameKey, img = std::move(img)]() {
                         if (guard && guard->visible && guard->thumbnailGeneration == generation)
                             Runtime::instance().setFrame(frameKey, img);
                     });

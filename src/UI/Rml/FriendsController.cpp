@@ -17,7 +17,9 @@
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/Input.h>
 
-#include <QDateTime>
+#include "Platform/Utf8.hpp"
+#include <charconv>
+#include <chrono>
 #include <utility>
 #include <algorithm>
 #include <format>
@@ -29,31 +31,30 @@ namespace Rml {
 
 using Core::Snowflake;
 
-FriendsController::FriendsController(Shell &shell, ::Rml::Element *root, QObject *parent)
-    : Controller(shell, root, parent)
+namespace {
+Snowflake parseId(const std::string &text)
 {
-    rebuildTimer.setSingleShot(true);
-    rebuildTimer.setInterval(0);
-    connect(&rebuildTimer, &QTimer::timeout, this, &FriendsController::rebuild);
+    std::uint64_t value = 0;
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+    return result.ec == std::errc{} && result.ptr == text.data() + text.size() ? Snowflake(value) : Snowflake::Invalid;
+}
+}
 
-    connect(&shell, &Shell::locationChanged, this, [this](const Location &) {
-        if (this->shell.isFriendsOpen()) {
-            rebuildTimer.start();
-        }
-    });
-
-    connect(&shell, &Shell::instanceChanged, this, [this](Core::ClientInstance *inst) {
+FriendsController::FriendsController(Shell &shell, ::Rml::Element *root)
+    : Controller(shell, root)
+{
+    track(shell.locationChanged.connect([this](const Location &) {
+        if (this->shell.isFriendsOpen())
+            scheduleRebuild();
+    }));
+    track(shell.instanceChanged.connect([this](Core::ClientInstance *inst) {
         connectInstance(inst);
-        if (this->shell.isFriendsOpen()) {
-            rebuildTimer.start();
-        }
-    });
-
-    connect(&shell, &Shell::accountReady, this, [this]() {
-        if (this->shell.isFriendsOpen()) {
-            rebuildTimer.start();
-        }
-    });
+        if (this->shell.isFriendsOpen())
+            scheduleRebuild();
+    }));
+    track(shell.accountReady.connect([this]() {
+            scheduleRebuild();
+    }));
 
     setupEventListeners();
     connectInstance(shell.currentInstance());
@@ -67,18 +68,10 @@ FriendsController::~FriendsController() = default;
 
 void FriendsController::connectInstance(Core::ClientInstance *instance)
 {
-    if (lastInstance == instance)
+    if (lastInstance.get() == instance)
         return;
 
-    if (lastInstance) {
-        disconnect(lastInstance, nullptr, this, nullptr);
-        if (auto *rel = lastInstance->relationships())
-            disconnect(rel, nullptr, this, nullptr);
-        if (auto *prs = lastInstance->presences())
-            disconnect(prs, nullptr, this, nullptr);
-        if (auto *usr = lastInstance->users())
-            disconnect(usr, nullptr, this, nullptr);
-    }
+    instanceConnections.clear();
 
     lastInstance = instance;
     ++requestGeneration;
@@ -93,28 +86,26 @@ void FriendsController::connectInstance(Core::ClientInstance *instance)
     if (!instance)
         return;
 
+    auto remember = [this](Platform::Connection connection) {
+        connection.setAutoDisconnect(true);
+        instanceConnections.push_back(std::move(connection));
+    };
     if (auto *rel = instance->relationships()) {
-        connect(rel, &Core::RelationshipManager::relationshipChanged, this, [this](Snowflake) {
-            if (this->shell.isFriendsOpen())
-                rebuildTimer.start();
-        });
-        connect(rel, &Core::RelationshipManager::relationshipsReset, this, [this]() {
-            if (this->shell.isFriendsOpen())
-                rebuildTimer.start();
-        });
+        remember(rel->relationshipChanged.connect([this](Snowflake) {
+            if (this->shell.isFriendsOpen()) scheduleRebuild();
+        }));
+        remember(rel->relationshipsReset.connect([this]() {
+            if (this->shell.isFriendsOpen()) scheduleRebuild();
+        }));
     }
-
     if (auto *prs = instance->presences()) {
-        connect(prs, &Core::PresenceManager::presencesChanged, this, [this](const std::vector<Snowflake> &) {
-            if (this->shell.isFriendsOpen())
-                rebuildTimer.start();
-        });
+        remember(prs->presencesChanged.connect([this](const std::vector<Snowflake> &) {
+            if (this->shell.isFriendsOpen()) scheduleRebuild();
+        }));
     }
-
-    connect(instance, &Core::ClientInstance::membersUpdated, this, [this](Snowflake, const std::vector<Snowflake> &) {
-        if (this->shell.isFriendsOpen())
-            rebuildTimer.start();
-    });
+    remember(instance->membersUpdated.connect([this](Snowflake, const std::vector<Snowflake> &) {
+        if (this->shell.isFriendsOpen()) scheduleRebuild();
+    }));
 }
 
 void FriendsController::setupEventListeners()
@@ -139,13 +130,13 @@ void FriendsController::setupEventListeners()
         if (auto *act = closest(target, "data-action")) {
             std::string action = attribute(act, "data-action");
             if (action == std::string_view("message")) {
-                Snowflake uId(attribute(act, "data-user-id").toULongLong());
+                Snowflake uId = parseId(attribute(act, "data-user-id"));
                 if (uId.isValid())
                     this->shell.openDmWithUser(this->shell.location().accountId, uId);
                 return;
             }
             if (action == std::string_view("more")) {
-                Snowflake uId(attribute(act, "data-user-id").toULongLong());
+                Snowflake uId = parseId(attribute(act, "data-user-id"));
                 if (uId.isValid())
                     this->shell.showContextMenuForUser(uId, Snowflake::Invalid);
                 return;
@@ -165,7 +156,7 @@ void FriendsController::setupEventListeners()
         }
 
         if (auto *row = closest(target, "data-user-id")) {
-            Snowflake uId(attribute(row, "data-user-id").toULongLong());
+            Snowflake uId = parseId(attribute(row, "data-user-id"));
             if (uId.isValid())
                 this->shell.openDmWithUser(this->shell.location().accountId, uId);
             return;
@@ -178,7 +169,7 @@ void FriendsController::setupEventListeners()
 
         auto *target = event.GetTargetElement();
         if (auto *row = closest(target, "data-user-id")) {
-            Snowflake uId(attribute(row, "data-user-id").toULongLong());
+            Snowflake uId = parseId(attribute(row, "data-user-id"));
             if (uId.isValid())
                 this->shell.showContextMenuForUser(uId, Snowflake::Invalid);
         }
@@ -191,7 +182,7 @@ void FriendsController::setupEventListeners()
                 std::string val = input->GetValue();
                 if (val != searchText) {
                     searchText = val;
-                    rebuildTimer.start();
+                    scheduleRebuild();
                 }
             } else if (input->GetId() == "add-friend-input") {
                 addFriendInputText = input->GetValue();
@@ -228,7 +219,7 @@ void FriendsController::sendFriendRequest()
     if (addFriendPending)
         return;
 
-    std::string tag = addFriendInputText.trimmed();
+    std::string tag(Platform::trim(addFriendInputText));
     if (tag.empty())
         return;
 
@@ -236,13 +227,13 @@ void FriendsController::sendFriendRequest()
     if (!inst || !inst->discord()) {
         addFriendFeedback = "Client instance not available.";
         addFriendSuccess = false;
-        rebuildTimer.start();
+        scheduleRebuild();
         return;
     }
 
     addFriendPending = true;
     const std::uint64_t generation = ++requestGeneration;
-    const QPointer<FriendsController> self(this);
+    const Platform::Guard<FriendsController> self(this);
     inst->discord()->sendFriendRequest(tag, [self, generation, tag](const Core::Result<void> &res) {
         if (!self || self->requestGeneration != generation)
             return;
@@ -254,9 +245,9 @@ void FriendsController::sendFriendRequest()
         } else {
             self->addFriendFeedback = res.error;
         }
-        self->rebuildTimer.start();
+        self->scheduleRebuild();
     });
-    rebuildTimer.start();
+    scheduleRebuild();
 }
 
 void FriendsController::updateAddFriendControls()
@@ -266,8 +257,13 @@ void FriendsController::updateAddFriendControls()
     if (auto *placeholder = regionRoot->GetElementById("add-friend-placeholder"))
         placeholder->SetProperty("display", addFriendInputText.empty() ? "block" : "none");
     if (auto *button = regionRoot->GetElementById("add-friend-btn"))
-        button->SetClass("disabled", addFriendPending || addFriendInputText.trimmed().empty());
+        button->SetClass("disabled", addFriendPending || Platform::trim(addFriendInputText).empty());
     requestRender();
+}
+
+void FriendsController::scheduleRebuild()
+{
+    rebuildTimer.start(std::chrono::milliseconds(0), false, [this] { rebuild(); });
 }
 
 void FriendsController::rebuild()
@@ -289,11 +285,11 @@ void FriendsController::render()
 
     if (inst && inst->relationships() && inst->presences()) {
         const auto &allRels = inst->relationships()->all();
-        for (auto it = allRels.cbegin(); it != allRels.cend(); ++it) {
-            if (!it.value().type.hasValue() || it.value().type.get() != Discord::RelationshipType::FRIEND)
+        for (const auto &[id, rel] : allRels) {
+            if (!rel.type.hasValue() || rel.type.get() != Discord::RelationshipType::FRIEND)
                 continue;
             ++allCount;
-            auto badge = inst->presences()->badge(it.key());
+            auto badge = inst->presences()->badge(id);
             if (badge.status != Discord::StatusType::OFFLINE)
                 ++onlineCount;
         }
@@ -402,14 +398,11 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
     std::vector<FriendItem> items;
     items.reserve(allRels.size());
 
-    const std::string searchFilter = searchText.trimmed().toLower();
+    const std::string searchFilter = Platform::unicodeLower(Platform::trim(searchText));
 
-    for (auto it = allRels.cbegin(); it != allRels.cend(); ++it) {
-        const auto &rel = it.value();
+    for (const auto &[userId, rel] : allRels) {
         if (!rel.type.hasValue() || rel.type.get() != Discord::RelationshipType::FRIEND)
             continue;
-
-        Snowflake userId = it.key();
         auto badge = inst->presences()->badge(userId);
         const bool isOnline = (badge.status != Discord::StatusType::OFFLINE);
 
@@ -430,7 +423,7 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
         std::string username = user.username.valueOr();
 
         if (!searchFilter.empty()) {
-            if (!displayName.toLower().contains(searchFilter) && !username.toLower().contains(searchFilter))
+            if (Platform::unicodeLower(displayName).find(searchFilter) == std::string::npos && Platform::unicodeLower(username).find(searchFilter) == std::string::npos)
                 continue;
         }
 
@@ -473,11 +466,11 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
             }
         }
 
-        items.append({ userId, displayName, username, avatarSrc, statusClass, subtext, isOnline });
+        items.push_back({ userId, displayName, username, avatarSrc, statusClass, subtext, isOnline });
     }
 
     std::sort(items.begin(), items.end(), [](const FriendItem &a, const FriendItem &b) {
-        return a.displayName.compare(b.displayName, Qt::CaseInsensitive) < 0;
+        return Platform::unicodeLower(a.displayName) < Platform::unicodeLower(b.displayName);
     });
 
     const std::string sectionTitle = (currentTab == Tab::Online)
@@ -568,11 +561,9 @@ void FriendsController::renderActiveNow(std::string &rml)
 
     if (inst && inst->relationships() && inst->presences()) {
         const auto &allRels = inst->relationships()->all();
-        for (auto it = allRels.cbegin(); it != allRels.cend(); ++it) {
-            if (!it.value().type.hasValue() || it.value().type.get() != Discord::RelationshipType::FRIEND)
+        for (const auto &[userId, rel] : allRels) {
+            if (!rel.type.hasValue() || rel.type.get() != Discord::RelationshipType::FRIEND)
                 continue;
-
-            Snowflake userId = it.key();
             auto acts = inst->presences()->activities(userId);
             auto sorted = Core::ActivityFormat::sortAndFilter(acts);
             auto profileCards = Core::ActivityFormat::profileCardActivities(sorted);
@@ -583,8 +574,8 @@ void FriendsController::renderActiveNow(std::string &rml)
             Discord::User user;
             if (userOpt)
                 user = *userOpt;
-            else if (it.value().user.hasValue())
-                user = it.value().user.get();
+            else if (rel.user.hasValue())
+                user = rel.user.get();
 
             std::string displayName = inst->users()->getDisplayName(userId);
             if (displayName.empty())
@@ -634,15 +625,15 @@ void FriendsController::renderActiveNow(std::string &rml)
                 }
 
                 const bool streaming = act.kind() == Discord::ActivityType::STREAMING;
-                const QSize artSize = streaming ? Platform::Size{320, 180} : Platform::Size{64, 64};
+                const Platform::Size artSize = streaming ? Platform::Size{320, 180} : Platform::Size{64, 64};
                 std::string artworkSrc;
                 if (act.assets.hasValue() && act.assets->largeImage.hasValue()) {
                     const std::string artwork = Discord::Cdn::activityAsset(
                         act.applicationId.valueOr(Snowflake::Invalid), *act.assets->largeImage, streaming ? 512 : 64);
-                    if (artwork.isValid())
+                    if (!artwork.empty())
                         artworkSrc = shell.imageSource(artwork, artSize);
                 }
-                cards.append({ userId, displayName, avatarSrc, statusClass, typeIcon, typeText,
+                cards.push_back({ userId, displayName, avatarSrc, statusClass, typeIcon, typeText,
                     heading, details, state, artworkSrc, streaming });
             }
         }
@@ -699,7 +690,7 @@ void FriendsController::renderActiveNow(std::string &rml)
 
 void FriendsController::renderAddFriend(std::string &rml)
 {
-    const bool canSend = !addFriendInputText.trimmed().empty() && !addFriendPending;
+    const bool canSend = !Platform::trim(addFriendInputText).empty() && !addFriendPending;
     const std::string btnClass = canSend ? std::string() : " disabled";
 
     std::string feedbackHtml;

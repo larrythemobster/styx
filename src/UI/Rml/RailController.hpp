@@ -3,9 +3,8 @@
 #include "Controller.hpp"
 #include "Core/Snowflake.hpp"
 
-#include <QPointer>
-#include <QString>
-#include <QTimer>
+#include "Platform/Timer.hpp"
+#include <string>
 
 namespace Styx {
 namespace UI {
@@ -13,19 +12,17 @@ namespace Rml {
 
 class RailController final : public Controller
 {
-    Q_OBJECT
 public:
-    RailController(Shell &shell, ::Rml::Element *root, QObject *parent = nullptr);
-
-private slots:
-    void rebuild();
+    RailController(Shell &shell, ::Rml::Element *root);
 
 private:
-    void renderRail();
-    QString renderFolderGrid(Core::Snowflake accountId, Core::Snowflake folderId);
-    static QString acronym(const QString &name);
+    void rebuild();
 
-    QTimer rebuildTimer;
+    void renderRail();
+    std::string renderFolderGrid(Core::Snowflake accountId, Core::Snowflake folderId);
+    static std::string acronym(const std::string &name);
+    void scheduleRebuild();
+    Platform::Timer rebuildTimer;
 };
 
 } // namespace Rml

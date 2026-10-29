@@ -12,6 +12,7 @@
 			<div class="viewer-actions">
 				<button id="viewer-btn-browser" class="viewer-btn" title="Open in Browser">Open in Browser</button>
 				<button id="viewer-btn-copy" class="viewer-btn" title="Copy Link">Copy Link</button>
+				<button id="viewer-btn-save" class="viewer-btn" title="Save Image">Save Image</button>
 				<button id="viewer-btn-close" class="viewer-btn viewer-btn-close" title="Close (Esc)">X</button>
 			</div>
 		</div>

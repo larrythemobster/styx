@@ -136,8 +136,8 @@ QString systemMessageClass(Discord::MessageType type)
 
 } // namespace
 
-ChatController::ChatController(Shell &shell, ::Rml::Element *root, QObject *parent)
-    : Controller(shell, root, parent)
+ChatController::ChatController(Shell &shell, ::Rml::Element *root)
+    : Controller(shell, root)
 {
     initElements();
     setupEventListeners();
@@ -460,21 +460,19 @@ void ChatController::setupEventListeners()
 
 void ChatController::setupModelConnections()
 {
-    connect(&shell, &Shell::locationChanged, this, &ChatController::onLocationChanged);
-    connect(&shell, &Shell::instanceChanged, this, &ChatController::onInstanceChanged);
-    connect(&shell, &Shell::memberListVisibleChanged, this, [this](bool) { updateHeader(); });
+    track(shell.locationChanged.connect([this](const Location &location) { onLocationChanged(location); }));
+    track(shell.instanceChanged.connect([this](Core::ClientInstance *instance) { onInstanceChanged(instance); }));
+    track(shell.memberListVisibleChanged.connect([this](bool) { updateHeader(); }));
 
-    if (auto *chatModel = shell.chat()) {
-        connect(chatModel, &QAbstractItemModel::rowsInserted, this, &ChatController::onRowsInserted);
-        connect(chatModel, &QAbstractItemModel::rowsRemoved, this, &ChatController::onRowsRemoved);
-        connect(chatModel, &QAbstractItemModel::dataChanged, this, &ChatController::onDataChanged);
-        connect(chatModel, &QAbstractItemModel::modelReset, this, &ChatController::onModelReset);
-        connect(chatModel, &ChatModel::atLatestChanged, this, &ChatController::onAtLatestChanged);
+    if (auto *model = shell.chat()) {
+        track(model->rowsInserted.connect([this](int first, int last) { onRowsInserted(first, last); }));
+        track(model->rowsRemoved.connect([this](int first, int last) { onRowsRemoved(first, last); }));
+        track(model->rowsChanged.connect([this](int first, int last) { onDataChanged(first, last); }));
+        track(model->modelReset.connect([this] { onModelReset(); }));
+        track(model->atLatestChanged.connect([this](bool atLatest) { onAtLatestChanged(atLatest); }));
     }
-
-    if (auto *typingTracker = shell.typing()) {
-        connect(typingTracker, &Core::TypingTracker::typersChanged, this, &ChatController::onTypersChanged);
-    }
+    if (auto *typingTracker = shell.typing())
+        track(typingTracker->typersChanged.connect([this] { onTypersChanged(); }));
 }
 
 void ChatController::onLocationChanged(const Location &location)
@@ -499,17 +497,17 @@ void ChatController::onLocationChanged(const Location &location)
 
 void ChatController::onInstanceChanged(Core::ClientInstance *instance)
 {
-    for (const auto &connection : std::as_const(instanceConnections))
-        disconnect(connection);
+    for (auto &connection : instanceConnections)
+        connection.disconnect();
     instanceConnections.clear();
     if (instance) {
-        instanceConnections.append(connect(instance->presences(), &Core::PresenceManager::presencesChanged,
-            this, [this](const QList<Core::Snowflake> &users) {
-                if (users.contains(headerRecipientId))
+        instanceConnections.push_back(instance->presences()->presencesChanged.connect(
+            [this](const std::vector<Core::Snowflake> &users) {
+                if (std::find(users.begin(), users.end(), headerRecipientId) != users.end())
                     updateHeader();
             }));
-        instanceConnections.append(connect(instance, &Core::ClientInstance::channelUpdated,
-            this, [this](const Discord::ChannelUpdate &channel) {
+        instanceConnections.push_back(instance->channelUpdated.connect(
+            [this](const Discord::ChannelUpdate &channel) {
                 if (channel.channel->id == currentChannelId) {
                     updateHeader();
                     updateComposer();
@@ -523,7 +521,7 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
     renderAllMessages();
 }
 
-void ChatController::onRowsInserted(const QModelIndex &, int first, int last)
+void ChatController::onRowsInserted(int first, int last)
 {
     if (!messagesEl || !shell.document())
         return;
@@ -543,7 +541,7 @@ void ChatController::onRowsInserted(const QModelIndex &, int first, int last)
         for (int r = first; r <= last; ++r) {
             auto el = shell.document()->CreateElement("div");
             if (el) {
-                el->SetInnerRML(buildMessageHtml(r).toStdString());
+                el->SetInnerRML(buildMessageHtml(r));
                 if (refChild)
                     messagesEl->InsertBefore(std::move(el), refChild);
                 else
@@ -559,7 +557,7 @@ void ChatController::onRowsInserted(const QModelIndex &, int first, int last)
         for (int r = first; r <= last; ++r) {
             auto el = shell.document()->CreateElement("div");
             if (el) {
-                el->SetInnerRML(buildMessageHtml(r).toStdString());
+                el->SetInnerRML(buildMessageHtml(r));
                 messagesEl->AppendChild(std::move(el));
             }
         }
@@ -572,7 +570,7 @@ void ChatController::onRowsInserted(const QModelIndex &, int first, int last)
     updateJumpBar();
 }
 
-void ChatController::onRowsRemoved(const QModelIndex &, int first, int last)
+void ChatController::onRowsRemoved(int first, int last)
 {
     if (!messagesEl)
         return;
@@ -585,14 +583,14 @@ void ChatController::onRowsRemoved(const QModelIndex &, int first, int last)
     updateJumpBar();
 }
 
-void ChatController::onDataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight, const QList<int> &)
+void ChatController::onDataChanged(int first, int last)
 {
     if (!messagesEl)
         return;
 
-    for (int r = topLeft.row(); r <= bottomRight.row(); ++r) {
+    for (int r = first; r <= last; ++r) {
         if (r >= 0 && r < messagesEl->GetNumChildren()) {
-            messagesEl->GetChild(r)->SetInnerRML(buildMessageHtml(r).toStdString());
+            messagesEl->GetChild(r)->SetInnerRML(buildMessageHtml(r));
         }
     }
     requestRender();
@@ -626,13 +624,12 @@ void ChatController::renderAllMessages()
         return;
     }
 
-    QString allRml;
+    std::string allRml;
     int count = model->rowCount();
-    for (int r = 0; r < count; ++r) {
-        allRml += QStringLiteral("<div>") + buildMessageHtml(r) + QStringLiteral("</div>");
-    }
+    for (int r = 0; r < count; ++r)
+        allRml += "<div>" + buildMessageHtml(r) + "</div>";
 
-    messagesEl->SetInnerRML(allRml.toStdString());
+    messagesEl->SetInnerRML(allRml);
     requestRender();
 
     if (wasAtBottom)

@@ -241,9 +241,9 @@ Platform::Rect EmojiGridModel::cellRect(const Cell &cell) const
     if (!cell.isValid() || cell.section >= geometry.size())
         return {};
     const SectionGeometry &sectionGeometry = geometry.at(cell.section);
-    return Platform::Rect{SidePadding + (cell.index % Columns) * CellPx,
-                 sectionGeometry.cellsTop() + (cell.index / Columns) * CellPx - currentScrollY,
-                 CellPx, CellPx};
+    return Platform::Rect{static_cast<float>(SidePadding + (cell.index % Columns) * CellPx),
+                 static_cast<float>(sectionGeometry.cellsTop() + (cell.index / Columns) * CellPx - currentScrollY),
+                 static_cast<float>(CellPx), static_cast<float>(CellPx)};
 }
 
 int EmojiGridModel::stickyHeaderY(int section) const

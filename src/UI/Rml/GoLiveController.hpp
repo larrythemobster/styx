@@ -4,9 +4,9 @@
 #include "Core/Stream/ScreenCapture.hpp"
 #include "Core/Stream/StreamQuality.hpp"
 
-#include <QList>
-#include <QSet>
-#include <QString>
+#include <string>
+#include <unordered_set>
+#include <vector>
 #include <atomic>
 #include <cstdint>
 #include <condition_variable>
@@ -24,9 +24,8 @@ namespace Rml {
 
 class GoLiveController final : public Controller
 {
-    Q_OBJECT
 public:
-    explicit GoLiveController(Shell &shell, QObject *parent = nullptr);
+    explicit GoLiveController(Shell &shell);
     ~GoLiveController() override;
 
     void open(bool screensTab = false);
@@ -59,21 +58,21 @@ private:
     bool visible = false;
     Tab currentTab = Tab::Applications;
 
-    QList<Core::Stream::CaptureSource> screenSources;
-    QList<Core::Stream::CaptureSource> appSources;
+    std::vector<Core::Stream::CaptureSource> screenSources;
+    std::vector<Core::Stream::CaptureSource> appSources;
     int selectedSourceIndex = -1;
 
-    QString selectedQualityId;
+    std::string selectedQualityId;
     bool audioEnabled = true;
     bool audioSupported = true;
 
-    QSet<QString> registeredFrames;
+    std::unordered_set<std::string> registeredFrames;
 
     std::atomic<bool> thumbnailRunning{false};
     std::thread thumbnailThread;
     std::mutex thumbnailMutex;
     std::condition_variable thumbnailCv;
-    QList<Core::Stream::CaptureSource> thumbnailSources;
+    std::vector<Core::Stream::CaptureSource> thumbnailSources;
     std::uint64_t thumbnailGeneration = 0;
 };
 

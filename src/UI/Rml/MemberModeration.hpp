@@ -1,8 +1,7 @@
 #pragma once
 
-#include <QDateTime>
-#include <QList>
-#include <QString>
+#include "Platform/Native.hpp"
+#include <string>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -23,11 +22,11 @@ struct MemberModerationTarget
 {
     Core::Snowflake guildId;
     Core::Snowflake userId;
-    QString username;
-    QList<Core::Snowflake> roleIds;
+    std::string username;
+    std::vector<Core::Snowflake> roleIds;
     bool bot = false;
-    QDateTime timeoutUntil;
-    [[nodiscard]] bool isTimedOut() const { return timeoutUntil.isValid() && timeoutUntil > QDateTime::currentDateTimeUtc(); }
+    Platform::DateTime timeoutUntil;
+    [[nodiscard]] bool isTimedOut() const { return timeoutUntil.valid() && timeoutUntil > Platform::DateTime::now(); }
 };
 
 namespace MemberModeration {
@@ -50,7 +49,7 @@ private:
 [[nodiscard]] bool canTimeout(Core::ClientInstance *instance, const MemberModerationTarget &target);
 [[nodiscard]] bool canChangeNickname(Core::ClientInstance *instance, const MemberModerationTarget &target);
 [[nodiscard]] bool canEditRoles(Core::ClientInstance *instance, const MemberModerationTarget &target);
-[[nodiscard]] QString timeoutRemaining(const QDateTime &until);
+[[nodiscard]] std::string timeoutRemaining(const Platform::DateTime &until);
 
 void kick(Shell &shell, Core::ClientInstance *instance, const MemberModerationTarget &target);
 void ban(Shell &shell, Core::ClientInstance *instance, const MemberModerationTarget &target);

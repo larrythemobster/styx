@@ -1,31 +1,26 @@
 #pragma once
 
-#include <QByteArray>
-#include <QString>
+#include <cstdint>
+#include <string>
+#include <string_view>
 
-class QImage;
+#include "Platform/Image.hpp"
 
-namespace Styx {
-namespace UI {
-namespace ImageUpload {
+namespace Styx::UI::ImageUpload {
 
 struct PreparedImage
 {
-    QString dataUri;
-    QByteArray originalMd5;
-    QString error;
+    std::string dataUri;
+    std::string originalMd5;
+    std::string error;
     bool animated = false;
 };
 
-QString fileFilter();
+std::string fileFilter();
+PreparedImage prepareCropped(const std::string &path, int maxWidth, int maxHeight);
+PreparedImage prepareRaw(const std::string &path, int64_t maxBytes);
+std::string dataUri(std::string_view bytes, std::string_view mimeType);
+std::string md5Hex(std::string_view bytes);
+std::string encodePng(const Platform::ImageBuffer &image);
 
-PreparedImage prepareCropped(const QString &path, int maxWidth, int maxHeight);
-PreparedImage prepareRaw(const QString &path, qint64 maxBytes);
-
-QString dataUri(const QByteArray &bytes, const QString &mimeType);
-QByteArray md5Hex(const QByteArray &bytes);
-QByteArray encodePng(const QImage &image);
-
-} // namespace ImageUpload
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI::ImageUpload

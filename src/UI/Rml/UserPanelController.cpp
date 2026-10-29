@@ -31,17 +31,14 @@ namespace Rml {
 
 using Core::Snowflake;
 
-UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root, QObject *parent)
-    : Controller(shell, root, parent)
+UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root)
+    : Controller(shell, root)
 {
     if (auto *doc = shell.document()) {
         voicePanel = doc->GetElementById("voice-panel");
         userPanel = doc->GetElementById("user-panel");
     }
 
-    rebuildTimer.setSingleShot(true);
-    rebuildTimer.setInterval(0);
-    connect(&rebuildTimer, &QTimer::timeout, this, &UserPanelController::rebuild);
 
     if (userPanel) {
         listen("click", [this](::Rml::Event &event) {
@@ -81,26 +78,14 @@ UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root, QOb
         }, voicePanel);
     }
 
-    connect(&shell, &Shell::instanceChanged, this, [this](Core::ClientInstance *inst) {
+    track(shell.instanceChanged.connect([this](Core::ClientInstance *inst) {
         connectInstanceVoice(inst);
-        rebuildTimer.start();
-    });
-
-    connect(&shell, &Shell::locationChanged, this, [this]() {
-        rebuildTimer.start();
-    });
-
-    connect(&shell, &Shell::accountReady, this, [this]() {
-        rebuildTimer.start();
-    });
-
-    connect(&shell, &Shell::selfMuteChanged, this, [this]() {
-        rebuildTimer.start();
-    });
-
-    connect(&shell, &Shell::selfDeafChanged, this, [this]() {
-        rebuildTimer.start();
-    });
+        scheduleRebuild();
+    }));
+    track(shell.locationChanged.connect([this](const Location &) { scheduleRebuild(); }));
+    track(shell.accountReady.connect([this](Snowflake) { scheduleRebuild(); }));
+    track(shell.selfMuteChanged.connect([this](bool) { scheduleRebuild(); }));
+    track(shell.selfDeafChanged.connect([this](bool) { scheduleRebuild(); }));
 
     connectInstanceVoice(shell.currentInstance());
     rebuild();
@@ -108,32 +93,38 @@ UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root, QOb
 
 void UserPanelController::connectInstanceVoice(Core::ClientInstance *instance)
 {
-    if (lastInstance == instance)
+    if (lastInstance.get() == instance)
         return;
+    instanceConnections.clear();
     lastInstance = instance;
     if (!instance)
         return;
 
-    connect(instance, &Core::ClientInstance::detailsUpdated, this, [this]() { rebuildTimer.start(); });
-    connect(instance, &Core::ClientInstance::voiceStateChanged, this, [this]() { rebuildTimer.start(); });
+    instanceConnections.push_back(instance->detailsUpdated.connect([this](const Core::AccountInfo &) { scheduleRebuild(); }));
+    instanceConnections.push_back(instance->voiceStateChanged.connect([this](Snowflake, Snowflake) { scheduleRebuild(); }));
 
     if (auto *pres = instance->presences()) {
-        connect(pres, &Core::PresenceManager::presencesChanged, this, [this]() { rebuildTimer.start(); });
+        instanceConnections.push_back(pres->presencesChanged.connect([this](std::vector<Snowflake>) { scheduleRebuild(); }));
     }
 
 #ifndef STYX_NO_VOICE
     if (auto *vm = instance->voice()) {
-        connect(vm, &Core::Audio::VoiceManager::voiceConnected, this, [this]() { rebuildTimer.start(); });
-        connect(vm, &Core::Audio::VoiceManager::voiceDisconnected, this, [this]() { rebuildTimer.start(); });
-        connect(vm, &Core::Audio::VoiceManager::voiceStateChanged, this, [this]() { rebuildTimer.start(); });
+        instanceConnections.push_back(vm->voiceConnected.connect([this]() { scheduleRebuild(); }));
+        instanceConnections.push_back(vm->voiceDisconnected.connect([this]() { scheduleRebuild(); }));
+        instanceConnections.push_back(vm->voiceStateChanged.connect([this]() { scheduleRebuild(); }));
     }
 #endif
 
 #ifdef STYX_HAVE_SCREENSHARE
     if (auto *sm = instance->streams()) {
-        connect(sm, &Core::Stream::StreamManager::streamingChanged, this, [this]() { rebuildTimer.start(); });
+        instanceConnections.push_back(sm->streamingChanged.connect([this](bool) { scheduleRebuild(); }));
     }
 #endif
+}
+
+void UserPanelController::scheduleRebuild()
+{
+    rebuildTimer.start(std::chrono::milliseconds(0), false, [this]() { rebuild(); });
 }
 
 void UserPanelController::rebuild()
@@ -194,8 +185,8 @@ void UserPanelController::renderVoicePanel()
             if (gOpt.has_value()) {
                 guildName = gOpt->name;
             } else if (auto *tree = shell.channelTree()) {
-                const QModelIndex sIdx = tree->serverIndex(inst->accountId(), currentGuildId);
-                guildName = sIdx.data(Qt::DisplayRole).toString();
+                if (auto *node = tree->serverNode(inst->accountId(), currentGuildId))
+                    guildName = node->name;
             }
         }
     }

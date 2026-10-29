@@ -18,6 +18,7 @@
 #include "Platform/Utf8.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <format>
 #include <unordered_map>
 

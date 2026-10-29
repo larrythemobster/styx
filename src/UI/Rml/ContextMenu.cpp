@@ -1,5 +1,6 @@
 #include "ContextMenu.hpp"
 #include "RmlView.hpp"
+#include "Platform/Native.hpp"
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
@@ -12,7 +13,7 @@ namespace Styx::UI::Rml {
 
 ContextMenu::ContextMenu(View &view) : view(view)
 {
-    connect(&view, &View::documentLoaded, this, [this] { hide(); });
+    track(view.documentLoaded.connect([this](auto *) { hide(); }));
 }
 
 ContextMenu::~ContextMenu()
@@ -29,7 +30,7 @@ bool ContextMenu::isVisible() const
     return document && document->IsVisible();
 }
 
-void ContextMenu::show(std::vector<MenuItem> entries, const QPoint &position)
+void ContextMenu::show(std::vector<MenuItem> entries, Platform::Point position)
 {
     if (!view.context())
         return;
@@ -78,36 +79,35 @@ bool ContextMenu::selectable(int index) const
 void ContextMenu::render()
 {
     auto *panel = document->GetElementById("context-menu-panel");
-    QString markup;
+    std::string markup;
     if (!path.empty())
-        markup += QStringLiteral("<button id='context-menu-back'>&lt; %1</button>").arg(tr("Back").toHtmlEscaped());
+        markup += "<button id='context-menu-back'>&lt; Back</button>";
     const auto &entries = currentItems();
     for (int i = 0; i < int(entries.size()); ++i) {
         const auto &item = entries[i];
         if (item.separator) {
-            markup += QStringLiteral("<div class='menu-separator'></div>");
+            markup += "<div class='menu-separator'></div>";
             continue;
         }
         const bool actionable = bool(item.action) || !item.children.empty();
-        markup += QStringLiteral("<%1 id='menu-item-%2' data-menu-index='%2' class='menu-item%3%4%5' %6>")
-                          .arg(actionable ? QStringLiteral("button") : QStringLiteral("div"))
-                          .arg(i)
-                          .arg(item.danger ? QStringLiteral(" danger") : QString())
-                          .arg(actionable ? QString() : QStringLiteral(" menu-label"))
-                          .arg(item.enabled ? QString() : QStringLiteral(" disabled"))
-                          .arg(item.enabled && actionable ? QString() : QStringLiteral("disabled='disabled'"));
-        if (!item.imageSource.isEmpty())
-            markup += QStringLiteral("<img class='menu-avatar' src='%1'/>").arg(item.imageSource.toHtmlEscaped());
-        markup += QStringLiteral("<div class='menu-text'%1>%2")
-                          .arg(item.color.isEmpty() ? QString() : QStringLiteral(" style='color:%1;'").arg(item.color.toHtmlEscaped()), item.label.toHtmlEscaped());
-        if (!item.subtitle.isEmpty())
-            markup += QStringLiteral("<div class='menu-subtitle'>%1</div>").arg(item.subtitle.toHtmlEscaped());
-        markup += QStringLiteral("</div>");
-        if (!item.children.empty())
-            markup += QStringLiteral("<span class='menu-arrow'>&gt;</span>");
-        markup += actionable ? QStringLiteral("</button>") : QStringLiteral("</div>");
+        const auto tag = actionable ? "button" : "div";
+        const auto index = std::to_string(i);
+        markup += std::string("<") + tag + " id='menu-item-" + index + "' data-menu-index='" + index +
+                  "' class='menu-item" + (item.danger ? " danger" : "") +
+                  (actionable ? "" : " menu-label") + (item.enabled ? "" : " disabled") + "' " +
+                  (item.enabled && actionable ? "" : "disabled='disabled'") + ">";
+        if (!item.imageSource.empty())
+            markup += "<img class='menu-avatar' src='" + Platform::htmlEscape(item.imageSource) + "'/>";
+        markup += "<div class='menu-text'";
+        if (!item.color.empty()) markup += " style='color:" + Platform::htmlEscape(item.color) + ";'";
+        markup += ">" + Platform::htmlEscape(item.label);
+        if (!item.subtitle.empty())
+            markup += "<div class='menu-subtitle'>" + Platform::htmlEscape(item.subtitle) + "</div>";
+        markup += "</div>";
+        if (!item.children.empty()) markup += "<span class='menu-arrow'>&gt;</span>";
+        markup += std::string("</") + tag + ">";
     }
-    panel->SetInnerRML(markup.toStdString());
+    panel->SetInnerRML(markup);
     const float dpr = float(view.devicePixelRatioF());
     panel->SetProperty("left", "0px");
     panel->SetProperty("top", "0px");
@@ -116,8 +116,8 @@ void ContextMenu::render()
     const auto height = panel->GetOffsetHeight();
     const auto dimensions = view.context()->GetDimensions();
     const float margin = 4 * dpr;
-    const float x = std::clamp(float(anchor.x()) * dpr, margin, std::max(margin, dimensions.x - size - margin));
-    const float y = std::clamp(float(anchor.y()) * dpr, margin, std::max(margin, dimensions.y - height - margin));
+    const float x = std::clamp(anchor.x * dpr, margin, std::max(margin, dimensions.x - size - margin));
+    const float y = std::clamp(anchor.y * dpr, margin, std::max(margin, dimensions.y - height - margin));
     panel->SetProperty("left", std::to_string(x) + "px");
     panel->SetProperty("top", std::to_string(y) + "px");
     view.requestRender();

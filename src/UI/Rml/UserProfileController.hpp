@@ -4,9 +4,9 @@
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
 
-#include <QPointer>
-#include <QTimer>
-#include <QUrl>
+#include "Platform/Native.hpp"
+#include "Platform/Timer.hpp"
+#include <string>
 #include <optional>
 
 namespace Rml {
@@ -23,12 +23,11 @@ namespace Rml {
 
 class UserProfileController final : public Controller
 {
-    Q_OBJECT
 public:
-    explicit UserProfileController(Shell &shell, QObject *parent = nullptr);
+    explicit UserProfileController(Shell &shell);
     ~UserProfileController() override;
 
-    void showProfile(Core::Snowflake userId, Core::Snowflake guildId, const QRectF &anchorRect = QRectF());
+    void showProfile(Core::Snowflake userId, Core::Snowflake guildId, const Platform::Rect &anchorRect = {});
     void hide();
     [[nodiscard]] bool isOpen() const { return visible; }
 
@@ -38,15 +37,15 @@ private:
     void renderPresenceAndActivities();
     void renderRoles();
     void renderDates();
-    void positionCard(const QRectF &anchorRect);
+    void positionCard(const Platform::Rect &anchorRect);
     void saveNoteIfDirty();
 
     [[nodiscard]] Core::ClientInstance *clientInstance() const;
     [[nodiscard]] std::optional<Discord::User> cachedUser() const;
     [[nodiscard]] std::optional<Discord::Member> cachedMember() const;
-    [[nodiscard]] QString resolvedDisplayName() const;
-    [[nodiscard]] QString tagHandle() const;
-    [[nodiscard]] QUrl resolvedAvatarUrl(int size) const;
+    [[nodiscard]] std::string resolvedDisplayName() const;
+    [[nodiscard]] std::string tagHandle() const;
+    [[nodiscard]] std::string resolvedAvatarUrl(int size) const;
     [[nodiscard]] int resolvedAccentColor() const;
     [[nodiscard]] bool isBot() const;
 
@@ -57,9 +56,10 @@ private:
     bool hasProfile = false;
     bool visible = false;
     bool noteDirty = false;
-    QString initialNote;
+    std::string initialNote;
+    std::uint64_t requestGeneration = 0;
 
-    QTimer activityTimer;
+    Platform::Timer activityTimer;
 };
 
 } // namespace Rml

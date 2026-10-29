@@ -2,13 +2,13 @@
 
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
-
 #include "Core/Audio/VoiceManager.hpp"
 #include "Core/ClientInstance.hpp"
-#include "Core/Presence/PresenceBadge.hpp"
-#include "Core/Presence/PresenceManager.hpp"
 #include "Core/Presence/ActivityFormat.hpp"
+#include "Core/Presence/PresenceManager.hpp"
 #include "Discord/CdnUrls.hpp"
+#include "Platform/Native.hpp"
+#include "Platform/Settings.hpp"
 #include "UI/ChannelList/ChannelFilterProxyModel.hpp"
 #include "UI/ChannelList/ChannelNode.hpp"
 #include "UI/ChannelList/ChannelTreeModel.hpp"
@@ -18,627 +18,312 @@
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Event.h>
 
-#include <QSettings>
+#include <charconv>
+#include <chrono>
+#include <string_view>
 
-namespace Styx {
-namespace UI {
-namespace Rml {
+namespace Styx::UI::Rml {
 
 using Core::Snowflake;
 
-ChannelListController::ChannelListController(Shell &shell, ::Rml::Element *root, QObject *parent)
-    : Controller(shell, root, parent)
+namespace {
+Snowflake snowflake(const std::string &text)
+{
+    std::uint64_t value = 0;
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+    return result.ec == std::errc{} && result.ptr == text.data() + text.size() ? Snowflake(value) : Snowflake::Invalid;
+}
+
+std::string categoryKey(Snowflake account, Snowflake category)
+{
+    return "category_collapsed/" + account.toString() + "/" + category.toString();
+}
+
+std::string trimmed(std::string_view text)
+{
+    const auto start = text.find_first_not_of(" \t\r\n\f\v");
+    if (start == std::string_view::npos) return {};
+    return std::string(text.substr(start, text.find_last_not_of(" \t\r\n\f\v") - start + 1));
+}
+
+void appendMention(std::string &rml, int mentions)
+{
+    if (mentions > 0)
+        rml += "<div class=\"channel-mention-badge\">" + (mentions > 99 ? std::string("99+") : std::to_string(mentions)) + "</div>";
+}
+}
+
+ChannelListController::ChannelListController(Shell &shell, ::Rml::Element *root)
+    : Controller(shell, root)
 {
     if (auto *doc = shell.document()) {
         sidebarHeader = doc->GetElementById("sidebar-header");
         channelList = doc->GetElementById("channel-list");
     }
-
-    rebuildTimer.setSingleShot(true);
-    rebuildTimer.setInterval(0);
-    connect(&rebuildTimer, &QTimer::timeout, this, &ChannelListController::rebuild);
-
     if (sidebarHeader) {
         listen("click", [this](::Rml::Event &event) {
-            auto *target = event.GetTargetElement();
-            if (auto *act = closest(target, "data-action")) {
-                QString a = attribute(act, "data-action");
-                if (a == QLatin1String("clear-dm-search")) {
+            if (auto *act = closest(event.GetTargetElement(), "data-action")) {
+                if (attribute(act, "data-action") == "clear-dm-search") {
                     dmFilterText.clear();
-                    if (auto *inp = dynamic_cast<::Rml::ElementFormControlInput *>(sidebarHeader->GetElementById("sidebar-search-input"))) {
-                        inp->SetValue("");
-                    }
-                    rebuildTimer.start();
+                    if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(sidebarHeader->GetElementById("sidebar-search-input")))
+                        input->SetValue("");
+                    scheduleRebuild();
                     return;
                 }
             }
-            if (!this->shell.location().isHome()) {
+            if (!this->shell.location().isHome())
                 this->shell.showContextMenuForGuild(this->shell.location().accountId, this->shell.location().guildId);
-            }
         }, sidebarHeader);
-
-        listen("change", [this](::Rml::Event &event) {
-            auto *target = event.GetTargetElement();
-            if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target)) {
-                if (input->GetId() == "sidebar-search-input") {
-                    QString val = QString::fromStdString(input->GetValue());
-                    if (val != dmFilterText) {
-                        dmFilterText = val;
-                        rebuildTimer.start();
-                    }
+        auto search = [this](::Rml::Event &event) {
+            if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(event.GetTargetElement())) {
+                if (input->GetId() == "sidebar-search-input" && input->GetValue() != dmFilterText) {
+                    dmFilterText = input->GetValue();
+                    scheduleRebuild();
                 }
             }
-        }, sidebarHeader);
-
-        listen("keyup", [this](::Rml::Event &event) {
-            auto *target = event.GetTargetElement();
-            if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target)) {
-                if (input->GetId() == "sidebar-search-input") {
-                    QString val = QString::fromStdString(input->GetValue());
-                    if (val != dmFilterText) {
-                        dmFilterText = val;
-                        rebuildTimer.start();
-                    }
-                }
-            }
-        }, sidebarHeader, true);
+        };
+        listen("change", search, sidebarHeader);
+        listen("keyup", search, sidebarHeader, true);
     }
-
     if (channelList) {
         listen("click", [this](::Rml::Event &event) {
             auto *target = event.GetTargetElement();
             if (auto *act = closest(target, "data-action")) {
-                QString a = attribute(act, "data-action");
-                if (a == QLatin1String("friends")) {
+                if (attribute(act, "data-action") == "friends") {
                     this->shell.openFriends(this->shell.location().accountId);
                     return;
                 }
             }
-
             if (auto *cat = closest(target, "data-category-id")) {
-                Snowflake catId(attribute(cat, "data-category-id").toULongLong());
+                auto id = snowflake(attribute(cat, "data-category-id"));
                 if (auto *tree = this->shell.channelTree()) {
-                    if (auto *catNode = tree->findChannelTreeNode(catId, this->shell.location().accountId)) {
-                        const bool newCollapsed = !catNode->collapsed;
-                        const QModelIndex srcIdx = tree->indexForNode(catNode);
-                        tree->setCollapsed(srcIdx, newCollapsed);
-
-                        QSettings settings;
-                        const QString key = QStringLiteral("category_collapsed/%1/%2")
-                                                .arg(this->shell.location().accountId.toString())
-                                                .arg(catId.toString());
-                        settings.setValue(key, newCollapsed);
+                    if (auto *node = tree->findChannelTreeNode(id, this->shell.location().accountId)) {
+                        bool collapsed = !node->collapsed;
+                        tree->setCollapsed(node, collapsed);
+                        Platform::Settings::instance().setBool(categoryKey(this->shell.location().accountId, id), collapsed);
                     }
                 }
-                rebuildTimer.start();
+                scheduleRebuild();
                 return;
             }
-
             if (auto *chan = closest(target, "data-channel-id")) {
-                Snowflake chId(attribute(chan, "data-channel-id").toULongLong());
-                QString type = attribute(chan, "data-type");
-                if (type == QLatin1String("voice")) {
-                    this->shell.joinVoice(this->shell.location().accountId, this->shell.location().guildId, chId);
-                    this->shell.openChannel(this->shell.location().accountId, this->shell.location().guildId, chId);
-                } else {
-                    this->shell.openChannel(this->shell.location().accountId, this->shell.location().guildId, chId);
-                }
+                auto id = snowflake(attribute(chan, "data-channel-id"));
+                if (attribute(chan, "data-type") == "voice")
+                    this->shell.joinVoice(this->shell.location().accountId, this->shell.location().guildId, id);
+                this->shell.openChannel(this->shell.location().accountId, this->shell.location().guildId, id);
                 return;
             }
-
             if (auto *dm = closest(target, "data-dm-id")) {
-                Snowflake chId(attribute(dm, "data-dm-id").toULongLong());
-                this->shell.openChannel(this->shell.location().accountId, Snowflake::Invalid, chId);
+                this->shell.openChannel(this->shell.location().accountId, Snowflake::Invalid, snowflake(attribute(dm, "data-dm-id")));
                 return;
             }
-
-            if (auto *user = closest(target, "data-user-id")) {
-                Snowflake uId(attribute(user, "data-user-id").toULongLong());
-                this->shell.showUserProfile(uId, this->shell.location().guildId);
-                return;
-            }
+            if (auto *user = closest(target, "data-user-id"))
+                this->shell.showUserProfile(snowflake(attribute(user, "data-user-id")), this->shell.location().guildId);
         }, channelList);
-
         listen("mousedown", [this](::Rml::Event &event) {
-            if (event.GetParameter<int>("button", 0) != 1) // Right click
-                return;
-
+            if (event.GetParameter<int>("button", 0) != 1) return;
             auto *target = event.GetTargetElement();
-            if (auto *chan = closest(target, "data-channel-id")) {
-                Snowflake chId(attribute(chan, "data-channel-id").toULongLong());
-                this->shell.showContextMenuForChannel(this->shell.location().accountId, this->shell.location().guildId, chId);
-                return;
-            }
-
-            if (auto *dm = closest(target, "data-dm-id")) {
-                Snowflake chId(attribute(dm, "data-dm-id").toULongLong());
-                this->shell.showContextMenuForChannel(this->shell.location().accountId, Snowflake::Invalid, chId);
-                return;
-            }
-
-            if (auto *user = closest(target, "data-user-id")) {
-                Snowflake uId(attribute(user, "data-user-id").toULongLong());
-                this->shell.showContextMenuForUser(uId, this->shell.location().guildId);
-                return;
-            }
+            if (auto *chan = closest(target, "data-channel-id"))
+                this->shell.showContextMenuForChannel(this->shell.location().accountId, this->shell.location().guildId, snowflake(attribute(chan, "data-channel-id")));
+            else if (auto *dm = closest(target, "data-dm-id"))
+                this->shell.showContextMenuForChannel(this->shell.location().accountId, Snowflake::Invalid, snowflake(attribute(dm, "data-dm-id")));
+            else if (auto *user = closest(target, "data-user-id"))
+                this->shell.showContextMenuForUser(snowflake(attribute(user, "data-user-id")), this->shell.location().guildId);
         }, channelList);
     }
-
-    connect(&shell, &Shell::locationChanged, this, [this](const Location &loc) {
+    track(shell.locationChanged.connect([this](const Location &loc) {
         if (auto *filter = this->shell.channelFilter()) {
             filter->setSelectedChannel(loc.channelId, loc.accountId);
             filter->invalidateFilter();
         }
-        rebuildTimer.start();
-    });
-
-    connect(&shell, &Shell::instanceChanged, this, [this](Core::ClientInstance *inst) {
-        connectInstanceVoice(inst);
-        rebuildTimer.start();
-    });
-
-    connect(&shell, &Shell::accountReady, this, [this]() {
-        rebuildTimer.start();
-    });
-
+        scheduleRebuild();
+    }));
+    track(shell.instanceChanged.connect([this](Core::ClientInstance *instance) {
+        connectInstanceVoice(instance);
+        scheduleRebuild();
+    }));
+    track(shell.accountReady.connect([this](auto) { scheduleRebuild(); }));
     if (auto *tree = shell.channelTree()) {
-        connect(tree, &QAbstractItemModel::modelReset, this, [this]() { rebuildTimer.start(); });
-        connect(tree, &QAbstractItemModel::dataChanged, this, [this]() { rebuildTimer.start(); });
-        connect(tree, &QAbstractItemModel::rowsInserted, this, [this]() { rebuildTimer.start(); });
-        connect(tree, &QAbstractItemModel::rowsRemoved, this, [this]() { rebuildTimer.start(); });
-        connect(tree, &QAbstractItemModel::layoutChanged, this, [this]() { rebuildTimer.start(); });
+        track(tree->reset.connect([this] { scheduleRebuild(); }));
+        track(tree->changed.connect([this](auto *) { scheduleRebuild(); }));
     }
-
-    if (auto *filter = shell.channelFilter()) {
-        connect(filter, &QAbstractItemModel::modelReset, this, [this]() { rebuildTimer.start(); });
-        connect(filter, &QAbstractItemModel::dataChanged, this, [this]() { rebuildTimer.start(); });
-        connect(filter, &QAbstractItemModel::rowsInserted, this, [this]() { rebuildTimer.start(); });
-        connect(filter, &QAbstractItemModel::rowsRemoved, this, [this]() { rebuildTimer.start(); });
-        connect(filter, &QAbstractItemModel::layoutChanged, this, [this]() { rebuildTimer.start(); });
-    }
-
+    if (auto *filter = shell.channelFilter())
+        track(filter->changed.connect([this] { scheduleRebuild(); }));
     connectInstanceVoice(shell.currentInstance());
     renderSidebar();
 }
 
+void ChannelListController::scheduleRebuild()
+{
+    rebuildTimer.start(std::chrono::milliseconds(0), false, [this] { renderSidebar(); });
+}
+
 void ChannelListController::connectInstanceVoice(Core::ClientInstance *instance)
 {
-    if (lastInstance == instance)
-        return;
-    if (lastInstance) {
-        disconnect(lastInstance->presences(), nullptr, this, nullptr);
-#ifndef STYX_NO_VOICE
-        if (auto *voice = lastInstance->voice())
-            disconnect(voice, nullptr, this, nullptr);
-#endif
-    }
+    if (lastInstance.get() == instance) return;
+    instanceConnections.clear();
     lastInstance = instance;
     dmFilterText.clear();
     if (sidebarHeader) {
         if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(sidebarHeader->GetElementById("sidebar-search-input")))
             input->SetValue("");
     }
-    if (!instance)
-        return;
-    connect(instance->presences(), &Core::PresenceManager::presencesChanged, this, [this] {
-        if (this->shell.location().isHome())
-            rebuildTimer.start();
-    });
-
+    if (!instance) return;
+    instanceConnections.push_back(instance->presences()->presencesChanged.connect([this](auto) {
+        if (shell.location().isHome()) scheduleRebuild();
+    }));
 #ifndef STYX_NO_VOICE
-    if (auto *vm = instance->voice()) {
-        connect(vm, &Core::Audio::VoiceManager::channelVoiceMemberChanged, this, [this]() { rebuildTimer.start(); });
-        connect(vm, &Core::Audio::VoiceManager::participantSpeakingChanged, this, [this]() { rebuildTimer.start(); });
-        connect(vm, &Core::Audio::VoiceManager::participantVoiceStateChanged, this, [this]() { rebuildTimer.start(); });
-        connect(vm, &Core::Audio::VoiceManager::participantJoined, this, [this]() { rebuildTimer.start(); });
-        connect(vm, &Core::Audio::VoiceManager::participantLeft, this, [this]() { rebuildTimer.start(); });
-        connect(vm, &Core::Audio::VoiceManager::participantUpdated, this, [this]() { rebuildTimer.start(); });
+    if (auto *voice = instance->voice()) {
+        instanceConnections.push_back(voice->channelVoiceMemberChanged.connect([this](auto, auto, auto) { scheduleRebuild(); }));
+        instanceConnections.push_back(voice->participantSpeakingChanged.connect([this](auto, auto) { scheduleRebuild(); }));
+        instanceConnections.push_back(voice->participantVoiceStateChanged.connect([this](auto, auto) { scheduleRebuild(); }));
+        instanceConnections.push_back(voice->participantJoined.connect([this](auto) { scheduleRebuild(); }));
+        instanceConnections.push_back(voice->participantLeft.connect([this](auto) { scheduleRebuild(); }));
+        instanceConnections.push_back(voice->participantUpdated.connect([this](auto) { scheduleRebuild(); }));
     }
 #endif
 }
 
-void ChannelListController::rebuild()
-{
-    renderSidebar();
-}
-
 void ChannelListController::renderSidebar()
 {
-    if (!sidebarHeader || !channelList)
-        return;
-
-    if (shell.location().isHome()) {
-        renderHomeSidebar();
-    } else {
-        renderGuildSidebar();
-    }
+    if (!sidebarHeader || !channelList) return;
+    if (shell.location().isHome()) renderHomeSidebar();
+    else renderGuildSidebar();
     requestRender(200);
 }
 
 void ChannelListController::renderHomeSidebar()
 {
-    auto *existingInput = sidebarHeader->GetElementById("sidebar-search-input");
-    if (!existingInput) {
-        const QString clearBtn = QStringLiteral(
-            "<img id=\"sidebar-search-clear\" class=\"sidebar-search-clear\" src=\"icon:x\" data-action=\"clear-dm-search\" style=\"%1\"/>")
-            .arg(dmFilterText.isEmpty() ? QStringLiteral("display: none;") : QString());
-        const QString headerRml = QStringLiteral(
-            "<div class=\"sidebar-search-box\">"
-            "<img class=\"search-icon\" src=\"icon:search\"/>"
-            "<input type=\"text\" id=\"sidebar-search-input\" class=\"sidebar-search-input\" value=\"%1\"/>"
-            "<span id=\"sidebar-search-placeholder\" class=\"sidebar-search-placeholder\" style=\"%2\">Find or start a conversation</span>"
-            "%3"
-            "</div>")
-            .arg(Rml::escape(dmFilterText),
-                 dmFilterText.isEmpty() ? QString() : QStringLiteral("display: none;"),
-                 clearBtn);
-        sidebarHeader->SetInnerRML(headerRml.toUtf8().constData());
-    } else {
-        if (auto *placeholder = sidebarHeader->GetElementById("sidebar-search-placeholder")) {
-            placeholder->SetProperty("display", dmFilterText.isEmpty() ? "inline" : "none");
-        }
+    if (!sidebarHeader->GetElementById("sidebar-search-input")) {
+        std::string header = "<div class=\"sidebar-search-box\"><img class=\"search-icon\" src=\"icon:search\"/><input type=\"text\" id=\"sidebar-search-input\" class=\"sidebar-search-input\" value=\"" + escape(dmFilterText) + "\"/><span id=\"sidebar-search-placeholder\" class=\"sidebar-search-placeholder\" style=\"" + (dmFilterText.empty() ? "" : "display: none;") + "\">Find or start a conversation</span><img id=\"sidebar-search-clear\" class=\"sidebar-search-clear\" src=\"icon:x\" data-action=\"clear-dm-search\" style=\"" + (dmFilterText.empty() ? "display: none;" : "") + "\"/></div>";
+        sidebarHeader->SetInnerRML(header);
+    } else if (auto *placeholder = sidebarHeader->GetElementById("sidebar-search-placeholder")) {
+        placeholder->SetProperty("display", dmFilterText.empty() ? "inline" : "none");
     }
     if (auto *clear = sidebarHeader->GetElementById("sidebar-search-clear"))
-        clear->SetProperty("display", dmFilterText.isEmpty() ? "none" : "block");
-    QString rml;
-    const bool friendsSelected = shell.isFriendsOpen();
-    QString friendsRowClass = QStringLiteral("channel-row dm-friends-row");
-    if (friendsSelected)
-        friendsRowClass += QStringLiteral(" selected");
-
-    rml += QStringLiteral(
-        "<div class=\"%1\" data-action=\"friends\">"
-        "<img class=\"channel-icon\" src=\"icon:user-plus\"/>"
-        "<span class=\"channel-name\">Friends</span>"
-        "</div>").arg(friendsRowClass);
-
-    rml += QStringLiteral("<div class=\"section-header\">Direct Messages</div>");
-
+        clear->SetProperty("display", dmFilterText.empty() ? "none" : "block");
+    bool friendsSelected = shell.isFriendsOpen();
+    std::string rml = "<div class=\"channel-row dm-friends-row" + std::string(friendsSelected ? " selected" : "") + "\" data-action=\"friends\"><img class=\"channel-icon\" src=\"icon:user-plus\"/><span class=\"channel-name\">Friends</span></div><div class=\"section-header\">Direct Messages</div>";
     auto *tree = shell.channelTree();
     auto *filter = shell.channelFilter();
     if (tree && filter) {
-        const QModelIndex srcDmHeader = tree->dmHeaderIndex(shell.location().accountId);
-        const QModelIndex proxyDmHeader = filter->mapFromSource(srcDmHeader);
-        if (proxyDmHeader.isValid()) {
-            const int dmCount = filter->rowCount(proxyDmHeader);
-            for (int i = 0; i < dmCount; ++i) {
-                const QModelIndex dmIdx = filter->index(i, 0, proxyDmHeader);
-                ChannelNode *node = tree->nodeFromIndex(filter->mapToSource(dmIdx));
-                if (!node)
-                    continue;
-
-                if (!dmFilterText.trimmed().isEmpty()) {
-                    if (!node->name.contains(dmFilterText.trimmed(), Qt::CaseInsensitive))
-                        continue;
-                }
-
-                const bool isSelected = !friendsSelected && (node->id == shell.location().channelId);
-                const bool isUnread = dmIdx.data(ChannelTreeModel::IsUnreadRole).toBool();
-                const int mentions = dmIdx.data(ChannelTreeModel::MentionCountRole).toInt();
-
-                QString avatarSrc;
-                if (node->dmRecipientId.isValid()) {
-                    QUrl url = Discord::Cdn::userAvatar(node->dmRecipientId, node->dmAvatarHash, 32);
-                    avatarSrc = shell.imageSource(url, QSize(32, 32));
-                } else if (!node->TEMP_iconHash.isEmpty()) {
-                    QUrl url = Discord::Cdn::channelIcon(node->id, node->TEMP_iconHash, 32);
-                    avatarSrc = shell.imageSource(url, QSize(32, 32));
-                } else {
-                    QUrl url = Discord::Cdn::defaultUserAvatar(node->dmRecipientId.isValid() ? node->dmRecipientId : node->id);
-                    avatarSrc = shell.imageSource(url, QSize(32, 32));
-                }
-
-                auto badge = dmIdx.data(ChannelTreeModel::PresenceBadgeRole).value<Core::PresenceBadge>();
-                QString statusClass;
+        auto *header = tree->dmHeaderNode(shell.location().accountId);
+        if (header && filter->accepts(header)) {
+            const auto query = Platform::unicodeLower(trimmed(dmFilterText));
+            for (auto *node : filter->children(header)) {
+                if (!query.empty() && Platform::unicodeLower(node->name).find(query) == std::string::npos) continue;
+                std::string avatar;
+                if (node->dmRecipientId.isValid())
+                    avatar = shell.imageSource(Discord::Cdn::userAvatar(node->dmRecipientId, node->dmAvatarHash, 32), {32, 32});
+                else if (!node->TEMP_iconHash.empty())
+                    avatar = shell.imageSource(Discord::Cdn::channelIcon(node->id, node->TEMP_iconHash, 32), {32, 32});
+                else
+                    avatar = shell.imageSource(Discord::Cdn::defaultUserAvatar(node->dmRecipientId.isValid() ? node->dmRecipientId : node->id), {32, 32});
+                auto badge = tree->presenceBadge(node);
+                std::string status;
                 switch (badge.status) {
-                case Discord::StatusType::ONLINE: statusClass = QStringLiteral("status-online"); break;
-                case Discord::StatusType::IDLE: statusClass = QStringLiteral("status-idle"); break;
-                case Discord::StatusType::DND: statusClass = QStringLiteral("status-dnd"); break;
-                case Discord::StatusType::OFFLINE:
-                default: statusClass = QStringLiteral("status-offline"); break;
+                case Discord::StatusType::ONLINE: status = "status-online"; break;
+                case Discord::StatusType::IDLE: status = "status-idle"; break;
+                case Discord::StatusType::DND: status = "status-dnd"; break;
+                default: status = "status-offline"; break;
                 }
-                if (badge.streaming)
-                    statusClass = QStringLiteral("status-streaming");
-
-                QString rowClass = QStringLiteral("dm-row");
-                if (isSelected) rowClass += QStringLiteral(" selected");
-                if (isUnread) rowClass += QStringLiteral(" unread");
-
-                rml += QStringLiteral("<div class=\"%1\" data-dm-id=\"%2\" data-recipient-id=\"%3\">")
-                           .arg(rowClass)
-                           .arg(node->id.toString())
-                           .arg(node->dmRecipientId.toString());
-                rml += QStringLiteral("<div class=\"dm-avatar-wrap\">");
-                rml += QStringLiteral("<div class=\"avatar-clip\">");
-                rml += QStringLiteral("<img class=\"dm-avatar\" src=\"%1\"/>").arg(Rml::escape(avatarSrc));
-                rml += QStringLiteral("</div>"); // .avatar-clip
-                rml += QStringLiteral("<div class=\"status-dot %1\"></div>").arg(statusClass);
-                rml += QStringLiteral("</div>"); // .dm-avatar-wrap
-
-                QString subtext;
+                if (badge.streaming) status = "status-streaming";
+                std::string row = "dm-row";
+                if (!friendsSelected && node->id == shell.location().channelId) row += " selected";
+                if (node->isUnread) row += " unread";
+                rml += "<div class=\"" + row + "\" data-dm-id=\"" + node->id.toString() + "\" data-recipient-id=\"" + node->dmRecipientId.toString() + "\"><div class=\"dm-avatar-wrap\"><div class=\"avatar-clip\"><img class=\"dm-avatar\" src=\"" + escape(avatar) + "\"/></div><div class=\"status-dot " + status + "\"></div></div>";
+                std::string subtext;
                 if (node->dmRecipientId.isValid()) {
                     if (auto *inst = shell.currentInstance()) {
                         auto acts = inst->presences()->activities(node->dmRecipientId);
                         auto sorted = Core::ActivityFormat::sortAndFilter(acts);
-                        const auto *custom = Core::ActivityFormat::custom(acts);
-                        const auto *prim = Core::ActivityFormat::primary(sorted);
-                        if (custom && !custom->stateText().isEmpty()) {
-                            subtext = custom->stateText();
-                        } else if (prim) {
-                            subtext = Core::ActivityFormat::cardHeading(*prim);
-                            QString sec = Core::ActivityFormat::secondaryText(*prim);
-                            if (!sec.isEmpty())
-                                subtext += QStringLiteral(": ") + sec;
+                        auto *custom = Core::ActivityFormat::custom(acts);
+                        auto *primary = Core::ActivityFormat::primary(sorted);
+                        if (custom && !custom->stateText().empty()) subtext = custom->stateText();
+                        else if (primary) {
+                            subtext = Core::ActivityFormat::cardHeading(*primary);
+                            auto secondary = Core::ActivityFormat::secondaryText(*primary);
+                            if (!secondary.empty()) subtext += ": " + secondary;
                         }
                     }
-                } else if (!node->recipientIds.isEmpty()) {
-                    subtext = QStringLiteral("%1 Members").arg(node->recipientIds.size() + 1);
-                }
-
-                rml += QStringLiteral("<div class=\"dm-text\">");
-                rml += QStringLiteral("<span class=\"dm-name\">%1</span>").arg(Rml::escape(node->name));
-                if (!subtext.isEmpty()) {
-                    rml += QStringLiteral("<span class=\"dm-subtext\">%1</span>").arg(Rml::escape(subtext));
-                }
-                rml += QStringLiteral("</div>"); // .dm-text
-
-                if (mentions > 0) {
-                    QString badgeText = mentions > 99 ? QStringLiteral("99+") : QString::number(mentions);
-                    rml += QStringLiteral("<div class=\"channel-mention-badge\">%1</div>").arg(badgeText);
-                }
-
-                rml += QStringLiteral("</div>"); // .dm-row
+                } else if (!node->recipientIds.empty()) subtext = std::to_string(node->recipientIds.size() + 1) + " Members";
+                rml += "<div class=\"dm-text\"><span class=\"dm-name\">" + escape(node->name) + "</span>";
+                if (!subtext.empty()) rml += "<span class=\"dm-subtext\">" + escape(subtext) + "</span>";
+                rml += "</div>";
+                appendMention(rml, node->mentionCount);
+                rml += "</div>";
             }
         }
     }
-
-    channelList->SetInnerRML(rml.toUtf8().constData());
+    channelList->SetInnerRML(rml);
 }
 
 void ChannelListController::renderGuildSidebar()
 {
     auto *tree = shell.channelTree();
     auto *filter = shell.channelFilter();
-    if (!tree || !filter)
-        return;
-
-    const Snowflake accountId = shell.location().accountId;
-    const Snowflake guildId = shell.location().guildId;
-
-    const QModelIndex srcGuild = tree->serverIndex(accountId, guildId);
-    QString guildName = srcGuild.data(Qt::DisplayRole).toString();
-    if (guildName.isEmpty())
-        guildName = QStringLiteral("Server");
-
-    // Header
-    const QString headerRml = QStringLiteral(
-        "<div class=\"guild-header-content\">"
-        "<span class=\"guild-header-title\">%1</span>"
-        "<img class=\"guild-header-chevron\" src=\"icon:chevron-down\"/>"
-        "</div>").arg(Rml::escape(guildName));
-    sidebarHeader->SetInnerRML(headerRml.toUtf8().constData());
-
-    // Channels
-    QString rml;
-    const QModelIndex proxyGuild = filter->mapFromSource(srcGuild);
-    if (proxyGuild.isValid()) {
-        const int count = filter->rowCount(proxyGuild);
-        for (int i = 0; i < count; ++i) {
-            renderChannelNode(filter->index(i, 0, proxyGuild), rml, 0);
-        }
-    }
-
-    channelList->SetInnerRML(rml.toUtf8().constData());
+    if (!tree || !filter) return;
+    auto *guild = tree->serverNode(shell.location().accountId, shell.location().guildId);
+    std::string name = guild && !guild->name.empty() ? guild->name : "Server";
+    sidebarHeader->SetInnerRML("<div class=\"guild-header-content\"><span class=\"guild-header-title\">" + escape(name) + "</span><img class=\"guild-header-chevron\" src=\"icon:chevron-down\"/></div>");
+    std::string rml;
+    if (guild && filter->accepts(guild))
+        for (auto *node : filter->children(guild)) renderChannelNode(node, rml);
+    channelList->SetInnerRML(rml);
 }
 
-void ChannelListController::renderChannelNode(const QModelIndex &proxyIndex, QString &rml, int depth)
+void ChannelListController::renderChannelNode(ChannelNode *node, std::string &rml)
 {
     auto *tree = shell.channelTree();
     auto *filter = shell.channelFilter();
-    if (!tree || !filter || !proxyIndex.isValid())
-        return;
-
-    ChannelNode *node = tree->nodeFromIndex(filter->mapToSource(proxyIndex));
-    if (!node)
-        return;
-
+    if (!tree || !filter || !node) return;
     if (node->type == ChannelNode::Type::Category) {
-        // Sync collapsed state from QSettings if stored
-        QSettings settings;
-        const QString key = QStringLiteral("category_collapsed/%1/%2")
-                                .arg(shell.location().accountId.toString())
-                                .arg(node->id.toString());
-        if (settings.contains(key)) {
-            const bool collapsed = settings.value(key).toBool();
-            if (node->collapsed != collapsed) {
-                tree->setCollapsed(filter->mapToSource(proxyIndex), collapsed);
-            }
-        }
-
-        const QString chevronIcon = node->collapsed ? QStringLiteral("icon:chevron-right") : QStringLiteral("icon:chevron-down");
-        rml += QStringLiteral(
-            "<div class=\"category-row\" data-category-id=\"%1\">"
-            "<img class=\"category-icon\" src=\"%2\"/>"
-            "<span class=\"category-name\">%3</span>"
-            "</div>")
-            .arg(node->id.toString())
-            .arg(chevronIcon)
-            .arg(Rml::escape(node->name.toUpper()));
-
-        // Children under category
-        const int catChildCount = filter->rowCount(proxyIndex);
-        for (int c = 0; c < catChildCount; ++c) {
-            renderChannelNode(filter->index(c, 0, proxyIndex), rml, depth + 1);
-        }
+        auto &settings = Platform::Settings::instance();
+        auto key = categoryKey(shell.location().accountId, node->id);
+        if (settings.contains(key) && node->collapsed != settings.getBool(key))
+            tree->setCollapsed(node, settings.getBool(key));
+        rml += "<div class=\"category-row\" data-category-id=\"" + node->id.toString() + "\"><img class=\"category-icon\" src=\"" + (node->collapsed ? "icon:chevron-right" : "icon:chevron-down") + "\"/><span class=\"category-name\">" + escape(Platform::unicodeUpper(node->name)) + "</span></div>";
+        for (auto *child : filter->children(node)) renderChannelNode(child, rml);
         return;
     }
-
-    if (node->type == ChannelNode::Type::Channel || node->type == ChannelNode::Type::Forum) {
-        const bool isForum = (node->type == ChannelNode::Type::Forum);
-        const bool isSelected = (node->id == shell.location().channelId);
-        const bool isUnread = node->isUnread;
-        const bool isMuted = node->isMuted;
-        const int mentions = node->mentionCount;
-
-        QString iconName = QStringLiteral("icon:hash");
-        if (isForum) {
-            iconName = QStringLiteral("icon:messages-square");
-        } else if (node->isAnnouncement) {
-            iconName = QStringLiteral("icon:megaphone");
-        } else if (node->isPrivate) {
-            iconName = QStringLiteral("icon:lock");
-        }
-
-        QString rowClass = QStringLiteral("channel-row");
-        if (isSelected) rowClass += QStringLiteral(" selected");
-        if (isUnread) rowClass += QStringLiteral(" unread");
-        if (isMuted) rowClass += QStringLiteral(" muted");
-
-        rml += QStringLiteral("<div class=\"%1\" data-channel-id=\"%2\" data-type=\"%3\">")
-                   .arg(rowClass)
-                   .arg(node->id.toString())
-                   .arg(isForum ? QStringLiteral("forum") : QStringLiteral("text"));
-
-        if (isUnread)
-            rml += QStringLiteral("<div class=\"channel-pill\"></div>");
-
-        rml += QStringLiteral("<img class=\"channel-icon\" src=\"%1\"/>").arg(iconName);
-        rml += QStringLiteral("<span class=\"channel-name\">%1</span>").arg(Rml::escape(node->name));
-
-        if (mentions > 0) {
-            QString badgeText = mentions > 99 ? QStringLiteral("99+") : QString::number(mentions);
-            rml += QStringLiteral("<div class=\"channel-mention-badge\">%1</div>").arg(badgeText);
-        }
-
-        rml += QStringLiteral("</div>"); // .channel-row
-
-        // Threads under channel
-        const int threadCount = filter->rowCount(proxyIndex);
-        for (int t = 0; t < threadCount; ++t) {
-            renderChannelNode(filter->index(t, 0, proxyIndex), rml, depth + 1);
-        }
-        return;
-    }
-
-    if (node->type == ChannelNode::Type::VoiceChannel) {
-        const bool isSelected = (node->id == shell.location().channelId);
-        const bool isUnread = node->isUnread;
-        const bool isMuted = node->isMuted;
-        const int mentions = node->mentionCount;
-
-        QString rowClass = QStringLiteral("channel-row");
-        if (isSelected) rowClass += QStringLiteral(" selected");
-        if (isUnread) rowClass += QStringLiteral(" unread");
-        if (isMuted) rowClass += QStringLiteral(" muted");
-
-        rml += QStringLiteral("<div class=\"%1\" data-channel-id=\"%2\" data-type=\"voice\">")
-                   .arg(rowClass)
-                   .arg(node->id.toString());
-
-        if (isUnread)
-            rml += QStringLiteral("<div class=\"channel-pill\"></div>");
-
-        rml += QStringLiteral("<img class=\"channel-icon\" src=\"icon:volume-2\"/>");
-        rml += QStringLiteral("<span class=\"channel-name\">%1</span>").arg(Rml::escape(node->name));
-
-        if (mentions > 0) {
-            QString badgeText = mentions > 99 ? QStringLiteral("99+") : QString::number(mentions);
-            rml += QStringLiteral("<div class=\"channel-mention-badge\">%1</div>").arg(badgeText);
-        }
-
-        rml += QStringLiteral("</div>"); // .channel-row
-
-        // Voice participants under voice channel
-        const int partCount = filter->rowCount(proxyIndex);
-        for (int p = 0; p < partCount; ++p) {
-            renderChannelNode(filter->index(p, 0, proxyIndex), rml, depth + 1);
-        }
-        return;
-    }
-
-    if (node->type == ChannelNode::Type::Thread) {
-        const bool isSelected = (node->id == shell.location().channelId);
-        const bool isUnread = node->isUnread;
-        const bool isMuted = node->isMuted;
-        const int mentions = node->mentionCount;
-
-        QString rowClass = QStringLiteral("channel-row thread");
-        if (isSelected) rowClass += QStringLiteral(" selected");
-        if (isUnread) rowClass += QStringLiteral(" unread");
-        if (isMuted) rowClass += QStringLiteral(" muted");
-
-        rml += QStringLiteral("<div class=\"%1\" data-channel-id=\"%2\" data-type=\"text\">")
-                   .arg(rowClass)
-                   .arg(node->id.toString());
-
-        if (isUnread)
-            rml += QStringLiteral("<div class=\"channel-pill\"></div>");
-
-        rml += QStringLiteral("<img class=\"channel-icon\" src=\"icon:message-circle\"/>");
-        rml += QStringLiteral("<span class=\"channel-name\">%1</span>").arg(Rml::escape(node->name));
-
-        if (mentions > 0) {
-            QString badgeText = mentions > 99 ? QStringLiteral("99+") : QString::number(mentions);
-            rml += QStringLiteral("<div class=\"channel-mention-badge\">%1</div>").arg(badgeText);
-        }
-
-        rml += QStringLiteral("</div>"); // .channel-row.thread
-        return;
-    }
-
     if (node->type == ChannelNode::Type::VoiceParticipant) {
-        const Snowflake userId = node->id;
-        bool isSpeaking = false;
-        bool isStreaming = false;
-        bool isMuted = proxyIndex.data(ChannelTreeModel::IsVoiceMutedRole).toBool();
-        bool isDeafened = proxyIndex.data(ChannelTreeModel::IsVoiceDeafenedRole).toBool();
-
+        bool speaking = false, streaming = false;
+        bool muted = tree->voiceMuted(node), deafened = tree->voiceDeafened(node);
 #ifndef STYX_NO_VOICE
         if (auto *inst = shell.currentInstance()) {
-            if (auto *vm = inst->voice()) {
-                if (const auto *p = vm->participant(userId)) {
-                    isSpeaking = p->speaking;
-                    isStreaming = p->streaming;
-                    isMuted = isMuted || p->selfMute || p->serverMute;
-                    isDeafened = isDeafened || p->selfDeaf || p->serverDeaf;
+            if (auto *voice = inst->voice()) {
+                if (auto *participant = voice->participant(node->id)) {
+                    speaking = participant->speaking;
+                    streaming = participant->streaming;
+                    muted = muted || participant->selfMute || participant->serverMute;
+                    deafened = deafened || participant->selfDeaf || participant->serverDeaf;
                 }
             }
         }
 #endif
-
-        QString avSrc;
-        if (!node->voiceParticipantAvatarUrl.isEmpty()) {
-            avSrc = shell.imageSource(node->voiceParticipantAvatarUrl, QSize(24, 24));
-        } else {
-            QUrl defUrl = Discord::Cdn::defaultUserAvatar(userId);
-            avSrc = shell.imageSource(defUrl, QSize(24, 24));
-        }
-
-        QString rowClass = QStringLiteral("voice-participant-row");
-        if (isSpeaking)
-            rowClass += QStringLiteral(" speaking");
-
-        rml += QStringLiteral("<div class=\"%1\" data-user-id=\"%2\">")
-                   .arg(rowClass)
-                   .arg(userId.toString());
-        rml += QStringLiteral("<img class=\"vp-avatar\" src=\"%1\"/>").arg(Rml::escape(avSrc));
-        rml += QStringLiteral("<span class=\"vp-name\">%1</span>").arg(Rml::escape(node->name));
-
-        if (isStreaming) {
-            rml += QStringLiteral("<span class=\"vp-badge-live\">LIVE</span>");
-        }
-
-        if (isDeafened) {
-            rml += QStringLiteral("<img class=\"vp-status-icon\" src=\"icon:volume-x\"/>");
-        } else if (isMuted) {
-            rml += QStringLiteral("<img class=\"vp-status-icon\" src=\"icon:mic-off\"/>");
-        }
-
-        rml += QStringLiteral("</div>"); // .voice-participant-row
+        auto avatar = shell.imageSource(node->voiceParticipantAvatarUrl.empty() ? Discord::Cdn::defaultUserAvatar(node->id) : node->voiceParticipantAvatarUrl, {24, 24});
+        rml += "<div class=\"voice-participant-row" + std::string(speaking ? " speaking" : "") + "\" data-user-id=\"" + node->id.toString() + "\"><img class=\"vp-avatar\" src=\"" + escape(avatar) + "\"/><span class=\"vp-name\">" + escape(node->name) + "</span>";
+        if (streaming) rml += "<span class=\"vp-badge-live\">LIVE</span>";
+        if (deafened) rml += "<img class=\"vp-status-icon\" src=\"icon:volume-x\"/>";
+        else if (muted) rml += "<img class=\"vp-status-icon\" src=\"icon:mic-off\"/>";
+        rml += "</div>";
         return;
     }
+    bool forum = node->type == ChannelNode::Type::Forum;
+    bool voice = node->type == ChannelNode::Type::VoiceChannel;
+    bool thread = node->type == ChannelNode::Type::Thread;
+    if (!forum && !voice && !thread && node->type != ChannelNode::Type::Channel) return;
+    std::string row = thread ? "channel-row thread" : "channel-row";
+    if (node->id == shell.location().channelId) row += " selected";
+    if (node->isUnread) row += " unread";
+    if (node->isMuted) row += " muted";
+    const char *icon = voice ? "icon:volume-2" : thread ? "icon:message-circle" : forum ? "icon:messages-square" : node->isAnnouncement ? "icon:megaphone" : node->isPrivate ? "icon:lock" : "icon:hash";
+    rml += "<div class=\"" + row + "\" data-channel-id=\"" + node->id.toString() + "\" data-type=\"" + (voice ? "voice" : forum ? "forum" : "text") + "\">";
+    if (node->isUnread) rml += "<div class=\"channel-pill\"></div>";
+    rml += "<img class=\"channel-icon\" src=\"" + std::string(icon) + "\"/><span class=\"channel-name\">" + escape(node->name) + "</span>";
+    appendMention(rml, node->mentionCount);
+    rml += "</div>";
+    if (!thread) for (auto *child : filter->children(node)) renderChannelNode(child, rml);
 }
 
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI::Rml

@@ -2,10 +2,8 @@
 
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
-
-#include "Core/ClientInstance.hpp"
-#include "Core/Session.hpp"
 #include "Discord/CdnUrls.hpp"
+#include "Platform/Utf8.hpp"
 #include "UI/ChannelList/ChannelNode.hpp"
 #include "UI/ChannelList/ChannelTreeModel.hpp"
 #include "UI/ChannelList/ServerRailModel.hpp"
@@ -13,333 +11,169 @@
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Event.h>
+#include <charconv>
+#include <cwctype>
+#include <format>
 
-#include <QColor>
-#include <QModelIndex>
-#include <QRegularExpression>
-
-namespace Styx {
-namespace UI {
-namespace Rml {
-
+namespace Styx::UI::Rml {
 using Core::Snowflake;
 
-RailController::RailController(Shell &shell, ::Rml::Element *root, QObject *parent)
-    : Controller(shell, root, parent)
+namespace {
+Snowflake parseId(const std::string &text)
 {
-    rebuildTimer.setSingleShot(true);
-    rebuildTimer.setInterval(0);
-    connect(&rebuildTimer, &QTimer::timeout, this, &RailController::rebuild);
+    std::uint64_t value = 0;
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+    return result.ec == std::errc{} && result.ptr == text.data() + text.size() ? Snowflake(value) : Snowflake::Invalid;
+}
+}
 
-    // Event listeners
+RailController::RailController(Shell &shell, ::Rml::Element *root)
+    : Controller(shell, root)
+{
     listen("click", [this](::Rml::Event &event) {
-        auto *target = event.GetTargetElement();
-        auto *item = closest(target, "data-kind");
-        if (!item)
-            return;
-
-        QString kind = attribute(item, "data-kind");
-        Snowflake accountId(attribute(item, "data-account-id").toULongLong());
-        Snowflake id(attribute(item, "data-id").toULongLong());
-
-        if (kind == QLatin1String("home")) {
-            this->shell.openHome(accountId);
-        } else if (kind == QLatin1String("folder")) {
-            if (auto *rail = this->shell.rail())
-                rail->toggleFolder(accountId, id);
-        } else if (kind == QLatin1String("server")) {
-            this->shell.openGuild(accountId, id);
-        }
+        auto *item = closest(event.GetTargetElement(), "data-kind");
+        if (!item) return;
+        const auto kind = attribute(item, "data-kind");
+        const auto accountId = parseId(attribute(item, "data-account-id"));
+        const auto id = parseId(attribute(item, "data-id"));
+        if (kind == "home") shell.openHome(accountId);
+        else if (kind == "folder") { if (auto *rail = shell.rail()) rail->toggleFolder(accountId, id); }
+        else if (kind == "server") shell.openGuild(accountId, id);
     });
-
     listen("mousedown", [this](::Rml::Event &event) {
-        if (event.GetParameter<int>("button", 0) != 1) // Right click
-            return;
-
-        auto *target = event.GetTargetElement();
-        auto *item = closest(target, "data-kind");
-        if (!item)
-            return;
-
-        QString kind = attribute(item, "data-kind");
-        Snowflake accountId(attribute(item, "data-account-id").toULongLong());
-        Snowflake id(attribute(item, "data-id").toULongLong());
-
-        if (kind == QLatin1String("server")) {
-            this->shell.showContextMenuForGuild(accountId, id);
-        } else if (kind == QLatin1String("home")) {
-            this->shell.openAccounts();
+        if (event.GetParameter<int>("button", 0) != 1) return;
+        auto *item = closest(event.GetTargetElement(), "data-kind");
+        if (!item) return;
+        const auto kind = attribute(item, "data-kind");
+        const auto accountId = parseId(attribute(item, "data-account-id"));
+        const auto id = parseId(attribute(item, "data-id"));
+        if (kind == "server") shell.showContextMenuForGuild(accountId, id);
+        else if (kind == "home") shell.openAccounts();
+    });
+    track(shell.locationChanged.connect([this](const Location &loc) {
+        if (auto *rail = shell.rail()) {
+            if (loc.isHome()) rail->setSelected(ServerRailModel::Kind::AccountHome, loc.accountId, loc.accountId);
+            else rail->setSelected(ServerRailModel::Kind::Server, loc.accountId, loc.guildId);
         }
-    });
-
-    // Model and navigation signals
-    connect(&shell, &Shell::locationChanged, this, [this](const Location &loc) {
-        if (auto *rail = this->shell.rail()) {
-            if (loc.isHome())
-                rail->setSelected(ServerRailModel::Kind::AccountHome, loc.accountId, loc.accountId);
-            else
-                rail->setSelected(ServerRailModel::Kind::Server, loc.accountId, loc.guildId);
-        }
-        rebuildTimer.start();
-    });
-
-    connect(&shell, &Shell::instanceChanged, this, [this]() {
-        rebuildTimer.start();
-    });
-
-    connect(&shell, &Shell::accountReady, this, [this]() {
-        rebuildTimer.start();
-    });
-
+        scheduleRebuild();
+    }));
+    track(shell.instanceChanged.connect([this](Core::ClientInstance *) { scheduleRebuild(); }));
+    track(shell.accountReady.connect([this](Snowflake) { scheduleRebuild(); }));
     if (auto *rail = shell.rail()) {
-        connect(rail, &QAbstractItemModel::modelReset, this, [this]() { rebuildTimer.start(); });
-        connect(rail, &QAbstractItemModel::dataChanged, this, [this]() { rebuildTimer.start(); });
-        connect(rail, &QAbstractItemModel::rowsInserted, this, [this]() { rebuildTimer.start(); });
-        connect(rail, &QAbstractItemModel::rowsRemoved, this, [this]() { rebuildTimer.start(); });
-        connect(rail, &QAbstractItemModel::layoutChanged, this, [this]() { rebuildTimer.start(); });
+        track(rail->reset.connect([this]() { scheduleRebuild(); }));
+        track(rail->changed.connect([this]() { scheduleRebuild(); }));
     }
-
     renderRail();
 }
 
-void RailController::rebuild()
+void RailController::scheduleRebuild()
 {
-    renderRail();
+    rebuildTimer.start(std::chrono::milliseconds(0), false, [this]() { rebuild(); });
 }
 
-QString RailController::acronym(const QString &name)
+void RailController::rebuild() { renderRail(); }
+
+std::string RailController::acronym(const std::string &name)
 {
-    const QStringList words = name.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
-    QString res;
-    for (const QString &w : words) {
-        if (!w.isEmpty()) {
-            res += w[0].toUpper();
-            if (res.length() >= 4)
-                break;
+    const auto wide = Platform::toUtf16(name);
+    std::wstring result;
+    bool word = false;
+    for (wchar_t ch : wide) {
+        if (std::iswspace(ch)) { word = false; continue; }
+        if (!word) {
+            result += static_cast<wchar_t>(std::towupper(ch));
+            if (result.size() >= 4) break;
+            word = true;
+        } else if (result.size() && result.back() >= 0xd800 && result.back() <= 0xdbff && ch >= 0xdc00 && ch <= 0xdfff) {
+            result += ch;
         }
     }
-    if (res.isEmpty() && !name.isEmpty())
-        res = name.left(1).toUpper();
-    return res;
+    return Platform::fromUtf16(result);
 }
 
-QString RailController::renderFolderGrid(Snowflake accountId, Snowflake folderId)
+std::string RailController::renderFolderGrid(Snowflake accountId, Snowflake folderId)
 {
-    QString rml;
+    std::string rml;
     auto *tree = shell.channelTree();
-    if (!tree)
-        return rml;
-
-    ChannelNode *folderNode = tree->findChannelTreeNode(folderId, accountId);
-    if (!folderNode)
-        return rml;
-
+    auto *folder = tree ? tree->folderNode(accountId, folderId) : nullptr;
+    if (!folder) return rml;
     int count = 0;
-    for (const auto &child : folderNode->children) {
-        if (child->type != ChannelNode::Type::Server)
-            continue;
-        if (count >= 4)
-            break;
-
-        if (!child->TEMP_iconHash.isEmpty()) {
-            QUrl url = Discord::Cdn::guildIcon(child->id, child->TEMP_iconHash, 32);
-            QString src = shell.imageSource(url, QSize(20, 20));
-            rml += QStringLiteral("<div class=\"folder-grid-item\"><img src=\"%1\"/></div>")
-                       .arg(Rml::escape(src));
+    for (const auto &child : folder->children) {
+        if (child->type != ChannelNode::Type::Server) continue;
+        if (count++ >= 4) break;
+        if (!child->TEMP_iconHash.empty()) {
+            auto src = shell.imageSource(Discord::Cdn::guildIcon(child->id, child->TEMP_iconHash, 32), Platform::Size{20, 20});
+            rml += std::format("<div class=\"folder-grid-item\"><img src=\"{}\"/></div>", escape(src));
         } else {
-            QString acr = acronym(child->name);
-            rml += QStringLiteral("<div class=\"folder-grid-item\"><span class=\"folder-grid-acr\">%1</span></div>")
-                       .arg(Rml::escape(acr.left(2)));
+            auto wide = Platform::toUtf16(acronym(child->name));
+            if (wide.size() > 2) wide.resize(2);
+            rml += std::format("<div class=\"folder-grid-item\"><span class=\"folder-grid-acr\">{}</span></div>", escape(Platform::fromUtf16(wide)));
         }
-        count++;
     }
     return rml;
 }
 
 void RailController::renderRail()
 {
-    if (!regionRoot)
-        return;
-
     auto *model = shell.rail();
-    if (!model)
-        return;
-
-    QString rmlPrimary;
-    QString rmlExpanded;
-    Snowflake currentExpandedFolderId = Snowflake::Invalid;
-    Snowflake lastExpandedFolderId = Snowflake::Invalid;
-
-    const int rows = model->rowCount();
-    for (int r = 0; r < rows; ++r) {
-        QModelIndex idx = model->index(r, 0);
-        auto kind = static_cast<ServerRailModel::Kind>(idx.data(ServerRailModel::KindRole).toInt());
-        Snowflake accountId(idx.data(ServerRailModel::AccountIdRole).toULongLong());
-        Snowflake id(idx.data(ServerRailModel::IdRole).toULongLong());
-        QString name = idx.data(Qt::DisplayRole).toString();
-        bool isUnread = idx.data(ServerRailModel::IsUnreadRole).toBool();
-        int mentionCount = idx.data(ServerRailModel::MentionCountRole).toInt();
-        bool isExpanded = idx.data(ServerRailModel::IsExpandedRole).toBool();
-        bool isSelected = idx.data(ServerRailModel::IsSelectedRole).toBool();
-        bool isFirstOfAccount = idx.data(ServerRailModel::IsFirstOfAccountRole).toBool();
-        bool inFolderGroup = idx.data(ServerRailModel::InFolderGroupRole).toBool();
-        if (kind == ServerRailModel::Kind::AccountHome) {
-
-            QString itemClass = QStringLiteral("rail-item kind-home");
-            if (isSelected)
-                itemClass += QStringLiteral(" selected");
-            if (isUnread)
-                itemClass += QStringLiteral(" unread");
-
-            QString itemRml;
-            itemRml += QStringLiteral("<div class=\"%1\" data-kind=\"home\" data-account-id=\"%2\" data-id=\"%2\">")
-                           .arg(itemClass)
-                           .arg(accountId.toString());
-            itemRml += QStringLiteral("<div class=\"pill\"></div>");
-            itemRml += QStringLiteral("<div class=\"rail-btn\">");
-
-            itemRml += QStringLiteral("<img class=\"rail-icon\" src=\"icon:messages-square\"/>");
-
-            if (mentionCount > 0) {
-                QString badgeText = mentionCount > 99 ? QStringLiteral("99+") : QString::number(mentionCount);
-                itemRml += QStringLiteral("<div class=\"mention-badge\">%1</div>").arg(badgeText);
+    if (!regionRoot || !model) return;
+    std::string primary, expanded;
+    Snowflake currentFolder = Snowflake::Invalid, lastFolder = Snowflake::Invalid;
+    std::size_t row = 0;
+    for (const auto &entry : model->rows()) {
+        const bool unread = model->isUnread(entry);
+        const bool selected = model->isSelected(entry);
+        const bool isExpanded = model->isExpanded(entry);
+        const int mentions = model->mentionCount(entry);
+        const char *kind = entry.kind == ServerRailModel::Kind::AccountHome ? "home" : entry.kind == ServerRailModel::Kind::Folder ? "folder" : "server";
+        std::string classes = std::format("rail-item kind-{}", kind);
+        if (selected) classes += " selected";
+        if (unread) classes += " unread";
+        if (entry.kind == ServerRailModel::Kind::Folder && isExpanded) classes += " expanded";
+        if (entry.inFolderGroup) classes += " in-folder-group";
+        std::string item = std::format("<div class=\"{}\" data-kind=\"{}\" data-account-id=\"{}\" data-id=\"{}\"><div class=\"pill\"></div>", classes, kind, entry.accountId.toString(), entry.id.toString());
+        std::string tooltip = entry.name;
+        if (entry.kind == ServerRailModel::Kind::AccountHome) {
+            item += "<div class=\"rail-btn\"><img class=\"rail-icon\" src=\"icon:messages-square\"/>";
+            if (tooltip.empty()) tooltip = "Direct Messages";
+        } else if (entry.kind == ServerRailModel::Kind::Folder) {
+            if (isExpanded) currentFolder = entry.id;
+            std::string style;
+            if (entry.folderColor) {
+                const auto color = *entry.folderColor;
+                style = std::format(" style=\"background-color: rgba({},{},{},0.3);\"", (color >> 16) & 255, (color >> 8) & 255, color & 255);
             }
-
-            itemRml += QStringLiteral("</div>"); // .rail-btn
-            itemRml += QStringLiteral("<div class=\"rail-tooltip\">%1</div>")
-                           .arg(Rml::escape(name.isEmpty() ? QStringLiteral("Direct Messages") : name));
-            itemRml += QStringLiteral("</div>"); // .rail-item
-
-            if (isFirstOfAccount && r > 0) {
-                rmlPrimary += QStringLiteral("<div class=\"rail-separator account-separator\"></div>");
-            }
-            rmlPrimary += itemRml;
-            rmlPrimary += QStringLiteral("<div class=\"rail-separator\"></div>");
-        } else if (kind == ServerRailModel::Kind::Folder) {
-            QString itemClass = QStringLiteral("rail-item kind-folder");
-            if (isSelected)
-                itemClass += QStringLiteral(" selected");
-            if (isUnread)
-                itemClass += QStringLiteral(" unread");
-            if (isExpanded)
-                itemClass += QStringLiteral(" expanded");
-            if (inFolderGroup)
-                itemClass += QStringLiteral(" in-folder-group");
-
-            if (isExpanded) {
-                currentExpandedFolderId = id;
-            }
-
-            QVariant fcVar = idx.data(ServerRailModel::FolderColorRole);
-            QString bgStyle;
-            if (fcVar.isValid()) {
-                QColor c = QColor::fromRgb(fcVar.toULongLong());
-                bgStyle = QStringLiteral(" style=\"background-color: rgba(%1,%2,%3,0.3);\"")
-                              .arg(c.red())
-                              .arg(c.green())
-                              .arg(c.blue());
-            }
-
-            QString itemRml;
-            itemRml += QStringLiteral("<div class=\"%1\" data-kind=\"folder\" data-account-id=\"%2\" data-id=\"%3\">")
-                           .arg(itemClass)
-                           .arg(accountId.toString())
-                           .arg(id.toString());
-            itemRml += QStringLiteral("<div class=\"pill\"></div>");
-            itemRml += QStringLiteral("<div class=\"rail-btn folder-btn\"%1>").arg(bgStyle);
-
-            if (isExpanded) {
-                itemRml += QStringLiteral("<img class=\"rail-icon\" src=\"icon:chevron-down\"/>");
-            } else {
-                itemRml += QStringLiteral("<div class=\"folder-grid\">");
-                itemRml += renderFolderGrid(accountId, id);
-                itemRml += QStringLiteral("</div>");
-            }
-
-            if (mentionCount > 0) {
-                QString badgeText = mentionCount > 99 ? QStringLiteral("99+") : QString::number(mentionCount);
-                itemRml += QStringLiteral("<div class=\"mention-badge\">%1</div>").arg(badgeText);
-            }
-
-            itemRml += QStringLiteral("</div>"); // .rail-btn
-            itemRml += QStringLiteral("<div class=\"rail-tooltip\">%1</div>")
-                           .arg(Rml::escape(name.isEmpty() ? QStringLiteral("Folder") : name));
-            itemRml += QStringLiteral("</div>"); // .rail-item
-
-            if (isFirstOfAccount && r > 0) {
-                rmlPrimary += QStringLiteral("<div class=\"rail-separator account-separator\"></div>");
-            }
-            rmlPrimary += itemRml;
-        } else if (kind == ServerRailModel::Kind::Server) {
-            QString itemClass = QStringLiteral("rail-item kind-server");
-            if (isSelected)
-                itemClass += QStringLiteral(" selected");
-            if (isUnread)
-                itemClass += QStringLiteral(" unread");
-            if (inFolderGroup)
-                itemClass += QStringLiteral(" in-folder-group");
-
-            QString iconHash;
-            if (auto *tree = shell.channelTree())
-                iconHash = tree->serverIndex(accountId, id).data(ChannelTreeModel::IconHashRole).toString();
-
-            QString itemRml;
-            itemRml += QStringLiteral("<div class=\"%1\" data-kind=\"server\" data-account-id=\"%2\" data-id=\"%3\">")
-                           .arg(itemClass)
-                           .arg(accountId.toString())
-                           .arg(id.toString());
-            itemRml += QStringLiteral("<div class=\"pill\"></div>");
-            itemRml += QStringLiteral("<div class=\"rail-btn\">");
-
-            if (!iconHash.isEmpty()) {
-                QUrl url = Discord::Cdn::guildIcon(id, iconHash, 64);
-                QString src = shell.imageSource(url, QSize(48, 48));
-                itemRml += QStringLiteral("<img class=\"rail-avatar\" src=\"%1\"/>").arg(Rml::escape(src));
-            } else {
-                QString acr = acronym(name);
-                itemRml += QStringLiteral("<span class=\"rail-monogram\">%1</span>").arg(Rml::escape(acr));
-            }
-
-            if (mentionCount > 0) {
-                QString badgeText = mentionCount > 99 ? QStringLiteral("99+") : QString::number(mentionCount);
-                itemRml += QStringLiteral("<div class=\"mention-badge\">%1</div>").arg(badgeText);
-            }
-
-            itemRml += QStringLiteral("</div>"); // .rail-btn
-            itemRml += QStringLiteral("<div class=\"rail-tooltip\">%1</div>").arg(Rml::escape(name));
-            itemRml += QStringLiteral("</div>"); // .rail-item
-
-            if (!inFolderGroup) {
-                if (isFirstOfAccount && r > 0) {
-                    rmlPrimary += QStringLiteral("<div class=\"rail-separator account-separator\"></div>");
-                }
-                rmlPrimary += itemRml;
-            } else {
-                if (lastExpandedFolderId != currentExpandedFolderId) {
-                    if (!rmlExpanded.isEmpty()) {
-                        rmlExpanded += QStringLiteral("<div class=\"rail-separator\"></div>");
-                    }
-                    lastExpandedFolderId = currentExpandedFolderId;
-                }
-                rmlExpanded += itemRml;
-            }
+            item += std::format("<div class=\"rail-btn folder-btn\"{}>", style);
+            if (isExpanded) item += "<img class=\"rail-icon\" src=\"icon:chevron-down\"/>";
+            else item += "<div class=\"folder-grid\">" + renderFolderGrid(entry.accountId, entry.id) + "</div>";
+            if (tooltip.empty()) tooltip = "Folder";
+        } else {
+            item += "<div class=\"rail-btn\">";
+            const auto *node = entry.node;
+            if (node && !node->TEMP_iconHash.empty()) {
+                auto src = shell.imageSource(Discord::Cdn::guildIcon(entry.id, node->TEMP_iconHash, 64), Platform::Size{48, 48});
+                item += std::format("<img class=\"rail-avatar\" src=\"{}\"/>", escape(src));
+            } else item += std::format("<span class=\"rail-monogram\">{}</span>", escape(acronym(entry.name)));
         }
+        if (mentions > 0) item += std::format("<div class=\"mention-badge\">{}</div>", mentions > 99 ? "99+" : std::to_string(mentions));
+        item += std::format("</div><div class=\"rail-tooltip\">{}</div></div>", escape(tooltip));
+        if (entry.kind == ServerRailModel::Kind::Server && entry.inFolderGroup) {
+            if (lastFolder != currentFolder) {
+                if (!expanded.empty()) expanded += "<div class=\"rail-separator\"></div>";
+                lastFolder = currentFolder;
+            }
+            expanded += item;
+        } else {
+            if (entry.isFirstOfAccount && row > 0) primary += "<div class=\"rail-separator account-separator\"></div>";
+            primary += item;
+            if (entry.kind == ServerRailModel::Kind::AccountHome) primary += "<div class=\"rail-separator\"></div>";
+        }
+        ++row;
     }
-
-    const bool hasExpandedServers = !rmlExpanded.isEmpty();
-    if (auto *doc = shell.document()) {
-        doc->SetClass("rail-folder-open", hasExpandedServers);
-    }
-
-    QString rml;
-    rml += QStringLiteral("<div class=\"rail-primary\">") + rmlPrimary + QStringLiteral("</div>");
-    if (hasExpandedServers) {
-        rml += QStringLiteral("<div class=\"rail-expanded\">") + rmlExpanded + QStringLiteral("</div>");
-    }
-    regionRoot->SetInnerRML(rml.toUtf8().constData());
+    if (auto *doc = shell.document()) doc->SetClass("rail-folder-open", !expanded.empty());
+    std::string rml = "<div class=\"rail-primary\">" + primary + "</div>";
+    if (!expanded.empty()) rml += "<div class=\"rail-expanded\">" + expanded + "</div>";
+    regionRoot->SetInnerRML(rml);
     requestRender(200);
 }
-
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI::Rml

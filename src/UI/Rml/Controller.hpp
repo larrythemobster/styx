@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QObject>
-#include <QString>
+#include "Platform/Trackable.hpp"
+#include <string>
 
 #include <RmlUi/Core/EventListener.h>
 
@@ -23,11 +23,10 @@ namespace Rml {
 // Base for the objects that own one region of main.rml (rail, channel list, chat, ...).
 // A controller builds its region's DOM, keeps it in sync with Core signals, and turns
 // RmlUi events into Shell navigation calls. Controllers live on the GUI thread.
-class Controller : public QObject
+class Controller : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    Controller(Shell &shell, ::Rml::Element *root, QObject *parent = nullptr);
+    Controller(Shell &shell, ::Rml::Element *root);
     ~Controller() override;
 
     [[nodiscard]] ::Rml::Element *root() const { return regionRoot; }
@@ -39,12 +38,13 @@ protected:
     // Listen for an RmlUi event type ("click", "mouseover", "keydown", "scroll", ...) on
     // `element` (default: the region root). Handlers see the event's target and can walk up
     // with closest() to find the item that was hit. Removed when the controller dies.
-    void listen(const QString &eventType, std::function<void(::Rml::Event &)> handler,
+    void listen(const std::string &eventType, std::function<void(::Rml::Event &)> handler,
                 ::Rml::Element *element = nullptr, bool capture = false);
+    void removeListeners();
 
     // Nearest ancestor-or-self of `element` that has `attribute` (e.g. "data-id").
     static ::Rml::Element *closest(::Rml::Element *element, const char *attribute);
-    static QString attribute(::Rml::Element *element, const char *name);
+    static std::string attribute(::Rml::Element *element, const char *name);
 
     Shell &shell;
     ::Rml::Element *regionRoot;
@@ -58,7 +58,7 @@ private:
     struct Registration
     {
         ::Rml::Element *element;
-        QString type;
+        std::string type;
         Listener *listener;
         bool capture;
     };

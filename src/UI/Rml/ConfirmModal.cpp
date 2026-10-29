@@ -23,6 +23,7 @@ ConfirmModalController::ConfirmModalController(Shell &shell)
 
 ConfirmModalController::~ConfirmModalController()
 {
+    removeListeners();
     if (modalDocument) {
         modalDocument->Close();
         modalDocument = nullptr;

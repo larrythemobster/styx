@@ -16,10 +16,12 @@
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Entities.hpp"
 
-#include <QDesktopServices>
-#include <QFontInfo>
-#include <QRandomGenerator>
-#include <QUrl>
+#include "Platform/Desktop.hpp"
+#include <algorithm>
+#include <cmath>
+#include <random>
+#include <sstream>
+#include <vector>
 
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/AudioBackends.hpp"
@@ -39,25 +41,59 @@ namespace Rml {
 
 using namespace Styx::Core::Settings;
 
-SettingsController::SettingsController(Shell &shell, ::Rml::Element *root, QObject *parent)
-    : Controller(shell, root, parent)
+namespace {
+template<class T> std::string textValue(const T &value) {
+    std::ostringstream stream;
+    stream << value;
+    return stream.str();
+}
+template<class... Args> std::string formatRml(std::string text, const Args &...args) {
+    const std::vector<std::string> values{ textValue(args)... };
+    for (size_t i = 0; i < values.size(); ++i) {
+        const auto marker = "%" + std::to_string(i + 1);
+        size_t pos = 0;
+        while ((pos = text.find(marker, pos)) != std::string::npos) {
+            text.replace(pos, marker.size(), values[i]);
+            pos += values[i].size();
+        }
+    }
+    return text;
+}
+std::string hexEncode(const std::string &bytes) {
+    constexpr char digits[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(bytes.size() * 2);
+    for (unsigned char c : bytes) { result += digits[c >> 4]; result += digits[c & 15]; }
+    return result;
+}
+std::string hexDecode(const std::string &text) {
+    std::string result;
+    auto digit = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i + 1 < text.size(); i += 2) {
+        int high = digit(text[i]), low = digit(text[i + 1]);
+        if (high < 0 || low < 0) return {};
+        result += static_cast<char>((high << 4) | low);
+    }
+    return result;
+}
+}
+
+
+
+SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
+    : Controller(shell, root)
 {
     themeSeedColor = Core::Theme::Manager::instance().color(Core::Theme::Token::Highlight);
-
-    rebuildTimer.setSingleShot(true);
-    connect(&rebuildTimer, &QTimer::timeout, this, &SettingsController::rebuild);
-
-    hideTransitionTimer.setSingleShot(true);
-    connect(&hideTransitionTimer, &QTimer::timeout, this, [this]() {
-        if (!this->shell.isSettingsOpen() && regionRoot)
-            regionRoot->SetProperty("display", "none");
-    });
-
-    connect(&shell, &Shell::settingsOpenChanged, this, &SettingsController::onSettingsOpenChanged);
-    connect(&shell, &Shell::instanceChanged, this, [this](Core::ClientInstance *) {
+    track(shell.settingsOpenChanged.connect([this](bool open) { onSettingsOpenChanged(open); }));
+    track(shell.instanceChanged.connect([this](Core::ClientInstance *) {
         if (this->shell.isSettingsOpen())
-            rebuildTimer.start(0);
-    });
+            rebuildTimer.start(std::chrono::milliseconds(0), false, [this] { rebuild(); });
+    }));
 
     setupEventListeners();
     if (regionRoot)
@@ -79,7 +115,10 @@ void SettingsController::onSettingsOpenChanged(bool open)
         requestRender(200);
     } else {
         regionRoot->SetClass("open", false);
-        hideTransitionTimer.start(160);
+        hideTransitionTimer.start(std::chrono::milliseconds(160), false, [this] {
+            if (!shell.isSettingsOpen() && regionRoot)
+                regionRoot->SetProperty("display", "none");
+        });
         requestRender(200);
     }
 }
@@ -106,54 +145,48 @@ void SettingsController::render()
     if (!regionRoot)
         return;
 
-    QString rml;
+    std::string rml;
     renderSidebar(rml);
     renderContent(rml);
 
-    regionRoot->SetInnerRML(rml.toUtf8().constData());
+    regionRoot->SetInnerRML(rml.c_str());
 }
 
-void SettingsController::renderSidebar(QString &rml)
+void SettingsController::renderSidebar(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-sidebar\">");
+    rml += std::string("<div class=\"settings-sidebar\">");
 
     // USER SETTINGS
-    rml += QStringLiteral("<div class=\"settings-group-header\">User Settings</div>");
-    rml += QStringLiteral("<div class=\"settings-nav-item%1\" data-section=\"my-account\">My Account</div>")
-               .arg(currentSection == Section::MyAccount ? QStringLiteral(" active") : QString());
+    rml += std::string("<div class=\"settings-group-header\">User Settings</div>");
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"my-account\">My Account</div>", currentSection == Section::MyAccount ? std::string(" active") : std::string());
 
-    rml += QStringLiteral("<div class=\"settings-divider\"></div>");
+    rml += std::string("<div class=\"settings-divider\"></div>");
 
     // APP SETTINGS
-    rml += QStringLiteral("<div class=\"settings-group-header\">App Settings</div>");
-    rml += QStringLiteral("<div class=\"settings-nav-item%1\" data-section=\"appearance\">Appearance</div>")
-               .arg(currentSection == Section::Appearance ? QStringLiteral(" active") : QString());
-    rml += QStringLiteral("<div class=\"settings-nav-item%1\" data-section=\"chat\">Chat &amp; Accessibility</div>")
-               .arg(currentSection == Section::Chat ? QStringLiteral(" active") : QString());
-    rml += QStringLiteral("<div class=\"settings-nav-item%1\" data-section=\"voice-video\">Voice &amp; Video</div>")
-               .arg(currentSection == Section::VoiceVideo ? QStringLiteral(" active") : QString());
-    rml += QStringLiteral("<div class=\"settings-nav-item%1\" data-section=\"go-live\">Go Live</div>")
-               .arg(currentSection == Section::GoLive ? QStringLiteral(" active") : QString());
-    rml += QStringLiteral("<div class=\"settings-nav-item%1\" data-section=\"advanced\">Advanced</div>")
-               .arg(currentSection == Section::Advanced ? QStringLiteral(" active") : QString());
+    rml += std::string("<div class=\"settings-group-header\">App Settings</div>");
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"appearance\">Appearance</div>", currentSection == Section::Appearance ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"chat\">Chat &amp; Accessibility</div>", currentSection == Section::Chat ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"voice-video\">Voice &amp; Video</div>", currentSection == Section::VoiceVideo ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"go-live\">Go Live</div>", currentSection == Section::GoLive ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"advanced\">Advanced</div>", currentSection == Section::Advanced ? std::string(" active") : std::string());
 
-    rml += QStringLiteral("<div class=\"settings-divider\"></div>");
+    rml += std::string("<div class=\"settings-divider\"></div>");
 
     // Footer info
-    rml += QStringLiteral("<div class=\"settings-sidebar-footer\">");
-    rml += QStringLiteral("<div class=\"settings-app-version\">Styx v0.1.0</div>");
-    rml += QStringLiteral("<a class=\"settings-credit-link\" data-action=\"open-upstream\">Based on Acheron by ouwou</a>");
-    rml += QStringLiteral("</div>"); // .settings-sidebar-footer
+    rml += std::string("<div class=\"settings-sidebar-footer\">");
+    rml += std::string("<div class=\"settings-app-version\">Styx v0.1.0</div>");
+    rml += std::string("<a class=\"settings-credit-link\" data-action=\"open-upstream\">Based on Acheron by ouwou</a>");
+    rml += std::string("</div>"); // .settings-sidebar-footer
 
-    rml += QStringLiteral("</div>"); // .settings-sidebar
+    rml += std::string("</div>"); // .settings-sidebar
 }
 
-void SettingsController::renderContent(QString &rml)
+void SettingsController::renderContent(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-content-pane\">");
+    rml += std::string("<div class=\"settings-content-pane\">");
 
     // Close button top right
-    rml += QStringLiteral(
+    rml += std::string(
         "<div class=\"settings-close-container\">"
         "  <div class=\"settings-close-btn\" data-action=\"close\" title=\"Close Settings\">"
         "    <img src=\"icon:x\"/>"
@@ -161,7 +194,7 @@ void SettingsController::renderContent(QString &rml)
         "  <div class=\"settings-esc-label\">ESC</div>"
         "</div>");
 
-    rml += QStringLiteral("<div class=\"settings-content-wrapper\">");
+    rml += std::string("<div class=\"settings-content-wrapper\">");
 
     switch (currentSection) {
     case Section::MyAccount:
@@ -184,20 +217,20 @@ void SettingsController::renderContent(QString &rml)
         break;
     }
 
-    rml += QStringLiteral("</div>"); // .settings-content-wrapper
-    rml += QStringLiteral("</div>"); // .settings-content-pane
+    rml += std::string("</div>"); // .settings-content-wrapper
+    rml += std::string("</div>"); // .settings-content-pane
 }
 
-void SettingsController::renderMyAccount(QString &rml)
+void SettingsController::renderMyAccount(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">My Account</div>");
+    rml += std::string("<div class=\"settings-section-title\">My Account</div>");
 
     auto *inst = shell.currentInstance();
-    QString displayName = QStringLiteral("Not logged in");
-    QString username = QStringLiteral("none");
-    QString accountIdStr = QStringLiteral("-");
-    QString emailStr = QStringLiteral("Not provided");
-    QString avatarSrc;
+    std::string displayName = std::string("Not logged in");
+    std::string username = std::string("none");
+    std::string accountIdStr = std::string("-");
+    std::string emailStr = std::string("Not provided");
+    std::string avatarSrc;
 
     if (inst) {
         const auto &info = inst->accountInfo();
@@ -209,264 +242,253 @@ void SettingsController::renderMyAccount(QString &rml)
         if (userMgr)
             me = userMgr->getUser(accountId);
 
-        displayName = (me && me->globalName.hasValue() && !me->globalName->isEmpty())
+        displayName = (me && me->globalName.hasValue() && !me->globalName->empty())
                           ? *me->globalName
-                          : (info.displayName.isEmpty() ? info.username : info.displayName);
-        if (displayName.isEmpty())
+                          : (info.displayName.empty() ? info.username : info.displayName);
+        if (displayName.empty())
             displayName = info.username;
 
         username = me ? me->username.get() : info.username;
 
-        QString avatarHash = (me && me->avatar.hasValue()) ? *me->avatar : info.avatar;
-        QUrl avatarUrl = !avatarHash.isEmpty()
+        std::string avatarHash = (me && me->avatar.hasValue()) ? *me->avatar : info.avatar;
+        std::string avatarUrl = !avatarHash.empty()
                              ? Discord::Cdn::userAvatar(accountId, avatarHash, 80)
                              : Discord::Cdn::defaultUserAvatar(accountId);
-        avatarSrc = shell.imageSource(avatarUrl, QSize(80, 80));
+        avatarSrc = shell.imageSource(avatarUrl, Platform::Size{80, 80});
     }
 
-    rml += QStringLiteral("<div class=\"my-account-card\">");
-    rml += QStringLiteral("<div class=\"my-account-profile-header\">");
-    if (!avatarSrc.isEmpty()) {
-        rml += QStringLiteral("<img class=\"my-account-avatar\" src=\"%1\"/>").arg(Rml::escape(avatarSrc));
+    rml += std::string("<div class=\"my-account-card\">");
+    rml += std::string("<div class=\"my-account-profile-header\">");
+    if (!avatarSrc.empty()) {
+        rml += formatRml("<img class=\"my-account-avatar\" src=\"%1\"/>", Rml::escape(avatarSrc));
     }
-    rml += QStringLiteral("<div class=\"my-account-names\">");
-    rml += QStringLiteral("<div class=\"my-account-display-name\">%1</div>").arg(Rml::escape(displayName));
-    rml += QStringLiteral("<div class=\"my-account-username\">@%1</div>").arg(Rml::escape(username));
-    rml += QStringLiteral("</div>"); // .my-account-names
-    rml += QStringLiteral("</div>"); // .my-account-profile-header
+    rml += std::string("<div class=\"my-account-names\">");
+    rml += formatRml("<div class=\"my-account-display-name\">%1</div>", Rml::escape(displayName));
+    rml += formatRml("<div class=\"my-account-username\">@%1</div>", Rml::escape(username));
+    rml += std::string("</div>"); // .my-account-names
+    rml += std::string("</div>"); // .my-account-profile-header
 
-    rml += QStringLiteral("<div class=\"my-account-field-card\">");
-    rml += QStringLiteral("<div class=\"my-account-field-label\">Display Name</div>");
-    rml += QStringLiteral("<div class=\"my-account-field-value\">%1</div>").arg(Rml::escape(displayName));
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"my-account-field-card\">");
+    rml += std::string("<div class=\"my-account-field-label\">Display Name</div>");
+    rml += formatRml("<div class=\"my-account-field-value\">%1</div>", Rml::escape(displayName));
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("<div class=\"my-account-field-card\">");
-    rml += QStringLiteral("<div class=\"my-account-field-label\">Username</div>");
-    rml += QStringLiteral("<div class=\"my-account-field-value\">@%1</div>").arg(Rml::escape(username));
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"my-account-field-card\">");
+    rml += std::string("<div class=\"my-account-field-label\">Username</div>");
+    rml += formatRml("<div class=\"my-account-field-value\">@%1</div>", Rml::escape(username));
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("<div class=\"my-account-field-card\">");
-    rml += QStringLiteral("<div class=\"my-account-field-label\">User ID</div>");
-    rml += QStringLiteral("<div class=\"my-account-field-value\">%1</div>").arg(Rml::escape(accountIdStr));
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"my-account-field-card\">");
+    rml += std::string("<div class=\"my-account-field-label\">User ID</div>");
+    rml += formatRml("<div class=\"my-account-field-value\">%1</div>", Rml::escape(accountIdStr));
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("<div class=\"my-account-field-card\">");
-    rml += QStringLiteral("<div class=\"my-account-field-label\">Email</div>");
-    rml += QStringLiteral("<div class=\"my-account-field-value\">%1</div>").arg(Rml::escape(emailStr));
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"my-account-field-card\">");
+    rml += std::string("<div class=\"my-account-field-label\">Email</div>");
+    rml += formatRml("<div class=\"my-account-field-value\">%1</div>", Rml::escape(emailStr));
+    rml += std::string("</div>");
 
-    rml += QStringLiteral(
+    rml += std::string(
         "<button class=\"settings-btn settings-btn-primary\" data-action=\"manage-accounts\">"
         "Switch / Manage Accounts"
         "</button>");
-    rml += QStringLiteral("</div>"); // .my-account-card
+    rml += std::string("</div>"); // .my-account-card
 }
 
-void SettingsController::renderAppearance(QString &rml)
+void SettingsController::renderAppearance(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Appearance</div>");
+    rml += std::string("<div class=\"settings-section-title\">Appearance</div>");
 
     // Theme Generator card
-    rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Theme Generator</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Generate Discord-style themes from an accent seed color.</div>");
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">Theme Generator</div>");
+    rml += std::string("<div class=\"settings-description\">Generate Discord-style themes from an accent seed color.</div>");
 
-    rml += QStringLiteral("<div class=\"settings-color-row\">");
-    rml += QStringLiteral("<div class=\"settings-color-swatch\" style=\"background-color: %1;\"></div>")
-               .arg(themeSeedColor.name(QColor::HexRgb));
-    rml += QStringLiteral("<input type=\"text\" class=\"settings-text-input\" id=\"seed-color-hex\" value=\"%1\" style=\"width: 120dp;\"/>")
-               .arg(themeSeedColor.name(QColor::HexRgb));
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-color-row\">");
+    rml += formatRml("<div class=\"settings-color-swatch\" style=\"background-color: %1;\"></div>", themeSeedColor.css());
+    rml += formatRml("<input type=\"text\" class=\"settings-text-input\" id=\"seed-color-hex\" value=\"%1\" style=\"width: 120dp;\"/>", themeSeedColor.css());
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Palette Scheme</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" id=\"theme-scheme-select\">");
+    rml += std::string("<div class=\"settings-row\">");
+    rml += std::string("<div class=\"settings-label\">Palette Scheme</div>");
+    rml += std::string("<select class=\"settings-select\" id=\"theme-scheme-select\">");
     for (int i = 0; i < Core::Theme::schemeCount; ++i) {
         auto s = static_cast<Core::Theme::Scheme>(i);
-        QString selected = (i == themeSchemeIndex) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(i).arg(selected, Core::Theme::schemeName(s));
+        std::string selected = (i == themeSchemeIndex) ? std::string(" selected") : std::string();
+        rml += formatRml("<option value=\"%1\"%2>%3</option>", i, selected, Core::Theme::schemeName(s));
     }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("</select>");
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Mode</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" id=\"theme-mode-select\">");
-    rml += QStringLiteral("<option value=\"dark\"%1>Dark</option>").arg(themeDarkMode ? QStringLiteral(" selected") : QString());
-    rml += QStringLiteral("<option value=\"light\"%1>Light</option>").arg(!themeDarkMode ? QStringLiteral(" selected") : QString());
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-row\">");
+    rml += std::string("<div class=\"settings-label\">Mode</div>");
+    rml += std::string("<select class=\"settings-select\" id=\"theme-mode-select\">");
+    rml += formatRml("<option value=\"dark\"%1>Dark</option>", themeDarkMode ? std::string(" selected") : std::string());
+    rml += formatRml("<option value=\"light\"%1>Light</option>", !themeDarkMode ? std::string(" selected") : std::string());
+    rml += std::string("</select>");
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("<div class=\"settings-button-group\">");
-    rml += QStringLiteral("<button class=\"settings-btn settings-btn-primary\" data-action=\"generate-theme\">Generate</button>");
-    rml += QStringLiteral("<button class=\"settings-btn settings-btn-secondary\" data-action=\"random-theme\">Randomize</button>");
-    rml += QStringLiteral("<button class=\"settings-btn settings-btn-danger\" data-action=\"reset-theme\">Reset Theme</button>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("<div class=\"settings-button-group\">");
+    rml += std::string("<button class=\"settings-btn settings-btn-primary\" data-action=\"generate-theme\">Generate</button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"random-theme\">Randomize</button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-danger\" data-action=\"reset-theme\">Reset Theme</button>");
+    rml += std::string("</div>");
+    rml += std::string("</div>"); // .settings-card
 
     // System theme switches
-    rml += QStringLiteral("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-card\">");
     const bool useSysColors = getBool(Keys::ThemeUseSystemColors, Defaults::ThemeUseSystemColors);
-    rml += QStringLiteral("<div class=\"settings-switch-row\">");
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">Use system colors</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Follow operating system color scheme overrides.</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(useSysColors ? QStringLiteral(" checked") : QString(), Keys::ThemeUseSystemColors);
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-switch-row\">");
+    rml += std::string("<div class=\"settings-switch-text\">");
+    rml += std::string("<div class=\"settings-switch-title\">Use system colors</div>");
+    rml += std::string("<div class=\"settings-switch-desc\">Follow operating system color scheme overrides.</div>");
+    rml += std::string("</div>");
+    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", useSysColors ? std::string(" checked") : std::string(), Keys::ThemeUseSystemColors);
+    rml += std::string("</div>");
 
     const bool useSysStyle = getBool(Keys::ThemeUseSystemStyle, Defaults::ThemeUseSystemStyle);
-    rml += QStringLiteral("<div class=\"settings-switch-row\">");
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">Use system widget style</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Apply native OS widget style instead of Fusion.</div>");
-    rml += QStringLiteral("<div class=\"settings-note\">* Applies after restart</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(useSysStyle ? QStringLiteral(" checked") : QString(), Keys::ThemeUseSystemStyle);
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("<div class=\"settings-switch-row\">");
+    rml += std::string("<div class=\"settings-switch-text\">");
+    rml += std::string("<div class=\"settings-switch-title\">Use system widget style</div>");
+    rml += std::string("<div class=\"settings-switch-desc\">Apply native OS widget style instead of Fusion.</div>");
+    rml += std::string("<div class=\"settings-note\">* Applies after restart</div>");
+    rml += std::string("</div>");
+    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", useSysStyle ? std::string(" checked") : std::string(), Keys::ThemeUseSystemStyle);
+    rml += std::string("</div>");
+    rml += std::string("</div>"); // .settings-card
 
     // Font overrides
-    rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Font Overrides</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Tune typography sizes across Styx interface roles.</div>");
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">Font Overrides</div>");
+    rml += std::string("<div class=\"settings-description\">Tune typography sizes across Styx interface roles.</div>");
 
     for (const auto &fd : Core::Theme::fontRegistry()) {
         const auto role = fd.role;
-        const QFont currentFont = Core::Theme::Manager::instance().font(role);
-        const int ptSize = QFontInfo(currentFont).pointSize();
+        const auto currentFont = Core::Theme::Manager::instance().font(role);
+        const int ptSize = static_cast<int>(currentFont.pointSize);
 
-        rml += QStringLiteral("<div class=\"settings-font-row\">");
-        rml += QStringLiteral("<span class=\"settings-font-name\">%1</span>").arg(QString::fromUtf8(fd.label));
-        rml += QStringLiteral("<span class=\"settings-font-size\">%1 pt</span>").arg(ptSize);
-        rml += QStringLiteral("<button class=\"settings-btn settings-btn-secondary\" data-action=\"font-size-dec\" data-role=\"%1\" style=\"padding: 4dp 10dp; margin-right: 6dp;\">-</button>").arg(static_cast<int>(role));
-        rml += QStringLiteral("<button class=\"settings-btn settings-btn-secondary\" data-action=\"font-size-inc\" data-role=\"%1\" style=\"padding: 4dp 10dp; margin-right: 12dp;\">+</button>").arg(static_cast<int>(role));
-        rml += QStringLiteral("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-font\" data-role=\"%1\" style=\"padding: 4dp 12dp;\">Reset</button>").arg(static_cast<int>(role));
-        rml += QStringLiteral("</div>");
+        rml += std::string("<div class=\"settings-font-row\">");
+        rml += formatRml("<span class=\"settings-font-name\">%1</span>", std::string(fd.label));
+        rml += formatRml("<span class=\"settings-font-size\">%1 pt</span>", ptSize);
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary\" data-action=\"font-size-dec\" data-role=\"%1\" style=\"padding: 4dp 10dp; margin-right: 6dp;\">-</button>", static_cast<int>(role));
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary\" data-action=\"font-size-inc\" data-role=\"%1\" style=\"padding: 4dp 10dp; margin-right: 12dp;\">+</button>", static_cast<int>(role));
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-font\" data-role=\"%1\" style=\"padding: 4dp 12dp;\">Reset</button>", static_cast<int>(role));
+        rml += std::string("</div>");
     }
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("</div>"); // .settings-card
 }
 
-void SettingsController::renderChat(QString &rml)
+void SettingsController::renderChat(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Chat &amp; Accessibility</div>");
+    rml += std::string("<div class=\"settings-section-title\">Chat &amp; Accessibility</div>");
 
     // Animation toggles
-    rml += QStringLiteral("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-card\">");
     const bool animEmoji = getBool(Keys::AnimateEmoji, Defaults::AnimateEmoji);
-    rml += QStringLiteral("<div class=\"settings-switch-row\" data-setting=\"%1\" style=\"cursor: pointer;\">").arg(Keys::AnimateEmoji);
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">Animate emoji</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Play animated emoji reactions and messages continuously.</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(animEmoji ? QStringLiteral(" checked") : QString(), Keys::AnimateEmoji);
-    rml += QStringLiteral("</div>");
+    rml += formatRml("<div class=\"settings-switch-row\" data-setting=\"%1\" style=\"cursor: pointer;\">", Keys::AnimateEmoji);
+    rml += std::string("<div class=\"settings-switch-text\">");
+    rml += std::string("<div class=\"settings-switch-title\">Animate emoji</div>");
+    rml += std::string("<div class=\"settings-switch-desc\">Play animated emoji reactions and messages continuously.</div>");
+    rml += std::string("</div>");
+    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", animEmoji ? std::string(" checked") : std::string(), Keys::AnimateEmoji);
+    rml += std::string("</div>");
 
     const bool animStickers = getBool(Keys::AnimateStickers, Defaults::AnimateStickers);
-    rml += QStringLiteral("<div class=\"settings-switch-row\">");
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">Animate stickers</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Play animated APNG and Lottie stickers in chat.</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(animStickers ? QStringLiteral(" checked") : QString(), Keys::AnimateStickers);
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("<div class=\"settings-switch-row\">");
+    rml += std::string("<div class=\"settings-switch-text\">");
+    rml += std::string("<div class=\"settings-switch-title\">Animate stickers</div>");
+    rml += std::string("<div class=\"settings-switch-desc\">Play animated APNG and Lottie stickers in chat.</div>");
+    rml += std::string("</div>");
+    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", animStickers ? std::string(" checked") : std::string(), Keys::AnimateStickers);
+    rml += std::string("</div>");
+    rml += std::string("</div>"); // .settings-card
 
     // GIF playback mode (Radio cards)
-    rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">GIF Playback Mode</div>");
-    const QString gifMode = getString(Keys::GifPlayback, Defaults::GifPlayback);
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">GIF Playback Mode</div>");
+    const std::string gifMode = getString(Keys::GifPlayback, Defaults::GifPlayback);
 
-    auto renderRadioCard = [&](const QString &val, const QString &title, const QString &desc) {
+    auto renderRadioCard = [&](const std::string &val, const std::string &title, const std::string &desc) {
         const bool active = (gifMode == val);
-        rml += QStringLiteral("<div class=\"settings-radio-card%1\" data-setting=\"%2\" data-value=\"%3\" tabindex=\"0\">")
-                   .arg(active ? QStringLiteral(" active") : QString(), Keys::GifPlayback, val);
-        rml += QStringLiteral("<div class=\"settings-radio-indicator\"></div>");
-        rml += QStringLiteral("<div class=\"settings-radio-info\">");
-        rml += QStringLiteral("<div class=\"settings-radio-title\">%1</div>").arg(title);
-        rml += QStringLiteral("<div class=\"settings-radio-desc\">%1</div>").arg(desc);
-        rml += QStringLiteral("</div></div>");
+        rml += formatRml("<div class=\"settings-radio-card%1\" data-setting=\"%2\" data-value=\"%3\" tabindex=\"0\">", active ? std::string(" active") : std::string(), Keys::GifPlayback, val);
+        rml += std::string("<div class=\"settings-radio-indicator\"></div>");
+        rml += std::string("<div class=\"settings-radio-info\">");
+        rml += formatRml("<div class=\"settings-radio-title\">%1</div>", title);
+        rml += formatRml("<div class=\"settings-radio-desc\">%1</div>", desc);
+        rml += std::string("</div></div>");
     };
 
-    renderRadioCard(QStringLiteral("focused"), QStringLiteral("When Styx is focused"),
-                    QStringLiteral("Play animated GIFs automatically when the window has focus."));
-    renderRadioCard(QStringLiteral("hover"), QStringLiteral("On hover"),
-                    QStringLiteral("Only play animated GIFs when hovering cursor over them."));
-    renderRadioCard(QStringLiteral("never"), QStringLiteral("Never play"),
-                    QStringLiteral("Keep animated GIFs frozen as still pictures."));
+    renderRadioCard(std::string("focused"), std::string("When Styx is focused"),
+                    std::string("Play animated GIFs automatically when the window has focus."));
+    renderRadioCard(std::string("hover"), std::string("On hover"),
+                    std::string("Only play animated GIFs when hovering cursor over them."));
+    renderRadioCard(std::string("never"), std::string("Never play"),
+                    std::string("Keep animated GIFs frozen as still pictures."));
 
     // GIF max playing slider
     const int maxPlaying = getInt(Keys::GifMaxPlaying, Defaults::GifMaxPlaying);
-    rml += QStringLiteral("<div class=\"settings-slider-wrap\" style=\"margin-top: 16dp;\">");
-    rml += QStringLiteral("<div class=\"settings-slider-header\">");
-    rml += QStringLiteral("<span class=\"settings-label\">Max simultaneous playing GIFs</span>");
-    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-gif-max-playing\">up to %1 at once</span>").arg(maxPlaying);
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"1\" max=\"16\" step=\"1\" value=\"%1\" data-setting=\"%2\" data-display=\"val-gif-max-playing\" data-prefix=\"up to \" data-unit=\" at once\"/>")
-               .arg(maxPlaying).arg(Keys::GifMaxPlaying);
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-top: 16dp;\">");
+    rml += std::string("<div class=\"settings-slider-header\">");
+    rml += std::string("<span class=\"settings-label\">Max simultaneous playing GIFs</span>");
+    rml += formatRml("<span class=\"settings-slider-val\" id=\"val-gif-max-playing\">up to %1 at once</span>", maxPlaying);
+    rml += std::string("</div>");
+    rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"1\" max=\"16\" step=\"1\" value=\"%1\" data-setting=\"%2\" data-display=\"val-gif-max-playing\" data-prefix=\"up to \" data-unit=\" at once\"/>", maxPlaying, Keys::GifMaxPlaying);
+    rml += std::string("</div>");
 
     // GIF max memory slider
     const int maxGifMb = getInt(Keys::GifMaxMb, Defaults::GifMaxMb);
-    rml += QStringLiteral("<div class=\"settings-slider-wrap\">");
-    rml += QStringLiteral("<div class=\"settings-slider-header\">");
-    rml += QStringLiteral("<span class=\"settings-label\">Largest GIF memory</span>");
-    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-gif-max-mb\">%1 MB</span>").arg(maxGifMb);
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"8\" max=\"256\" step=\"8\" value=\"%1\" data-setting=\"%2\" data-display=\"val-gif-max-mb\" data-unit=\" MB\"/>")
-               .arg(maxGifMb).arg(Keys::GifMaxMb);
-    rml += QStringLiteral("<div class=\"settings-description\">Oversized GIFs exceeding this memory threshold stay as still pictures.</div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-slider-wrap\">");
+    rml += std::string("<div class=\"settings-slider-header\">");
+    rml += std::string("<span class=\"settings-label\">Largest GIF memory</span>");
+    rml += formatRml("<span class=\"settings-slider-val\" id=\"val-gif-max-mb\">%1 MB</span>", maxGifMb);
+    rml += std::string("</div>");
+    rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"8\" max=\"256\" step=\"8\" value=\"%1\" data-setting=\"%2\" data-display=\"val-gif-max-mb\" data-unit=\" MB\"/>", maxGifMb, Keys::GifMaxMb);
+    rml += std::string("<div class=\"settings-description\">Oversized GIFs exceeding this memory threshold stay as still pictures.</div>");
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("</div>"); // .settings-card
 
     // Animation Cache Limits
-    rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Animation Memory Limits</div>");
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">Animation Memory Limits</div>");
 
     const int cacheMb = getInt(Keys::AnimationCacheMb, Defaults::AnimationCacheMb);
-    rml += QStringLiteral("<div class=\"settings-slider-wrap\">");
-    rml += QStringLiteral("<div class=\"settings-slider-header\">");
-    rml += QStringLiteral("<span class=\"settings-label\">Memory for animations</span>");
-    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-anim-cache-mb\">%1 MB</span>").arg(cacheMb);
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"16\" max=\"1024\" step=\"16\" value=\"%1\" data-setting=\"%2\" data-display=\"val-anim-cache-mb\" data-unit=\" MB\"/>")
-               .arg(cacheMb).arg(Keys::AnimationCacheMb);
-    rml += QStringLiteral("<div class=\"settings-description\">Total unpacked RAM buffer for animated stickers and emoji frames.</div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-slider-wrap\">");
+    rml += std::string("<div class=\"settings-slider-header\">");
+    rml += std::string("<span class=\"settings-label\">Memory for animations</span>");
+    rml += formatRml("<span class=\"settings-slider-val\" id=\"val-anim-cache-mb\">%1 MB</span>", cacheMb);
+    rml += std::string("</div>");
+    rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"16\" max=\"1024\" step=\"16\" value=\"%1\" data-setting=\"%2\" data-display=\"val-anim-cache-mb\" data-unit=\" MB\"/>", cacheMb, Keys::AnimationCacheMb);
+    rml += std::string("<div class=\"settings-description\">Total unpacked RAM buffer for animated stickers and emoji frames.</div>");
+    rml += std::string("</div>");
 
     const int maxAnimMb = getInt(Keys::AnimationMaxMb, Defaults::AnimationMaxMb);
-    rml += QStringLiteral("<div class=\"settings-slider-wrap\">");
-    rml += QStringLiteral("<div class=\"settings-slider-header\">");
-    rml += QStringLiteral("<span class=\"settings-label\">Largest single animation</span>");
-    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-anim-max-mb\">%1 MB</span>").arg(maxAnimMb);
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"4\" max=\"128\" step=\"4\" value=\"%1\" data-setting=\"%2\" data-display=\"val-anim-max-mb\" data-unit=\" MB\"/>")
-               .arg(maxAnimMb).arg(Keys::AnimationMaxMb);
-    rml += QStringLiteral("<div class=\"settings-description\">Animations that exceed this limit are downscaled or shown static.</div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-slider-wrap\">");
+    rml += std::string("<div class=\"settings-slider-header\">");
+    rml += std::string("<span class=\"settings-label\">Largest single animation</span>");
+    rml += formatRml("<span class=\"settings-slider-val\" id=\"val-anim-max-mb\">%1 MB</span>", maxAnimMb);
+    rml += std::string("</div>");
+    rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"4\" max=\"128\" step=\"4\" value=\"%1\" data-setting=\"%2\" data-display=\"val-anim-max-mb\" data-unit=\" MB\"/>", maxAnimMb, Keys::AnimationMaxMb);
+    rml += std::string("<div class=\"settings-description\">Animations that exceed this limit are downscaled or shown static.</div>");
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("</div>"); // .settings-card
 }
 
-void SettingsController::renderVoiceVideo(QString &rml)
+void SettingsController::renderVoiceVideo(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Voice &amp; Video</div>");
+    rml += std::string("<div class=\"settings-section-title\">Voice &amp; Video</div>");
 
     // Voice Settings card
-    rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Voice Settings</div>");
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">Voice Settings</div>");
 
 #ifndef STYX_NO_VOICE
     auto *inst = shell.currentInstance();
     auto *vm = inst ? inst->voice() : nullptr;
 
-    QList<Core::Audio::AudioDeviceInfo> inputDevices;
-    QList<Core::Audio::AudioDeviceInfo> outputDevices;
+    std::vector<Core::Audio::AudioDeviceInfo> inputDevices;
+    std::vector<Core::Audio::AudioDeviceInfo> outputDevices;
     if (vm) {
         inputDevices = vm->availableInputDevices();
         outputDevices = vm->availableOutputDevices();
@@ -478,174 +500,171 @@ void SettingsController::renderVoiceVideo(QString &rml)
         }
     }
 
-    const QString currentInput = getString(Keys::VoiceInputDevice, Defaults::VoiceInputDevice);
-    const QString currentOutput = getString(Keys::VoiceOutputDevice, Defaults::VoiceOutputDevice);
+    const std::string currentInput = getString(Keys::VoiceInputDevice, Defaults::VoiceInputDevice);
+    const std::string currentOutput = getString(Keys::VoiceOutputDevice, Defaults::VoiceOutputDevice);
 
     // Side-by-side Input Device & Output Device
-    rml += QStringLiteral("<div class=\"settings-grid-2col\">");
+    rml += std::string("<div class=\"settings-grid-2col\">");
 
     // Input Device Column
-    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-left\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Input Device</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::VoiceInputDevice);
-    rml += QStringLiteral("<option value=\"\"%1>Default Communication Device</option>").arg(currentInput.isEmpty() ? QStringLiteral(" selected") : QString());
+    rml += std::string("<div class=\"settings-grid-col settings-grid-col-left\">");
+    rml += std::string("<div class=\"settings-label\">Input Device</div>");
+    rml += formatRml("<select class=\"settings-select\" data-setting=\"%1\">", Keys::VoiceInputDevice);
+    rml += formatRml("<option value=\"\"%1>Default Communication Device</option>", currentInput.empty() ? std::string(" selected") : std::string());
     for (const auto &dev : inputDevices) {
-        QString devHex = QString::fromLatin1(dev.id.toHex());
-        QString sel = (currentInput == devHex || (currentInput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(devHex, sel, Rml::escape(dev.description));
+        std::string devHex = hexEncode(dev.id);
+        std::string sel = (currentInput == devHex || (currentInput.empty() && dev.isDefault)) ? std::string(" selected") : std::string();
+        rml += formatRml("<option value=\"%1\"%2>%3</option>", devHex, sel, Rml::escape(dev.description));
     }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("</select>");
+    rml += std::string("</div>");
 
     // Output Device Column
-    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-right\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Output Device</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::VoiceOutputDevice);
-    rml += QStringLiteral("<option value=\"\"%1>Default Communication Device</option>").arg(currentOutput.isEmpty() ? QStringLiteral(" selected") : QString());
+    rml += std::string("<div class=\"settings-grid-col settings-grid-col-right\">");
+    rml += std::string("<div class=\"settings-label\">Output Device</div>");
+    rml += formatRml("<select class=\"settings-select\" data-setting=\"%1\">", Keys::VoiceOutputDevice);
+    rml += formatRml("<option value=\"\"%1>Default Communication Device</option>", currentOutput.empty() ? std::string(" selected") : std::string());
     for (const auto &dev : outputDevices) {
-        QString devHex = QString::fromLatin1(dev.id.toHex());
-        QString sel = (currentOutput == devHex || (currentOutput.isEmpty() && dev.isDefault)) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(devHex, sel, Rml::escape(dev.description));
+        std::string devHex = hexEncode(dev.id);
+        std::string sel = (currentOutput == devHex || (currentOutput.empty() && dev.isDefault)) ? std::string(" selected") : std::string();
+        rml += formatRml("<option value=\"%1\"%2>%3</option>", devHex, sel, Rml::escape(dev.description));
     }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("</select>");
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("</div>"); // .settings-grid-2col
+    rml += std::string("</div>"); // .settings-grid-2col
 
     // Side-by-side Input Volume & Output Volume
     const int inputVolume = getInt(Keys::VoiceInputVolume, Defaults::VoiceInputVolume);
     const int outputVolume = getInt(Keys::VoiceOutputVolume, Defaults::VoiceOutputVolume);
 
-    rml += QStringLiteral("<div class=\"settings-grid-2col\" style=\"margin-bottom: 8dp;\">");
+    rml += std::string("<div class=\"settings-grid-2col\" style=\"margin-bottom: 8dp;\">");
 
     // Input Volume Column
-    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-left\">");
-    rml += QStringLiteral("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
-    rml += QStringLiteral("<div class=\"settings-slider-header\">");
-    rml += QStringLiteral("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Input Volume</span>");
-    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-voice-input-vol\">") + QString::number(inputVolume) + QStringLiteral("%</span>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"100\" step=\"1\" value=\"")
-           + QString::number(inputVolume)
-           + QStringLiteral("\" data-setting=\"") + QLatin1String(Keys::VoiceInputVolume)
-           + QStringLiteral("\" data-display=\"val-voice-input-vol\" data-unit=\"%\"/>");
-    rml += QStringLiteral("</div>"); // .settings-slider-wrap
-    rml += QStringLiteral("</div>"); // .settings-grid-col
+    rml += std::string("<div class=\"settings-grid-col settings-grid-col-left\">");
+    rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
+    rml += std::string("<div class=\"settings-slider-header\">");
+    rml += std::string("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Input Volume</span>");
+    rml += std::string("<span class=\"settings-slider-val\" id=\"val-voice-input-vol\">") + std::to_string(inputVolume) + std::string("%</span>");
+    rml += std::string("</div>");
+    rml += std::string("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"100\" step=\"1\" value=\"")
+           + std::to_string(inputVolume)
+           + std::string("\" data-setting=\"") + std::string(Keys::VoiceInputVolume)
+           + std::string("\" data-display=\"val-voice-input-vol\" data-unit=\"%\"/>");
+    rml += std::string("</div>"); // .settings-slider-wrap
+    rml += std::string("</div>"); // .settings-grid-col
     // Output Volume Column
-    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-right\">");
-    rml += QStringLiteral("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
-    rml += QStringLiteral("<div class=\"settings-slider-header\">");
-    rml += QStringLiteral("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Output Volume</span>");
-    rml += QStringLiteral("<span class=\"settings-slider-val\" id=\"val-voice-output-vol\">") + QString::number(outputVolume) + QStringLiteral("%</span>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"200\" step=\"1\" value=\"")
-           + QString::number(outputVolume)
-           + QStringLiteral("\" data-setting=\"") + QLatin1String(Keys::VoiceOutputVolume)
-           + QStringLiteral("\" data-display=\"val-voice-output-vol\" data-unit=\"%\"/>");
-    rml += QStringLiteral("</div>"); // .settings-slider-wrap
-    rml += QStringLiteral("</div>"); // .settings-grid-col
-    rml += QStringLiteral("</div>"); // .settings-grid-2col
+    rml += std::string("<div class=\"settings-grid-col settings-grid-col-right\">");
+    rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
+    rml += std::string("<div class=\"settings-slider-header\">");
+    rml += std::string("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Output Volume</span>");
+    rml += std::string("<span class=\"settings-slider-val\" id=\"val-voice-output-vol\">") + std::to_string(outputVolume) + std::string("%</span>");
+    rml += std::string("</div>");
+    rml += std::string("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"200\" step=\"1\" value=\"")
+           + std::to_string(outputVolume)
+           + std::string("\" data-setting=\"") + std::string(Keys::VoiceOutputVolume)
+           + std::string("\" data-display=\"val-voice-output-vol\" data-unit=\"%\"/>");
+    rml += std::string("</div>"); // .settings-slider-wrap
+    rml += std::string("</div>"); // .settings-grid-col
+    rml += std::string("</div>"); // .settings-grid-2col
 
-    rml += QStringLiteral("<div class=\"settings-description\" style=\"margin-top: 8dp; margin-bottom: 0;\">Device and volume changes take effect immediately during a call, or on your next voice connection.</div>");
+    rml += std::string("<div class=\"settings-description\" style=\"margin-top: 8dp; margin-bottom: 0;\">Device and volume changes take effect immediately during a call, or on your next voice connection.</div>");
 #endif
-    rml += QStringLiteral("</div>"); // .settings-card (Voice Settings)
+    rml += std::string("</div>"); // .settings-card (Voice Settings)
 
     // Advanced Subheading & Audio Backend card
-    rml += QStringLiteral("<div class=\"settings-subheading\">Advanced</div>");
-    rml += QStringLiteral("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-subheading\">Advanced</div>");
+    rml += std::string("<div class=\"settings-card\">");
 
-    const QString currentBackend = getString(Keys::AudioBackend, Defaults::AudioBackend);
-    rml += QStringLiteral("<div class=\"settings-row\" style=\"margin-bottom: 0;\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Audio Backend</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::AudioBackend);
-    rml += QStringLiteral("<option value=\"\"%1>Automatic</option>").arg(currentBackend.isEmpty() ? QStringLiteral(" selected") : QString());
+    const std::string currentBackend = getString(Keys::AudioBackend, Defaults::AudioBackend);
+    rml += std::string("<div class=\"settings-row\" style=\"margin-bottom: 0;\">");
+    rml += std::string("<div class=\"settings-label\">Audio Backend</div>");
+    rml += formatRml("<select class=\"settings-select\" data-setting=\"%1\">", Keys::AudioBackend);
+    rml += formatRml("<option value=\"\"%1>Automatic</option>", currentBackend.empty() ? std::string(" selected") : std::string());
 #ifndef STYX_NO_VOICE
-    for (const QString &name : Core::Audio::supportedAudioBackends()) {
-        QString sel = (currentBackend == name) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(name, sel, name);
+    for (const std::string &name : Core::Audio::supportedAudioBackends()) {
+        std::string sel = (currentBackend == name) ? std::string(" selected") : std::string();
+        rml += formatRml("<option value=\"%1\"%2>%3</option>", name, sel, name);
     }
 #endif
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("<div class=\"settings-note\">* Takes effect after restart</div>");
-    rml += QStringLiteral("</div>"); // .settings-row
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("</select>");
+    rml += std::string("<div class=\"settings-note\">* Takes effect after restart</div>");
+    rml += std::string("</div>"); // .settings-row
+    rml += std::string("</div>"); // .settings-card
 }
 
 
-void SettingsController::renderGoLive(QString &rml)
+void SettingsController::renderGoLive(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Go Live</div>");
+    rml += std::string("<div class=\"settings-section-title\">Go Live</div>");
 
-    rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Screenshare Quality</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Default resolution and frame rate when sharing a screen or application window.</div>");
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">Screenshare Quality</div>");
+    rml += std::string("<div class=\"settings-description\">Default resolution and frame rate when sharing a screen or application window.</div>");
 
-    const QString currentPreset = getString(Keys::StreamQuality, Defaults::StreamQuality);
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::StreamQuality);
+    const std::string currentPreset = getString(Keys::StreamQuality, Defaults::StreamQuality);
+    rml += std::string("<div class=\"settings-row\">");
+    rml += formatRml("<select class=\"settings-select\" data-setting=\"%1\">", Keys::StreamQuality);
     for (const auto &preset : Core::Stream::StreamQuality::presets()) {
-        QString sel = (preset.id == currentPreset) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(preset.id, sel, preset.label());
+        std::string sel = (preset.id == currentPreset) ? std::string(" selected") : std::string();
+        rml += formatRml("<option value=\"%1\"%2>%3</option>", preset.id, sel, preset.label());
     }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("</select>");
+    rml += std::string("</div>");
 
     const bool shareAudio = getBool(Keys::StreamAudio, Defaults::StreamAudio);
-    rml += QStringLiteral("<div class=\"settings-switch-row\">");
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">Share system audio</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Capture application sound when sharing a window, or system audio when sharing screen.</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(shareAudio ? QStringLiteral(" checked") : QString(), Keys::StreamAudio);
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-switch-row\">");
+    rml += std::string("<div class=\"settings-switch-text\">");
+    rml += std::string("<div class=\"settings-switch-title\">Share system audio</div>");
+    rml += std::string("<div class=\"settings-switch-desc\">Capture application sound when sharing a window, or system audio when sharing screen.</div>");
+    rml += std::string("</div>");
+    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", shareAudio ? std::string(" checked") : std::string(), Keys::StreamAudio);
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("</div>"); // .settings-card
 }
 
-void SettingsController::renderAdvanced(QString &rml)
+void SettingsController::renderAdvanced(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Advanced</div>");
+    rml += std::string("<div class=\"settings-section-title\">Advanced</div>");
 
-    rml += QStringLiteral("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-card\">");
 
     // In-memory cache
     const bool inMemory = getBool(Keys::InMemoryCache, Defaults::InMemoryCache);
-    rml += QStringLiteral("<div class=\"settings-switch-row\">");
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">In-memory cache database</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Store temporary cache in RAM (:memory:) instead of sqlite file on disk.</div>");
-    rml += QStringLiteral("<div class=\"settings-note\">* Requires restart</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(inMemory ? QStringLiteral(" checked") : QString(), Keys::InMemoryCache);
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-switch-row\">");
+    rml += std::string("<div class=\"settings-switch-text\">");
+    rml += std::string("<div class=\"settings-switch-title\">In-memory cache database</div>");
+    rml += std::string("<div class=\"settings-switch-desc\">Store temporary cache in RAM (:memory:) instead of sqlite file on disk.</div>");
+    rml += std::string("<div class=\"settings-note\">* Requires restart</div>");
+    rml += std::string("</div>");
+    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", inMemory ? std::string(" checked") : std::string(), Keys::InMemoryCache);
+    rml += std::string("</div>");
 
     // Close to tray
     const bool closeToTray = getBool(Keys::CloseToTray, Defaults::CloseToTray);
-    rml += QStringLiteral("<div class=\"settings-switch-row\">");
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">Keep running in system tray</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Minimize Styx to the notification tray instead of exiting when the window is closed.</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(closeToTray ? QStringLiteral(" checked") : QString(), Keys::CloseToTray);
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-switch-row\">");
+    rml += std::string("<div class=\"settings-switch-text\">");
+    rml += std::string("<div class=\"settings-switch-title\">Keep running in system tray</div>");
+    rml += std::string("<div class=\"settings-switch-desc\">Minimize Styx to the notification tray instead of exiting when the window is closed.</div>");
+    rml += std::string("</div>");
+    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", closeToTray ? std::string(" checked") : std::string(), Keys::CloseToTray);
+    rml += std::string("</div>");
 
 #ifdef _WIN32
     // Font Engine
-    const QString fontEngine = getString(Keys::FontEngine, Defaults::FontEngine);
-    rml += QStringLiteral("<div class=\"settings-row\" style=\"margin-top: 16dp;\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Font Engine</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" data-setting=\"%1\">").arg(Keys::FontEngine);
-    rml += QStringLiteral("<option value=\"directwrite\"%1>DirectWrite (Default)</option>").arg(fontEngine == QLatin1String("directwrite") ? QStringLiteral(" selected") : QString());
-    rml += QStringLiteral("<option value=\"freetype\"%1>FreeType</option>").arg(fontEngine == QLatin1String("freetype") ? QStringLiteral(" selected") : QString());
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("<div class=\"settings-note\">* Windows font rasterization engine. Requires restart.</div>");
-    rml += QStringLiteral("</div>");
+    const std::string fontEngine = getString(Keys::FontEngine, Defaults::FontEngine);
+    rml += std::string("<div class=\"settings-row\" style=\"margin-top: 16dp;\">");
+    rml += std::string("<div class=\"settings-label\">Font Engine</div>");
+    rml += formatRml("<select class=\"settings-select\" data-setting=\"%1\">", Keys::FontEngine);
+    rml += formatRml("<option value=\"directwrite\"%1>DirectWrite (Default)</option>", fontEngine == std::string("directwrite") ? std::string(" selected") : std::string());
+    rml += formatRml("<option value=\"freetype\"%1>FreeType</option>", fontEngine == std::string("freetype") ? std::string(" selected") : std::string());
+    rml += std::string("</select>");
+    rml += std::string("<div class=\"settings-note\">* Windows font rasterization engine. Requires restart.</div>");
+    rml += std::string("</div>");
 #endif
 
-    rml += QStringLiteral("</div>"); // .settings-card
+    rml += std::string("</div>"); // .settings-card
 }
 
 void SettingsController::setupEventListeners()
@@ -657,25 +676,25 @@ void SettingsController::setupEventListeners()
 
         // Close button
         if (auto *btn = closest(target, "data-action")) {
-            QString action = attribute(btn, "data-action");
+            std::string action = attribute(btn, "data-action");
             handleAction(action, btn);
             return;
         }
 
         // Section tab item
         if (auto *item = closest(target, "data-section")) {
-            QString sec = attribute(item, "data-section");
-            if (sec == QLatin1String("my-account"))
+            std::string sec = attribute(item, "data-section");
+            if (sec == std::string("my-account"))
                 setSection(Section::MyAccount);
-            else if (sec == QLatin1String("appearance"))
+            else if (sec == std::string("appearance"))
                 setSection(Section::Appearance);
-            else if (sec == QLatin1String("chat"))
+            else if (sec == std::string("chat"))
                 setSection(Section::Chat);
-            else if (sec == QLatin1String("voice-video"))
+            else if (sec == std::string("voice-video"))
                 setSection(Section::VoiceVideo);
-            else if (sec == QLatin1String("go-live"))
+            else if (sec == std::string("go-live"))
                 setSection(Section::GoLive);
-            else if (sec == QLatin1String("advanced"))
+            else if (sec == std::string("advanced"))
                 setSection(Section::Advanced);
             return;
         }
@@ -741,8 +760,8 @@ void SettingsController::setupEventListeners()
 
 void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
 {
-    const QString key = attribute(switchEl, "data-setting");
-    if (key.isEmpty())
+    const std::string key = attribute(switchEl, "data-setting");
+    if (key.empty())
         return;
 
     const bool wasChecked = switchEl->IsClassSet("checked");
@@ -752,11 +771,11 @@ void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
     setBool(key, nowChecked);
 
     // Immediate action application
-    if (key == QLatin1String(Keys::CloseToTray)) {
+    if (key == std::string(Keys::CloseToTray)) {
         shell.applyCloseToTray();
-    } else if (key == QLatin1String(Keys::ThemeUseSystemColors)) {
+    } else if (key == std::string(Keys::ThemeUseSystemColors)) {
         Core::Theme::Manager::instance().setUseSystemColors(nowChecked);
-    } else if (key == QLatin1String(Keys::ThemeUseSystemStyle)) {
+    } else if (key == std::string(Keys::ThemeUseSystemStyle)) {
         Core::Theme::Manager::setSystemStyleEnabled(nowChecked);
     }
 
@@ -765,9 +784,9 @@ void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
 
 void SettingsController::handleRadioClick(::Rml::Element *radioEl)
 {
-    const QString key = attribute(radioEl, "data-setting");
-    const QString val = attribute(radioEl, "data-value");
-    if (key.isEmpty() || val.isEmpty())
+    const std::string key = attribute(radioEl, "data-setting");
+    const std::string val = attribute(radioEl, "data-value");
+    if (key.empty() || val.empty())
         return;
 
     setString(key, val);
@@ -786,40 +805,40 @@ void SettingsController::handleRadioClick(::Rml::Element *radioEl)
 
 void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
 {
-    const QString key = attribute(sliderEl, "data-setting");
-    if (key.isEmpty())
+    const std::string key = attribute(sliderEl, "data-setting");
+    if (key.empty())
         return;
 
     auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(sliderEl);
     if (!input)
         return;
 
-    const int val = QString::fromStdString(input->GetValue()).toInt();
+    const int val = input->GetValue().toInt();
     setInt(key, val);
 
     // Update display label
-    const QString dispId = attribute(sliderEl, "data-display");
-    if (!dispId.isEmpty() && regionRoot) {
-        if (auto *labelEl = regionRoot->GetElementById(dispId.toStdString())) {
-            const QString prefix = attribute(sliderEl, "data-prefix");
-            const QString unit = attribute(sliderEl, "data-unit");
-            labelEl->SetInnerRML((prefix + QString::number(val) + unit).toUtf8().constData());
+    const std::string dispId = attribute(sliderEl, "data-display");
+    if (!dispId.empty() && regionRoot) {
+        if (auto *labelEl = regionRoot->GetElementById(dispId)) {
+            const std::string prefix = attribute(sliderEl, "data-prefix");
+            const std::string unit = attribute(sliderEl, "data-unit");
+            labelEl->SetInnerRML((prefix + std::to_string(val) + unit).c_str());
         }
     }
 
     // Apply immediate settings
-    if (key == QLatin1String(Keys::AnimationCacheMb)) {
+    if (key == std::string(Keys::AnimationCacheMb)) {
         shell.session()->getAnimatedImageCache()->setCacheLimitMiB(val);
-    } else if (key == QLatin1String(Keys::AnimationMaxMb)) {
+    } else if (key == std::string(Keys::AnimationMaxMb)) {
         shell.session()->getAnimatedImageCache()->setAnimationLimitMiB(val);
 #ifndef STYX_NO_VOICE
-    } else if (key == QLatin1String(Keys::VoiceInputVolume)) {
+    } else if (key == std::string(Keys::VoiceInputVolume)) {
         const float gain = static_cast<float>(val) / 100.0f;
         for (const auto &client : shell.session()->getClients()) {
             if (client && client->voice())
                 client->voice()->setInputGain(gain);
         }
-    } else if (key == QLatin1String(Keys::VoiceOutputVolume)) {
+    } else if (key == std::string(Keys::VoiceOutputVolume)) {
         const float vol = static_cast<float>(val) / 100.0f;
         for (const auto &client : shell.session()->getClients()) {
             if (client && client->voice())
@@ -832,29 +851,29 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
 
 void SettingsController::handleSelectChange(::Rml::Element *selectEl)
 {
-    const QString key = attribute(selectEl, "data-setting");
+    const std::string key = attribute(selectEl, "data-setting");
     auto *sel = rmlui_dynamic_cast<::Rml::ElementFormControlSelect *>(selectEl);
     if (!sel)
         return;
 
-    const QString val = QString::fromStdString(sel->GetValue());
+    const std::string val = sel->GetValue();
 
-    if (!key.isEmpty()) {
+    if (!key.empty()) {
         setString(key, val);
 #ifndef STYX_NO_VOICE
-        if (key == QLatin1String(Keys::VoiceInputDevice)) {
-            QByteArray devBytes = val.isEmpty() ? QByteArray() : QByteArray::fromHex(val.toLatin1());
+        if (key == std::string(Keys::VoiceInputDevice)) {
+            std::string devBytes = hexDecode(val);
             for (const auto &client : shell.session()->getClients()) {
                 if (client && client->voice())
                     client->voice()->setInputDevice(devBytes);
             }
-        } else if (key == QLatin1String(Keys::VoiceOutputDevice)) {
-            QByteArray devBytes = val.isEmpty() ? QByteArray() : QByteArray::fromHex(val.toLatin1());
+        } else if (key == std::string(Keys::VoiceOutputDevice)) {
+            std::string devBytes = hexDecode(val);
             for (const auto &client : shell.session()->getClients()) {
                 if (client && client->voice())
                     client->voice()->setOutputDevice(devBytes);
             }
-        } else if (key == QLatin1String(Keys::AudioBackend)) {
+        } else if (key == std::string(Keys::AudioBackend)) {
             Core::Audio::setConfiguredAudioBackend(val);
         }
 #endif
@@ -862,30 +881,30 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
 
     // Local theme generator selects
     if (selectEl->GetId() == "theme-scheme-select") {
-        themeSchemeIndex = val.toInt();
+        themeSchemeIndex = std::stoi(val);
     } else if (selectEl->GetId() == "theme-mode-select") {
-        themeDarkMode = (val == QLatin1String("dark"));
+        themeDarkMode = (val == std::string("dark"));
     }
 
     requestRender(50);
 }
 
-void SettingsController::handleAction(const QString &action, ::Rml::Element *target)
+void SettingsController::handleAction(const std::string &action, ::Rml::Element *target)
 {
-    if (action == QLatin1String("close")) {
+    if (action == std::string("close")) {
         shell.closeSettings();
-    } else if (action == QLatin1String("manage-accounts")) {
+    } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
-    } else if (action == QLatin1String("open-upstream")) {
-        QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/ouwou/acheron")));
-    } else if (action == QLatin1String("generate-theme")) {
+    } else if (action == std::string("open-upstream")) {
+        Platform::openUrl("https://github.com/ouwou/acheron");
+    } else if (action == std::string("generate-theme")) {
         // Read seed color hex
         if (regionRoot) {
             if (auto *hexEl = regionRoot->GetElementById("seed-color-hex")) {
                 if (auto *inp = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(hexEl)) {
-                    QString hex = QString::fromStdString(inp->GetValue());
-                    QColor c(hex);
-                    if (c.isValid())
+                    std::string hex = inp->GetValue();
+                    auto c = Platform::Color::parse(hex);
+                    if (c.valid)
                         themeSeedColor = c;
                 }
             }
@@ -896,20 +915,27 @@ void SettingsController::handleAction(const QString &action, ::Rml::Element *tar
         Core::Theme::Manager::instance().save();
         render();
         requestRender(100);
-    } else if (action == QLatin1String("random-theme")) {
-        auto *rng = QRandomGenerator::global();
-        const qreal h = rng->generateDouble() * 360.0;
-        const qreal s = 0.55 + rng->generateDouble() * 0.40;
-        const qreal l = 0.45 + rng->generateDouble() * 0.20;
-        themeSeedColor = QColor::fromHslF(static_cast<float>(h / 360.0), static_cast<float>(s), static_cast<float>(l));
-        themeSchemeIndex = static_cast<int>(rng->generateDouble() * Core::Theme::schemeCount);
+    } else if (action == std::string("random-theme")) {
+        std::random_device rng;
+        std::uniform_real_distribution<double> unit(0.0, 1.0);
+        const double h = unit(rng) * 6.0;
+        const double saturation = 0.55 + unit(rng) * 0.40;
+        const double lightness = 0.45 + unit(rng) * 0.20;
+        const double chroma = (1.0 - std::abs(2.0 * lightness - 1.0)) * saturation;
+        const double x = chroma * (1.0 - std::abs(std::fmod(h, 2.0) - 1.0));
+        const double m = lightness - chroma / 2.0;
+        const double r = h < 1 ? chroma : h < 2 ? x : h < 4 ? 0 : h < 5 ? x : chroma;
+        const double g = h < 1 ? x : h < 3 ? chroma : h < 4 ? x : 0;
+        const double b = h < 2 ? 0 : h < 3 ? x : h < 5 ? chroma : x;
+        themeSeedColor = Platform::Color{static_cast<uint8_t>((r + m) * 255), static_cast<uint8_t>((g + m) * 255), static_cast<uint8_t>((b + m) * 255), 255, true};
+        themeSchemeIndex = std::uniform_int_distribution<int>(0, Core::Theme::schemeCount - 1)(rng);
         const auto scheme = static_cast<Core::Theme::Scheme>(std::clamp(themeSchemeIndex, 0, Core::Theme::schemeCount - 1));
         Core::Theme::Manager::instance().setOverrides(Core::Theme::generate(themeSeedColor, scheme, themeDarkMode));
         Core::Theme::Manager::instance().apply();
         Core::Theme::Manager::instance().save();
         render();
         requestRender(100);
-    } else if (action == QLatin1String("reset-theme")) {
+    } else if (action == std::string("reset-theme")) {
         Core::Theme::Manager::instance().resetAll();
         Core::Theme::Manager::instance().apply();
         Core::Theme::Manager::instance().applyFonts();
@@ -917,20 +943,20 @@ void SettingsController::handleAction(const QString &action, ::Rml::Element *tar
         themeSeedColor = Core::Theme::Manager::instance().color(Core::Theme::Token::Highlight);
         render();
         requestRender(100);
-    } else if (action == QLatin1String("font-size-inc") || action == QLatin1String("font-size-dec")) {
-        int roleInt = attribute(target, "data-role").toInt();
+    } else if (action == std::string("font-size-inc") || action == std::string("font-size-dec")) {
+        int roleInt = std::stoi(attribute(target, "data-role"));
         auto role = static_cast<Core::Theme::FontRole>(roleInt);
-        QFont f = Core::Theme::Manager::instance().font(role);
-        int curPt = QFontInfo(f).pointSize();
-        int newPt = (action == QLatin1String("font-size-inc")) ? curPt + 1 : std::max(6, curPt - 1);
-        f.setPointSize(newPt);
+        auto f = Core::Theme::Manager::instance().font(role);
+        int curPt = static_cast<int>(f.pointSize);
+        int newPt = (action == std::string("font-size-inc")) ? curPt + 1 : std::max(6, curPt - 1);
+        f.pointSize = newPt;
         Core::Theme::Manager::instance().setFontOverride(role, f);
         Core::Theme::Manager::instance().applyFonts();
         Core::Theme::Manager::instance().save();
         render();
         requestRender(100);
-    } else if (action == QLatin1String("reset-font")) {
-        int roleInt = attribute(target, "data-role").toInt();
+    } else if (action == std::string("reset-font")) {
+        int roleInt = std::stoi(attribute(target, "data-role"));
         auto role = static_cast<Core::Theme::FontRole>(roleInt);
         Core::Theme::Manager::instance().clearFontOverride(role);
         Core::Theme::Manager::instance().applyFonts();

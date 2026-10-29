@@ -3,9 +3,7 @@
 #include "Shell.hpp"
 #include "RmlView.hpp"
 #include "RmlRuntime.hpp"
-
 #include "Core/ClientInstance.hpp"
-#include "Core/ImageManager.hpp"
 #include "Core/MessageManager.hpp"
 #include "Core/Presence/ActivityFormat.hpp"
 #include "Core/Presence/PresenceBadge.hpp"
@@ -13,546 +11,284 @@
 #include "Core/UserManager.hpp"
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Client.hpp"
-
-#include <QColor>
-#include <QDateTime>
-#include <QLocale>
-
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Elements/ElementFormControlInput.h>
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/Input.h>
+#include <algorithm>
+#include <chrono>
+#include <format>
 
-namespace Styx {
-namespace UI {
-namespace Rml {
-
+namespace Styx::UI::Rml {
 namespace {
-
-QString formatDate(const QDateTime &dt)
+std::string formatDate(const Platform::DateTime &date)
 {
-    if (!dt.isValid())
-        return QStringLiteral("—");
-    return QLocale::system().toString(dt.toLocalTime().date(), QStringLiteral("MMM d, yyyy"));
+    return date.valid() ? date.format("%b %d, %Y") : "—";
+}
 }
 
-} // namespace
-
-UserProfileController::UserProfileController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
-{
-    activityTimer.setInterval(1000);
-    connect(&activityTimer, &QTimer::timeout, this, [this]() {
-        if (visible)
-            renderPresenceAndActivities();
-    });
-}
-
+UserProfileController::UserProfileController(Shell &shell) : Controller(shell, nullptr) {}
 UserProfileController::~UserProfileController()
 {
-    if (profileDocument) {
-        profileDocument->Close();
-        profileDocument = nullptr;
-    }
+    activityTimer.stop();
+    if (profileDocument) profileDocument->Close();
 }
-
-Core::ClientInstance *UserProfileController::clientInstance() const
-{
-    return shell.currentInstance();
-}
-
+Core::ClientInstance *UserProfileController::clientInstance() const { return shell.currentInstance(); }
 std::optional<Discord::User> UserProfileController::cachedUser() const
 {
     auto *inst = clientInstance();
-    if (!inst || !currentUserId.isValid())
-        return std::nullopt;
-    return inst->users()->getUser(currentUserId);
+    return inst && inst->users() && currentUserId.isValid() ? inst->users()->getUser(currentUserId) : std::nullopt;
 }
-
 std::optional<Discord::Member> UserProfileController::cachedMember() const
 {
     auto *inst = clientInstance();
-    if (!inst || !currentGuildId.isValid() || !currentUserId.isValid())
-        return std::nullopt;
-    return inst->users()->getMember(currentGuildId, currentUserId);
+    return inst && inst->users() && currentGuildId.isValid() && currentUserId.isValid()
+        ? inst->users()->getMember(currentGuildId, currentUserId) : std::nullopt;
 }
-
-QString UserProfileController::tagHandle() const
+std::string UserProfileController::tagHandle() const
 {
-    if (auto u = cachedUser(); u && u->username.hasValue())
-        return QStringLiteral("@") + u->username.get();
-    if (hasProfile && profile.user.get().username.hasValue())
-        return QStringLiteral("@") + profile.user.get().username.get();
-    return QStringLiteral("@unknown");
+    if (auto u = cachedUser(); u && u->username.hasValue()) return "@" + u->username.get();
+    if (hasProfile && profile.user.get().username.hasValue()) return "@" + profile.user.get().username.get();
+    return "@unknown";
 }
-
-QString UserProfileController::resolvedDisplayName() const
+std::string UserProfileController::resolvedDisplayName() const
 {
-    auto *inst = clientInstance();
-    if (inst && currentGuildId.isValid()) {
-        QString nick = inst->users()->getNickname(currentUserId, currentGuildId);
-        if (!nick.isEmpty())
-            return nick;
+    if (auto *inst = clientInstance(); inst && inst->users() && currentGuildId.isValid()) {
+        auto nick = inst->users()->getNickname(currentUserId, currentGuildId);
+        if (!nick.empty()) return nick;
     }
-    if (auto u = cachedUser())
-        return u->getDisplayName();
-    if (hasProfile)
-        return profile.user.get().getDisplayName();
-    return QStringLiteral("Unknown User");
+    if (auto u = cachedUser()) return u->getDisplayName();
+    return hasProfile ? profile.user.get().getDisplayName() : "Unknown User";
 }
-
-QUrl UserProfileController::resolvedAvatarUrl(int size) const
+std::string UserProfileController::resolvedAvatarUrl(int size) const
 {
-    QString memberHash;
-    if (auto m = cachedMember())
-        memberHash = m->avatar.valueOr();
-
-    QString userHash;
-    if (auto u = cachedUser())
-        userHash = u->avatar.valueOr();
-    if (userHash.isEmpty() && hasProfile)
-        userHash = profile.user.get().avatar.valueOr();
-
+    std::string memberHash, userHash;
+    if (auto m = cachedMember()) memberHash = m->avatar.valueOr();
+    if (auto u = cachedUser()) userHash = u->avatar.valueOr();
+    if (userHash.empty() && hasProfile) userHash = profile.user.get().avatar.valueOr();
     return Discord::Cdn::effectiveAvatar(currentGuildId, currentUserId, memberHash, userHash, size);
 }
-
 int UserProfileController::resolvedAccentColor() const
 {
-    if (hasProfile && profile.guildMemberProfile.hasValue() && profile.guildMemberProfile.get().accentColor.hasValue())
-        return profile.guildMemberProfile.get().accentColor.get();
-    if (hasProfile && profile.userProfile.hasValue() && profile.userProfile.get().accentColor.hasValue())
-        return profile.userProfile.get().accentColor.get();
-    if (hasProfile && profile.user.get().accentColor.hasValue())
-        return profile.user.get().accentColor.get();
-    if (auto u = cachedUser(); u && u->accentColor.hasValue())
-        return u->accentColor.get();
+    if (hasProfile && profile.guildMemberProfile.hasValue() && profile.guildMemberProfile.get().accentColor.hasValue()) return profile.guildMemberProfile.get().accentColor.get();
+    if (hasProfile && profile.userProfile.hasValue() && profile.userProfile.get().accentColor.hasValue()) return profile.userProfile.get().accentColor.get();
+    if (hasProfile && profile.user.get().accentColor.hasValue()) return profile.user.get().accentColor.get();
+    if (auto u = cachedUser(); u && u->accentColor.hasValue()) return u->accentColor.get();
     return 0;
 }
-
 bool UserProfileController::isBot() const
 {
-    if (auto u = cachedUser(); u && u->bot.hasValue() && u->bot.get())
-        return true;
-    return hasProfile && profile.user.get().bot.hasValue() && profile.user.get().bot.get();
+    if (auto u = cachedUser(); u && u->bot.valueOr(false)) return true;
+    return hasProfile && profile.user.get().bot.valueOr(false);
 }
-
 void UserProfileController::ensureDocument()
 {
-    if (profileDocument || !shell.view() || !shell.view()->context())
-        return;
-
+    if (profileDocument || !shell.view() || !shell.view()->context()) return;
     profileDocument = shell.view()->context()->LoadDocument(":/ui/user_profile.rml");
-    if (!profileDocument)
-        return;
-
+    if (!profileDocument) return;
     regionRoot = profileDocument;
-
     listen("click", [this](::Rml::Event &event) {
         auto *target = event.GetTargetElement();
-        if (!target)
-            return;
-
+        if (!target) return;
         if (target->GetId() == "profile-backdrop" || target->GetId() == "user-profile-root") {
-            event.StopPropagation();
-            hide();
-            return;
+            event.StopPropagation(); hide(); return;
         }
-
         if (target->GetId() == "profile-message-btn" || closest(target, "profile-message-btn")) {
             event.StopPropagation();
-            Core::Snowflake accId = shell.location().accountId;
-            Core::Snowflake targetUser = currentUserId;
-            hide();
-            shell.openDmWithUser(accId, targetUser);
-            return;
+            auto account = shell.location().accountId;
+            auto user = currentUserId;
+            hide(); shell.openDmWithUser(account, user);
         }
     }, profileDocument);
-
     listen("keydown", [this](::Rml::Event &event) {
-        const auto key = static_cast<::Rml::Input::KeyIdentifier>(
-            event.GetParameter<int>("key_identifier", 0));
-        if (key == ::Rml::Input::KI_ESCAPE) {
-            event.StopPropagation();
-            hide();
+        if (event.GetParameter<int>("key_identifier", 0) == ::Rml::Input::KI_ESCAPE) {
+            event.StopPropagation(); hide();
         }
     }, profileDocument);
-
     listen("change", [this](::Rml::Event &event) {
         auto *target = event.GetTargetElement();
-        if (target && target->GetId() == "profile-note-input") {
-            noteDirty = true;
-        }
+        if (target && target->GetId() == "profile-note-input") noteDirty = true;
     }, profileDocument);
 }
-
-void UserProfileController::positionCard(const QRectF &anchorRect)
+void UserProfileController::positionCard(const Platform::Rect &anchor)
 {
-    if (!profileDocument)
-        return;
-
+    if (!profileDocument) return;
     auto *card = profileDocument->GetElementById("profile-card");
-    if (!card)
-        return;
-
-    const float popoutW = 320.0f;
-    const float popoutH = 460.0f;
-    float winW = shell.view() ? static_cast<float>(shell.view()->width()) : 1280.0f;
-    float winH = shell.view() ? static_cast<float>(shell.view()->height()) : 720.0f;
-
-    float left = (winW - popoutW) / 2.0f;
-    float top = (winH - popoutH) / 2.0f;
-
-    if (anchorRect.isValid() && anchorRect.width() > 0 && anchorRect.height() > 0) {
-        // Place adjacent to anchor
-        if (anchorRect.center().x() > winW / 2.0f) {
-            // Anchor on the right -> popout to the left
-            left = static_cast<float>(anchorRect.left()) - popoutW - 8.0f;
-        } else {
-            // Anchor on the left -> popout to the right
-            left = static_cast<float>(anchorRect.right()) + 8.0f;
-        }
-
-        top = static_cast<float>(anchorRect.top());
-        // Clamp bounds
-        if (left < 10.0f)
-            left = 10.0f;
-        if (left + popoutW > winW - 10.0f)
-            left = winW - popoutW - 10.0f;
-        if (top < 10.0f)
-            top = 10.0f;
-        if (top + popoutH > winH - 10.0f)
-            top = winH - popoutH - 10.0f;
+    if (!card) return;
+    constexpr float w = 320, h = 460;
+    float winW = shell.view() ? static_cast<float>(shell.view()->width()) : 1280;
+    float winH = shell.view() ? static_cast<float>(shell.view()->height()) : 720;
+    float left = (winW - w) / 2, top = (winH - h) / 2;
+    if (!anchor.empty()) {
+        left = anchor.x + anchor.width / 2 > winW / 2 ? anchor.x - w - 8 : anchor.x + anchor.width + 8;
+        top = anchor.y;
+        left = std::max(10.0f, std::min(left, winW - w - 10));
+        top = std::max(10.0f, std::min(top, winH - h - 10));
     }
-
-    card->SetProperty("left", QStringLiteral("%1px").arg(left).toStdString());
-    card->SetProperty("top", QStringLiteral("%1px").arg(top).toStdString());
+    card->SetProperty("left", std::format("{}px", left));
+    card->SetProperty("top", std::format("{}px", top));
 }
-
 void UserProfileController::updateProfileData()
 {
-    if (!profileDocument)
-        return;
-
     auto *inst = clientInstance();
-    if (!inst)
-        return;
-
-    // Names
-    if (auto *nameEl = profileDocument->GetElementById("profile-display-name"))
-        nameEl->SetInnerRML(resolvedDisplayName().toHtmlEscaped().toStdString());
-
-    if (auto *handleEl = profileDocument->GetElementById("profile-handle"))
-        handleEl->SetInnerRML(tagHandle().toHtmlEscaped().toStdString());
-
-    if (auto *botBadge = profileDocument->GetElementById("profile-bot-badge"))
-        botBadge->SetClass("visible", isBot());
-
-    // Pronouns
-    QString pronouns;
-    if (hasProfile && profile.guildMemberProfile.hasValue() && !profile.guildMemberProfile.get().pronouns.get().isEmpty())
-        pronouns = profile.guildMemberProfile.get().pronouns.get();
-    else if (hasProfile && !profile.userProfile.get().pronouns.get().isEmpty())
-        pronouns = profile.userProfile.get().pronouns.get();
-
-    if (auto *pronounsEl = profileDocument->GetElementById("profile-pronouns")) {
-        pronounsEl->SetInnerRML(pronouns.toHtmlEscaped().toStdString());
-        pronounsEl->SetClass("visible", !pronouns.isEmpty());
+    if (!profileDocument || !inst) return;
+    if (auto *el = profileDocument->GetElementById("profile-display-name")) el->SetInnerRML(escape(resolvedDisplayName()));
+    if (auto *el = profileDocument->GetElementById("profile-handle")) el->SetInnerRML(escape(tagHandle()));
+    if (auto *el = profileDocument->GetElementById("profile-bot-badge")) el->SetClass("visible", isBot());
+    std::string pronouns;
+    if (hasProfile && profile.guildMemberProfile.hasValue()) pronouns = profile.guildMemberProfile.get().pronouns.valueOr();
+    if (pronouns.empty() && hasProfile && profile.userProfile.hasValue()) pronouns = profile.userProfile.get().pronouns.valueOr();
+    if (auto *el = profileDocument->GetElementById("profile-pronouns")) { el->SetInnerRML(escape(pronouns)); el->SetClass("visible", !pronouns.empty()); }
+    if (auto *el = profileDocument->GetElementById("profile-avatar-img")) el->SetAttribute("src", shell.imageSource(resolvedAvatarUrl(128), {68, 68}));
+    std::string banner;
+    if (hasProfile && profile.guildMemberProfile.hasValue()) banner = profile.guildMemberProfile.get().banner.valueOr();
+    if (banner.empty() && hasProfile) banner = profile.user.get().banner.valueOr();
+    if (auto *el = profileDocument->GetElementById("profile-banner-img")) {
+        if (!banner.empty()) el->SetAttribute("src", shell.imageSource(Discord::Cdn::userBanner(currentUserId, banner, 640), {320, 105}));
+        el->SetClass("visible", !banner.empty());
     }
-
-    // Avatar
-    if (auto *avatarImg = profileDocument->GetElementById("profile-avatar-img")) {
-        QUrl avatarUrl = resolvedAvatarUrl(128);
-        QString src = shell.imageSource(avatarUrl, QSize(68, 68));
-        avatarImg->SetAttribute("src", src.toStdString());
+    if (auto *el = profileDocument->GetElementById("profile-banner")) {
+        auto color = resolvedAccentColor();
+        el->SetProperty("background-color", color ? Platform::Color::rgb(color).css() : "#5865f2");
     }
-
-    // Banner
-    QString bannerHash;
-    if (hasProfile && profile.guildMemberProfile.hasValue() && profile.guildMemberProfile.get().banner.hasValue())
-        bannerHash = profile.guildMemberProfile.get().banner.get();
-    if (bannerHash.isEmpty() && hasProfile && profile.user.get().banner.hasValue())
-        bannerHash = profile.user.get().banner.get();
-
-    if (auto *bannerImg = profileDocument->GetElementById("profile-banner-img")) {
-        if (!bannerHash.isEmpty()) {
-            QUrl bannerUrl = Discord::Cdn::userBanner(currentUserId, bannerHash, 640);
-            QString src = shell.imageSource(bannerUrl, QSize(320, 105));
-            bannerImg->SetAttribute("src", src.toStdString());
-            bannerImg->SetClass("visible", true);
-        } else {
-            bannerImg->SetClass("visible", false);
+    std::string bio;
+    if (hasProfile && profile.guildMemberProfile.hasValue()) bio = profile.guildMemberProfile.get().bio.valueOr();
+    if (bio.empty() && hasProfile && profile.userProfile.hasValue()) bio = profile.userProfile.get().bio.valueOr();
+    if (auto *section = profileDocument->GetElementById("profile-bio-section")) {
+        section->SetProperty("display", bio.empty() ? "none" : "block");
+        if (!bio.empty()) if (auto *el = profileDocument->GetElementById("profile-bio")) el->SetInnerRML(inst->messages()->profileBioHtml(bio));
+    }
+    if (!noteDirty) {
+        if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(profileDocument->GetElementById("profile-note-input"))) {
+            initialNote = inst->users()->getCachedNote(currentUserId).value_or(std::string());
+            input->SetValue(initialNote);
         }
     }
-
-    if (auto *bannerEl = profileDocument->GetElementById("profile-banner")) {
-        int colorInt = resolvedAccentColor();
-        if (colorInt != 0) {
-            QColor color = QColor::fromRgb(colorInt);
-            bannerEl->SetProperty("background-color", color.name().toStdString());
-        } else {
-            bannerEl->SetProperty("background-color", "#5865f2");
-        }
-    }
-
-    // Bio / About Me
-    QString bio;
-    if (hasProfile && profile.guildMemberProfile.hasValue() && profile.guildMemberProfile.get().bio.hasValue())
-        bio = profile.guildMemberProfile.get().bio.get();
-    if (bio.isEmpty() && hasProfile && profile.userProfile.hasValue() && profile.userProfile.get().bio.hasValue())
-        bio = profile.userProfile.get().bio.get();
-
-    if (auto *bioSec = profileDocument->GetElementById("profile-bio-section")) {
-        if (!bio.isEmpty()) {
-            bioSec->SetProperty("display", "block");
-            if (auto *bioEl = profileDocument->GetElementById("profile-bio")) {
-                QString bioHtml = inst->messages()->profileBioHtml(bio);
-                bioEl->SetInnerRML(bioHtml.toStdString());
-            }
-        } else {
-            bioSec->SetProperty("display", "none");
-        }
-    }
-
-    // Note
-    if (auto *noteInput = profileDocument->GetElementById("profile-note-input")) {
-        if (auto *formInput = dynamic_cast<::Rml::ElementFormControlInput *>(noteInput)) {
-            QString note = inst->users()->getCachedNote(currentUserId).value_or(QString());
-            initialNote = note;
-            formInput->SetValue(note.toStdString());
-            noteDirty = false;
-        }
-    }
-
-    renderPresenceAndActivities();
-    renderRoles();
-    renderDates();
+    renderPresenceAndActivities(); renderRoles(); renderDates();
 }
-
 void UserProfileController::renderPresenceAndActivities()
 {
-    if (!profileDocument)
-        return;
-
     auto *inst = clientInstance();
-    if (!inst)
-        return;
-
+    if (!profileDocument || !inst || !inst->presences()) return;
     auto *presences = inst->presences();
-    Core::PresenceBadge badge = presences->badge(currentUserId, currentGuildId);
-
-    // Status dot
-    if (auto *dotEl = profileDocument->GetElementById("profile-status-dot")) {
-        dotEl->SetClass("online", badge.status == Discord::StatusType::ONLINE && !badge.streaming);
-        dotEl->SetClass("idle", badge.status == Discord::StatusType::IDLE && !badge.streaming);
-        dotEl->SetClass("dnd", badge.status == Discord::StatusType::DND && !badge.streaming);
-        dotEl->SetClass("offline", badge.status == Discord::StatusType::OFFLINE && !badge.streaming);
-        dotEl->SetClass("streaming", badge.streaming);
+    auto badge = presences->badge(currentUserId, currentGuildId);
+    if (auto *dot = profileDocument->GetElementById("profile-status-dot")) {
+        dot->SetClass("online", badge.status == Discord::StatusType::ONLINE && !badge.streaming);
+        dot->SetClass("idle", badge.status == Discord::StatusType::IDLE && !badge.streaming);
+        dot->SetClass("dnd", badge.status == Discord::StatusType::DND && !badge.streaming);
+        dot->SetClass("offline", badge.status == Discord::StatusType::OFFLINE && !badge.streaming);
+        dot->SetClass("streaming", badge.streaming);
     }
-
-    const QList<Discord::Activity> allActivities = presences->activities(currentUserId, currentGuildId);
-
-    // Custom status
-    const Discord::Activity *custom = Core::ActivityFormat::custom(allActivities);
-    if (auto *customRow = profileDocument->GetElementById("profile-custom-status")) {
-        if (custom && !custom->stateText().isEmpty()) {
-            customRow->SetClass("visible", true);
-            if (auto *textEl = profileDocument->GetElementById("profile-status-text"))
-                textEl->SetInnerRML(custom->stateText().toHtmlEscaped().toStdString());
-            if (auto *emojiEl = profileDocument->GetElementById("profile-status-emoji")) {
-                const Discord::ActivityEmoji emoji = custom->emoji.hasValue() ? custom->emoji.get() : Discord::ActivityEmoji();
-                if (!emoji.isUnicode() && emoji.id.hasValue()) {
-                    QUrl emojiUrl = emoji.stillImageUrl(32);
-                    emojiEl->SetAttribute("src", shell.imageSource(emojiUrl, QSize(18, 18)).toStdString());
-                    emojiEl->SetProperty("display", "inline-block");
-                } else if (!emoji.nameText().isEmpty()) {
-                    emojiEl->SetAttribute("src", Runtime::emojiSource(emoji.nameText()).toStdString());
-                    emojiEl->SetProperty("display", "inline-block");
-                } else {
-                    emojiEl->SetProperty("display", "none");
-                }
+    auto activities = presences->activities(currentUserId, currentGuildId);
+    auto *custom = Core::ActivityFormat::custom(activities);
+    if (auto *row = profileDocument->GetElementById("profile-custom-status")) {
+        const bool show = custom && !custom->stateText().empty();
+        row->SetClass("visible", show);
+        if (show) {
+            if (auto *el = profileDocument->GetElementById("profile-status-text")) el->SetInnerRML(escape(custom->stateText()));
+            if (auto *el = profileDocument->GetElementById("profile-status-emoji")) {
+                auto emoji = custom->emoji.hasValue() ? custom->emoji.get() : Discord::ActivityEmoji();
+                std::string src;
+                if (!emoji.isUnicode() && emoji.id.hasValue()) src = shell.imageSource(emoji.stillImageUrl(32), {18, 18});
+                else if (!emoji.nameText().empty()) src = Runtime::emojiSource(emoji.nameText());
+                if (!src.empty()) el->SetAttribute("src", src);
+                el->SetProperty("display", src.empty() ? "none" : "inline-block");
             }
-        } else {
-            customRow->SetClass("visible", false);
         }
     }
-
-    // Activities
-    if (auto *activitiesContainer = profileDocument->GetElementById("profile-activities")) {
-        QString activitiesRml;
-        auto profileActivities = Core::ActivityFormat::profileCardActivities(allActivities);
-        for (const Discord::Activity &act : profileActivities) {
-            QString heading = Core::ActivityFormat::cardHeading(act);
+    if (auto *container = profileDocument->GetElementById("profile-activities")) {
+        std::string rml;
+        auto cards = Core::ActivityFormat::profileCardActivities(Core::ActivityFormat::sortAndFilter(activities));
+        for (const auto &act : cards) {
+            auto heading = Core::ActivityFormat::cardHeading(act);
             bool named = Core::ActivityFormat::headingHasName(act);
-            QString title = named ? act.detailsText() : act.nameText();
-            QString details = named ? QString() : act.detailsText();
-            QString state = Core::ActivityFormat::partyText(act);
-            auto timer = Core::ActivityFormat::timerFor(act);
-            QString timerText = Core::ActivityFormat::timerText(timer, QDateTime::currentMSecsSinceEpoch());
-
-            QUrl largeImgUrl;
-            if (act.assets.hasValue() && act.assets.get().largeImage.hasValue()) {
-                QString asset = act.assets.get().largeImage.get();
-                if (act.applicationId.hasValue())
-                    largeImgUrl = Discord::Cdn::activityAsset(act.applicationId.get(), asset, 96);
-            }
-            if (!largeImgUrl.isValid() && act.applicationId.hasValue()) {
-                largeImgUrl = Discord::Cdn::applicationIcon(act.applicationId.get(),
-                    inst->discord()->applicationIconHash(act.applicationId.get()), 96);
-            }
-
-            activitiesRml += QStringLiteral("<div class=\"activity-card\">");
-            activitiesRml += QStringLiteral("<div class=\"activity-header\">%1</div>").arg(heading.toHtmlEscaped());
-            activitiesRml += QStringLiteral("<div class=\"activity-content\">");
-            if (largeImgUrl.isValid()) {
-                QString imgSource = shell.imageSource(largeImgUrl, QSize(48, 48));
-                activitiesRml += QStringLiteral("<div class=\"activity-image-wrap\"><img class=\"activity-large-img\" src=\"%1\"/></div>").arg(imgSource);
-            }
-            activitiesRml += QStringLiteral("<div class=\"activity-text-col\">");
-            if (!title.isEmpty())
-                activitiesRml += QStringLiteral("<div class=\"activity-name\">%1</div>").arg(title.toHtmlEscaped());
-            if (!details.isEmpty())
-                activitiesRml += QStringLiteral("<div class=\"activity-details\">%1</div>").arg(details.toHtmlEscaped());
-            if (!state.isEmpty())
-                activitiesRml += QStringLiteral("<div class=\"activity-state\">%1</div>").arg(state.toHtmlEscaped());
-            if (!timerText.isEmpty())
-                activitiesRml += QStringLiteral("<div class=\"activity-timer\">%1</div>").arg(timerText.toHtmlEscaped());
-            activitiesRml += QStringLiteral("</div></div></div>");
+            auto title = named ? act.detailsText() : act.nameText();
+            auto details = named ? std::string() : act.detailsText();
+            auto state = Core::ActivityFormat::partyText(act);
+            auto timer = Core::ActivityFormat::timerText(Core::ActivityFormat::timerFor(act), Platform::DateTime::now().unixMillis());
+            std::string image;
+            if (act.assets.hasValue() && act.assets->largeImage.hasValue() && act.applicationId.hasValue()) image = Discord::Cdn::activityAsset(act.applicationId.get(), act.assets->largeImage.get(), 96);
+            if (image.empty() && act.applicationId.hasValue() && inst->discord()) image = Discord::Cdn::applicationIcon(act.applicationId.get(), inst->discord()->applicationIconHash(act.applicationId.get()), 96);
+            rml += "<div class=\"activity-card\"><div class=\"activity-header\">" + escape(heading) + "</div><div class=\"activity-content\">";
+            if (!image.empty()) rml += "<div class=\"activity-image-wrap\"><img class=\"activity-large-img\" src=\"" + escape(shell.imageSource(image, {48, 48})) + "\"/></div>";
+            rml += "<div class=\"activity-text-col\">";
+            if (!title.empty()) rml += "<div class=\"activity-name\">" + escape(title) + "</div>";
+            if (!details.empty()) rml += "<div class=\"activity-details\">" + escape(details) + "</div>";
+            if (!state.empty()) rml += "<div class=\"activity-state\">" + escape(state) + "</div>";
+            if (!timer.empty()) rml += "<div class=\"activity-timer\">" + escape(timer) + "</div>";
+            rml += "</div></div></div>";
         }
-
-        activitiesContainer->SetInnerRML(activitiesRml.toStdString());
-        if (auto *actSec = profileDocument->GetElementById("profile-activities-section"))
-            actSec->SetProperty("display", profileActivities.isEmpty() ? "none" : "block");
+        container->SetInnerRML(rml);
+        if (auto *section = profileDocument->GetElementById("profile-activities-section")) section->SetProperty("display", cards.empty() ? "none" : "block");
     }
 }
-
 void UserProfileController::renderRoles()
 {
-    if (!profileDocument)
-        return;
-
+    if (!profileDocument) return;
     auto *inst = clientInstance();
-    if (!inst || !currentGuildId.isValid()) {
-        if (auto *rolesSec = profileDocument->GetElementById("profile-roles-section"))
-            rolesSec->SetProperty("display", "none");
-        return;
-    }
-
-    QList<Discord::Role> memberRoles = inst->getMemberRolesSorted(currentGuildId, currentUserId);
-    if (auto *rolesContainer = profileDocument->GetElementById("profile-roles")) {
-        QString rolesRml;
-        for (const auto &role : memberRoles) {
-            QColor color = role.hasColor() ? role.getColor() : QColor(148, 155, 164);
-            rolesRml += QStringLiteral("<div class=\"role-pill\">"
-                                       "<div class=\"role-dot\" style=\"background-color: %1;\"></div>"
-                                       "<span>%2</span>"
-                                       "</div>")
-                            .arg(color.name(), role.name.get().toHtmlEscaped());
+    std::vector<Discord::Role> roles;
+    if (inst && currentGuildId.isValid()) roles = inst->getMemberRolesSorted(currentGuildId, currentUserId);
+    if (auto *container = profileDocument->GetElementById("profile-roles")) {
+        std::string rml;
+        for (const auto &role : roles) {
+            auto color = role.hasColor() ? role.getColor() : Platform::Color::rgb(0x949ba4);
+            rml += "<div class=\"role-pill\"><div class=\"role-dot\" style=\"background-color: " + color.css() + ";\"></div><span>" + escape(role.name.get()) + "</span></div>";
         }
-        rolesContainer->SetInnerRML(rolesRml.toStdString());
+        container->SetInnerRML(rml);
     }
-
-    if (auto *rolesSec = profileDocument->GetElementById("profile-roles-section"))
-        rolesSec->SetProperty("display", memberRoles.isEmpty() ? "none" : "block");
+    if (auto *section = profileDocument->GetElementById("profile-roles-section")) section->SetProperty("display", roles.empty() ? "none" : "block");
 }
-
 void UserProfileController::renderDates()
 {
-    if (!profileDocument)
-        return;
-
-    auto *datesContainer = profileDocument->GetElementById("profile-dates");
-    if (!datesContainer)
-        return;
-
-    QString datesRml;
-    datesRml += QStringLiteral("<div class=\"dates-row\">Discord: <b>%1</b></div>").arg(formatDate(currentUserId.toDateTime()));
-
+    if (!profileDocument) return;
+    auto *container = profileDocument->GetElementById("profile-dates");
+    if (!container) return;
+    std::string rml = "<div class=\"dates-row\">Discord: <b>" + escape(formatDate(currentUserId.toDateTime())) + "</b></div>";
     if (currentGuildId.isValid()) {
-        QDateTime joinedAt;
-        if (auto m = cachedMember(); m && m->joinedAt.hasValue())
-            joinedAt = m->joinedAt.get();
-        else if (hasProfile && profile.guildMember.hasValue() && profile.guildMember.get().joinedAt.hasValue())
-            joinedAt = profile.guildMember.get().joinedAt.get();
-
-        if (joinedAt.isValid())
-            datesRml += QStringLiteral("<div class=\"dates-row\">Server: <b>%1</b></div>").arg(formatDate(joinedAt));
+        Platform::DateTime joined;
+        if (auto m = cachedMember(); m && m->joinedAt.hasValue()) joined = m->joinedAt.get();
+        else if (hasProfile && profile.guildMember.hasValue() && profile.guildMember.get().joinedAt.hasValue()) joined = profile.guildMember.get().joinedAt.get();
+        if (joined.valid()) rml += "<div class=\"dates-row\">Server: <b>" + escape(formatDate(joined)) + "</b></div>";
     }
-
-    datesContainer->SetInnerRML(datesRml.toStdString());
+    container->SetInnerRML(rml);
 }
-
 void UserProfileController::saveNoteIfDirty()
 {
-    if (!noteDirty || !currentUserId.isValid() || isBot())
-        return;
-
+    if (!noteDirty || !currentUserId.isValid() || isBot()) return;
     auto *inst = clientInstance();
-    if (!inst)
-        return;
-
-    if (auto *noteInput = profileDocument ? profileDocument->GetElementById("profile-note-input") : nullptr) {
-        if (auto *formInput = dynamic_cast<::Rml::ElementFormControlInput *>(noteInput)) {
-            QString newNote = QString::fromStdString(formInput->GetValue());
-            if (newNote != initialNote) {
-                inst->discord()->setUserNote(currentUserId, newNote);
-                initialNote = newNote;
-            }
-        }
+    if (!inst || !inst->discord()) return;
+    if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(profileDocument ? profileDocument->GetElementById("profile-note-input") : nullptr)) {
+        auto note = input->GetValue();
+        if (note != initialNote) { inst->discord()->setUserNote(currentUserId, note); initialNote = note; }
     }
     noteDirty = false;
 }
-
-void UserProfileController::showProfile(Core::Snowflake userId, Core::Snowflake guildId, const QRectF &anchorRect)
+void UserProfileController::showProfile(Core::Snowflake userId, Core::Snowflake guildId, const Platform::Rect &anchor)
 {
     ensureDocument();
-    if (!profileDocument)
-        return;
-
-    currentUserId = userId;
-    currentGuildId = guildId;
-    hasProfile = false;
-
-    updateProfileData();
-    positionCard(anchorRect);
-
-    profileDocument->Show();
-    profileDocument->PullToFront();
-    profileDocument->SetClass("open", true);
+    if (!profileDocument) return;
+    if (visible) saveNoteIfDirty();
+    currentUserId = userId; currentGuildId = guildId; hasProfile = false; noteDirty = false;
+    auto generation = ++requestGeneration;
+    updateProfileData(); positionCard(anchor);
+    profileDocument->Show(); profileDocument->PullToFront(); profileDocument->SetClass("open", true);
     visible = true;
-    activityTimer.start();
+    activityTimer.start(std::chrono::seconds(1), true, [this] { if (visible) { renderPresenceAndActivities(); requestRender(); } });
     requestRender();
-
-    // Fetch full profile asynchronously
-    if (auto *inst = clientInstance()) {
-        QPointer<UserProfileController> self(this);
-        inst->discord()->fetchUserProfile(userId, guildId, [self, userId](const Core::Result<Discord::UserProfile> &result) {
-            if (!self || !self->visible || self->currentUserId != userId)
-                return;
-            if (result.success()) {
-                self->profile = result.value.value();
-                self->hasProfile = true;
-                self->updateProfileData();
-                self->requestRender();
-            }
+    if (auto *inst = clientInstance(); inst && inst->discord()) {
+        Platform::Guard<UserProfileController> self(this);
+        inst->discord()->fetchUserProfile(userId, guildId, [self, generation](const Core::Result<Discord::UserProfile> &result) {
+            if (!self || !self->visible || self->requestGeneration != generation) return;
+            if (result.success()) { self->profile = result.value.value(); self->hasProfile = true; self->updateProfileData(); self->requestRender(); }
         });
     }
 }
-
 void UserProfileController::hide()
 {
-    if (!profileDocument || !visible)
-        return;
-
-    saveNoteIfDirty();
-    activityTimer.stop();
-    profileDocument->SetClass("open", false);
-    profileDocument->Hide();
-    visible = false;
-    requestRender();
+    if (!profileDocument || !visible) return;
+    saveNoteIfDirty(); ++requestGeneration; activityTimer.stop();
+    profileDocument->SetClass("open", false); profileDocument->Hide(); visible = false; requestRender();
 }
-
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI::Rml

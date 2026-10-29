@@ -9,6 +9,11 @@
 #include "Core/TimeUtils.hpp"
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Entities.hpp"
+#include "Platform/Native.hpp"
+#include <algorithm>
+#include <charconv>
+#include <format>
+
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
@@ -19,21 +24,20 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-static QString escape(const QString &str)
+static std::string escape(const std::string &str)
 {
-    return str.toHtmlEscaped();
+    return Platform::htmlEscape(str);
 }
 
-ForumController::ForumController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
+ForumController::ForumController(Shell &shell)
+    : Controller(shell, nullptr)
 {
 }
 
 ForumController::~ForumController()
 {
-    for (auto &conn : managerConnections)
-        QObject::disconnect(conn);
     managerConnections.clear();
+    removeListeners();
 
     if (forumDocument) {
         forumDocument->Close();
@@ -50,7 +54,7 @@ void ForumController::ensureDocument()
     if (!view || !view->context())
         return;
 
-    forumDocument = view->context()->LoadDocument(":/ui/forum.rml");
+    forumDocument = view->context()->LoadDocument("ui/forum.rml");
     if (!forumDocument)
         return;
 
@@ -72,8 +76,6 @@ void ForumController::open(Core::Snowflake accountId, Core::Snowflake guildId, C
     if (!forumDocument)
         return;
 
-    for (auto &conn : managerConnections)
-        QObject::disconnect(conn);
     managerConnections.clear();
 
     currentAccountId = accountId;
@@ -88,12 +90,12 @@ void ForumController::open(Core::Snowflake accountId, Core::Snowflake guildId, C
     auto *mgr = inst->forums();
     if (mgr) {
         currentSortMode = mgr->sortMode(forumId);
-        managerConnections.append(connect(mgr, &Core::ForumManager::postsReset, this, &ForumController::onPostsReset));
-        managerConnections.append(connect(mgr, &Core::ForumManager::postsAppended, this, &ForumController::onPostsAppended));
-        managerConnections.append(connect(mgr, &Core::ForumManager::postInserted, this, &ForumController::onPostInserted));
-        managerConnections.append(connect(mgr, &Core::ForumManager::postUpdated, this, &ForumController::onPostUpdated));
-        managerConnections.append(connect(mgr, &Core::ForumManager::postRemoved, this, &ForumController::onPostRemoved));
-        managerConnections.append(connect(mgr, &Core::ForumManager::loadingChanged, this, &ForumController::onLoadingChanged));
+        managerConnections.push_back(mgr->postsReset.connect([this](auto id) { onPostsReset(id); }));
+        managerConnections.push_back(mgr->postsAppended.connect([this](auto id, int start, int count) { onPostsAppended(id, start, count); }));
+        managerConnections.push_back(mgr->postInserted.connect([this](auto id, auto thread, int row) { onPostInserted(id, thread, row); }));
+        managerConnections.push_back(mgr->postUpdated.connect([this](auto id, auto thread) { onPostUpdated(id, thread); }));
+        managerConnections.push_back(mgr->postRemoved.connect([this](auto id, auto thread) { onPostRemoved(id, thread); }));
+        managerConnections.push_back(mgr->loadingChanged.connect([this](auto id, bool loading) { onLoadingChanged(id, loading); }));
         mgr->openForum(forumId);
     }
 
@@ -117,8 +119,6 @@ void ForumController::close()
     visible = false;
     currentForumId = Core::Snowflake::Invalid;
 
-    for (auto &conn : managerConnections)
-        QObject::disconnect(conn);
     managerConnections.clear();
 
     if (forumDocument)
@@ -141,9 +141,9 @@ void ForumController::setupEventListeners()
         if (!actionEl)
             return;
 
-        const QString action = attribute(actionEl, "data-action");
+        const std::string action = attribute(actionEl, "data-action");
 
-        if (action == QStringLiteral("sort-recent")) {
+        if (action == "sort-recent") {
             auto *inst = shell.instanceFor(currentAccountId);
             if (inst && inst->forums() && currentForumId.isValid()) {
                 currentSortMode = Core::ForumSortMode::LATEST_ACTIVITY;
@@ -151,7 +151,7 @@ void ForumController::setupEventListeners()
                 updateControls();
                 renderPosts();
             }
-        } else if (action == QStringLiteral("sort-created")) {
+        } else if (action == "sort-created") {
             auto *inst = shell.instanceFor(currentAccountId);
             if (inst && inst->forums() && currentForumId.isValid()) {
                 currentSortMode = Core::ForumSortMode::CREATION_DATE;
@@ -159,32 +159,36 @@ void ForumController::setupEventListeners()
                 updateControls();
                 renderPosts();
             }
-        } else if (action == QStringLiteral("open-composer")) {
+        } else if (action == "open-composer") {
             if (auto *composer = forumDocument->GetElementById("forum-composer"))
                 composer->SetProperty("display", "flex");
             requestRender();
-        } else if (action == QStringLiteral("close-composer")) {
+        } else if (action == "close-composer") {
             if (auto *composer = forumDocument->GetElementById("forum-composer"))
                 composer->SetProperty("display", "none");
             requestRender();
-        } else if (action == QStringLiteral("filter-all")) {
+        } else if (action == "filter-all") {
             selectedTagId = Core::Snowflake::Invalid;
             updateTags();
             renderPosts();
-        } else if (action == QStringLiteral("filter-tag")) {
-            const quint64 tid = attribute(actionEl, "data-tag-id").toULongLong();
+        } else if (action == "filter-tag") {
+            const auto text = attribute(actionEl, "data-tag-id");
+            std::uint64_t tid = 0;
+            std::from_chars(text.data(), text.data() + text.size(), tid);
             if (selectedTagId == Core::Snowflake(tid))
                 selectedTagId = Core::Snowflake::Invalid;
             else
                 selectedTagId = Core::Snowflake(tid);
             updateTags();
             renderPosts();
-        } else if (action == QStringLiteral("load-more")) {
+        } else if (action == "load-more") {
             auto *inst = shell.instanceFor(currentAccountId);
             if (inst && inst->forums() && currentForumId.isValid())
                 inst->forums()->loadMorePosts(currentForumId);
-        } else if (action == QStringLiteral("open-post")) {
-            const quint64 threadIdVal = attribute(actionEl, "data-thread-id").toULongLong();
+        } else if (action == "open-post") {
+            const auto text = attribute(actionEl, "data-thread-id");
+            std::uint64_t threadIdVal = 0;
+            std::from_chars(text.data(), text.data() + text.size(), threadIdVal);
             if (threadIdVal != 0) {
                 Core::Snowflake threadId(threadIdVal);
                 close();
@@ -200,29 +204,29 @@ void ForumController::updateHeader()
         return;
 
     auto *inst = shell.instanceFor(currentAccountId);
-    QString name = QStringLiteral("Forum");
-    QString topic;
+    std::string name = "Forum";
+    std::string topic;
 
     if (inst) {
         if (auto ch = inst->getChannel(currentForumId)) {
-            if (ch->name.hasValue() && !ch->name->isEmpty())
+            if (ch->name.hasValue() && !ch->name->empty())
                 name = ch->name.get();
-            if (ch->topic.hasValue() && !ch->topic->isEmpty())
+            if (ch->topic.hasValue() && !ch->topic->empty())
                 topic = ch->topic.get();
         }
     }
 
     if (auto *titleEl = forumDocument->GetElementById("forum-title"))
-        titleEl->SetInnerRML(escape(name).toStdString());
+        titleEl->SetInnerRML(escape(name));
 
     if (auto *topicEl = forumDocument->GetElementById("forum-topic")) {
-        if (topic.isEmpty()) {
+        if (topic.empty()) {
             topicEl->SetProperty("display", "none");
             if (auto *divEl = forumDocument->GetElementById("forum-divider"))
                 divEl->SetProperty("display", "none");
         } else {
             topicEl->SetProperty("display", "block");
-            topicEl->SetInnerRML(escape(topic).toStdString());
+            topicEl->SetInnerRML(escape(topic));
             if (auto *divEl = forumDocument->GetElementById("forum-divider"))
                 divEl->SetProperty("display", "block");
         }
@@ -259,15 +263,15 @@ void ForumController::updateTags()
     }
 
     const auto tags = inst->forums()->availableTags(currentForumId);
-    if (tags.isEmpty()) {
+    if (tags.empty()) {
         tagsBar->SetInnerRML("");
         return;
     }
 
-    QString rml;
+    std::string rml;
     const bool allActive = !selectedTagId.isValid();
-    rml += QStringLiteral("<div class=\"forum-tag-chip%1\" data-action=\"filter-all\">All</div>")
-               .arg(allActive ? QStringLiteral(" active") : QString());
+    rml += std::format("<div class=\"forum-tag-chip{}\" data-action=\"filter-all\">All</div>",
+                       allActive ? " active" : "");
 
     for (const auto &tag : tags) {
         if (!tag.id.hasValue() || !tag.name.hasValue())
@@ -276,26 +280,23 @@ void ForumController::updateTags()
         const Core::Snowflake tagId = tag.id.get();
         const bool isActive = (selectedTagId == tagId);
 
-        QString iconPart;
+        std::string iconPart;
         if (tag.emojiId.hasValue() && tag.emojiId.get().isValid()) {
-            QUrl emojiUrl = Discord::Cdn::emoji(tag.emojiId.get(), 20);
-            iconPart = QStringLiteral("<img class=\"tag-emoji\" src=\"%1\"/>")
-                           .arg(escape(shell.imageSource(emojiUrl, QSize(14, 14))));
-        } else if (tag.emojiName.hasValue() && !tag.emojiName->isEmpty()) {
-            iconPart = QStringLiteral("<span class=\"tag-emoji\">%1</span>").arg(escape(tag.emojiName.get()));
+            auto emojiUrl = Discord::Cdn::emoji(tag.emojiId.get(), 20);
+            iconPart = std::format("<img class=\"tag-emoji\" src=\"{}\"/>",
+                                   escape(shell.imageSource(emojiUrl, {14, 14})));
+        } else if (tag.emojiName.hasValue() && !tag.emojiName->empty()) {
+            iconPart = std::format("<span class=\"tag-emoji\">{}</span>", escape(tag.emojiName.get()));
         }
 
-        rml += QStringLiteral("<div class=\"forum-tag-chip%1\" data-action=\"filter-tag\" data-tag-id=\"%2\">%3%4</div>")
-                   .arg(isActive ? QStringLiteral(" active") : QString(),
-                        QString::number(static_cast<quint64>(tagId)),
-                        iconPart,
-                        escape(tag.name.get()));
+        rml += std::format("<div class=\"forum-tag-chip{}\" data-action=\"filter-tag\" data-tag-id=\"{}\">{}{}</div>",
+                           isActive ? " active" : "", tagId.toString(), iconPart, escape(tag.name.get()));
     }
 
-    tagsBar->SetInnerRML(rml.toStdString());
+    tagsBar->SetInnerRML(rml);
 }
 
-QUrl ForumController::thumbnailUrlOf(const Discord::Message *msg)
+std::string ForumController::thumbnailUrlOf(const Discord::Message *msg)
 {
     if (!msg)
         return {};
@@ -304,10 +305,10 @@ QUrl ForumController::thumbnailUrlOf(const Discord::Message *msg)
         for (const auto &att : msg->attachments.get()) {
             if (!att.isImage())
                 continue;
-            if (att.proxyUrl.hasValue() && !att.proxyUrl.get().isEmpty())
-                return QUrl(att.proxyUrl.get());
-            if (att.url.hasValue() && !att.url.get().isEmpty())
-                return QUrl(att.url.get());
+            if (att.proxyUrl.hasValue() && !att.proxyUrl.get().empty())
+                return att.proxyUrl.get();
+            if (att.url.hasValue() && !att.url.get().empty())
+                return att.url.get();
         }
     }
 
@@ -315,17 +316,17 @@ QUrl ForumController::thumbnailUrlOf(const Discord::Message *msg)
         for (const auto &embed : msg->embeds.get()) {
             if (embed.image.hasValue()) {
                 const auto &img = embed.image.get();
-                if (img.proxyUrl.hasValue() && !img.proxyUrl.get().isEmpty())
-                    return QUrl(img.proxyUrl.get());
-                if (img.url.hasValue() && !img.url.get().isEmpty())
-                    return QUrl(img.url.get());
+                if (img.proxyUrl.hasValue() && !img.proxyUrl.get().empty())
+                    return img.proxyUrl.get();
+                if (img.url.hasValue() && !img.url.get().empty())
+                    return img.url.get();
             }
             if (embed.thumbnail.hasValue()) {
                 const auto &thumb = embed.thumbnail.get();
-                if (thumb.proxyUrl.hasValue() && !thumb.proxyUrl.get().isEmpty())
-                    return QUrl(thumb.proxyUrl.get());
-                if (thumb.url.hasValue() && !thumb.url.get().isEmpty())
-                    return QUrl(thumb.url.get());
+                if (thumb.proxyUrl.hasValue() && !thumb.proxyUrl.get().empty())
+                    return thumb.proxyUrl.get();
+                if (thumb.url.hasValue() && !thumb.url.get().empty())
+                    return thumb.url.get();
             }
         }
     }
@@ -333,7 +334,7 @@ QUrl ForumController::thumbnailUrlOf(const Discord::Message *msg)
     return {};
 }
 
-QString ForumController::buildPostCardHtml(const Discord::Channel &post)
+std::string ForumController::buildPostCardHtml(const Discord::Channel &post)
 {
     const Core::Snowflake threadId = post.id.get();
     auto *inst = shell.instanceFor(currentAccountId);
@@ -345,135 +346,125 @@ QString ForumController::buildPostCardHtml(const Discord::Channel &post)
     const Discord::Message *starter = mgr->firstMessagePtr(threadId);
 
     const auto readState = mgr->postReadState(threadId);
-    const QString title = post.name.valueOr(QStringLiteral("Untitled"));
+    const std::string title = post.name.valueOr("Untitled");
 
-    // Tags lookup
-    QString tagsHtml;
-    if (post.appliedTags.hasValue() && !post.appliedTags->isEmpty()) {
+    std::string tagsHtml;
+    if (post.appliedTags.hasValue() && !post.appliedTags->empty()) {
         const auto available = mgr->availableTags(currentForumId);
-        QHash<Core::Snowflake, Discord::ForumTag> tagLookup;
-        for (const auto &t : available) {
-            if (t.id.hasValue())
-                tagLookup.insert(t.id.get(), t);
-        }
-
-        QString pills;
+        std::string pills;
         for (const auto &tId : post.appliedTags.get()) {
-            auto it = tagLookup.constFind(tId);
-            if (it == tagLookup.constEnd() || !it->name.hasValue())
+            const auto it = std::find_if(available.begin(), available.end(), [tId](const auto &tag) {
+                return tag.id.hasValue() && tag.id.get() == tId;
+            });
+            if (it == available.end() || !it->name.hasValue())
                 continue;
 
-            QString iconPart;
+            std::string iconPart;
             if (it->emojiId.hasValue() && it->emojiId.get().isValid()) {
-                QUrl emojiUrl = Discord::Cdn::emoji(it->emojiId.get(), 20);
-                iconPart = QStringLiteral("<img class=\"tag-emoji\" src=\"%1\"/>")
-                               .arg(escape(shell.imageSource(emojiUrl, QSize(12, 12))));
-            } else if (it->emojiName.hasValue() && !it->emojiName->isEmpty()) {
-                iconPart = QStringLiteral("<span class=\"tag-emoji\">%1</span>").arg(escape(it->emojiName.get()));
+                auto emojiUrl = Discord::Cdn::emoji(it->emojiId.get(), 20);
+                iconPart = std::format("<img class=\"tag-emoji\" src=\"{}\"/>",
+                                       escape(shell.imageSource(emojiUrl, {12, 12})));
+            } else if (it->emojiName.hasValue() && !it->emojiName->empty()) {
+                iconPart = std::format("<span class=\"tag-emoji\">{}</span>", escape(it->emojiName.get()));
             }
-
-            pills += QStringLiteral("<div class=\"forum-card-tag-pill\">%1%2</div>")
-                         .arg(iconPart, escape(it->name.get()));
+            pills += std::format("<div class=\"forum-card-tag-pill\">{}{}</div>", iconPart, escape(it->name.get()));
         }
-
-        if (!pills.isEmpty())
-            tagsHtml = QStringLiteral("<div class=\"forum-card-tags-row\">%1</div>").arg(pills);
+        if (!pills.empty())
+            tagsHtml = std::format("<div class=\"forum-card-tags-row\">{}</div>", pills);
     }
 
-    // Message snippet
-    QString snippet;
-    if (starter && starter->content.hasValue() && !starter->content->isEmpty()) {
-        snippet = starter->content.get().simplified();
-        if (snippet.length() > 140)
-            snippet = snippet.left(137) + QStringLiteral("…");
+    std::string snippet;
+    if (starter && starter->content.hasValue() && !starter->content->empty()) {
+        const auto chars = Platform::codepoints(starter->content.get());
+        std::vector<char32_t> simplified;
+        bool space = false;
+        for (char32_t ch : chars) {
+            const bool whitespace = ch == U' ' || (ch >= U'\t' && ch <= U'\r') || ch == 0x85 ||
+                                    ch == 0xa0 || ch == 0x1680 || (ch >= 0x2000 && ch <= 0x200a) ||
+                                    ch == 0x2028 || ch == 0x2029 || ch == 0x202f || ch == 0x205f || ch == 0x3000;
+            if (whitespace) {
+                space = !simplified.empty();
+            } else {
+                if (space)
+                    simplified.push_back(U' ');
+                simplified.push_back(ch);
+                space = false;
+            }
+        }
+        if (simplified.size() > 140) {
+            simplified.resize(137);
+            simplified.push_back(U'…');
+        }
+        snippet = Platform::fromCodepoints(simplified);
     }
 
-    // Author info
-    QString authorName = QStringLiteral("User");
-    QString avatarSrc;
-    QColor authorColor;
+    std::string authorName = "User";
+    std::string avatarSrc;
+    Platform::Color authorColor;
 
     if (starter && starter->author.hasValue()) {
         const auto &author = starter->author.get();
         if (author.id.hasValue()) {
             const Core::Snowflake authorId = author.id.get();
             authorColor = shell.roleColor(authorId, currentGuildId);
-            QUrl avatarUrl = Discord::Cdn::userAvatar(authorId, author.avatar.valueOr(QString()), 32);
-            avatarSrc = shell.imageSource(avatarUrl, QSize(18, 18));
+            auto avatarUrl = Discord::Cdn::userAvatar(authorId, author.avatar.valueOr(""), 32);
+            avatarSrc = shell.imageSource(avatarUrl, {18, 18});
         }
-        if (author.globalName.hasValue() && !author.globalName->isEmpty())
+        if (author.globalName.hasValue() && !author.globalName->empty())
             authorName = author.globalName.get();
         else if (author.username.hasValue())
             authorName = author.username.get();
     }
 
-    QString authorStyle;
-    if (authorColor.isValid())
-        authorStyle = QStringLiteral(" style=\"color: %1;\"").arg(authorColor.name());
+    std::string authorStyle;
+    if (authorColor.valid)
+        authorStyle = std::format(" style=\"color: {};\"", authorColor.css());
 
-    QString avatarHtml;
-    if (!avatarSrc.isEmpty())
-        avatarHtml = QStringLiteral("<img class=\"forum-card-avatar\" src=\"%1\"/>").arg(escape(avatarSrc));
+    std::string avatarHtml;
+    if (!avatarSrc.empty())
+        avatarHtml = std::format("<img class=\"forum-card-avatar\" src=\"{}\"/>", escape(avatarSrc));
 
-    // Time
-    const QDateTime dt = post.effectiveLastMessageId().toDateTime();
-    const QString relTime = Core::TimeUtils::relativeTime(dt);
-
-    // Reply count
+    const auto dt = post.effectiveLastMessageId().toDateTime();
+    const std::string relTime = Core::TimeUtils::relativeTime(dt);
     const int replyCount = post.messageCount.valueOr(0);
-
-    // Thumbnail
-    QUrl thumbUrl = thumbnailUrlOf(starter);
-    QString thumbHtml;
-    if (thumbUrl.isValid()) {
-        QString imgSrc = shell.imageSource(thumbUrl, QSize(80, 80));
-        thumbHtml = QStringLiteral(
-            "<div class=\"forum-card-thumbnail-container\">"
-            "<img class=\"forum-card-thumbnail\" src=\"%1\"/>"
-            "</div>").arg(escape(imgSrc));
+    const auto thumbUrl = thumbnailUrlOf(starter);
+    std::string thumbHtml;
+    if (!thumbUrl.empty()) {
+        const auto imgSrc = shell.imageSource(thumbUrl, {80, 80});
+        thumbHtml = std::format("<div class=\"forum-card-thumbnail-container\">"
+                                "<img class=\"forum-card-thumbnail\" src=\"{}\"/>"
+                                "</div>", escape(imgSrc));
     }
 
-    QString unreadDot;
-    if (readState.unread)
-        unreadDot = QStringLiteral("<div class=\"forum-card-unread-dot\"></div>");
-
-    return QStringLiteral(
-        "<div class=\"forum-card\" data-action=\"open-post\" data-thread-id=\"%1\">"
+    const std::string unreadDot = readState.unread ? "<div class=\"forum-card-unread-dot\"></div>" : "";
+    return std::format(
+        "<div class=\"forum-card\" data-action=\"open-post\" data-thread-id=\"{}\">"
         "  <div class=\"forum-card-left\">"
         "    <div class=\"forum-card-top-row\">"
-        "      %2"
-        "      <span class=\"forum-card-title%3\">%4</span>"
+        "      {}"
+        "      <span class=\"forum-card-title{}\">{}</span>"
         "    </div>"
-        "    %5"
-        "    <div class=\"forum-card-snippet\">%6</div>"
+        "    {}"
+        "    <div class=\"forum-card-snippet\">{}</div>"
         "    <div class=\"forum-card-footer\">"
         "      <div class=\"forum-card-meta-left\">"
-        "        %7"
-        "        <span class=\"forum-card-author\"%8>%9</span>"
-        "        <span class=\"forum-card-time\">%10</span>"
+        "        {}"
+        "        <span class=\"forum-card-author\"{}>{}</span>"
+        "        <span class=\"forum-card-time\">{}</span>"
         "      </div>"
         "      <div class=\"forum-card-meta-right\">"
         "        <div class=\"forum-card-replies\">"
         "          <img src=\"icon:message-circle\"/>"
-        "          <span>%11</span>"
+        "          <span>{}</span>"
         "        </div>"
         "      </div>"
         "    </div>"
         "  </div>"
-        "  %12"
-        "</div>")
-        .arg(QString::number(static_cast<quint64>(threadId)),
-             unreadDot,
-             readState.unread ? QStringLiteral(" unread") : QString(),
-             escape(title),
-             tagsHtml,
-             escape(snippet),
-             avatarHtml,
-             authorStyle,
-             escape(authorName),
-             escape(relTime),
-             QString::number(replyCount),
-             thumbHtml);
+        "  {}"
+        "</div>",
+        threadId.toString(), unreadDot, readState.unread ? " unread" : "", escape(title),
+        tagsHtml, escape(snippet), avatarHtml, authorStyle, escape(authorName), escape(relTime),
+        replyCount, thumbHtml);
 }
 
 void ForumController::renderPosts()
@@ -501,19 +492,19 @@ void ForumController::renderPosts()
     auto *mgr = inst->forums();
     const auto &posts = mgr->posts(currentForumId);
 
-    QString rml;
+    std::string rml;
     int visibleCount = 0;
 
     for (const auto &post : posts) {
         if (selectedTagId.isValid()) {
-            if (!post.appliedTags.hasValue() || !post.appliedTags->contains(selectedTagId))
+            if (!post.appliedTags.hasValue() || std::find(post.appliedTags->begin(), post.appliedTags->end(), selectedTagId) == post.appliedTags->end())
                 continue;
         }
         rml += buildPostCardHtml(post);
         ++visibleCount;
     }
 
-    postsList->SetInnerRML(rml.toStdString());
+    postsList->SetInnerRML(rml);
 
     if (emptyMsg)
         emptyMsg->SetProperty("display", visibleCount == 0 && !mgr->isLoading(currentForumId) ? "block" : "none");

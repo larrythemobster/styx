@@ -91,8 +91,8 @@ const PermissionDef AllPermissions[] = {
 
 } // namespace
 
-GuildSettingsController::GuildSettingsController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
+GuildSettingsController::GuildSettingsController(Shell &shell)
+    : Controller(shell, nullptr)
 {
 }
 
@@ -122,7 +122,7 @@ bool GuildSettingsController::canEditCurrentSection() const
     return GuildSettingsAccess::canEdit(instance(), currentGuildId, currentSection);
 }
 
-bool GuildSettingsController::isCurrentRequest(Core::Snowflake guildId, quint64 generation) const
+bool GuildSettingsController::isCurrentRequest(Core::Snowflake guildId, std::uint64_t generation) const
 {
     return visible && currentGuildId == guildId && requestGeneration == generation;
 }
@@ -157,12 +157,12 @@ void GuildSettingsController::resetGuildState()
     errorMessage.clear();
 }
 
-void GuildSettingsController::reportError(const QString &message)
+void GuildSettingsController::reportError(const std::string &message)
 {
     errorMessage = message;
     if (document) {
         if (auto *text = document->GetElementById("guild-unsaved-changes-text"))
-            text->SetInnerRML(escape(message).toUtf8().constData());
+            text->SetInnerRML(escape(message));
         if (auto *bar = document->GetElementById("guild-unsaved-changes-bar")) {
             bar->SetClass("visible", true);
             bar->SetClass("flash", true);
@@ -181,19 +181,17 @@ std::optional<Discord::Guild> GuildSettingsController::guild() const
     return inst ? inst->getGuild(currentGuildId) : std::nullopt;
 }
 
-QString GuildSettingsController::getGuildIconUrl() const
+std::string GuildSettingsController::getGuildIconUrl() const
 {
-    if (!draftProfile.iconDataUri.isEmpty())
+    if (!draftProfile.iconDataUri.empty())
         return draftProfile.iconDataUri;
     if (draftProfile.iconRemoved)
-        return QString();
+        return {};
 
     auto g = guild();
-    if (g && g->icon.hasValue() && !g->icon->isEmpty()) {
-        QUrl url = Discord::Cdn::guildIcon(currentGuildId, g->icon.get(), 128);
-        return shell.imageSource(url, QSize(96, 96));
-    }
-    return QString();
+    if (g && g->icon.hasValue() && !g->icon->empty())
+        return shell.imageSource(Discord::Cdn::guildIcon(currentGuildId, g->icon.get(), 128), {96, 96});
+    return {};
 }
 
 void GuildSettingsController::open(Core::Snowflake accountId, Core::Snowflake guildId, GuildSettingsSection section)
@@ -223,9 +221,9 @@ void GuildSettingsController::close()
 {
     if (hasUnsavedChanges()) {
         showConfirmModal(
-            shell, tr("Discard unsaved changes?"),
-            tr("You have unsaved changes, are you sure you want to discard them?"),
-            tr("Discard"), [this]() { discardChanges(); close(); }, nullptr, true);
+            shell, "Discard unsaved changes?",
+            "You have unsaved changes, are you sure you want to discard them?",
+            "Discard", [this]() { discardChanges(); close(); }, nullptr, true);
         return;
     }
 
@@ -244,9 +242,9 @@ void GuildSettingsController::setSection(GuildSettingsSection section)
     if (hasUnsavedChanges()) {
         showConfirmModal(
             shell,
-            tr("Discard unsaved changes?"),
-            tr("You have unsaved changes, are you sure you want to discard them?"),
-            tr("Discard"),
+            "Discard unsaved changes?",
+            "You have unsaved changes, are you sure you want to discard them?",
+            "Discard",
             [this, section]() {
                 discardChanges();
                 currentSection = section;
@@ -281,12 +279,12 @@ void GuildSettingsController::renderSidebar()
     if (!sidebar)
         return;
 
-    QString rml;
+    std::string rml;
     auto g = guild();
-    QString guildName = g ? g->name.valueOr("Server") : "Server";
+    std::string guildName = g ? g->name.valueOr("Server") : "Server";
 
-    rml += QStringLiteral("<div class=\"settings-group-header\" style=\"color:#ffffff; font-size:14dp; margin-bottom:12dp;\">%1</div>")
-               .arg(escape(guildName));
+    rml += "<div class=\"settings-group-header\" style=\"color:#ffffff; font-size:14dp; margin-bottom:12dp;\">" +
+           escape(guildName) + "</div>";
 
     auto sections = GuildSettingsAccess::visibleSections(instance(), currentGuildId);
     GuildSettingsGroup lastGroup = static_cast<GuildSettingsGroup>(-1);
@@ -295,27 +293,27 @@ void GuildSettingsController::renderSidebar()
         GuildSettingsGroup grp = GuildSettingsAccess::group(sec);
         if (grp != lastGroup) {
             lastGroup = grp;
-            QString grpTitle = GuildSettingsAccess::groupTitle(grp);
-            if (!grpTitle.isEmpty()) {
-                rml += QStringLiteral("<div class=\"settings-group-header\">%1</div>").arg(escape(grpTitle));
+            std::string grpTitle = GuildSettingsAccess::groupTitle(grp);
+            if (!grpTitle.empty()) {
+                rml += "<div class=\"settings-group-header\">" + escape(grpTitle) + "</div>";
             } else if (sec == GuildSettingsSection::Profile) {
-                rml += QStringLiteral("<div class=\"settings-group-header\">Server Settings</div>");
+                rml += "<div class=\"settings-group-header\">Server Settings</div>";
             } else if (grp == GuildSettingsGroup::Danger) {
-                rml += QStringLiteral("<div class=\"settings-divider\"></div>");
+                rml += "<div class=\"settings-divider\"></div>";
             }
         }
 
-        QString itemClass = QStringLiteral("settings-nav-item");
+        std::string itemClass = "settings-nav-item";
         if (currentSection == sec)
-            itemClass += QStringLiteral(" active");
+            itemClass += " active";
         if (sec == GuildSettingsSection::DeleteServer)
-            itemClass += QStringLiteral(" settings-btn-danger");
+            itemClass += " settings-btn-danger";
 
-        rml += QStringLiteral("<div class=\"%1\" data-action=\"nav-section\" data-section=\"%2\">%3</div>")
-                   .arg(itemClass, QString::number(static_cast<int>(sec)), escape(GuildSettingsAccess::title(sec)));
+        rml += "<div class=\"" + itemClass + "\" data-action=\"nav-section\" data-section=\"" +
+               std::to_string(static_cast<int>(sec)) + "\">" + escape(GuildSettingsAccess::title(sec)) + "</div>";
     }
 
-    sidebar->SetInnerRML(rml.toUtf8().constData());
+    sidebar->SetInnerRML(rml);
 }
 
 void GuildSettingsController::renderContent()
@@ -324,7 +322,7 @@ void GuildSettingsController::renderContent()
     if (!content)
         return;
 
-    QString rml;
+    std::string rml;
     switch (currentSection) {
     case GuildSettingsSection::Profile:
         renderProfile(rml);
@@ -361,128 +359,130 @@ void GuildSettingsController::renderContent()
         break;
     }
 
-    content->SetInnerRML(rml.toUtf8().constData());
+    content->SetInnerRML(rml);
 }
 
 // 1. Overview / Profile
-void GuildSettingsController::renderProfile(QString &rml)
+void GuildSettingsController::renderProfile(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Server Overview & Profile</div>");
+    rml += "<div class=\"settings-section-title\">Server Overview &amp; Profile</div>";
 
     // Icon Row
-    rml += QStringLiteral("<div class=\"guild-icon-upload-row\">");
-    QString iconSrc = getGuildIconUrl();
-    rml += QStringLiteral("<div class=\"guild-icon-preview\">");
-    if (!iconSrc.isEmpty()) {
-        rml += QStringLiteral("<img src=\"%1\"/>").arg(escape(iconSrc));
+    rml += "<div class=\"guild-icon-upload-row\">";
+    std::string iconSrc = getGuildIconUrl();
+    rml += "<div class=\"guild-icon-preview\">";
+    if (!iconSrc.empty()) {
+        rml += "<img src=\"" + escape(iconSrc) + "\"/>";
     } else {
         auto g = guild();
-        QString initials = g ? g->name.valueOr("?").left(2).toUpper() : "?";
-        rml += QStringLiteral("<div class=\"guild-icon-initials\">%1</div>").arg(escape(initials));
+        const std::string name = g ? g->name.valueOr("?") : "?";
+        std::string initials = Platform::unicodeUpper(Platform::Utf8::left(name, 2));
+        if (initials.empty())
+            initials = "?";
+        rml += "<div class=\"guild-icon-initials\">" + escape(initials) + "</div>";
     }
-    rml += QStringLiteral("</div>");
+    rml += "</div>";
 
-    rml += QStringLiteral("<div class=\"guild-icon-actions\">");
-    rml += QStringLiteral("<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-icon\">Change Icon</div>");
-    if (!iconSrc.isEmpty())
-        rml += QStringLiteral("<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-icon\">Remove Icon</div>");
-    rml += QStringLiteral("<div class=\"settings-note\" style=\"color:#949ba4; font-style:normal;\">Minimum Size: 128x128</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
+    rml += "<div class=\"guild-icon-actions\">";
+    rml += "<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-icon\">Change Icon</div>";
+    if (!iconSrc.empty())
+        rml += "<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-icon\">Remove Icon</div>";
+    rml += "<div class=\"settings-note\" style=\"color:#949ba4; font-style:normal;\">Minimum Size: 128x128</div>";
+    rml += "</div>";
+    rml += "</div>";
 
     // Server Name
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Server Name</div>");
-    rml += QStringLiteral("<input type=\"text\" class=\"settings-text-input\" id=\"profile-name-input\" value=\"%1\" maxlength=\"100\"/>")
-               .arg(escape(draftProfile.name));
-    rml += QStringLiteral("</div>");
+    rml += "<div class=\"settings-row\">";
+    rml += "<div class=\"settings-label\">Server Name</div>";
+    rml += "<input type=\"text\" class=\"settings-text-input\" id=\"profile-name-input\" value=\"" +
+           escape(draftProfile.name) + "\" maxlength=\"100\"/>";
+    rml += "</div>";
 
     // Server Description
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Server Description</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Tell the world what your server is about.</div>");
-    rml += QStringLiteral("<textarea class=\"settings-textarea\" id=\"profile-desc-input\">%1</textarea>")
-               .arg(escape(draftProfile.description));
-    rml += QStringLiteral("</div>");
+    rml += "<div class=\"settings-row\">";
+    rml += "<div class=\"settings-label\">Server Description</div>";
+    rml += "<div class=\"settings-description\">Tell the world what your server is about.</div>";
+    rml += "<textarea class=\"settings-textarea\" id=\"profile-desc-input\">" + escape(draftProfile.description) + "</textarea>";
+    rml += "</div>";
 
     // Server Banner Brand Color
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Server Brand Color</div>");
-    rml += QStringLiteral("<div class=\"brand-colors-row\">");
+    rml += "<div class=\"settings-row\">";
+    rml += "<div class=\"settings-label\">Server Brand Color</div>";
+    rml += "<div class=\"brand-colors-row\">";
     for (const auto &preset : BrandColors) {
-        QString activeClass = (draftProfile.brandColor.compare(QLatin1String(preset.color), Qt::CaseInsensitive) == 0)
-                                  ? QStringLiteral(" active") : QString();
-        rml += QStringLiteral("<div class=\"brand-color-swatch%1\" style=\"background-color:%2;\" data-action=\"select-brand-color\" data-color=\"%2\" title=\"%3\"></div>")
-                   .arg(activeClass, QLatin1String(preset.color), QLatin1String(preset.name));
+        const bool active = equalsIgnoringCase(draftProfile.brandColor, preset.color);
+        rml += std::string("<div class=\"brand-color-swatch") + (active ? " active" : "") +
+               "\" style=\"background-color:" + preset.color + ";\" data-action=\"select-brand-color\" data-color=\"" +
+               preset.color + "\" title=\"" + preset.name + "\"></div>";
     }
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
+    rml += "</div>";
+    rml += "</div>";
 
     // Server Traits
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Server Traits</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Add up to 6 traits that define your community.</div>");
-    rml += QStringLiteral("<div class=\"traits-grid\">");
+    rml += "<div class=\"settings-row\">";
+    rml += "<div class=\"settings-label\">Server Traits</div>";
+    rml += "<div class=\"settings-description\">Add up to 6 traits that define your community.</div>";
+    rml += "<div class=\"traits-grid\">";
     for (int i = 0; i < 6; ++i) {
-        rml += QStringLiteral("<div class=\"trait-input-col\">");
-        rml += QStringLiteral("<input type=\"text\" class=\"settings-text-input\" id=\"trait-input-%1\" data-trait-idx=\"%1\" value=\"%2\" maxlength=\"24\" placeholder=\"Trait %3\"/>")
-                   .arg(QString::number(i), escape(draftProfile.traits[i]), QString::number(i + 1));
-        rml += QStringLiteral("</div>");
+        const std::string index = std::to_string(i);
+        rml += "<div class=\"trait-input-col\">";
+        rml += "<input type=\"text\" class=\"settings-text-input\" id=\"trait-input-" + index +
+               "\" data-trait-idx=\"" + index + "\" value=\"" + escape(draftProfile.traits[i]) +
+               "\" maxlength=\"24\" placeholder=\"Trait " + std::to_string(i + 1) + "\"/>";
+        rml += "</div>";
     }
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
+    rml += "</div>";
+    rml += "</div>";
 
     // Private Server Switch
-    rml += QStringLiteral("<div class=\"settings-switch-row\">");
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">Private Server</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Only members can view profile content and server details.</div>");
-    rml += QStringLiteral("</div>");
-    QString switchClass = draftProfile.isPrivate ? QStringLiteral(" checked") : QString();
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-action=\"toggle-private\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(switchClass);
-    rml += QStringLiteral("</div>");
+    rml += "<div class=\"settings-switch-row\">";
+    rml += "<div class=\"settings-switch-text\">";
+    rml += "<div class=\"settings-switch-title\">Private Server</div>";
+    rml += "<div class=\"settings-switch-desc\">Only members can view profile content and server details.</div>";
+    rml += "</div>";
+    rml += std::string("<div class=\"settings-switch") + (draftProfile.isPrivate ? " checked" : "") +
+           "\" data-action=\"toggle-private\"><div class=\"settings-switch-thumb\"></div></div>";
+    rml += "</div>";
 }
 
 // 2. Engagement
-void GuildSettingsController::renderEngagement(QString &rml)
+void GuildSettingsController::renderEngagement(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Engagement & System Messages</div>");
+    rml += "<div class=\"settings-section-title\">Engagement &amp; System Messages</div>";
 
     auto *inst = instance();
-    QList<Discord::Channel> channels;
+    std::vector<Discord::Channel> channels;
     if (inst)
         channels = inst->getGuildChannels(currentGuildId);
     // System Messages Channel
-    rml += QStringLiteral("<div class=\"settings-row\">");
-    rml += QStringLiteral("<div class=\"settings-label\">System Messages Channel</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Channel where welcome messages and server boost announcements are posted.</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" id=\"select-system-channel\">");
-    rml += QStringLiteral("<option value=\"0\"%1>No System Messages</option>")
-               .arg(!draftEngagement.systemChannelId.isValid() ? QStringLiteral(" selected") : QString());
+    rml += "<div class=\"settings-row\">";
+    rml += "<div class=\"settings-label\">System Messages Channel</div>";
+    rml += "<div class=\"settings-description\">Channel where welcome messages and server boost announcements are posted.</div>";
+    rml += "<select class=\"settings-select\" id=\"select-system-channel\">";
+    rml += std::string("<option value=\"0\"") + (!draftEngagement.systemChannelId.isValid() ? " selected" : "") +
+           ">No System Messages</option>";
     for (const auto &ch : channels) {
         if (ch.type.valueOr(Discord::ChannelType::GUILD_TEXT) == Discord::ChannelType::GUILD_TEXT) {
-            QString sel = (ch.id.get() == draftEngagement.systemChannelId) ? QStringLiteral(" selected") : QString();
-            rml += QStringLiteral("<option value=\"%1\"%2># %3</option>")
-                       .arg(QString::number(quint64(ch.id.get())), sel, escape(ch.name.valueOr("channel")));
+            const bool selected = ch.id.get() == draftEngagement.systemChannelId;
+            rml += "<option value=\"" + ch.id.get().toString() + "\"" + (selected ? " selected" : "") + "># " +
+                   escape(ch.name.valueOr("channel")) + "</option>";
         }
     }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
+    rml += "</select>";
+    rml += "</div>";
 
     // System Flags
-    rml += QStringLiteral("<div class=\"settings-subheading\">System Message Notifications</div>");
+    rml += "<div class=\"settings-subheading\">System Message Notifications</div>";
 
-    auto addFlag = [&](const QString &title, const QString &desc, bool checked, const QString &action) {
-        rml += QStringLiteral("<div class=\"settings-switch-row\">");
-        rml += QStringLiteral("<div class=\"settings-switch-text\">");
-        rml += QStringLiteral("<div class=\"settings-switch-title\">%1</div>").arg(escape(title));
-        rml += QStringLiteral("<div class=\"settings-switch-desc\">%1</div>").arg(escape(desc));
-        rml += QStringLiteral("</div>");
-        QString chk = checked ? QStringLiteral(" checked") : QString();
-        rml += QStringLiteral("<div class=\"settings-switch%1\" data-action=\"%2\"><div class=\"settings-switch-thumb\"></div></div>")
-                   .arg(chk, action);
-        rml += QStringLiteral("</div>");
+    auto addFlag = [&](const std::string &title, const std::string &desc, bool checked, const std::string &action) {
+        rml += "<div class=\"settings-switch-row\">";
+        rml += "<div class=\"settings-switch-text\">";
+        rml += "<div class=\"settings-switch-title\">" + escape(title) + "</div>";
+        rml += "<div class=\"settings-switch-desc\">" + escape(desc) + "</div>";
+        rml += "</div>";
+        rml += std::string("<div class=\"settings-switch") + (checked ? " checked" : "") + "\" data-action=\"" + action +
+               "\"><div class=\"settings-switch-thumb\"></div></div>";
+        rml += "</div>";
     };
 
     addFlag("Suppress member join notifications", "Don't send a message when someone joins this server.", draftEngagement.suppressJoin, "toggle-flag-join");
@@ -491,120 +491,118 @@ void GuildSettingsController::renderEngagement(QString &rml)
     addFlag("Suppress member prompt reply notifications", "Don't notify members when someone replies to member prompts.", draftEngagement.suppressPrompt, "toggle-flag-prompt");
 
     // Default Notifications
-    rml += QStringLiteral("<div class=\"settings-subheading\">Default Notification Settings</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Determines whether members receive notifications for all messages or only @mentions by default.</div>");
-    rml += QStringLiteral("<div class=\"settings-radio-group\">");
+    rml += "<div class=\"settings-subheading\">Default Notification Settings</div>";
+    rml += "<div class=\"settings-description\">Determines whether members receive notifications for all messages or only @mentions by default.</div>";
+    rml += "<div class=\"settings-radio-group\">";
 
     bool allMsgs = (draftEngagement.defaultNotifications == Discord::MessageNotificationLevel::ALL_MESSAGES);
-    rml += QStringLiteral("<div class=\"settings-radio-card%1\" data-action=\"select-notif-all\">")
-               .arg(allMsgs ? QStringLiteral(" active") : QString());
-    rml += QStringLiteral("<div class=\"settings-radio-indicator\"></div>");
-    rml += QStringLiteral("<div class=\"settings-radio-info\"><div class=\"settings-radio-title\">All Messages</div><div class=\"settings-radio-desc\">Recommended for small communities and private servers.</div></div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-radio-card") + (allMsgs ? " active" : "") + "\" data-action=\"select-notif-all\">";
+    rml += "<div class=\"settings-radio-indicator\"></div>";
+    rml += "<div class=\"settings-radio-info\"><div class=\"settings-radio-title\">All Messages</div><div class=\"settings-radio-desc\">Recommended for small communities and private servers.</div></div>";
+    rml += "</div>";
 
-    rml += QStringLiteral("<div class=\"settings-radio-card%1\" data-action=\"select-notif-mentions\">")
-               .arg(!allMsgs ? QStringLiteral(" active") : QString());
-    rml += QStringLiteral("<div class=\"settings-radio-indicator\"></div>");
-    rml += QStringLiteral("<div class=\"settings-radio-info\"><div class=\"settings-radio-title\">Only @mentions</div><div class=\"settings-radio-desc\">Recommended for public or larger servers.</div></div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-radio-card") + (!allMsgs ? " active" : "") + "\" data-action=\"select-notif-mentions\">";
+    rml += "<div class=\"settings-radio-indicator\"></div>";
+    rml += "<div class=\"settings-radio-info\"><div class=\"settings-radio-title\">Only @mentions</div><div class=\"settings-radio-desc\">Recommended for public or larger servers.</div></div>";
+    rml += "</div>";
+    rml += "</div>";
 
     // AFK Channel & Timeout
-    rml += QStringLiteral("<div class=\"settings-subheading\">Inactive (AFK) Settings</div>");
-    rml += QStringLiteral("<div class=\"settings-grid-2col\">");
-    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-left\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Inactive Channel</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" id=\"select-afk-channel\">");
-    rml += QStringLiteral("<option value=\"0\"%1>No Inactive Channel</option>")
-               .arg(!draftEngagement.afkChannelId.isValid() ? QStringLiteral(" selected") : QString());
+    rml += "<div class=\"settings-subheading\">Inactive (AFK) Settings</div>";
+    rml += "<div class=\"settings-grid-2col\">";
+    rml += "<div class=\"settings-grid-col settings-grid-col-left\">";
+    rml += "<div class=\"settings-label\">Inactive Channel</div>";
+    rml += "<select class=\"settings-select\" id=\"select-afk-channel\">";
+    rml += std::string("<option value=\"0\"") + (!draftEngagement.afkChannelId.isValid() ? " selected" : "") +
+           ">No Inactive Channel</option>";
     for (const auto &ch : channels) {
         if (ch.type.valueOr(Discord::ChannelType::GUILD_VOICE) == Discord::ChannelType::GUILD_VOICE) {
-            QString sel = (ch.id.get() == draftEngagement.afkChannelId) ? QStringLiteral(" selected") : QString();
-            rml += QStringLiteral("<option value=\"%1\"%2>%3</option>")
-                       .arg(QString::number(quint64(ch.id.get())), sel, escape(ch.name.valueOr("voice")));
+            const bool selected = ch.id.get() == draftEngagement.afkChannelId;
+            rml += "<option value=\"" + ch.id.get().toString() + "\"" + (selected ? " selected" : "") + ">" +
+                   escape(ch.name.valueOr("voice")) + "</option>";
         }
     }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
+    rml += "</select>";
+    rml += "</div>";
 
-    rml += QStringLiteral("<div class=\"settings-grid-col settings-grid-col-right\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Inactive Timeout</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" id=\"select-afk-timeout\">");
+    rml += "<div class=\"settings-grid-col settings-grid-col-right\">";
+    rml += "<div class=\"settings-label\">Inactive Timeout</div>";
+    rml += "<select class=\"settings-select\" id=\"select-afk-timeout\">";
     const int timeouts[] = { 60, 300, 900, 1800, 3600 };
     const char *timeoutLabels[] = { "1 minute", "5 minutes", "15 minutes", "30 minutes", "1 hour" };
     for (int t = 0; t < 5; ++t) {
-        QString sel = (draftEngagement.afkTimeout == timeouts[t]) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(QString::number(timeouts[t]), sel, timeoutLabels[t]);
+        const bool selected = draftEngagement.afkTimeout == timeouts[t];
+        rml += "<option value=\"" + std::to_string(timeouts[t]) + "\"" + (selected ? " selected" : "") + ">" +
+               timeoutLabels[t] + "</option>";
     }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
+    rml += "</select>";
+    rml += "</div>";
+    rml += "</div>";
 }
 
 // 3. Boost Perks
-void GuildSettingsController::renderBoostPerks(QString &rml)
+void GuildSettingsController::renderBoostPerks(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Server Boost Perks</div>");
+    rml += "<div class=\"settings-section-title\">Server Boost Perks</div>";
 
     auto g = guild();
     int boostCount = g ? g->premiumSubscriptionCount.valueOr(0) : 0;
     int tier = g ? static_cast<int>(g->premiumTier.valueOr(Discord::PremiumTier::NONE)) : 0;
 
-    rml += QStringLiteral("<div class=\"settings-card\" style=\"display:flex; flex-direction:row; align-items:center; justify-content:space-between;\">");
-    rml += QStringLiteral("<div>");
-    rml += QStringLiteral("<div class=\"boost-badge\">LEVEL %1</div>").arg(QString::number(tier));
-    rml += QStringLiteral("<div style=\"font-size:16dp; font-weight:bold; color:#ffffff;\">%1 Server Boosts</div>").arg(QString::number(boostCount));
-    rml += QStringLiteral("<div style=\"font-size:13dp; color:#949ba4;\">Unlock custom banners, vanity URLs, and extra emoji slots.</div>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
+    rml += "<div class=\"settings-card\" style=\"display:flex; flex-direction:row; align-items:center; justify-content:space-between;\">";
+    rml += "<div>";
+    rml += "<div class=\"boost-badge\">LEVEL " + std::to_string(tier) + "</div>";
+    rml += "<div style=\"font-size:16dp; font-weight:bold; color:#ffffff;\">" + std::to_string(boostCount) + " Server Boosts</div>";
+    rml += "<div style=\"font-size:13dp; color:#949ba4;\">Unlock custom banners, vanity URLs, and extra emoji slots.</div>";
+    rml += "</div>";
+    rml += "</div>";
 
     // Progress Bar Toggle
-    rml += QStringLiteral("<div class=\"settings-switch-row\">");
-    rml += QStringLiteral("<div class=\"settings-switch-text\">");
-    rml += QStringLiteral("<div class=\"settings-switch-title\">Show Boost Progress Bar</div>");
-    rml += QStringLiteral("<div class=\"settings-switch-desc\">Displays current Server Boost progress at the top of your channel list.</div>");
-    rml += QStringLiteral("</div>");
-    QString barChk = draftBoost.progressBar ? QStringLiteral(" checked") : QString();
-    rml += QStringLiteral("<div class=\"settings-switch%1\" data-action=\"toggle-progress-bar\"><div class=\"settings-switch-thumb\"></div></div>")
-               .arg(barChk);
-    rml += QStringLiteral("</div>");
+    rml += "<div class=\"settings-switch-row\">";
+    rml += "<div class=\"settings-switch-text\">";
+    rml += "<div class=\"settings-switch-title\">Show Boost Progress Bar</div>";
+    rml += "<div class=\"settings-switch-desc\">Displays current Server Boost progress at the top of your channel list.</div>";
+    rml += "</div>";
+    rml += std::string("<div class=\"settings-switch") + (draftBoost.progressBar ? " checked" : "") +
+           "\" data-action=\"toggle-progress-bar\"><div class=\"settings-switch-thumb\"></div></div>";
+    rml += "</div>";
 
     // Banner slot
-    rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Server Banner Background</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Displayed at the top of your channel list. Minimum 960x540 (16:9 ratio).</div>");
+    rml += "<div class=\"settings-card\">";
+    rml += "<div class=\"settings-label\">Server Banner Background</div>";
+    rml += "<div class=\"settings-description\">Displayed at the top of your channel list. Minimum 960x540 (16:9 ratio).</div>";
     if (tier >= 2) {
-        rml += QStringLiteral("<div class=\"settings-button-group\">");
-        rml += QStringLiteral("<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-banner\">Upload Banner</div>");
-        rml += QStringLiteral("<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-banner\">Remove Banner</div>");
-        rml += QStringLiteral("</div>");
+        rml += "<div class=\"settings-button-group\">";
+        rml += "<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-banner\">Upload Banner</div>";
+        rml += "<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-banner\">Remove Banner</div>";
+        rml += "</div>";
     } else {
-        rml += QStringLiteral("<div class=\"settings-note\">Locked — Requires Level 2 Server Boosts (7 Boosts).</div>");
+        rml += "<div class=\"settings-note\">Locked \xE2\x80\x94 Requires Level 2 Server Boosts (7 Boosts).</div>";
     }
-    rml += QStringLiteral("</div>");
+    rml += "</div>";
 
     // Invite Splash slot
-    rml += QStringLiteral("<div class=\"settings-card\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Server Invite Splash</div>");
-    rml += QStringLiteral("<div class=\"settings-description\">Shown when people visit your invite links in a web browser. Minimum 1920x1080.</div>");
+    rml += "<div class=\"settings-card\">";
+    rml += "<div class=\"settings-label\">Server Invite Splash</div>";
+    rml += "<div class=\"settings-description\">Shown when people visit your invite links in a web browser. Minimum 1920x1080.</div>";
     if (tier >= 1) {
-        rml += QStringLiteral("<div class=\"settings-button-group\">");
-        rml += QStringLiteral("<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-splash\">Upload Splash</div>");
-        rml += QStringLiteral("<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-splash\">Remove Splash</div>");
-        rml += QStringLiteral("</div>");
+        rml += "<div class=\"settings-button-group\">";
+        rml += "<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-splash\">Upload Splash</div>";
+        rml += "<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-splash\">Remove Splash</div>";
+        rml += "</div>";
     } else {
-        rml += QStringLiteral("<div class=\"settings-note\">Locked — Requires Level 1 Server Boosts (2 Boosts).</div>");
+        rml += "<div class=\"settings-note\">Locked \xE2\x80\x94 Requires Level 1 Server Boosts (2 Boosts).</div>";
     }
-    rml += QStringLiteral("</div>");
+    rml += "</div>";
 }
 
 // 4. Emoji
-void GuildSettingsController::renderEmoji(QString &rml)
+void GuildSettingsController::renderEmoji(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\" style=\"display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
-    rml += QStringLiteral("<span>Emoji</span>");
-    rml += QStringLiteral("<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-emoji-upload\">Upload Emoji</div>");
-    rml += QStringLiteral("</div>");
+    rml += "<div class=\"settings-section-title\" style=\"display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">";
+    rml += "<span>Emoji</span>";
+    rml += "<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-emoji-upload\">Upload Emoji</div>";
+    rml += "</div>";
 
     int staticCount = 0;
     int animCount = 0;
@@ -615,30 +613,29 @@ void GuildSettingsController::renderEmoji(QString &rml)
             staticCount++;
     }
 
-    rml += QStringLiteral("<div class=\"slots-counter\">Static Emojis: %1 / 50 slots used · Animated Emojis: %2 / 50 slots used</div>")
-               .arg(QString::number(staticCount), QString::number(animCount));
+    rml += "<div class=\"slots-counter\">Static Emojis: " + std::to_string(staticCount) +
+           " / 50 slots used \xC2\xB7 Animated Emojis: " + std::to_string(animCount) + " / 50 slots used</div>";
 
-    if (emojis.isEmpty()) {
-        rml += QStringLiteral("<div class=\"empty-state\"><div class=\"empty-state-title\">No Custom Emojis</div><div class=\"empty-state-desc\">Upload images (PNG, JPG, GIF) under 256 KB to use them anywhere on your server.</div></div>");
+    if (emojis.empty()) {
+        rml += "<div class=\"empty-state\"><div class=\"empty-state-title\">No Custom Emojis</div><div class=\"empty-state-desc\">Upload images (PNG, JPG, GIF) under 256 KB to use them anywhere on your server.</div></div>";
         return;
     }
 
-    rml += QStringLiteral("<div class=\"guild-table\">");
-    rml += QStringLiteral("<div class=\"guild-table-header\"><div class=\"col-image\">Image</div><div class=\"col-name\">Name</div><div class=\"col-uploader\">Uploaded By</div><div class=\"col-actions\">Actions</div></div>");
+    rml += "<div class=\"guild-table\">";
+    rml += "<div class=\"guild-table-header\"><div class=\"col-image\">Image</div><div class=\"col-name\">Name</div><div class=\"col-uploader\">Uploaded By</div><div class=\"col-actions\">Actions</div></div>";
 
     for (const auto &em : emojis) {
-        rml += QStringLiteral("<div class=\"guild-table-row\">");
-        QUrl emUrl = Discord::Cdn::emoji(em.id.get(), 32, em.animated.valueOr(false));
-        QString emSrc = shell.imageSource(emUrl, QSize(32, 32));
-        rml += QStringLiteral("<div class=\"col-image\"><img class=\"emoji-preview-img\" src=\"%1\"/></div>").arg(escape(emSrc));
-        rml += QStringLiteral("<div class=\"col-name\" style=\"font-weight:600; color:#f2f3f5;\">:%1:</div>").arg(escape(em.name.valueOr("emoji")));
-        QString uploaderName = em.user.hasValue() ? em.user->username.valueOr("Unknown") : "Server";
-        rml += QStringLiteral("<div class=\"col-uploader\">%1</div>").arg(escape(uploaderName));
-        rml += QStringLiteral("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"delete-emoji\" data-id=\"%1\">Delete</div></div>")
-                   .arg(QString::number(quint64(em.id.get())));
-        rml += QStringLiteral("</div>");
+        rml += "<div class=\"guild-table-row\">";
+        const std::string emSrc = shell.imageSource(Discord::Cdn::emoji(em.id.get(), 32, em.animated.valueOr(false)), {32, 32});
+        rml += "<div class=\"col-image\"><img class=\"emoji-preview-img\" src=\"" + escape(emSrc) + "\"/></div>";
+        rml += "<div class=\"col-name\" style=\"font-weight:600; color:#f2f3f5;\">:" + escape(em.name.valueOr("emoji")) + ":</div>";
+        const std::string uploaderName = em.user.hasValue() ? em.user->username.valueOr("Unknown") : "Server";
+        rml += "<div class=\"col-uploader\">" + escape(uploaderName) + "</div>";
+        rml += "<div class=\"col-actions\"><div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"delete-emoji\" data-id=\"" +
+               em.id.get().toString() + "\">Delete</div></div>";
+        rml += "</div>";
     }
-    rml += QStringLiteral("</div>");
+    rml += "</div>";
 }
 
 // 5. Stickers

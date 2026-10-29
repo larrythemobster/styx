@@ -1,29 +1,24 @@
 #pragma once
 
 #include "Controller.hpp"
-#include <QList>
-#include <QPointer>
-#include <QPointF>
-#include <QSizeF>
-#include <QUrl>
+#include "Platform/Native.hpp"
+
+#include <string>
+#include <vector>
 
 namespace Rml {
 class ElementDocument;
 }
 
-namespace Styx {
-namespace UI {
-class Shell;
-namespace Rml {
+namespace Styx::UI::Rml {
 
 class ImageViewerController final : public Controller
 {
-    Q_OBJECT
 public:
-    explicit ImageViewerController(Shell &shell, QObject *parent = nullptr);
+    explicit ImageViewerController(Shell &shell);
     ~ImageViewerController() override;
 
-    void openImage(const QUrl &url, const QList<QUrl> &gallery = {});
+    void openImage(const std::string &url, const std::vector<std::string> &gallery = {});
     void hide();
     [[nodiscard]] bool isOpen() const { return visible; }
 
@@ -36,18 +31,16 @@ private:
     void prevImage();
 
     ::Rml::ElementDocument *viewerDocument = nullptr;
-    QList<QUrl> galleryUrls;
+    std::vector<std::string> galleryUrls;
     int currentIndex = 0;
-    QUrl currentUrl;
-    QSizeF naturalImageSize;
-
+    std::string currentUrl;
+    Platform::Size naturalImageSize;
+    Platform::Point panOffset;
+    Platform::Point lastMousePos;
     float zoomLevel = 1.0f;
-    QPointF panOffset;
-    QPointF lastMousePos;
+    unsigned long long loadGeneration = 0;
     bool isDragging = false;
     bool visible = false;
 };
 
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI::Rml

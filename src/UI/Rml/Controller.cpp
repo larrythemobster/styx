@@ -10,17 +10,23 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-Controller::Controller(Shell &shell, ::Rml::Element *root, QObject *parent)
-    : QObject(parent), shell(shell), regionRoot(root)
+Controller::Controller(Shell &shell, ::Rml::Element *root)
+    : shell(shell), regionRoot(root)
 {
 }
 
 Controller::~Controller()
 {
+    removeListeners();
+}
+
+void Controller::removeListeners()
+{
     for (const Registration &r : registrations) {
-        r.element->RemoveEventListener(r.type.toStdString(), r.listener, r.capture);
+        r.element->RemoveEventListener(r.type, r.listener, r.capture);
         delete r.listener;
     }
+    registrations.clear();
 }
 
 void Controller::requestRender(int animateMs)
@@ -29,7 +35,7 @@ void Controller::requestRender(int animateMs)
         view->requestRender(animateMs);
 }
 
-void Controller::listen(const QString &eventType, std::function<void(::Rml::Event &)> handler,
+void Controller::listen(const std::string &eventType, std::function<void(::Rml::Event &)> handler,
                         ::Rml::Element *element, bool capture)
 {
     if (!element)
@@ -38,7 +44,7 @@ void Controller::listen(const QString &eventType, std::function<void(::Rml::Even
         return;
     auto *listener = new Listener;
     listener->handler = std::move(handler);
-    element->AddEventListener(eventType.toStdString(), listener, capture);
+    element->AddEventListener(eventType, listener, capture);
     registrations.push_back({ element, eventType, listener, capture });
 }
 
@@ -51,11 +57,11 @@ void Controller::listen(const QString &eventType, std::function<void(::Rml::Even
     return nullptr;
 }
 
-QString Controller::attribute(::Rml::Element *element, const char *name)
+std::string Controller::attribute(::Rml::Element *element, const char *name)
 {
     if (!element)
         return {};
-    return QString::fromStdString(element->GetAttribute<::Rml::String>(name, ""));
+    return element->GetAttribute<::Rml::String>(name, "");
 }
 
 } // namespace Rml

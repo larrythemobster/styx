@@ -14,7 +14,6 @@
 #include "Core/Emoji/PickerEmoji.hpp"
 #include "Core/Gifs/FavoriteGifs.hpp"
 #include "Core/Snowflake.hpp"
-#include "Proto/UserSettings.hpp"
 
 namespace Rml {
 class ElementDocument;

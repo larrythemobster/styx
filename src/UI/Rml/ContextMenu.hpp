@@ -1,8 +1,8 @@
 #pragma once
 
-#include <QObject>
-#include <QString>
-#include <QPoint>
+#include "Platform/Native.hpp"
+#include "Platform/Trackable.hpp"
+#include <string>
 #include <RmlUi/Core/EventListener.h>
 
 #include <functional>
@@ -19,24 +19,24 @@ class View;
 
 struct MenuItem
 {
-    QString label;
+    std::string label;
     std::function<void()> action;
     bool enabled = true;
     bool danger = false;
     bool separator = false;
     std::vector<MenuItem> children;
-    QString subtitle;
-    QString imageSource;
-    QString color;
+    std::string subtitle;
+    std::string imageSource;
+    std::string color;
 };
 
-class ContextMenu final : public QObject, public ::Rml::EventListener
+class ContextMenu final : public Platform::Trackable, public ::Rml::EventListener
 {
 public:
     explicit ContextMenu(View &view);
     ~ContextMenu() override;
 
-    void show(std::vector<MenuItem> items, const QPoint &position);
+    void show(std::vector<MenuItem> items, Platform::Point position);
     void hide();
     [[nodiscard]] bool isVisible() const;
     void ProcessEvent(::Rml::Event &event) override;
@@ -54,7 +54,7 @@ private:
     std::vector<MenuItem> items;
     std::vector<int> path;
     int focused = -1;
-    QPoint anchor;
+    Platform::Point anchor;
 };
 
 } // namespace Styx::UI::Rml

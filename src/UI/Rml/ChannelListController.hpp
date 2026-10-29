@@ -1,41 +1,37 @@
 #pragma once
 
 #include "Controller.hpp"
-#include "Core/Snowflake.hpp"
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
 
-#include <QModelIndex>
-#include <QPointer>
-#include <QString>
-#include <QTimer>
+#include <string>
+#include <vector>
 
 namespace Styx {
-namespace Core {
-class ClientInstance;
-}
+namespace Core { class ClientInstance; }
 namespace UI {
+struct ChannelNode;
 namespace Rml {
 
 class ChannelListController final : public Controller
 {
-    Q_OBJECT
 public:
-    ChannelListController(Shell &shell, ::Rml::Element *root, QObject *parent = nullptr);
-
-private slots:
-    void rebuild();
+    ChannelListController(Shell &shell, ::Rml::Element *root);
 
 private:
+    void scheduleRebuild();
     void renderSidebar();
     void renderGuildSidebar();
     void renderHomeSidebar();
-    void renderChannelNode(const QModelIndex &proxyIndex, QString &rml, int depth = 0);
+    void renderChannelNode(ChannelNode *node, std::string &rml);
     void connectInstanceVoice(Core::ClientInstance *instance);
 
     ::Rml::Element *sidebarHeader = nullptr;
     ::Rml::Element *channelList = nullptr;
-    QTimer rebuildTimer;
-    QPointer<Core::ClientInstance> lastInstance;
-    QString dmFilterText;
+    Platform::Timer rebuildTimer;
+    Platform::Guard<Core::ClientInstance> lastInstance;
+    std::vector<Platform::Connection> instanceConnections;
+    std::string dmFilterText;
 };
 
 } // namespace Rml

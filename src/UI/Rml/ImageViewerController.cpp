@@ -2,14 +2,10 @@
 
 #include "Shell.hpp"
 #include "RmlView.hpp"
-#include "RmlRuntime.hpp"
-
 #include "Core/ImageManager.hpp"
-
-#include <QClipboard>
-#include <QDesktopServices>
-#include <QGuiApplication>
-#include <QPixmap>
+#include "Platform/Desktop.hpp"
+#include "Platform/Image.hpp"
+#include "Platform/Trackable.hpp"
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
@@ -18,22 +14,19 @@
 #include <RmlUi/Core/Input.h>
 
 #include <algorithm>
+#include <filesystem>
 
-namespace Styx {
-namespace UI {
-namespace Rml {
+namespace Styx::UI::Rml {
 
-ImageViewerController::ImageViewerController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
+ImageViewerController::ImageViewerController(Shell &shell)
+    : Controller(shell, nullptr)
 {
 }
 
 ImageViewerController::~ImageViewerController()
 {
-    if (viewerDocument) {
+    if (viewerDocument)
         viewerDocument->Close();
-        viewerDocument = nullptr;
-    }
 }
 
 void ImageViewerController::ensureDocument()
@@ -44,94 +37,80 @@ void ImageViewerController::ensureDocument()
     viewerDocument = shell.view()->context()->LoadDocument(":/ui/image_viewer.rml");
     if (!viewerDocument)
         return;
-
     regionRoot = viewerDocument;
 
     listen("click", [this](::Rml::Event &event) {
         auto *target = event.GetTargetElement();
         if (!target)
             return;
-
-        if (target->GetId() == "viewer-btn-close") {
+        const auto &id = target->GetId();
+        if (id == "viewer-btn-close") {
             event.StopPropagation();
             hide();
-            return;
-        }
-
-        if (target->GetId() == "viewer-btn-browser") {
+        } else if (id == "viewer-btn-browser") {
             event.StopPropagation();
-            if (currentUrl.isValid())
-                QDesktopServices::openUrl(currentUrl);
-            return;
-        }
-
-        if (target->GetId() == "viewer-btn-copy") {
+            if (!currentUrl.empty())
+                Platform::Desktop::openUrl(currentUrl);
+        } else if (id == "viewer-btn-copy") {
             event.StopPropagation();
-            if (currentUrl.isValid())
-                QGuiApplication::clipboard()->setText(currentUrl.toString());
-            return;
-        }
-
-        if (target->GetId() == "viewer-nav-prev") {
+            if (!currentUrl.empty())
+                Platform::Desktop::setClipboardText(currentUrl);
+        } else if (id == "viewer-btn-save") {
+            event.StopPropagation();
+            if (currentUrl.empty() || !shell.images())
+                return;
+            const auto url = Core::ImageManager::fullQualityUrl(currentUrl);
+            const auto account = shell.location().accountId;
+            const auto name = std::filesystem::path(Platform::urlPath(url)).filename().string();
+            Platform::Guard<Core::ImageManager> images(shell.images());
+            Platform::Desktop::saveFile("Save Image", name, [images, url, account](std::vector<std::string> paths) {
+                if (images && !paths.empty() && !paths.front().empty())
+                    images->download(url, account, paths.front());
+            });
+        } else if (id == "viewer-nav-prev") {
             event.StopPropagation();
             prevImage();
-            return;
-        }
-
-        if (target->GetId() == "viewer-nav-next") {
+        } else if (id == "viewer-nav-next") {
             event.StopPropagation();
             nextImage();
-            return;
-        }
-
-        // Clicking backdrop or viewport outside image closes
-        if (target->GetId() == "viewer-backdrop" || target->GetId() == "viewer-viewport" || target->GetId() == "image-viewer-root") {
+        } else if (id == "viewer-backdrop" || id == "viewer-viewport" || id == "image-viewer-root") {
             event.StopPropagation();
             hide();
-            return;
         }
     }, viewerDocument);
 
     listen("mousedown", [this](::Rml::Event &event) {
         auto *target = event.GetTargetElement();
-        if (target && target->GetId() == "viewer-image") {
-            if (event.GetParameter<int>("button", 0) == 0) { // left button
-                isDragging = true;
-                lastMousePos = QPointF(static_cast<float>(event.GetParameter<int>("mouse_x", 0)),
-                                       static_cast<float>(event.GetParameter<int>("mouse_y", 0)));
-                event.StopPropagation();
-            }
+        if (target && target->GetId() == "viewer-image" && event.GetParameter<int>("button", 0) == 0) {
+            isDragging = true;
+            lastMousePos = {static_cast<float>(event.GetParameter<int>("mouse_x", 0)),
+                            static_cast<float>(event.GetParameter<int>("mouse_y", 0))};
+            event.StopPropagation();
         }
     }, viewerDocument);
 
     listen("mousemove", [this](::Rml::Event &event) {
-        if (isDragging) {
-            QPointF pos(static_cast<float>(event.GetParameter<int>("mouse_x", 0)),
-                        static_cast<float>(event.GetParameter<int>("mouse_y", 0)));
-            panOffset += (pos - lastMousePos);
-            lastMousePos = pos;
-            updateTransform();
-            event.StopPropagation();
-        }
+        if (!isDragging)
+            return;
+        const Platform::Point pos{static_cast<float>(event.GetParameter<int>("mouse_x", 0)),
+                                  static_cast<float>(event.GetParameter<int>("mouse_y", 0))};
+        panOffset.x += pos.x - lastMousePos.x;
+        panOffset.y += pos.y - lastMousePos.y;
+        lastMousePos = pos;
+        updateTransform();
+        event.StopPropagation();
     }, viewerDocument);
-
-    listen("mouseup", [this](::Rml::Event &) {
-        isDragging = false;
-    }, viewerDocument);
-
+    listen("mouseup", [this](::Rml::Event &) { isDragging = false; }, viewerDocument);
     listen("mousescroll", [this](::Rml::Event &event) {
-        float wheelDelta = event.GetParameter<float>("wheel_delta_y", 0.0f);
-        if (wheelDelta != 0.0f) {
-            float factor = wheelDelta < 0.0f ? 1.15f : (1.0f / 1.15f);
-            zoomLevel = std::clamp(zoomLevel * factor, 0.1f, 20.0f);
+        const float delta = event.GetParameter<float>("wheel_delta_y", 0.0f);
+        if (delta != 0.0f) {
+            zoomLevel = std::clamp(zoomLevel * (delta < 0.0f ? 1.15f : 1.0f / 1.15f), 0.1f, 20.0f);
             updateTransform();
             event.StopPropagation();
         }
     }, viewerDocument);
-
     listen("keydown", [this](::Rml::Event &event) {
-        const auto key = static_cast<::Rml::Input::KeyIdentifier>(
-            event.GetParameter<int>("key_identifier", 0));
+        const auto key = static_cast<::Rml::Input::KeyIdentifier>(event.GetParameter<int>("key_identifier", 0));
         if (key == ::Rml::Input::KI_ESCAPE) {
             event.StopPropagation();
             hide();
@@ -159,95 +138,64 @@ void ImageViewerController::ensureDocument()
 
 void ImageViewerController::resetView()
 {
-    float winW = shell.view() ? static_cast<float>(shell.view()->width()) : 1280.0f;
-    float winH = shell.view() ? static_cast<float>(shell.view()->height()) : 720.0f;
-
-    panOffset = QPointF(0.0f, 0.0f);
+    const float winW = shell.view() ? static_cast<float>(shell.view()->width()) : 1280.0f;
+    const float winH = shell.view() ? static_cast<float>(shell.view()->height()) : 720.0f;
+    panOffset = {};
     zoomLevel = 1.0f;
-
-    if (naturalImageSize.isValid() && naturalImageSize.width() > 0 && naturalImageSize.height() > 0) {
-        float maxW = winW * 0.85f;
-        float maxH = winH * 0.85f;
-        float scaleX = maxW / static_cast<float>(naturalImageSize.width());
-        float scaleY = maxH / static_cast<float>(naturalImageSize.height());
-        zoomLevel = std::min({ scaleX, scaleY, 1.0f });
-    }
+    if (!naturalImageSize.empty())
+        zoomLevel = std::min({winW * 0.85f / naturalImageSize.width,
+                              winH * 0.85f / naturalImageSize.height, 1.0f});
 }
 
 void ImageViewerController::updateTransform()
 {
     if (!viewerDocument)
         return;
-
-    auto *imgEl = viewerDocument->GetElementById("viewer-image");
-    if (!imgEl)
+    auto *image = viewerDocument->GetElementById("viewer-image");
+    if (!image)
         return;
-
-    float winW = shell.view() ? static_cast<float>(shell.view()->width()) : 1280.0f;
-    float winH = shell.view() ? static_cast<float>(shell.view()->height()) : 720.0f;
-
-    float imgW = naturalImageSize.isValid() && naturalImageSize.width() > 0 ? static_cast<float>(naturalImageSize.width()) : 600.0f;
-    float imgH = naturalImageSize.isValid() && naturalImageSize.height() > 0 ? static_cast<float>(naturalImageSize.height()) : 400.0f;
-
-    float currentW = imgW * zoomLevel;
-    float currentH = imgH * zoomLevel;
-
-    float left = (winW - currentW) / 2.0f + static_cast<float>(panOffset.x());
-    float top = (winH - currentH) / 2.0f + static_cast<float>(panOffset.y());
-
-    imgEl->SetProperty("width", QStringLiteral("%1px").arg(currentW).toStdString());
-    imgEl->SetProperty("height", QStringLiteral("%1px").arg(currentH).toStdString());
-    imgEl->SetProperty("left", QStringLiteral("%1px").arg(left).toStdString());
-    imgEl->SetProperty("top", QStringLiteral("%1px").arg(top).toStdString());
-
+    const float winW = shell.view() ? static_cast<float>(shell.view()->width()) : 1280.0f;
+    const float winH = shell.view() ? static_cast<float>(shell.view()->height()) : 720.0f;
+    const float width = (naturalImageSize.width > 0 ? naturalImageSize.width : 600) * zoomLevel;
+    const float height = (naturalImageSize.height > 0 ? naturalImageSize.height : 400) * zoomLevel;
+    image->SetProperty("width", std::to_string(width) + "px");
+    image->SetProperty("height", std::to_string(height) + "px");
+    image->SetProperty("left", std::to_string((winW - width) / 2.0f + panOffset.x) + "px");
+    image->SetProperty("top", std::to_string((winH - height) / 2.0f + panOffset.y) + "px");
     requestRender();
 }
 
 void ImageViewerController::loadImage(int index)
 {
-    if (galleryUrls.isEmpty() || index < 0 || index >= galleryUrls.size() || !viewerDocument)
+    if (index < 0 || static_cast<size_t>(index) >= galleryUrls.size() || !viewerDocument)
         return;
-
     currentIndex = index;
-    currentUrl = galleryUrls[currentIndex];
-
-    // Counter
+    currentUrl = galleryUrls[index];
+    const auto generation = ++loadGeneration;
     if (auto *counter = viewerDocument->GetElementById("viewer-counter")) {
-        counter->SetInnerRML(QStringLiteral("%1 of %2").arg(currentIndex + 1).arg(galleryUrls.size()).toStdString());
+        counter->SetInnerRML(std::to_string(index + 1) + " of " + std::to_string(galleryUrls.size()));
         counter->SetClass("visible", galleryUrls.size() > 1);
     }
+    if (auto *button = viewerDocument->GetElementById("viewer-nav-prev"))
+        button->SetClass("visible", galleryUrls.size() > 1);
+    if (auto *button = viewerDocument->GetElementById("viewer-nav-next"))
+        button->SetClass("visible", galleryUrls.size() > 1);
 
-    // Nav arrows
-    if (auto *prevBtn = viewerDocument->GetElementById("viewer-nav-prev"))
-        prevBtn->SetClass("visible", galleryUrls.size() > 1);
-    if (auto *nextBtn = viewerDocument->GetElementById("viewer-nav-next"))
-        nextBtn->SetClass("visible", galleryUrls.size() > 1);
-
-    // Default dimensions while loading
-    naturalImageSize = QSizeF(800, 600);
+    naturalImageSize = {800, 600};
     resetView();
-
-    // Assign image source
-    if (auto *imgEl = viewerDocument->GetElementById("viewer-image")) {
-        QString src = shell.imageSource(currentUrl, QSize(1920, 1080));
-        imgEl->SetAttribute("src", src.toStdString());
-    }
-
+    if (auto *image = viewerDocument->GetElementById("viewer-image"))
+        image->SetAttribute("src", shell.imageSource(currentUrl, {1920, 1080}));
     updateTransform();
 
-    // Fetch full quality to determine true dimensions
     if (auto *images = shell.images()) {
-        QUrl fullUrl = Core::ImageManager::fullQualityUrl(currentUrl);
-        Core::Snowflake accId = shell.location().accountId;
-        QPointer<ImageViewerController> self(this);
-        int expectedIndex = currentIndex;
-
-        images->fetch(fullUrl, accId, this, [self, expectedIndex](const QByteArray &data) {
-            if (!self || !self->visible || self->currentIndex != expectedIndex)
+        Platform::Guard<ImageViewerController> self(this);
+        images->fetch(Core::ImageManager::fullQualityUrl(currentUrl), shell.location().accountId, this,
+                      [self, generation](const std::string &data) {
+            if (!self || !self->visible || self->loadGeneration != generation)
                 return;
-            QPixmap pixmap;
-            if (pixmap.loadFromData(data) && !pixmap.isNull()) {
-                self->naturalImageSize = pixmap.size();
+            auto image = Platform::Image::decode(reinterpret_cast<const uint8_t *>(data.data()), data.size());
+            if (image && !image->empty()) {
+                self->naturalImageSize = {image->width, image->height};
                 self->resetView();
                 self->updateTransform();
             }
@@ -257,40 +205,31 @@ void ImageViewerController::loadImage(int index)
 
 void ImageViewerController::nextImage()
 {
-    if (galleryUrls.size() <= 1)
-        return;
-    int next = (currentIndex + 1) % galleryUrls.size();
-    loadImage(next);
+    if (galleryUrls.size() > 1)
+        loadImage((currentIndex + 1) % static_cast<int>(galleryUrls.size()));
 }
 
 void ImageViewerController::prevImage()
 {
-    if (galleryUrls.size() <= 1)
-        return;
-    int prev = (currentIndex - 1 + galleryUrls.size()) % galleryUrls.size();
-    loadImage(prev);
+    if (galleryUrls.size() > 1)
+        loadImage((currentIndex - 1 + static_cast<int>(galleryUrls.size())) % static_cast<int>(galleryUrls.size()));
 }
 
-void ImageViewerController::openImage(const QUrl &url, const QList<QUrl> &gallery)
+void ImageViewerController::openImage(const std::string &url, const std::vector<std::string> &gallery)
 {
     ensureDocument();
     if (!viewerDocument)
         return;
-
     galleryUrls = gallery;
-    if (galleryUrls.isEmpty() && url.isValid())
-        galleryUrls.append(url);
-
-    currentIndex = galleryUrls.indexOf(url);
-    if (currentIndex < 0)
-        currentIndex = 0;
-
+    if (galleryUrls.empty() && !url.empty())
+        galleryUrls.push_back(url);
+    const auto found = std::find(galleryUrls.begin(), galleryUrls.end(), url);
+    currentIndex = found == galleryUrls.end() ? 0 : static_cast<int>(found - galleryUrls.begin());
+    visible = true;
     loadImage(currentIndex);
-
     viewerDocument->Show();
     viewerDocument->PullToFront();
     viewerDocument->SetClass("open", true);
-    visible = true;
     requestRender();
 }
 
@@ -298,14 +237,12 @@ void ImageViewerController::hide()
 {
     if (!viewerDocument || !visible)
         return;
-
     isDragging = false;
+    ++loadGeneration;
     viewerDocument->SetClass("open", false);
     viewerDocument->Hide();
     visible = false;
     requestRender();
 }
 
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+} // namespace Styx::UI::Rml
