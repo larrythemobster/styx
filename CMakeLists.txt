@@ -642,6 +642,8 @@ set(PLATFORM_SOURCES
     src/Platform/Sqlite.cpp
     src/Platform/ThreadPool.cpp
     src/Platform/Utf8.cpp
+    src/Platform/Native.cpp
+    src/Platform/Desktop.cpp
     src/Platform/WorkerLoop.cpp
 )
 
@@ -671,6 +673,7 @@ target_link_libraries(styx_platform
         nlohmann_json::nlohmann_json
         unofficial::sqlite3::sqlite3
         CURL::libcurl
+        OpenSSL::Crypto
 )
 if(TARGET WebP::webp)
     target_link_libraries(styx_platform PUBLIC WebP::webp)

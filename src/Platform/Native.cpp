@@ -4,7 +4,12 @@
 
 #include <curl/curl.h>
 #include <openssl/rand.h>
-#include <utf8proc.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -333,29 +338,72 @@ std::string randomUuid()
 std::vector<char32_t> codepoints(std::string_view utf8)
 {
     std::vector<char32_t> result;
-    for (size_t i = 0; i < utf8.size();) {
-        utf8proc_int32_t cp; auto n = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t *>(utf8.data() + i), static_cast<utf8proc_ssize_t>(utf8.size() - i), &cp);
-        if (n < 0) { result.push_back(0xfffd); ++i; } else { result.push_back(static_cast<char32_t>(cp)); i += static_cast<size_t>(n); }
+    size_t i = 0;
+    while (i < utf8.size()) {
+        const auto c = static_cast<unsigned char>(utf8[i]);
+        if (c < 0x80) {
+            result.push_back(c);
+            i += 1;
+        } else if ((c >> 5) == 0x06 && i + 1 < utf8.size()) {
+            result.push_back(((c & 0x1F) << 6) | (static_cast<unsigned char>(utf8[i + 1]) & 0x3F));
+            i += 2;
+        } else if ((c >> 4) == 0x0E && i + 2 < utf8.size()) {
+            result.push_back(((c & 0x0F) << 12) | ((static_cast<unsigned char>(utf8[i + 1]) & 0x3F) << 6) |
+                             (static_cast<unsigned char>(utf8[i + 2]) & 0x3F));
+            i += 3;
+        } else if ((c >> 3) == 0x1E && i + 3 < utf8.size()) {
+            result.push_back(((c & 0x07) << 18) | ((static_cast<unsigned char>(utf8[i + 1]) & 0x3F) << 12) |
+                             ((static_cast<unsigned char>(utf8[i + 2]) & 0x3F) << 6) |
+                             (static_cast<unsigned char>(utf8[i + 3]) & 0x3F));
+            i += 4;
+        } else {
+            result.push_back(0xFFFD);
+            i += 1;
+        }
     }
     return result;
 }
 std::string fromCodepoints(const std::vector<char32_t> &values)
 {
     std::string result;
-    for (char32_t value : values) {
-        utf8proc_uint8_t bytes[4];
-        auto cp = static_cast<utf8proc_int32_t>(value);
-        auto n = utf8proc_encode_char(utf8proc_codepoint_valid(cp) ? cp : 0xfffd, bytes);
-        result.append(reinterpret_cast<const char *>(bytes), static_cast<size_t>(n));
+    for (char32_t cp : values) {
+        if (cp < 0x80) {
+            result.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+            result.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            result.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+            result.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            result.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x110000) {
+            result.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            result.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            result.append("\xEF\xBF\xBD");
+        }
     }
     return result;
 }
 std::string unicodeLower(std::string_view text)
 {
-    auto points = codepoints(text); for (auto &cp : points) cp = static_cast<char32_t>(utf8proc_tolower(static_cast<utf8proc_int32_t>(cp))); return fromCodepoints(points);
+#ifdef _WIN32
+    std::wstring wide = toUtf16(text);
+    CharLowerBuffW(wide.data(), static_cast<DWORD>(wide.size()));
+    return fromUtf16(wide);
+#else
+    return toLowerAscii(text);
+#endif
 }
 std::string unicodeUpper(std::string_view text)
 {
-    auto points = codepoints(text); for (auto &cp : points) cp = static_cast<char32_t>(utf8proc_toupper(static_cast<utf8proc_int32_t>(cp))); return fromCodepoints(points);
-}
+#ifdef _WIN32
+    std::wstring wide = toUtf16(text);
+    CharUpperBuffW(wide.data(), static_cast<DWORD>(wide.size()));
+    return fromUtf16(wide);
+#else
+    return toUpperAscii(text);
+#endif
 }
