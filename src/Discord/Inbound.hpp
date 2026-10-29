@@ -8,22 +8,22 @@ namespace Discord {
 struct Inbound
 {
     OpCode opcode;
-    QJsonValue data;
+    nlohmann::json data;
 
     std::optional<int> s;
-    std::optional<QString> t;
+    std::optional<std::string> t;
 
-    static Inbound fromJson(const QJsonObject &root)
+    static Inbound fromJson(const nlohmann::json &root)
     {
         Inbound obj;
-        obj.opcode = static_cast<OpCode>(root["op"].toInt());
+        obj.opcode = static_cast<OpCode>(root.value("op", 0));
         obj.data = root["d"];
 
-        if (root.contains("s") && !root["s"].isNull())
-            obj.s = root["s"].toInt();
+        if (root.contains("s") && !root["s"].is_null())
+            obj.s = root["s"].get<int>();
 
-        if (root.contains("t") && !root["t"].isNull())
-            obj.t = root["t"].toString();
+        if (root.contains("t") && !root["t"].is_null())
+            obj.t = root["t"].get<std::string>();
 
         return obj;
     }
@@ -31,7 +31,7 @@ struct Inbound
     template <typename T>
     T getData() const
     {
-        return T::fromJson(data.toObject());
+        return T::fromJson(data.is_object() ? data : nlohmann::json::object());
     }
 };
 
@@ -39,10 +39,10 @@ struct Hello
 {
     int heartbeatInterval;
 
-    static Hello fromJson(const QJsonObject &root)
+    static Hello fromJson(const nlohmann::json &root)
     {
         Hello obj;
-        obj.heartbeatInterval = root["heartbeat_interval"].toInt();
+        obj.heartbeatInterval = root.value("heartbeat_interval", 0);
         return obj;
     }
 };

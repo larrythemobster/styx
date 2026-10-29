@@ -1,9 +1,9 @@
 #pragma once
 
-#include <QString>
-#include <QMutex>
-
+#include <cstdint>
+#include <mutex>
 #include <optional>
+#include <string>
 
 #include "Objects.hpp"
 
@@ -14,14 +14,14 @@ struct ClientPropertiesBuildParams
 {
     bool includeClientHeartbeatSessionId;
     std::optional<bool> isFastConnect;
-    std::optional<QString> gatewayConnectReasons;
+    std::optional<std::string> gatewayConnectReasons;
 };
 
 struct HeartbeatSession
 {
-    QString id;
-    qint64 createdAtMs = 0;
-    qint64 lastUsedAtMs = 0;
+    std::string id;
+    int64_t createdAtMs = 0;
+    int64_t lastUsedAtMs = 0;
 };
 
 enum class HeartbeatSessionUpdate {
@@ -35,27 +35,27 @@ class ClientIdentity
 public:
     ClientIdentity();
 
-    QString clientLaunchId() const;
+    std::string clientLaunchId() const;
 
     std::optional<HeartbeatSession> heartbeatSession() const;
     void restoreHeartbeatSession(const std::optional<HeartbeatSession> &stored);
     HeartbeatSessionUpdate touchHeartbeatSession();
 
-    void setDiscordLocale(const QString &locale);
-    QString discordLocale() const;
+    void setDiscordLocale(const std::string &locale);
+    std::string discordLocale() const;
 
     void setActivity(bool focused, bool rtcConnected);
 
     ClientProperties buildClientProperties(const ClientPropertiesBuildParams &params) const;
 
 private:
-    static QString generateLaunchSignature();
+    static std::string generateLaunchSignature();
 
-    mutable QMutex mutex;
-    QString launchId;
-    QString launchSignature;
+    mutable std::mutex mutex;
+    std::string launchId;
+    std::string launchSignature;
     std::optional<HeartbeatSession> clientHeartbeatSession;
-    QString locale = "en-US";
+    std::string locale = "en-US";
     bool appFocused = true;
     bool rtcConnected = false;
 };

@@ -2,13 +2,17 @@
 
 #include <cstdint>
 
-#include <QDebug>
-#include <QHash>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 
-#include "qt_flags.hpp"
+#include "Core/Flags.hpp"
 
 namespace Styx {
 namespace Discord {
+
+#define STYX_FLAG_OPERATORS(E)     constexpr Core::Flags<E> operator|(E a, E b) { return Core::Flags<E>(a) | b; }     constexpr Core::Flags<E> operator&(E a, E b) { return Core::Flags<E>(a) & b; }     constexpr Core::Flags<E> operator^(E a, E b) { return Core::Flags<E>(a) ^ b; }     constexpr Core::Flags<E> operator~(E a) { return ~Core::Flags<E>(a); }
 
 constexpr uint32_t BLURPLE = 0x5865F2;
 
@@ -80,12 +84,12 @@ enum class CloseCode {
     TOO_MANY_SESSIONS = 4015,
     CONNECTION_REQUEST_CANCELED = 4016,
 };
-inline QDebug operator<<(QDebug dbg, CloseCode code)
+inline std::ostream &operator<<(std::ostream &out, CloseCode code)
 {
-    return dbg << static_cast<int>(code);
+    return out << static_cast<int>(code);
 }
 
-enum class Capability : quint32 {
+enum class Capability : std::uint32_t {
     LAZY_USER_NOTES = 1 << 0,
     NO_AFFINE_USER_IDS = 1 << 1,
     VERSIONED_READ_STATES = 1 << 2,
@@ -108,7 +112,8 @@ enum class Capability : quint32 {
     UNK19 = 1 << 19,
     UNK20 = 1 << 20,
 };
-STYX_DECLARE_FLAGS(Capabilities, Capability)
+using Capabilities = Core::Flags<Capability>;
+STYX_FLAG_OPERATORS(Capability)
 
 // clang-format off
 constexpr static auto CURRENT_CAPABILITIES = Capability::LAZY_USER_NOTES |
@@ -174,6 +179,9 @@ enum class GatewayEvent {
     VOICE_STATE_UPDATE,
     VOICE_STATE_UPDATE_BATCH,
     VOICE_SERVER_UPDATE,
+    CALL_CREATE,
+    CALL_UPDATE,
+    CALL_DELETE,
     STREAM_CREATE,
     STREAM_UPDATE,
     STREAM_SERVER_UPDATE,
@@ -197,9 +205,9 @@ enum class RelationshipType {
     IMPLICIT = 5,
 };
 
-inline GatewayEvent parseGatewayEvent(const QString &event)
+inline GatewayEvent parseGatewayEvent(std::string_view event)
 {
-    static const QHash<QString, GatewayEvent> events = {
+    static const std::unordered_map<std::string, GatewayEvent> events = {
         { "READY", GatewayEvent::READY },
         { "READY_SUPPLEMENTAL", GatewayEvent::READY_SUPPLEMENTAL },
         { "MESSAGE_CREATE", GatewayEvent::MESSAGE_CREATE },
@@ -243,6 +251,9 @@ inline GatewayEvent parseGatewayEvent(const QString &event)
         { "VOICE_STATE_UPDATE", GatewayEvent::VOICE_STATE_UPDATE },
         { "VOICE_STATE_UPDATE_BATCH", GatewayEvent::VOICE_STATE_UPDATE_BATCH },
         { "VOICE_SERVER_UPDATE", GatewayEvent::VOICE_SERVER_UPDATE },
+        { "CALL_CREATE", GatewayEvent::CALL_CREATE },
+        { "CALL_UPDATE", GatewayEvent::CALL_UPDATE },
+        { "CALL_DELETE", GatewayEvent::CALL_DELETE },
         { "STREAM_CREATE", GatewayEvent::STREAM_CREATE },
         { "STREAM_UPDATE", GatewayEvent::STREAM_UPDATE },
         { "STREAM_SERVER_UPDATE", GatewayEvent::STREAM_SERVER_UPDATE },
@@ -257,7 +268,8 @@ inline GatewayEvent parseGatewayEvent(const QString &event)
         { "SESSIONS_REPLACE", GatewayEvent::SESSIONS_REPLACE },
     };
 
-    return events.value(event, GatewayEvent::UNKNOWN);
+    auto found = events.find(std::string(event));
+    return found == events.end() ? GatewayEvent::UNKNOWN : found->second;
 };
 
 enum class StatusType {
@@ -269,9 +281,9 @@ enum class StatusType {
     INVISIBLE,
 };
 
-inline StatusType parseStatus(const QString &status)
+inline StatusType parseStatus(std::string_view status)
 {
-    static const QHash<QString, StatusType> statuses = {
+    static const std::unordered_map<std::string, StatusType> statuses = {
         { "online", StatusType::ONLINE },
         { "idle", StatusType::IDLE },
         { "dnd", StatusType::DND },
@@ -280,7 +292,8 @@ inline StatusType parseStatus(const QString &status)
         { "unknown", StatusType::UNKNOWN },
     };
 
-    return statuses.value(status, StatusType::OFFLINE);
+    auto found = statuses.find(std::string(status));
+    return found == statuses.end() ? StatusType::OFFLINE : found->second;
 }
 
 enum class ActivityType {
@@ -310,7 +323,8 @@ enum class ActivityFlag {
     EMBEDDED = 1 << 8,
     CONTEXTLESS = 1 << 9,
 };
-STYX_DECLARE_FLAGS(ActivityFlags, ActivityFlag)
+using ActivityFlags = Core::Flags<ActivityFlag>;
+STYX_FLAG_OPERATORS(ActivityFlag)
 
 enum class ChannelType {
     GUILD_TEXT = 0,
@@ -367,7 +381,8 @@ enum class ChannelFlag {
     IS_GAME_INVITES_CHANNEL = 1 << 22,
     HAS_ONLY_SYSTEM_MESSAGES = 1 << 23,
 };
-STYX_DECLARE_FLAGS(ChannelFlags, ChannelFlag)
+using ChannelFlags = Core::Flags<ChannelFlag>;
+STYX_FLAG_OPERATORS(ChannelFlag)
 
 // /users/@me/settings-proto/{type}
 enum class UserSettingsProtoType {
@@ -508,7 +523,8 @@ enum class SystemChannelFlag {
     SUPPRESS_ROLE_SUBSCRIPTION_PURCHASE_NOTIFICATION_REPLIES = 1 << 5,
     SUPPRESS_CHANNEL_PROMPT_DEADCHAT = 1 << 7,
 };
-STYX_DECLARE_FLAGS(SystemChannelFlags, SystemChannelFlag)
+using SystemChannelFlags = Core::Flags<SystemChannelFlag>;
+STYX_FLAG_OPERATORS(SystemChannelFlag)
 
 enum class MessageType {
     DEFAULT = 0,
@@ -607,9 +623,10 @@ enum class MessageFlag {
     IS_COMPONENTS_V2 = 1 << 15,
     SENT_BY_SOCIAL_LAYER_INTEGRATION = 1 << 16,
 };
-STYX_DECLARE_FLAGS(MessageFlags, MessageFlag)
+using MessageFlags = Core::Flags<MessageFlag>;
+STYX_FLAG_OPERATORS(MessageFlag)
 
-enum class Permission : quint64 {
+enum class Permission : std::uint64_t {
     CREATE_INSTANT_INVITE = 1ULL << 0,
     KICK_MEMBERS = 1ULL << 1,
     BAN_MEMBERS = 1ULL << 2,
@@ -664,27 +681,29 @@ enum class Permission : quint64 {
     PIN_MESSAGES = 1ULL << 51,
     BYPASS_SLOWMODE = 1ULL << 52,
 };
-STYX_DECLARE_FLAGS(Permissions, Permission)
+using Permissions = Core::Flags<Permission>;
+STYX_FLAG_OPERATORS(Permission)
 
 constexpr Permissions ALL_PERMISSIONS = Permissions::fromInt(0xFFFFFFFFFFFFFFFFULL);
 constexpr Permissions NO_PERMISSIONS = Permissions::fromInt(0ULL);
 
-constexpr Permissions MFA_ELEVATED_PERMISSIONS = Permissions::fromInt(quint64(Permission::KICK_MEMBERS) |
-                                                                      quint64(Permission::BAN_MEMBERS) |
-                                                                      quint64(Permission::ADMINISTRATOR) |
-                                                                      quint64(Permission::MANAGE_CHANNELS) |
-                                                                      quint64(Permission::MANAGE_GUILD) |
-                                                                      quint64(Permission::MANAGE_ROLES) |
-                                                                      quint64(Permission::MANAGE_MESSAGES) |
-                                                                      quint64(Permission::MANAGE_THREADS) |
-                                                                      quint64(Permission::MODERATE_MEMBERS));
+constexpr Permissions MFA_ELEVATED_PERMISSIONS = Permissions::fromInt(std::uint64_t(Permission::KICK_MEMBERS) |
+                                                                      std::uint64_t(Permission::BAN_MEMBERS) |
+                                                                      std::uint64_t(Permission::ADMINISTRATOR) |
+                                                                      std::uint64_t(Permission::MANAGE_CHANNELS) |
+                                                                      std::uint64_t(Permission::MANAGE_GUILD) |
+                                                                      std::uint64_t(Permission::MANAGE_ROLES) |
+                                                                      std::uint64_t(Permission::MANAGE_MESSAGES) |
+                                                                      std::uint64_t(Permission::MANAGE_THREADS) |
+                                                                      std::uint64_t(Permission::MODERATE_MEMBERS));
 
 enum class ReadStateFlag {
     IS_GUILD_CHANNEL = 1 << 0,
     IS_THREAD = 1 << 1,
     IS_MENTION_LOW_IMPORTANCE = 1 << 2,
 };
-STYX_DECLARE_FLAGS(ReadStateFlags, ReadStateFlag)
+using ReadStateFlags = Core::Flags<ReadStateFlag>;
+STYX_FLAG_OPERATORS(ReadStateFlag)
 
 enum class NotificationSettingsFlag {
     USE_NEW_NOTIFICATIONS = 1 << 4,
@@ -717,14 +736,16 @@ enum class AttachmentFlag {
     CONTAINS_GORE_CONTENT = 1 << 6,
     CONTAINS_SELF_HARM_CONTENT = 1 << 7,
 };
-STYX_DECLARE_FLAGS(AttachmentFlags, AttachmentFlag)
+using AttachmentFlags = Core::Flags<AttachmentFlag>;
+STYX_FLAG_OPERATORS(AttachmentFlag)
 
 enum class VoiceFlag {
     CLIPS_ENABLED = 1 << 0,
     ALLOW_VOICE_RECORDINGS = 1 << 1,
     ALLOW_ANY_VIEWER_CLIPS = 1 << 2,
 };
-STYX_DECLARE_FLAGS(VoiceFlags, VoiceFlag)
+using VoiceFlags = Core::Flags<VoiceFlag>;
+STYX_FLAG_OPERATORS(VoiceFlag)
 
 } // namespace Discord
 } // namespace Styx

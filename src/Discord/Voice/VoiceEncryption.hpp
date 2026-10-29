@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QByteArray>
+#include <string>
 
 #include <cstdint>
 
@@ -13,7 +13,7 @@ namespace Voice {
 class VoiceEncryption
 {
 public:
-    VoiceEncryption(EncryptionMode mode, const QByteArray &secretKey);
+    VoiceEncryption(EncryptionMode mode, const std::string &secretKey);
 
     /// Encrypts an audio payload for an outbound RTP packet.
     /// @param rtpHeader  The serialized RTP header bytes (used as AAD for AEAD modes).
@@ -21,13 +21,13 @@ public:
     /// @return The encrypted section to append after the RTP header:
     ///         [ciphertext + auth tag] + [4-byte supplemental nonce (big-endian)].
     ///         Empty on failure.
-    QByteArray encrypt(const QByteArray &rtpHeader, const QByteArray &audioPayload);
+    std::string encrypt(const std::string &rtpHeader, const std::string &audioPayload);
 
     /// Decrypts the encrypted section of an inbound RTP packet.
     /// @param rtpHeader  The serialized RTP header bytes (used as AAD for AEAD modes).
     /// @param encryptedSection  Everything after the RTP header in the received packet.
     /// @return The decrypted audio payload, or empty on failure.
-    QByteArray decrypt(const QByteArray &rtpHeader, const QByteArray &encryptedSection);
+    std::string decrypt(const std::string &rtpHeader, const std::string &encryptedSection);
 
     /// Initialize libsodium. Must be called before any encrypt/decrypt operations.
     /// Safe to call multiple times.
@@ -38,13 +38,13 @@ public:
     static bool isModeAvailable(EncryptionMode mode);
 
 private:
-    QByteArray encryptAes256Gcm(const QByteArray &rtpHeader, const QByteArray &payload);
-    QByteArray encryptXChacha20(const QByteArray &rtpHeader, const QByteArray &payload);
-    QByteArray decryptAes256Gcm(const QByteArray &rtpHeader, const QByteArray &encrypted);
-    QByteArray decryptXChacha20(const QByteArray &rtpHeader, const QByteArray &encrypted);
+    std::string encryptAes256Gcm(const std::string &rtpHeader, const std::string &payload);
+    std::string encryptXChacha20(const std::string &rtpHeader, const std::string &payload);
+    std::string decryptAes256Gcm(const std::string &rtpHeader, const std::string &encrypted);
+    std::string decryptXChacha20(const std::string &rtpHeader, const std::string &encrypted);
 
     EncryptionMode m_mode;
-    QByteArray m_key;
+    std::string m_key;
     uint32_t m_nonce = 0;
 };
 

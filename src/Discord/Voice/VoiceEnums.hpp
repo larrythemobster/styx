@@ -1,10 +1,10 @@
 #pragma once
 
-#include <QDebug>
-#include <QString>
-#include <QStringList>
+#include <ostream>
+#include <string>
+#include <string_view>
 
-#include "qt_flags.hpp"
+#include "Core/Flags.hpp"
 
 namespace Styx {
 namespace Discord {
@@ -67,7 +67,7 @@ enum class VoiceCloseCode {
     DISCONNECTED_ALL = 4022, // dont reconnect
 };
 
-inline QDebug operator<<(QDebug dbg, VoiceCloseCode code)
+inline std::ostream &operator<<(std::ostream &dbg, VoiceCloseCode code)
 {
     return dbg << static_cast<int>(code);
 }
@@ -77,7 +77,7 @@ enum class SpeakingFlag {
     SOUNDSHARE = 1 << 1,
     PRIORITY = 1 << 2,
 };
-STYX_DECLARE_FLAGS(SpeakingFlags, SpeakingFlag)
+using SpeakingFlags = Core::Flags<SpeakingFlag>;
 
 enum class EncryptionMode {
     AEAD_AES256_GCM_RTPSIZE,
@@ -85,7 +85,7 @@ enum class EncryptionMode {
     UNKNOWN,
 };
 
-inline QString encryptionModeToString(EncryptionMode mode)
+inline std::string encryptionModeToString(EncryptionMode mode)
 {
     switch (mode) {
     case EncryptionMode::AEAD_AES256_GCM_RTPSIZE:
@@ -97,7 +97,7 @@ inline QString encryptionModeToString(EncryptionMode mode)
     }
 }
 
-inline EncryptionMode encryptionModeFromString(const QString &str)
+inline EncryptionMode encryptionModeFromString(std::string_view str)
 {
     if (str == "aead_aes256_gcm_rtpsize")
         return EncryptionMode::AEAD_AES256_GCM_RTPSIZE;

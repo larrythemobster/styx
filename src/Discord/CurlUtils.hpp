@@ -1,7 +1,6 @@
 #pragma once
 
-#include <QString>
-#include <QObject>
+#include <string>
 
 #include "Core/ProxyConfig.hpp"
 
@@ -21,17 +20,17 @@ namespace CurlUtils {
 
 struct UserAgentProps
 {
-    QString os;
-    QString browser;
-    QString browserVersion;
-    QString osVersion;
+    std::string os;
+    std::string browser;
+    std::string browserVersion;
+    std::string osVersion;
 };
 
-QString getCertificatePath();
-QString getUserAgent();
-QString getImpersonateTarget();
+std::string getCertificatePath();
+std::string getUserAgent();
+std::string getImpersonateTarget();
 UserAgentProps getUserAgentProps();
-QString getSystemLocale();
+std::string getSystemLocale();
 
 void ensureBuildNumber(const Core::ProxyConfig &proxy, std::function<void()> done);
 int getBuildNumber();
@@ -41,9 +40,9 @@ void applyCommonOptions(CURL *curl);
 
 void applyProxy(CURL *curl, const Core::ProxyConfig &proxy);
 
-void appendDiscordHeaders(curl_slist **headers, const ClientIdentity &identity, const QString &referer);
+void appendDiscordHeaders(curl_slist **headers, const ClientIdentity &identity, const std::string &referer);
 
-// CURLOPT_WRITEFUNCTION for QByteArray
+// CURLOPT_WRITEFUNCTION for binary strings
 size_t writeToByteArray(char *ptr, size_t size, size_t nmemb, void *userdata);
 
 // send full frame with retry

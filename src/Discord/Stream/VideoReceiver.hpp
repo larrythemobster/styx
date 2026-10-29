@@ -1,9 +1,9 @@
 #pragma once
 
-#include <QByteArray>
-#include <QElapsedTimer>
-#include <QObject>
-#include <QTimer>
+#include "Platform/Trackable.hpp"
+#include "Platform/Timer.hpp"
+#include <chrono>
+#include <string>
 
 #include <cstdint>
 #include <map>
@@ -20,78 +20,77 @@ namespace Stream {
 // emits whole access units in Annex B form with 4-byte start codes. That is byte-for-byte
 // what WebRTC's depacketizer hands DAVE, so the frame decrypts. On unrecoverable loss it
 // asks for a keyframe and resumes at the next one.
-class VideoReceiver : public QObject
+class VideoReceiver : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit VideoReceiver(QObject *parent = nullptr);
+    VideoReceiver();
 
-    void setSsrcs(quint32 videoSsrc, quint32 rtxSsrc, quint32 audioSsrc);
-    void setLocalSsrc(quint32 ssrc) { localSsrc = ssrc; }
+    void setSsrcs(uint32_t videoSsrc, uint32_t rtxSsrc, uint32_t audioSsrc);
+    void setLocalSsrc(uint32_t ssrc) { localSsrc = ssrc; }
 
-    void handleRtp(const QByteArray &packet);
+    void handleRtp(const std::string &packet);
     void requestKeyframe();
     void reset();
 
     struct Stats
     {
-        quint64 packets = 0;
-        quint64 recovered = 0;
-        quint64 nacksSent = 0;
-        quint64 frames = 0;
-        quint64 framesDropped = 0;
-        quint64 keyframeRequests = 0;
+        uint64_t packets = 0;
+        uint64_t recovered = 0;
+        uint64_t nacksSent = 0;
+        uint64_t frames = 0;
+        uint64_t framesDropped = 0;
+        uint64_t keyframeRequests = 0;
     };
     [[nodiscard]] const Stats &stats() const { return counters; }
 
-signals:
+public:
     // An H264 access unit, still DAVE-encrypted when the session is E2EE.
-    void frameReady(const QByteArray &annexB, quint32 rtpTimestamp, bool keyframe);
+    Platform::Signal<const std::string &, uint32_t, bool> frameReady;
     // An Opus packet from the stream's audio SSRC, still DAVE-encrypted when E2EE.
-    void audioReady(quint32 ssrc, quint16 sequence, quint32 rtpTimestamp, const QByteArray &opus);
+    Platform::Signal<uint32_t, uint16_t, uint32_t, const std::string &> audioReady;
     // RTCP feedback for the media server (NACK or PLI).
-    void sendRtcp(const QByteArray &packet);
+    Platform::Signal<const std::string &> sendRtcp;
 
 private:
     struct Packet
     {
-        quint32 timestamp = 0;
+        uint32_t timestamp = 0;
         bool marker = false;
         bool keyframeStart = false; // carries SPS: an encoder starts every IDR access unit with it
-        QByteArray payload;         // H264 RTP payload (no RTP header/extension/padding)
+        std::string payload;         // H264 RTP payload (no RTP header/extension/padding)
     };
 
     struct Missing
     {
-        qint64 firstSeenMs = 0;
-        qint64 lastNackMs = 0;
+        int64_t firstSeenMs = 0;
+        int64_t lastNackMs = 0;
         int nackCount = 0;
     };
 
-    void insertVideo(quint16 sequence, quint32 timestamp, bool marker, QByteArray payload);
+    void insertVideo(uint16_t sequence, uint32_t timestamp, bool marker, std::string payload);
     void assembleFrames();
     bool emitFrame(int64_t first, int64_t last);
     void resyncToKeyframe();
     void onTick();
-    void sendNacks(qint64 nowMs);
+    void sendNacks(int64_t nowMs);
     void sendPli();
-    int64_t unwrap(quint16 sequence);
-    static bool payloadStartsKeyframe(const QByteArray &payload);
+    int64_t unwrap(uint16_t sequence);
+    static bool payloadStartsKeyframe(const std::string &payload);
 
-    quint32 videoSsrc = 0;
-    quint32 rtxSsrc = 0;
-    quint32 audioSsrc = 0;
-    quint32 localSsrc = 1;
+    uint32_t videoSsrc = 0;
+    uint32_t rtxSsrc = 0;
+    uint32_t audioSsrc = 0;
+    uint32_t localSsrc = 1;
 
     std::map<int64_t, Packet> buffer;   // extended sequence -> packet
     std::map<int64_t, Missing> missing; // holes below the newest packet
     std::optional<int64_t> lastUnwrapped;
     std::optional<int64_t> nextFrameStart; // first sequence of the next frame to emit
     bool waitingForKeyframe = true;
-    qint64 lastPliMs = -100000;
+    int64_t lastPliMs = -100000;
 
-    QElapsedTimer clock;
-    QTimer tick{ this };
+    std::chrono::steady_clock::time_point clock = std::chrono::steady_clock::now();
+    Platform::Timer tick;
     Stats counters;
 
     static constexpr int MAX_BUFFERED_PACKETS = 2048;

@@ -1,8 +1,12 @@
 #pragma once
 
-#include <QObject>
-#include <QPair>
-#include <QUrl>
+#include "Platform/Trackable.hpp"
+#include "Platform/Native.hpp"
+#include <nlohmann/json.hpp>
+#include <cstdint>
+#include <string>
+#include <vector>
+#include <utility>
 
 #include <curl/curl.h>
 
@@ -26,8 +30,8 @@ struct RequestDescriptor;
 struct HttpResponse
 {
     int statusCode = 0;
-    QByteArray body;
-    QString error;
+    std::string body;
+    std::string error;
     bool success = false;
 
     [[nodiscard]] bool rateLimited() const { return statusCode == 429; }
@@ -35,33 +39,31 @@ struct HttpResponse
 
 struct FileUpload
 {
-    QString filename;
-    QByteArray data;
-    QString mimeType;
-    QString fieldName;
+    std::string filename;
+    std::string data;
+    std::string mimeType;
+    std::string fieldName;
 };
 
 using HttpCallback = std::function<void(const HttpResponse &)>;
 
-inline QByteArray encodeUriComponent(const QString &text)
+inline std::string encodeUriComponent(const std::string &text)
 {
-    return QUrl::toPercentEncoding(text, "!'()*");
+    return Platform::urlEncode(text);
 }
 
 struct RequestOptions
 {
     std::optional<ContextProperties> context;
-    std::optional<QString> auditLogReason;
-    QByteArray originalMd5;
+    std::optional<std::string> auditLogReason;
+    std::string originalMd5;
 };
 
-class HttpClient : public QObject
+class HttpClient : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit HttpClient(const QString &baseUrl, const QString &token, ClientIdentity &identity,
-                        const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver = nullptr,
-                        QObject *parent = nullptr);
+    explicit HttpClient(const std::string &baseUrl, const std::string &token, ClientIdentity &identity,
+                        const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver = nullptr);
     ~HttpClient() override;
 
     enum class Method {
@@ -72,55 +74,55 @@ public:
         DELETE_, // thanks windows.h for the DELETE macro
     };
 
-    void setReferer(const QString &referer) { this->referer = referer; }
-    void setFingerprint(const QString &fingerprint) { this->fingerprint = fingerprint; }
+    void setReferer(const std::string &referer) { this->referer = referer; }
+    void setFingerprint(const std::string &fingerprint) { this->fingerprint = fingerprint; }
 
-    void get(const QString &endpoint, const QUrlQuery &query, HttpCallback callback);
-    void post(const QString &endpoint, const QJsonObject &body, HttpCallback callback);
-    void post(const QString &endpoint, const QJsonObject &body, const ContextProperties &context, HttpCallback callback);
-    void patch(const QString &endpoint, const QJsonObject &body, HttpCallback callback);
-    void put(const QString &endpoint, const QJsonObject &body, HttpCallback callback);
-    void delete_(const QString &endpoint, HttpCallback callback);
-    void delete_(const QString &endpoint, const QJsonObject &body, HttpCallback callback);
+    void get(const std::string &endpoint, const std::vector<std::pair<std::string, std::string>> &query, HttpCallback callback);
+    void post(const std::string &endpoint, const nlohmann::json &body, HttpCallback callback);
+    void post(const std::string &endpoint, const nlohmann::json &body, const ContextProperties &context, HttpCallback callback);
+    void patch(const std::string &endpoint, const nlohmann::json &body, HttpCallback callback);
+    void put(const std::string &endpoint, const nlohmann::json &body, HttpCallback callback);
+    void delete_(const std::string &endpoint, HttpCallback callback);
+    void delete_(const std::string &endpoint, const nlohmann::json &body, HttpCallback callback);
 
-    void post(const QString &endpoint, const Core::OrderedJson &body, HttpCallback callback);
-    void put(const QString &endpoint, const Core::OrderedJson &body, HttpCallback callback);
-    void patch(const QString &endpoint, const Core::OrderedJson &body, HttpCallback callback);
-    void patch(const QString &endpoint, const Core::OrderedJson::Array &body, HttpCallback callback);
-    void send(Method method, const QString &endpoint, const QByteArray &jsonBody, const RequestOptions &options, HttpCallback callback);
-    void postMultipart(const QString &endpoint, const QJsonObject &jsonPayload,
-                       const QList<FileUpload> &files, HttpCallback callback);
-    void postForm(const QString &endpoint, const QList<QPair<QString, QString>> &fields,
-                  const QList<FileUpload> &files, const RequestOptions &options, HttpCallback callback);
+    void post(const std::string &endpoint, const Core::OrderedJson &body, HttpCallback callback);
+    void put(const std::string &endpoint, const Core::OrderedJson &body, HttpCallback callback);
+    void patch(const std::string &endpoint, const Core::OrderedJson &body, HttpCallback callback);
+    void patch(const std::string &endpoint, const Core::OrderedJson::Array &body, HttpCallback callback);
+    void send(Method method, const std::string &endpoint, const std::string &jsonBody, const RequestOptions &options, HttpCallback callback);
+    void postMultipart(const std::string &endpoint, const nlohmann::json &jsonPayload,
+                       const std::vector<FileUpload> &files, HttpCallback callback);
+    void postForm(const std::string &endpoint, const std::vector<std::pair<std::string, std::string>> &fields,
+                  const std::vector<FileUpload> &files, const RequestOptions &options, HttpCallback callback);
     // for gcp uploads
-    void putExternalFile(const QString &absoluteUrl, const QString &filePath,
-                         const QString &contentType, HttpCallback callback,
-                         std::function<void(qint64 sent, qint64 total)> progress = {},
+    void putExternalFile(const std::string &absoluteUrl, const std::string &filePath,
+                         const std::string &contentType, HttpCallback callback,
+                         std::function<void(int64_t sent, int64_t total)> progress = {},
                          std::shared_ptr<std::atomic<bool>> cancelFlag = {});
-    void putExternal(const QString &absoluteUrl, const QByteArray &data,
-                     const QString &contentType, HttpCallback callback,
-                     std::function<void(qint64 sent, qint64 total)> progress = {},
+    void putExternal(const std::string &absoluteUrl, const std::string &data,
+                     const std::string &contentType, HttpCallback callback,
+                     std::function<void(int64_t sent, int64_t total)> progress = {},
                      std::shared_ptr<std::atomic<bool>> cancelFlag = {});
 
 private:
-    void executeRequest(Method method, const QString &url, const QByteArray &data, HttpCallback callback, const RequestOptions &options = {});
-    void executeMultipartRequest(const QString &url, const QByteArray &jsonData,
-                                 const QList<FileUpload> &files, HttpCallback callback,
-                                 const QList<QPair<QString, QString>> &formFields = {},
+    void executeRequest(Method method, const std::string &url, const std::string &data, HttpCallback callback, const RequestOptions &options = {});
+    void executeMultipartRequest(const std::string &url, const std::string &jsonData,
+                                 const std::vector<FileUpload> &files, HttpCallback callback,
+                                 const std::vector<std::pair<std::string, std::string>> &formFields = {},
                                  const RequestOptions &options = {});
     void submitExternalPut(RequestDescriptor &descriptor,
-                           std::function<void(qint64, qint64)> progress);
+                           std::function<void(int64_t, int64_t)> progress);
 
     void onRequestComplete(RequestDescriptor descriptor, HttpResponse response,
                            std::optional<CaptchaChallenge> challenge);
 
-    QString baseUrl;
-    QString token;
+    std::string baseUrl;
+    std::string token;
     ClientIdentity &identity;
     Core::ProxyConfig proxy;
     CaptchaResolver *captchaResolver;
-    QString referer = "https://discord.com/channels/@me";
-    QString fingerprint;
+    std::string referer = "https://discord.com/channels/@me";
+    std::string fingerprint;
 
     std::unique_ptr<RequestWorker> worker;
 

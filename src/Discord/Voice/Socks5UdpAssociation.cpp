@@ -1,8 +1,8 @@
 #include "Socks5UdpAssociation.hpp"
 #include "Core/Logging.hpp"
 
-#include <QtEndian>
-#include <QMetaObject>
+#include "Platform/Dispatcher.hpp"
+#include <functional>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -39,44 +39,44 @@ constexpr char METHOD_NONE = 0x00;
 constexpr char METHOD_USERPASS = 0x02;
 constexpr char METHOD_UNACCEPTABLE = char(0xFF);
 constexpr char CMD_UDP_ASSOCIATE = 0x03;
-constexpr quint8 ATYP_IPV4 = 0x01;
-constexpr quint8 ATYP_DOMAIN = 0x03;
-constexpr quint8 ATYP_IPV6 = 0x04;
+constexpr std::uint8_t ATYP_IPV4 = 0x01;
+constexpr std::uint8_t ATYP_DOMAIN = 0x03;
+constexpr std::uint8_t ATYP_IPV6 = 0x04;
 constexpr char REPLY_SUCCEEDED = 0x00;
 
-void appendAddress(QByteArray &out, const QString &destination, quint16 port)
+void appendAddress(std::string &out, const std::string &destination, std::uint16_t port)
 {
-    std::string destStr = destination.toStdString();
+    const std::string &destStr = destination;
     in_addr addr4{};
     in6_addr addr6{};
 
     if (inet_pton(AF_INET, destStr.c_str(), &addr4) == 1) {
-        out.append(char(ATYP_IPV4));
+        out.push_back(char(ATYP_IPV4));
         out.append(reinterpret_cast<const char *>(&addr4), 4);
     } else if (inet_pton(AF_INET6, destStr.c_str(), &addr6) == 1) {
-        out.append(char(ATYP_IPV6));
+        out.push_back(char(ATYP_IPV6));
         out.append(reinterpret_cast<const char *>(&addr6), 16);
     } else {
-        QByteArray domainUtf8 = destination.toUtf8();
-        if (!domainUtf8.isEmpty() && domainUtf8.size() <= 255) {
-            out.append(char(ATYP_DOMAIN));
-            out.append(static_cast<char>(domainUtf8.size()));
+        std::string domainUtf8 = destination;
+        if (!domainUtf8.empty() && domainUtf8.size() <= 255) {
+            out.push_back(char(ATYP_DOMAIN));
+            out.push_back(static_cast<char>(domainUtf8.size()));
             out.append(domainUtf8);
         } else {
             return;
         }
     }
 
-    quint16 portBE = qToBigEndian(port);
+    std::uint16_t portBE = htons(port);
     out.append(reinterpret_cast<const char *>(&portBE), 2);
 }
 
-int addressFieldLength(const QByteArray &data, int offset)
+int addressFieldLength(const std::string &data, int offset)
 {
     if (data.size() <= offset)
         return -1;
 
-    switch (static_cast<quint8>(data.at(offset))) {
+    switch (static_cast<std::uint8_t>(data.at(offset))) {
     case ATYP_IPV4:
         return 1 + 4 + 2;
     case ATYP_IPV6:
@@ -84,33 +84,33 @@ int addressFieldLength(const QByteArray &data, int offset)
     case ATYP_DOMAIN:
         if (data.size() <= offset + 1)
             return -1;
-        return 1 + 1 + static_cast<quint8>(data.at(offset + 1)) + 2;
+        return 1 + 1 + static_cast<std::uint8_t>(data.at(offset + 1)) + 2;
     default:
         return -1;
     }
 }
 
-QString replyErrorString(quint8 code)
+std::string replyErrorString(std::uint8_t code)
 {
     switch (code) {
     case 0x01:
-        return QStringLiteral("general SOCKS server failure");
+        return ("general SOCKS server failure");
     case 0x02:
-        return QStringLiteral("connection not allowed by ruleset");
+        return ("connection not allowed by ruleset");
     case 0x03:
-        return QStringLiteral("network unreachable");
+        return ("network unreachable");
     case 0x04:
-        return QStringLiteral("host unreachable");
+        return ("host unreachable");
     case 0x05:
-        return QStringLiteral("connection refused");
+        return ("connection refused");
     case 0x06:
-        return QStringLiteral("TTL expired");
+        return ("TTL expired");
     case 0x07:
-        return QStringLiteral("command not supported");
+        return ("command not supported");
     case 0x08:
-        return QStringLiteral("address type not supported");
+        return ("address type not supported");
     default:
-        return QStringLiteral("unknown error %1").arg(code);
+        return "unknown error " + std::to_string(code);
     }
 }
 
@@ -127,11 +127,6 @@ int recvExact(native_socket_t sock, char *buf, int total)
 }
 
 } // namespace
-
-Socks5UdpAssociation::Socks5UdpAssociation(QObject *parent)
-    : QObject(parent)
-{
-}
 
 Socks5UdpAssociation::~Socks5UdpAssociation()
 {
@@ -150,11 +145,12 @@ void Socks5UdpAssociation::open(const Core::ProxyConfig &config)
 void Socks5UdpAssociation::close()
 {
     m_closing = true;
+    ++m_generation;
     m_established = false;
 
-    if (m_controlSocket != -1) {
-        native_socket_t s = static_cast<native_socket_t>(m_controlSocket);
-        m_controlSocket = -1;
+    auto control = m_controlSocket.exchange(-1);
+    if (control != -1) {
+        native_socket_t s = static_cast<native_socket_t>(control);
 #ifdef _WIN32
         ::shutdown(s, SD_BOTH);
 #else
@@ -179,11 +175,11 @@ void Socks5UdpAssociation::runHandshake(Core::ProxyConfig config)
     addrinfo *res = nullptr;
 
     std::string portStr = std::to_string(config.port);
-    std::string hostStr = config.host.toStdString();
+    std::string hostStr = config.host;
 
     int rc = getaddrinfo(hostStr.c_str(), portStr.c_str(), &hints, &res);
     if (rc != 0 || !res) {
-        fail(QStringLiteral("Failed to resolve SOCKS5 proxy host: %1").arg(config.host));
+        fail("Failed to resolve SOCKS5 proxy host: " + config.host);
         return;
     }
 
@@ -213,46 +209,51 @@ void Socks5UdpAssociation::runHandshake(Core::ProxyConfig config)
     freeaddrinfo(res);
 
     if (sock == kInvalidNativeSocket) {
-        fail(QStringLiteral("Failed to connect to SOCKS5 proxy at %1:%2").arg(config.host).arg(config.port));
+        fail("Failed to connect to SOCKS5 proxy at " + config.host + ":" + std::to_string(config.port));
         return;
     }
 
     m_controlSocket = static_cast<intptr_t>(sock);
+    if (m_closing) {
+        auto control = m_controlSocket.exchange(-1);
+        if (control != -1) closeNativeSocket(static_cast<native_socket_t>(control));
+        return;
+    }
 
     // 1. Send greeting
     std::vector<char> greeting = {SOCKS_VERSION, 1, METHOD_NONE};
-    if (!config.username.isEmpty()) {
+    if (!config.username.empty()) {
         greeting[1] = 2;
         greeting.push_back(METHOD_USERPASS);
     }
 
     if (::send(sock, greeting.data(), static_cast<int>(greeting.size()), 0) <= 0) {
-        fail(QStringLiteral("Failed to send greeting to SOCKS5 proxy"));
+        fail(("Failed to send greeting to SOCKS5 proxy"));
         return;
     }
 
     // 2. Receive method selection
     char methodReply[2]{};
     if (recvExact(sock, methodReply, 2) != 2) {
-        fail(QStringLiteral("Failed to receive method selection from SOCKS5 proxy"));
+        fail(("Failed to receive method selection from SOCKS5 proxy"));
         return;
     }
 
     if (methodReply[0] != SOCKS_VERSION) {
-        fail(QStringLiteral("Invalid SOCKS version received from proxy"));
+        fail(("Invalid SOCKS version received from proxy"));
         return;
     }
 
     if (methodReply[1] == METHOD_UNACCEPTABLE) {
-        fail(QStringLiteral("Proxy rejected all offered authentication methods"));
+        fail(("Proxy rejected all offered authentication methods"));
         return;
     }
 
     if (methodReply[1] == METHOD_USERPASS) {
-        QByteArray user = config.username.toUtf8();
-        QByteArray pass = config.password.toUtf8();
+        std::string user = config.username;
+        std::string pass = config.password;
         if (user.size() > 255 || pass.size() > 255) {
-            fail(QStringLiteral("SOCKS5 credentials exceed 255 bytes"));
+            fail(("SOCKS5 credentials exceed 255 bytes"));
             return;
         }
 
@@ -264,53 +265,53 @@ void Socks5UdpAssociation::runHandshake(Core::ProxyConfig config)
         authReq.insert(authReq.end(), pass.begin(), pass.end());
 
         if (::send(sock, authReq.data(), static_cast<int>(authReq.size()), 0) <= 0) {
-            fail(QStringLiteral("Failed to send credentials to SOCKS5 proxy"));
+            fail(("Failed to send credentials to SOCKS5 proxy"));
             return;
         }
 
         char authReply[2]{};
         if (recvExact(sock, authReply, 2) != 2 || authReply[1] != 0) {
-            fail(QStringLiteral("Proxy rejected the supplied credentials"));
+            fail(("Proxy rejected the supplied credentials"));
             return;
         }
     } else if (methodReply[1] != METHOD_NONE) {
-        fail(QStringLiteral("Proxy selected unsupported authentication method %1").arg(int(methodReply[1])));
+        fail("Proxy selected unsupported authentication method " + std::to_string(int(methodReply[1])));
         return;
     }
 
     // 3. Send UDP ASSOCIATE request (dst 0.0.0.0:0)
     char assocReq[10] = {SOCKS_VERSION, CMD_UDP_ASSOCIATE, 0x00, static_cast<char>(ATYP_IPV4), 0, 0, 0, 0, 0, 0};
     if (::send(sock, assocReq, 10, 0) <= 0) {
-        fail(QStringLiteral("Failed to send UDP ASSOCIATE request to SOCKS5 proxy"));
+        fail(("Failed to send UDP ASSOCIATE request to SOCKS5 proxy"));
         return;
     }
 
     // 4. Receive associate reply
     char assocHdr[4]{};
     if (recvExact(sock, assocHdr, 4) != 4) {
-        fail(QStringLiteral("Failed to receive UDP ASSOCIATE reply"));
+        fail(("Failed to receive UDP ASSOCIATE reply"));
         return;
     }
 
     if (assocHdr[0] != SOCKS_VERSION || assocHdr[1] != REPLY_SUCCEEDED) {
-        fail(QStringLiteral("UDP ASSOCIATE failed: %1").arg(replyErrorString(static_cast<quint8>(assocHdr[1]))));
+        fail("UDP ASSOCIATE failed: " + replyErrorString(static_cast<std::uint8_t>(assocHdr[1])));
         return;
     }
 
-    quint8 atyp = static_cast<quint8>(assocHdr[3]);
+    std::uint8_t atyp = static_cast<std::uint8_t>(assocHdr[3]);
     int addrLen = 0;
     if (atyp == ATYP_IPV4) {
         addrLen = 4;
     } else if (atyp == ATYP_IPV6) {
         addrLen = 16;
     } else {
-        fail(QStringLiteral("Proxy returned unsupported relay address type %1").arg(int(atyp)));
+        fail("Proxy returned unsupported relay address type " + std::to_string(int(atyp)));
         return;
     }
 
     std::vector<char> addrAndPort(addrLen + 2);
     if (recvExact(sock, addrAndPort.data(), addrLen + 2) != addrLen + 2) {
-        fail(QStringLiteral("Incomplete UDP ASSOCIATE relay address received"));
+        fail(("Incomplete UDP ASSOCIATE relay address received"));
         return;
     }
 
@@ -320,12 +321,12 @@ void Socks5UdpAssociation::runHandshake(Core::ProxyConfig config)
     } else {
         inet_ntop(AF_INET6, addrAndPort.data(), ipBuf, sizeof(ipBuf));
     }
-    quint16 port = qFromBigEndian<quint16>(reinterpret_cast<const uchar *>(addrAndPort.data() + addrLen));
+    std::uint16_t port = (static_cast<std::uint8_t>(addrAndPort[addrLen]) << 8) | static_cast<std::uint8_t>(addrAndPort[addrLen + 1]);
 
-    m_relayAddress = QString::fromLatin1(ipBuf);
+    m_relayAddress = std::string(ipBuf);
     m_relayPort = port;
 
-    if (m_relayAddress.isEmpty() || m_relayAddress == QStringLiteral("0.0.0.0") || m_relayAddress == QStringLiteral("::")) {
+    if (m_relayAddress.empty() || m_relayAddress == ("0.0.0.0") || m_relayAddress == ("::")) {
         sockaddr_storage peerStorage{};
         socklen_t peerLen = sizeof(peerStorage);
         if (::getpeername(sock, reinterpret_cast<sockaddr *>(&peerStorage), &peerLen) == 0) {
@@ -335,19 +336,19 @@ void Socks5UdpAssociation::runHandshake(Core::ProxyConfig config)
             } else if (peerStorage.ss_family == AF_INET6) {
                 inet_ntop(AF_INET6, &reinterpret_cast<sockaddr_in6 *>(&peerStorage)->sin6_addr, peerBuf, sizeof(peerBuf));
             }
-            m_relayAddress = QString::fromLatin1(peerBuf);
+            m_relayAddress = std::string(peerBuf);
         }
     }
 
     if (m_relayPort == 0) {
-        fail(QStringLiteral("Proxy returned an invalid relay port"));
+        fail(("Proxy returned an invalid relay port"));
         return;
     }
 
     m_established = true;
-    qCInfo(LogVoice) << "SOCKS5 UDP relay established at" << m_relayAddress << ":" << m_relayPort;
+    Core::log(Core::LogLevel::Info, LogVoice) << "SOCKS5 UDP relay established at" << m_relayAddress << ":" << m_relayPort;
 
-    QMetaObject::invokeMethod(this, &Socks5UdpAssociation::established, Qt::QueuedConnection);
+    post([this] { established.publish(); });
 
     // Keep association alive until closed
 #ifdef _WIN32
@@ -362,48 +363,60 @@ void Socks5UdpAssociation::runHandshake(Core::ProxyConfig config)
     ::recv(sock, dummy, sizeof(dummy), 0);
 
     if (!m_closing) {
-        fail(QStringLiteral("Proxy closed the UDP association"));
+        fail(("Proxy closed the UDP association"));
     }
 }
 
-void Socks5UdpAssociation::fail(const QString &error)
+void Socks5UdpAssociation::post(std::function<void()> callback)
+{
+    auto guard = Platform::Guard<Socks5UdpAssociation>(this);
+    auto generation = m_generation.load();
+    auto task = [guard, generation, callback = std::move(callback)] {
+        if (guard && guard->m_generation.load() == generation)
+            callback();
+    };
+    if (m_loop)
+        m_loop->post(std::move(task));
+    else
+        Platform::Dispatcher::main().post(std::move(task));
+}
+
+void Socks5UdpAssociation::fail(const std::string &error)
 {
     m_established = false;
     if (m_closing)
         return;
 
-    qCWarning(LogVoice) << "SOCKS5 UDP association failed:" << error;
-    QMetaObject::invokeMethod(this, [this, error]() {
-        emit failed(error);
-    }, Qt::QueuedConnection);
+    Core::log(Core::LogLevel::Warning, LogVoice) << "SOCKS5 UDP association failed:" << error;
+    post([this, error] { failed.publish(error); });
 }
 
-QByteArray Socks5UdpAssociation::encapsulate(const QByteArray &payload, const QString &destination,
-                                             quint16 destinationPort)
+std::string Socks5UdpAssociation::encapsulate(const std::string &payload, const std::string &destination,
+                                             std::uint16_t destinationPort)
 {
-    if (destination.isEmpty())
-        return QByteArray();
+    if (destination.empty())
+        return std::string();
 
-    QByteArray datagram(3, '\0');
+    std::string datagram(3, '\0');
     int before = datagram.size();
     appendAddress(datagram, destination, destinationPort);
     if (datagram.size() == before) {
-        return QByteArray();
+        return std::string();
     }
     datagram.append(payload);
     return datagram;
 }
 
-QByteArray Socks5UdpAssociation::decapsulate(const QByteArray &datagram)
+std::string Socks5UdpAssociation::decapsulate(const std::string &datagram)
 {
     if (datagram.size() < 4 || datagram.at(2) != 0)
-        return QByteArray();
+        return std::string();
 
     const int tail = addressFieldLength(datagram, 3);
     if (tail < 0 || datagram.size() < 3 + tail)
-        return QByteArray();
+        return std::string();
 
-    return datagram.mid(3 + tail);
+    return datagram.substr(3 + tail);
 }
 
 } // namespace Voice

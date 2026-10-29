@@ -1,10 +1,10 @@
 #pragma once
 
-#include <QByteArray>
-#include <QFile>
-#include <QList>
-#include <QPointer>
-#include <QString>
+#include <cstdio>
+#include <cstdint>
+#include <vector>
+#include <utility>
+#include "Platform/Trackable.hpp"
 
 #include <curl/curl.h>
 
@@ -32,20 +32,20 @@ struct RequestDescriptor
 {
     HttpClient::Method method = HttpClient::Method::GET;
     std::string url;
-    QByteArray body; // json body or payload_json for multipart
+    std::string body; // json body or payload_json for multipart
     bool multipart = false;
     bool external = false; // no headers (gcp)
-    QString contentType; // external Content-Type
-    QString uploadFilePath; // stream from disk
-    QList<FileUpload> files; // multipart
-    QList<QPair<QString, QString>> formFields;
-    QString referer;
-    QString fingerprint;
-    QByteArray contextProperties;
-    std::optional<QString> auditLogReason;
-    QByteArray originalMd5;
+    std::string contentType; // external Content-Type
+    std::string uploadFilePath; // stream from disk
+    std::vector<FileUpload> files; // multipart
+    std::vector<std::pair<std::string, std::string>> formFields;
+    std::string referer;
+    std::string fingerprint;
+    std::string contextProperties;
+    std::optional<std::string> auditLogReason;
+    std::string originalMd5;
     HttpCallback callback;
-    std::function<void(qint64 sent, qint64 total)> progressCallback; // worker thread!
+    std::function<void(int64_t sent, int64_t total)> progressCallback; // worker thread!
     std::shared_ptr<std::atomic<bool>> cancelFlag;
     int captchaAttempt = 0;
     std::optional<CaptchaSolution> solution;
@@ -56,20 +56,20 @@ struct TransferContext
     CURL *easy = nullptr;
     curl_slist *headers = nullptr;
     curl_mime *mime = nullptr; // multipart
-    QFile *uploadFile = nullptr; // streamed body, worker thread only
+    std::FILE *uploadFile = nullptr; // streamed body, worker thread only
     std::string url;
     HttpResponse response;
     RequestDescriptor descriptor;
     RequestWorker *worker = nullptr;
-    qint64 lastProgressSent = -1;
+    int64_t lastProgressSent = -1;
 
-    ~TransferContext() { delete uploadFile; }
+    ~TransferContext() { if (uploadFile) std::fclose(uploadFile); }
 };
 
 class RequestWorker
 {
 public:
-    RequestWorker(HttpClient *owner, QString token, ClientIdentity &identity,
+    RequestWorker(HttpClient *owner, std::string token, ClientIdentity &identity,
                   const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver);
     ~RequestWorker();
 
@@ -88,8 +88,8 @@ private:
     void abortAllInFlight();
 
     HttpClient *owner;
-    QPointer<HttpClient> ownerGuard; // null-check
-    QString token;
+    Platform::Guard<HttpClient> ownerGuard; // null-check
+    std::string token;
     ClientIdentity &identity;
     Core::ProxyConfig proxy;
     CaptchaResolver *captchaResolver;

@@ -1,17 +1,14 @@
 #include "HttpClient.hpp"
 #include "RequestWorker.hpp"
 
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QPointer>
-#include <QUrlQuery>
+#include "Platform/Dispatcher.hpp"
 
 namespace Styx {
 namespace Discord {
 
-HttpClient::HttpClient(const QString &baseUrl, const QString &token, ClientIdentity &identity,
-                       const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver, QObject *parent)
-    : QObject(parent), baseUrl(baseUrl), token(token), identity(identity), proxy(proxy), captchaResolver(captchaResolver)
+HttpClient::HttpClient(const std::string &baseUrl, const std::string &token, ClientIdentity &identity,
+                       const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver)
+    : baseUrl(baseUrl), token(token), identity(identity), proxy(proxy), captchaResolver(captchaResolver)
 {
     worker = std::make_unique<RequestWorker>(this, token, identity, proxy, captchaResolver);
 }
@@ -22,105 +19,107 @@ HttpClient::~HttpClient()
         worker->shutdown();
 }
 
-void HttpClient::get(const QString &endpoint, const QUrlQuery &query, HttpCallback callback)
+void HttpClient::get(const std::string &endpoint, const std::vector<std::pair<std::string, std::string>> &query, HttpCallback callback)
 {
-    QString url = baseUrl + endpoint;
-    if (!query.isEmpty())
-        url += "?" + query.toString(QUrl::FullyEncoded);
+    std::string url = baseUrl + endpoint;
+    for (const auto &[key, value] : query) {
+        url += (url.find('?') == std::string::npos ? "?" : "&");
+        url += Platform::urlEncode(key) + "=" + Platform::urlEncode(value);
+    }
     executeRequest(Method::GET, url, {}, callback);
 }
 
-void HttpClient::post(const QString &endpoint, const QJsonObject &body, HttpCallback callback)
+void HttpClient::post(const std::string &endpoint, const nlohmann::json &body, HttpCallback callback)
 {
-    QString url = baseUrl + endpoint;
-    QByteArray data = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    std::string url = baseUrl + endpoint;
+    std::string data = body.dump();
     executeRequest(Method::POST, url, data, callback);
 }
 
-void HttpClient::post(const QString &endpoint, const QJsonObject &body, const ContextProperties &context,
+void HttpClient::post(const std::string &endpoint, const nlohmann::json &body, const ContextProperties &context,
                       HttpCallback callback)
 {
-    QString url = baseUrl + endpoint;
-    QByteArray data = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    std::string url = baseUrl + endpoint;
+    std::string data = body.dump();
     RequestOptions options;
     options.context = context;
     executeRequest(Method::POST, url, data, callback, options);
 }
 
-void HttpClient::patch(const QString &endpoint, const QJsonObject &body, HttpCallback callback)
+void HttpClient::patch(const std::string &endpoint, const nlohmann::json &body, HttpCallback callback)
 {
-    QString url = baseUrl + endpoint;
-    QByteArray data = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    std::string url = baseUrl + endpoint;
+    std::string data = body.dump();
     executeRequest(Method::PATCH, url, data, callback);
 }
 
-void HttpClient::put(const QString &endpoint, const QJsonObject &body, HttpCallback callback)
+void HttpClient::put(const std::string &endpoint, const nlohmann::json &body, HttpCallback callback)
 {
-    QString url = baseUrl + endpoint;
-    QByteArray data = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    std::string url = baseUrl + endpoint;
+    std::string data = body.dump();
     executeRequest(Method::PUT, url, data, callback);
 }
 
-void HttpClient::delete_(const QString &endpoint, HttpCallback callback)
+void HttpClient::delete_(const std::string &endpoint, HttpCallback callback)
 {
-    QString url = baseUrl + endpoint;
+    std::string url = baseUrl + endpoint;
     executeRequest(Method::DELETE_, url, {}, callback);
 }
 
-void HttpClient::delete_(const QString &endpoint, const QJsonObject &body, HttpCallback callback)
+void HttpClient::delete_(const std::string &endpoint, const nlohmann::json &body, HttpCallback callback)
 {
-    QString url = baseUrl + endpoint;
-    QByteArray data = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    std::string url = baseUrl + endpoint;
+    std::string data = body.dump();
     executeRequest(Method::DELETE_, url, data, callback);
 }
 
-void HttpClient::post(const QString &endpoint, const Core::OrderedJson &body, HttpCallback callback)
+void HttpClient::post(const std::string &endpoint, const Core::OrderedJson &body, HttpCallback callback)
 {
     executeRequest(Method::POST, baseUrl + endpoint, body.toBytes(), callback);
 }
 
-void HttpClient::put(const QString &endpoint, const Core::OrderedJson &body, HttpCallback callback)
+void HttpClient::put(const std::string &endpoint, const Core::OrderedJson &body, HttpCallback callback)
 {
     executeRequest(Method::PUT, baseUrl + endpoint, body.toBytes(), callback);
 }
 
-void HttpClient::patch(const QString &endpoint, const Core::OrderedJson &body, HttpCallback callback)
+void HttpClient::patch(const std::string &endpoint, const Core::OrderedJson &body, HttpCallback callback)
 {
     executeRequest(Method::PATCH, baseUrl + endpoint, body.toBytes(), callback);
 }
 
-void HttpClient::patch(const QString &endpoint, const Core::OrderedJson::Array &body, HttpCallback callback)
+void HttpClient::patch(const std::string &endpoint, const Core::OrderedJson::Array &body, HttpCallback callback)
 {
     executeRequest(Method::PATCH, baseUrl + endpoint, body.toBytes(), callback);
 }
 
-void HttpClient::send(Method method, const QString &endpoint, const QByteArray &jsonBody, const RequestOptions &options, HttpCallback callback)
+void HttpClient::send(Method method, const std::string &endpoint, const std::string &jsonBody, const RequestOptions &options, HttpCallback callback)
 {
     executeRequest(method, baseUrl + endpoint, jsonBody, callback, options);
 }
 
-void HttpClient::postMultipart(const QString &endpoint, const QJsonObject &jsonPayload,
-                               const QList<FileUpload> &files, HttpCallback callback)
+void HttpClient::postMultipart(const std::string &endpoint, const nlohmann::json &jsonPayload,
+                               const std::vector<FileUpload> &files, HttpCallback callback)
 {
-    QString url = baseUrl + endpoint;
-    QByteArray jsonData = QJsonDocument(jsonPayload).toJson(QJsonDocument::Compact);
+    std::string url = baseUrl + endpoint;
+    std::string jsonData = jsonPayload.dump();
     executeMultipartRequest(url, jsonData, files, callback);
 }
 
-void HttpClient::postForm(const QString &endpoint, const QList<QPair<QString, QString>> &fields,
-                          const QList<FileUpload> &files, const RequestOptions &options, HttpCallback callback)
+void HttpClient::postForm(const std::string &endpoint, const std::vector<std::pair<std::string, std::string>> &fields,
+                          const std::vector<FileUpload> &files, const RequestOptions &options, HttpCallback callback)
 {
     executeMultipartRequest(baseUrl + endpoint, {}, files, callback, fields, options);
 }
 
-void HttpClient::putExternalFile(const QString &absoluteUrl, const QString &filePath,
-                                 const QString &contentType, HttpCallback callback,
-                                 std::function<void(qint64, qint64)> progress,
+void HttpClient::putExternalFile(const std::string &absoluteUrl, const std::string &filePath,
+                                 const std::string &contentType, HttpCallback callback,
+                                 std::function<void(int64_t, int64_t)> progress,
                                  std::shared_ptr<std::atomic<bool>> cancelFlag)
 {
     RequestDescriptor descriptor;
     descriptor.method = Method::PUT;
-    descriptor.url = absoluteUrl.toStdString();
+    descriptor.url = absoluteUrl;
     descriptor.uploadFilePath = filePath;
     descriptor.external = true;
     descriptor.contentType = contentType;
@@ -129,14 +128,14 @@ void HttpClient::putExternalFile(const QString &absoluteUrl, const QString &file
     submitExternalPut(descriptor, std::move(progress));
 }
 
-void HttpClient::putExternal(const QString &absoluteUrl, const QByteArray &data,
-                             const QString &contentType, HttpCallback callback,
-                             std::function<void(qint64, qint64)> progress,
+void HttpClient::putExternal(const std::string &absoluteUrl, const std::string &data,
+                             const std::string &contentType, HttpCallback callback,
+                             std::function<void(int64_t, int64_t)> progress,
                              std::shared_ptr<std::atomic<bool>> cancelFlag)
 {
     RequestDescriptor descriptor;
     descriptor.method = Method::PUT;
-    descriptor.url = absoluteUrl.toStdString();
+    descriptor.url = absoluteUrl;
     descriptor.body = data;
     descriptor.external = true;
     descriptor.contentType = contentType;
@@ -146,13 +145,13 @@ void HttpClient::putExternal(const QString &absoluteUrl, const QByteArray &data,
 }
 
 void HttpClient::submitExternalPut(RequestDescriptor &descriptor,
-                                   std::function<void(qint64, qint64)> progress)
+                                   std::function<void(int64_t, int64_t)> progress)
 {
     if (progress) {
-        QPointer<HttpClient> guard(this);
+        Platform::Guard<HttpClient> guard(this);
         descriptor.progressCallback = [this, guard,
-                                       progress = std::move(progress)](qint64 sent, qint64 total) {
-            QMetaObject::invokeMethod(this, [guard, progress, sent, total]() {
+                                       progress = std::move(progress)](int64_t sent, int64_t total) {
+            Platform::Dispatcher::main().post([guard, progress, sent, total]() {
                 if (guard)
                     progress(sent, total);
             });
@@ -161,11 +160,11 @@ void HttpClient::submitExternalPut(RequestDescriptor &descriptor,
     worker->submit(std::move(descriptor));
 }
 
-void HttpClient::executeRequest(Method method, const QString &url, const QByteArray &data, HttpCallback callback, const RequestOptions &options)
+void HttpClient::executeRequest(Method method, const std::string &url, const std::string &data, HttpCallback callback, const RequestOptions &options)
 {
     RequestDescriptor descriptor;
     descriptor.method = method;
-    descriptor.url = url.toStdString();
+    descriptor.url = url;
     descriptor.body = data;
     descriptor.multipart = false;
     descriptor.referer = referer;
@@ -178,14 +177,14 @@ void HttpClient::executeRequest(Method method, const QString &url, const QByteAr
     worker->submit(std::move(descriptor));
 }
 
-void HttpClient::executeMultipartRequest(const QString &url, const QByteArray &jsonData,
-                                         const QList<FileUpload> &files, HttpCallback callback,
-                                         const QList<QPair<QString, QString>> &formFields,
+void HttpClient::executeMultipartRequest(const std::string &url, const std::string &jsonData,
+                                         const std::vector<FileUpload> &files, HttpCallback callback,
+                                         const std::vector<std::pair<std::string, std::string>> &formFields,
                                          const RequestOptions &options)
 {
     RequestDescriptor descriptor;
     descriptor.method = Method::POST;
-    descriptor.url = url.toStdString();
+    descriptor.url = url;
     descriptor.body = jsonData;
     descriptor.multipart = true;
     descriptor.files = files;
@@ -210,14 +209,14 @@ void HttpClient::onRequestComplete(RequestDescriptor descriptor, HttpResponse re
         return;
     }
 
-    QPointer<HttpClient> self(this);
+    Platform::Guard<HttpClient> self(this);
     captchaResolver->resolve(*challenge, proxy, [this, self, descriptor = std::move(descriptor), response = std::move(response)](std::optional<CaptchaSolution> s) mutable {
         if (!self)
             return;
         if (!s) {
             HttpResponse err = response;
             err.success = false;
-            if (err.error.isEmpty())
+            if (err.error.empty())
                 err.error = "Captcha canceled";
             descriptor.callback(err);
             return;

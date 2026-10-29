@@ -1,7 +1,12 @@
 #pragma once
 
-#include <QObject>
-#include <QString>
+#include "Platform/Trackable.hpp"
+#include <nlohmann/json.hpp>
+#include <atomic>
+#include <condition_variable>
+#include <string>
+#include <vector>
+#include <utility>
 
 #include <curl/curl.h>
 
@@ -27,12 +32,11 @@ namespace Discord {
 
 class ClientIdentity;
 
-class Gateway : public QObject
+class Gateway : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit Gateway(const QString &token, const QString &gatewayUrl, ClientIdentity &identity,
-                     const Core::ProxyConfig &proxy, QObject *parent = nullptr);
+    explicit Gateway(const std::string &token, const std::string &gatewayUrl, ClientIdentity &identity,
+                     const Core::ProxyConfig &proxy);
     ~Gateway();
 
     void start();
@@ -41,17 +45,18 @@ public:
 
     [[nodiscard]] bool isRunning() const { return running; }
 
-    void subscribeToGuild(Core::Snowflake guildId, Core::Snowflake channelId, const QList<QPair<int, int>> &ranges);
+    void subscribeToGuild(Core::Snowflake guildId, Core::Snowflake channelId, const std::vector<std::pair<int, int>> &ranges);
     void setMemberUpdatesSubscription(Core::Snowflake guildId, bool subscribed);
-    void requestGuildMembers(Core::Snowflake guildId, const QList<Core::Snowflake> &userIds, bool presences = true);
-    void queryGuildMembers(Core::Snowflake guildId, const QString &query, int limit, bool presences);
+    void requestGuildMembers(Core::Snowflake guildId, const std::vector<Core::Snowflake> &userIds, bool presences = true);
+    void queryGuildMembers(Core::Snowflake guildId, const std::string &query, int limit, bool presences);
     void requestForumUnreads(Core::Snowflake guildId, Core::Snowflake forumId,
-                             const QList<QPair<Core::Snowflake, Core::Snowflake>> &threads);
+                             const std::vector<std::pair<Core::Snowflake, Core::Snowflake>> &threads);
     void sendVoiceStateUpdate(Core::Snowflake guildId, Core::Snowflake channelId, bool selfMute, bool selfDeaf);
+    void sendCallConnect(Core::Snowflake channelId);
     void sendStreamCreate(Core::Snowflake guildId, Core::Snowflake channelId);
-    void sendStreamDelete(const QString &streamKey);
-    void sendStreamWatch(const QString &streamKey);
-    void sendStreamSetPaused(const QString &streamKey, bool paused);
+    void sendStreamDelete(const std::string &streamKey);
+    void sendStreamWatch(const std::string &streamKey);
+    void sendStreamSetPaused(const std::string &streamKey, bool paused);
 
     // for the qos heartbeat
     void setActiveState(bool focused, bool rtcConnected);
@@ -60,76 +65,79 @@ public:
     // Debug: simulate a server RECONNECT opcode
     void debugForceReconnect();
 
-signals:
-    void connected();
-    void disconnected(CloseCode code, const QString &reason);
-    void reconnecting(int attempt, int maxAttempts);
+public:
+    Platform::Signal<> connected;
+    Platform::Signal<CloseCode , const std::string &> disconnected;
+    Platform::Signal<int , int> reconnecting;
 
     // The network loop has exited for good; no reconnection will follow.
-    void finished();
+    Platform::Signal<> finished;
 
-    void gatewayHello();
-    void gatewayReady(const Ready &data);
-    void gatewayReadySupplemental(const ReadySupplemental &data);
-    void gatewayMessageCreate(const Message &data);
-    void gatewayMessageUpdate(const Message &data);
-    void gatewayMessageDelete(const MessageDelete &data);
-    void gatewayTypingStart(const TypingStart &data);
-    void gatewayChannelCreate(const ChannelCreate &data);
-    void gatewayChannelUpdate(const ChannelUpdate &data);
-    void gatewayChannelDelete(const ChannelDelete &data);
-    void gatewayThreadCreate(const ChannelCreate &data);
-    void gatewayThreadUpdate(const ChannelUpdate &data);
-    void gatewayThreadDelete(const ThreadDelete &data);
-    void gatewayThreadListSync(const ThreadListSync &data);
-    void gatewayThreadMemberUpdate(const ThreadMemberUpdate &data);
-    void gatewayThreadMembersUpdate(const ThreadMembersUpdate &data);
-    void gatewayForumUnreads(const ForumUnreads &data);
-    void gatewayGuildCreate(const GatewayGuild &data);
-    void gatewayGuildUpdate(const Guild &data);
-    void gatewayGuildDelete(const GuildDelete &data);
-    void gatewayGuildMembersChunk(const GuildMembersChunk &data);
-    void gatewayGuildMemberAdd(const GuildMemberAdd &data);
-    void gatewayGuildMemberUpdate(const GuildMemberUpdate &data);
-    void gatewayGuildMemberRemove(const GuildMemberRemove &data);
-    void gatewayGuildRoleCreate(const GuildRoleCreate &data);
-    void gatewayGuildRoleUpdate(const GuildRoleUpdate &data);
-    void gatewayGuildRoleDelete(const GuildRoleDelete &data);
-    void gatewayGuildEmojisUpdate(const GuildEmojisUpdate &data);
-    void gatewayGuildStickersUpdate(const GuildStickersUpdate &data);
-    void gatewayGuildBanAdd(const GuildBanEvent &data);
-    void gatewayGuildBanRemove(const GuildBanEvent &data);
-    void gatewayGuildPruneUpdate(const GuildPruneUpdate &data);
-    void gatewayMessageAck(const MessageAck &data);
-    void gatewayMessageReactionAdd(const MessageReactionAdd &data);
-    void gatewayMessageReactionAddMany(const MessageReactionAddMany &data);
-    void gatewayMessageReactionRemove(const MessageReactionRemove &data);
-    void gatewayMessageReactionRemoveAll(const MessageReactionRemoveAll &data);
-    void gatewayMessageReactionRemoveEmoji(const MessageReactionRemoveEmoji &data);
-    void gatewayUserGuildSettingsUpdate(const UserGuildSettings &data);
-    void gatewayNotificationSettingsUpdate(const NotificationSettings &data);
-    void gatewayGuildMemberListUpdate(const GuildMemberListUpdate &data);
-    void gatewayVoiceStateUpdate(const VoiceState &data);
-    void gatewayVoiceServerUpdate(const VoiceServerUpdate &data);
-    void gatewayStreamCreate(const StreamCreate &data);
-    void gatewayStreamUpdate(const StreamUpdate &data);
-    void gatewayStreamServerUpdate(const StreamServerUpdate &data);
-    void gatewayStreamDelete(const StreamDelete &data);
-    void gatewayRelationshipAdd(const Relationship &data);
-    void gatewayRelationshipUpdate(const RelationshipPartial &data);
-    void gatewayRelationshipRemove(const RelationshipPartial &data);
-    void gatewayUserNoteUpdate(const UserNoteUpdate &data);
-    void gatewayUserSettingsProtoUpdate(const UserSettingsProtoUpdate &data);
-    void gatewayPresenceUpdate(const Presence &data);
-    void gatewayPresencesReplace(const QList<Presence> &data);
-    void gatewaySessionsReplace(const QList<UserSession> &data);
+    Platform::Signal<> gatewayHello;
+    Platform::Signal<const Ready &> gatewayReady;
+    Platform::Signal<const ReadySupplemental &> gatewayReadySupplemental;
+    Platform::Signal<const Message &> gatewayMessageCreate;
+    Platform::Signal<const Message &> gatewayMessageUpdate;
+    Platform::Signal<const MessageDelete &> gatewayMessageDelete;
+    Platform::Signal<const TypingStart &> gatewayTypingStart;
+    Platform::Signal<const ChannelCreate &> gatewayChannelCreate;
+    Platform::Signal<const ChannelUpdate &> gatewayChannelUpdate;
+    Platform::Signal<const ChannelDelete &> gatewayChannelDelete;
+    Platform::Signal<const ChannelCreate &> gatewayThreadCreate;
+    Platform::Signal<const ChannelUpdate &> gatewayThreadUpdate;
+    Platform::Signal<const ThreadDelete &> gatewayThreadDelete;
+    Platform::Signal<const ThreadListSync &> gatewayThreadListSync;
+    Platform::Signal<const ThreadMemberUpdate &> gatewayThreadMemberUpdate;
+    Platform::Signal<const ThreadMembersUpdate &> gatewayThreadMembersUpdate;
+    Platform::Signal<const ForumUnreads &> gatewayForumUnreads;
+    Platform::Signal<const GatewayGuild &> gatewayGuildCreate;
+    Platform::Signal<const Guild &> gatewayGuildUpdate;
+    Platform::Signal<const GuildDelete &> gatewayGuildDelete;
+    Platform::Signal<const GuildMembersChunk &> gatewayGuildMembersChunk;
+    Platform::Signal<const GuildMemberAdd &> gatewayGuildMemberAdd;
+    Platform::Signal<const GuildMemberUpdate &> gatewayGuildMemberUpdate;
+    Platform::Signal<const GuildMemberRemove &> gatewayGuildMemberRemove;
+    Platform::Signal<const GuildRoleCreate &> gatewayGuildRoleCreate;
+    Platform::Signal<const GuildRoleUpdate &> gatewayGuildRoleUpdate;
+    Platform::Signal<const GuildRoleDelete &> gatewayGuildRoleDelete;
+    Platform::Signal<const GuildEmojisUpdate &> gatewayGuildEmojisUpdate;
+    Platform::Signal<const GuildStickersUpdate &> gatewayGuildStickersUpdate;
+    Platform::Signal<const GuildBanEvent &> gatewayGuildBanAdd;
+    Platform::Signal<const GuildBanEvent &> gatewayGuildBanRemove;
+    Platform::Signal<const GuildPruneUpdate &> gatewayGuildPruneUpdate;
+    Platform::Signal<const MessageAck &> gatewayMessageAck;
+    Platform::Signal<const MessageReactionAdd &> gatewayMessageReactionAdd;
+    Platform::Signal<const MessageReactionAddMany &> gatewayMessageReactionAddMany;
+    Platform::Signal<const MessageReactionRemove &> gatewayMessageReactionRemove;
+    Platform::Signal<const MessageReactionRemoveAll &> gatewayMessageReactionRemoveAll;
+    Platform::Signal<const MessageReactionRemoveEmoji &> gatewayMessageReactionRemoveEmoji;
+    Platform::Signal<const UserGuildSettings &> gatewayUserGuildSettingsUpdate;
+    Platform::Signal<const NotificationSettings &> gatewayNotificationSettingsUpdate;
+    Platform::Signal<const GuildMemberListUpdate &> gatewayGuildMemberListUpdate;
+    Platform::Signal<const VoiceState &> gatewayVoiceStateUpdate;
+    Platform::Signal<const VoiceServerUpdate &> gatewayVoiceServerUpdate;
+    Platform::Signal<const CallCreate &> gatewayCallCreate;
+    Platform::Signal<const CallUpdate &> gatewayCallUpdate;
+    Platform::Signal<const CallDelete &> gatewayCallDelete;
+    Platform::Signal<const StreamCreate &> gatewayStreamCreate;
+    Platform::Signal<const StreamUpdate &> gatewayStreamUpdate;
+    Platform::Signal<const StreamServerUpdate &> gatewayStreamServerUpdate;
+    Platform::Signal<const StreamDelete &> gatewayStreamDelete;
+    Platform::Signal<const Relationship &> gatewayRelationshipAdd;
+    Platform::Signal<const RelationshipPartial &> gatewayRelationshipUpdate;
+    Platform::Signal<const RelationshipPartial &> gatewayRelationshipRemove;
+    Platform::Signal<const UserNoteUpdate &> gatewayUserNoteUpdate;
+    Platform::Signal<const UserSettingsProtoUpdate &> gatewayUserSettingsProtoUpdate;
+    Platform::Signal<const Presence &> gatewayPresenceUpdate;
+    Platform::Signal<const std::vector<Presence> &> gatewayPresencesReplace;
+    Platform::Signal<const std::vector<UserSession> &> gatewaySessionsReplace;
 
 private:
     void sendPayload(const Core::OrderedJson &obj);
-    void sendPayload(const QByteArray &data);
+    void sendPayload(const std::string &data);
 
     // this function is called by the network thread
-    void onPayloadReceived(const QJsonObject &root);
+    void onPayloadReceived(const nlohmann::json &root);
     void handleDispatch(const Inbound &data);
     void handleReady(const Inbound &data);
     void handleReadySupplemental(const Inbound &data);
@@ -174,6 +182,9 @@ private:
     void handleVoiceStateUpdate(const Inbound &data);
     void handleVoiceStateUpdateBatch(const Inbound &data);
     void handleVoiceServerUpdate(const Inbound &data);
+    void handleCallCreate(const Inbound &data);
+    void handleCallUpdate(const Inbound &data);
+    void handleCallDelete(const Inbound &data);
     void handleRelationshipAdd(const Inbound &data);
     void handleRelationshipUpdate(const Inbound &data);
     void handleRelationshipRemove(const Inbound &data);
@@ -197,8 +208,8 @@ private:
     void teardown();
 
 private:
-    QString token;
-    QString gatewayUrl;
+    std::string token;
+    std::string gatewayUrl;
     ClientIdentity &identity;
     Core::ProxyConfig proxy;
 
@@ -207,8 +218,8 @@ private:
     std::mutex curlMutex;
     CURL *curl = nullptr;
 
-    QByteArray receiveBuffer;
-    IngestThread *ingest = nullptr;
+    std::unique_ptr<IngestThread> ingest;
+    std::shared_ptr<std::atomic<uint64_t>> ingestEpoch = std::make_shared<std::atomic<uint64_t>>(0);
 
     std::atomic<bool> wantToClose{ false };
     std::thread networkThread;
@@ -227,8 +238,8 @@ private:
     std::optional<QoSPayload> upcomingQoS;
     std::atomic<bool> sessionEstablished{ false };
 
-    QString sessionId;
-    QString resumeGatewayUrl;
+    std::string sessionId;
+    std::string resumeGatewayUrl;
 
     std::atomic<bool> heartbeatAckReceived{ true };
     std::atomic<bool> shouldReconnect{ false };

@@ -4,8 +4,8 @@
 #include "CurlUtils.hpp"
 #include "HttpClient.hpp"
 
-#include <QJsonDocument>
-#include <QJsonObject>
+#include "Platform/Dispatcher.hpp"
+#include <filesystem>
 
 #include <utility>
 
@@ -16,26 +16,28 @@ namespace Discord {
 
 static size_t readCallback(char *buffer, size_t size, size_t nitems, void *userp)
 {
-    auto *file = static_cast<QFile *>(userp);
-    qint64 read = file->read(buffer, static_cast<qint64>(size) * nitems);
-    if (read < 0)
-        return CURL_READFUNC_ABORT;
-    return static_cast<size_t>(read);
+    auto *file = static_cast<std::FILE *>(userp);
+    size_t count = std::fread(buffer, size, nitems, file);
+    return std::ferror(file) ? CURL_READFUNC_ABORT : count * size;
 }
 
 static int seekCallback(void *userp, curl_off_t offset, int origin)
 {
-    auto *file = static_cast<QFile *>(userp);
+    auto *file = static_cast<std::FILE *>(userp);
     if (origin != SEEK_SET)
         return CURL_SEEKFUNC_CANTSEEK;
-    return file->seek(offset) ? CURL_SEEKFUNC_OK : CURL_SEEKFUNC_FAIL;
+    #ifdef _WIN32
+    return _fseeki64(file, offset, SEEK_SET) == 0 ? CURL_SEEKFUNC_OK : CURL_SEEKFUNC_FAIL;
+#else
+    return fseeko(file, offset, SEEK_SET) == 0 ? CURL_SEEKFUNC_OK : CURL_SEEKFUNC_FAIL;
+#endif
 }
 
 static int xferinfoCallback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
                             curl_off_t ultotal, curl_off_t ulnow)
 {
-    Q_UNUSED(dltotal);
-    Q_UNUSED(dlnow);
+    (void)dltotal;
+    (void)dlnow;
     auto *ctx = static_cast<TransferContext *>(clientp);
     const RequestDescriptor &desc = ctx->descriptor;
     if (desc.cancelFlag && desc.cancelFlag->load())
@@ -46,12 +48,12 @@ static int xferinfoCallback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
     if (desc.progressCallback && ulnow != ctx->lastProgressSent &&
         (finished || ulnow - ctx->lastProgressSent >= minDelta)) {
         ctx->lastProgressSent = ulnow;
-        desc.progressCallback(static_cast<qint64>(ulnow), static_cast<qint64>(ultotal));
+        desc.progressCallback(static_cast<int64_t>(ulnow), static_cast<int64_t>(ultotal));
     }
     return 0;
 }
 
-RequestWorker::RequestWorker(HttpClient *owner, QString token, ClientIdentity &identity,
+RequestWorker::RequestWorker(HttpClient *owner, std::string token, ClientIdentity &identity,
                              const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver)
     : owner(owner), ownerGuard(owner), token(std::move(token)), identity(identity), proxy(proxy), captchaResolver(captchaResolver)
 {
@@ -157,7 +159,7 @@ void RequestWorker::drainSubmissions()
 
         CURLMcode mc = curl_multi_add_handle(multi, easy);
         if (mc != CURLM_OK) {
-            qCWarning(LogNetwork) << "curl_multi_add_handle failed:" << curl_multi_strerror(mc);
+            Core::log(Core::LogLevel::Warning, LogNetwork) << "curl_multi_add_handle failed:" << curl_multi_strerror(mc);
             failTransfer(ctx, "Failed to add transfer");
             continue;
         }
@@ -170,16 +172,20 @@ CURL *RequestWorker::buildEasyHandle(TransferContext *ctx)
 {
     CURL *curl = curl_easy_init();
     if (!curl) {
-        qCCritical(LogNetwork) << "Failed to initialize curl";
+        Core::log(Core::LogLevel::Error, LogNetwork) << "Failed to initialize curl";
         return nullptr;
     }
 
     const RequestDescriptor &desc = ctx->descriptor;
 
-    if (!desc.uploadFilePath.isEmpty()) {
-        ctx->uploadFile = new QFile(desc.uploadFilePath);
-        if (!ctx->uploadFile->open(QIODevice::ReadOnly)) {
-            qCWarning(LogNetwork) << "Failed to open upload file:" << desc.uploadFilePath;
+    if (!desc.uploadFilePath.empty()) {
+        #ifdef _WIN32
+        ctx->uploadFile = _wfopen(std::filesystem::u8path(desc.uploadFilePath).c_str(), L"rb");
+#else
+        ctx->uploadFile = std::fopen(desc.uploadFilePath.c_str(), "rb");
+#endif
+        if (!ctx->uploadFile) {
+            Core::log(Core::LogLevel::Warning, LogNetwork) << "Failed to open upload file:" << desc.uploadFilePath;
             curl_easy_cleanup(curl);
             return nullptr;
         }
@@ -195,27 +201,27 @@ CURL *RequestWorker::buildEasyHandle(TransferContext *ctx)
     if (desc.method != HttpClient::Method::GET)
         headers = curl_slist_append(headers, "Origin: https://discord.com");
     if (desc.external) {
-        if (!desc.contentType.isEmpty())
-            headers = curl_slist_append(headers, ("Content-Type: " + desc.contentType).toUtf8().constData());
+        if (!desc.contentType.empty())
+            headers = curl_slist_append(headers, ("Content-Type: " + desc.contentType).c_str());
         if (ctx->uploadFile)
             headers = curl_slist_append(headers, "Expect:"); // CURLOPT_UPLOAD turns this on
     } else {
-        if (!token.isEmpty())
-            headers = curl_slist_append(headers, ("Authorization: " + token).toUtf8().constData());
-        if (!desc.multipart && !desc.body.isEmpty())
+        if (!token.empty())
+            headers = curl_slist_append(headers, ("Authorization: " + token).c_str());
+        if (!desc.multipart && !desc.body.empty())
             headers = curl_slist_append(headers, "Content-Type: application/json");
-        if (!desc.originalMd5.isEmpty())
-            headers = curl_slist_append(headers, ("X-Discord-Original-MD5: " + desc.originalMd5).constData());
+        if (!desc.originalMd5.empty())
+            headers = curl_slist_append(headers, ("X-Discord-Original-MD5: " + desc.originalMd5).data());
         if (desc.auditLogReason) {
-            const QByteArray reason = encodeUriComponent(*desc.auditLogReason);
-            headers = curl_slist_append(headers, reason.isEmpty() ? "X-Audit-Log-Reason;" : ("X-Audit-Log-Reason: " + reason).constData());
+            const std::string reason = encodeUriComponent(*desc.auditLogReason);
+            headers = curl_slist_append(headers, reason.empty() ? "X-Audit-Log-Reason;" : ("X-Audit-Log-Reason: " + reason).data());
         }
-        if (!desc.contextProperties.isEmpty())
-            headers = curl_slist_append(headers, ("X-Context-Properties: " + desc.contextProperties).constData());
+        if (!desc.contextProperties.empty())
+            headers = curl_slist_append(headers, ("X-Context-Properties: " + desc.contextProperties).data());
 
         CurlUtils::appendDiscordHeaders(&headers, identity, desc.referer);
-        if (!desc.fingerprint.isEmpty())
-            headers = curl_slist_append(headers, ("X-Fingerprint: " + desc.fingerprint).toUtf8().constData());
+        if (!desc.fingerprint.empty())
+            headers = curl_slist_append(headers, ("X-Fingerprint: " + desc.fingerprint).c_str());
 
         if (desc.solution)
             appendCaptchaHeaders(headers, *desc.solution);
@@ -234,28 +240,28 @@ CURL *RequestWorker::buildEasyHandle(TransferContext *ctx)
     if (desc.multipart) {
         curl_mime *mime = curl_mime_init(curl);
 
-        if (desc.formFields.isEmpty()) {
+        if (desc.formFields.empty()) {
             curl_mimepart *jsonPart = curl_mime_addpart(mime);
             curl_mime_name(jsonPart, "payload_json");
-            curl_mime_data(jsonPart, desc.body.constData(), desc.body.size());
+            curl_mime_data(jsonPart, desc.body.data(), desc.body.size());
             curl_mime_type(jsonPart, "application/json");
         }
 
         for (const auto &field : desc.formFields) {
             curl_mimepart *fieldPart = curl_mime_addpart(mime);
-            const QByteArray value = field.second.toUtf8();
-            curl_mime_name(fieldPart, field.first.toUtf8().constData());
-            curl_mime_data(fieldPart, value.constData(), value.size());
+            const std::string &value = field.second;
+            curl_mime_name(fieldPart, field.first.c_str());
+            curl_mime_data(fieldPart, value.data(), value.size());
         }
 
         // file parts
         for (int i = 0; i < desc.files.size(); i++) {
             curl_mimepart *filePart = curl_mime_addpart(mime);
-            const QString partName = desc.files[i].fieldName.isEmpty() ? QString("files[%1]").arg(i) : desc.files[i].fieldName;
-            curl_mime_name(filePart, partName.toUtf8().constData());
-            curl_mime_data(filePart, desc.files[i].data.constData(), desc.files[i].data.size());
-            curl_mime_filename(filePart, desc.files[i].filename.toUtf8().constData());
-            curl_mime_type(filePart, desc.files[i].mimeType.toUtf8().constData());
+            const std::string partName = desc.files[i].fieldName.empty() ? "files[" + std::to_string(i) + "]" : desc.files[i].fieldName;
+            curl_mime_name(filePart, partName.c_str());
+            curl_mime_data(filePart, desc.files[i].data.data(), desc.files[i].data.size());
+            curl_mime_filename(filePart, desc.files[i].filename.c_str());
+            curl_mime_type(filePart, desc.files[i].mimeType.c_str());
         }
 
         curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
@@ -267,12 +273,12 @@ CURL *RequestWorker::buildEasyHandle(TransferContext *ctx)
         case HttpClient::Method::POST:
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, desc.body.size());
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.constData());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.data());
             break;
         case HttpClient::Method::PATCH:
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PATCH");
             curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, desc.body.size());
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.constData());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.data());
             break;
         case HttpClient::Method::PUT:
             if (ctx->uploadFile) {
@@ -281,18 +287,18 @@ CURL *RequestWorker::buildEasyHandle(TransferContext *ctx)
                 curl_easy_setopt(curl, CURLOPT_READDATA, ctx->uploadFile);
                 curl_easy_setopt(curl, CURLOPT_SEEKFUNCTION, seekCallback);
                 curl_easy_setopt(curl, CURLOPT_SEEKDATA, ctx->uploadFile);
-                curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(ctx->uploadFile->size()));
+                curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(std::filesystem::file_size(std::filesystem::u8path(desc.uploadFilePath))));
             } else {
                 curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, desc.body.size());
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.constData());
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.data());
             }
             break;
         case HttpClient::Method::DELETE_:
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-            if (!desc.body.isEmpty()) {
+            if (!desc.body.empty()) {
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, desc.body.size());
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.constData());
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, desc.body.data());
             }
             break;
         }
@@ -315,7 +321,7 @@ void RequestWorker::handleCompletion(TransferContext *ctx, CURLcode result)
         ctx->response.error = "cancelled";
         ctx->response.success = false;
     } else if (result != CURLE_OK) {
-        qCWarning(LogNetwork) << "HTTP error: " << curl_easy_strerror(result);
+        Core::log(Core::LogLevel::Warning, LogNetwork) << "HTTP error: " << curl_easy_strerror(result);
         ctx->response.error = curl_easy_strerror(result);
         ctx->response.success = false;
     } else {
@@ -330,7 +336,7 @@ void RequestWorker::handleCompletion(TransferContext *ctx, CURLcode result)
         challenge = CaptchaChallenge::fromResponseBody(ctx->response.body);
 
     // close handles b4 callbacks
-    delete ctx->uploadFile;
+    if (ctx->uploadFile) std::fclose(ctx->uploadFile);
     ctx->uploadFile = nullptr;
 
     dispatchCompletion(std::move(ctx->descriptor), std::move(ctx->response), std::move(challenge));
@@ -364,8 +370,8 @@ void RequestWorker::failTransfer(TransferContext *ctx, const char *error)
 void RequestWorker::dispatchCompletion(RequestDescriptor descriptor, HttpResponse response,
                                        std::optional<CaptchaChallenge> challenge)
 {
-    QPointer<HttpClient> guard = ownerGuard;
-    QMetaObject::invokeMethod(owner, [guard, descriptor = std::move(descriptor),
+    Platform::Guard<HttpClient> guard = ownerGuard;
+    Platform::Dispatcher::main().post([guard, descriptor = std::move(descriptor),
                                       response = std::move(response),
                                       challenge = std::move(challenge)]() mutable {
         if (!guard)

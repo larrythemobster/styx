@@ -1,52 +1,44 @@
 #pragma once
 
-#include <QObject>
-#include <QtZlib/zlib.h>
-
+#include <zlib.h>
+#include <nlohmann/json.hpp>
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
 #include <deque>
+#include <mutex>
+#include <string>
 #include <thread>
 
-namespace Styx {
-namespace Discord {
+#include "Platform/Signal.hpp"
 
-class IngestThread : public QObject
+namespace Styx::Discord {
+
+class IngestThread
 {
-    Q_OBJECT
 public:
-    explicit IngestThread(QObject *parent = nullptr);
-    ~IngestThread() override;
-
+    IngestThread();
+    ~IngestThread();
     void start();
     void stop();
-
-    void push(const QByteArray &data);
+    void push(const std::string &data);
     void reset();
 
-signals:
-    void payloadReceived(QJsonObject root);
+    Platform::Signal<nlohmann::json, uint64_t> payloadReceived;
+    uint64_t currentGeneration() const { return generation.load(); }
 
 private:
-    struct TaggedData
-    {
-        QByteArray data;
-        uint64_t generation;
-    };
-
+    struct TaggedData { std::string data; uint64_t generation; };
     void threadLoop();
-
-private:
     std::thread thread;
-    std::atomic<bool> running = false;
-
+    std::atomic<bool> running{false};
     std::mutex mutex;
     std::condition_variable cv;
     std::deque<TaggedData> queue;
-    QByteArray decompressedBuffer;
-
-    z_stream stream;
+    std::string decompressedBuffer;
+    z_stream stream{};
     bool streamActive = false;
-    std::atomic<uint64_t> generation{ 0 };
+    std::atomic<uint64_t> generation{0};
 };
 
-} // namespace Discord
-} // namespace Styx
+} // namespace Styx::Discord

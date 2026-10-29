@@ -9,7 +9,11 @@
 #include "Core/Audio/IAudioBackend.hpp"
 #include "Core/Logging.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cstring>
+#include <format>
+#include <span>
 
 namespace Styx {
 namespace Discord {
@@ -18,7 +22,7 @@ namespace Voice {
 // 20ms at 48khz
 static constexpr uint32_t OPUS_FRAME_SAMPLES = 960;
 
-static QString formatDisplayableCode(const std::vector<uint8_t> &data, int bytesToConsume = 30, int groupSize = 5)
+static std::string formatDisplayableCode(const std::vector<uint8_t> &data, int bytesToConsume = 30, int groupSize = 5)
 {
     int numGroups = bytesToConsume / groupSize;
     if (static_cast<int>(data.size()) < bytesToConsume)
@@ -28,7 +32,7 @@ static QString formatDisplayableCode(const std::vector<uint8_t> &data, int bytes
     for (int i = 0; i < groupSize; i++)
         modulus *= 10;
 
-    QString result;
+    std::string result;
     for (int g = 0; g < numGroups; g++) {
         uint64_t value = 0;
         for (int b = 0; b < groupSize; b++)
@@ -36,18 +40,17 @@ static QString formatDisplayableCode(const std::vector<uint8_t> &data, int bytes
         value %= modulus;
 
         if (g > 0)
-            result += QLatin1Char(' ');
-        result += QStringLiteral("%1").arg(value, groupSize, 10, QLatin1Char('0'));
+            result += ' ';
+        result += std::format("{:0{}}", value, groupSize);
     }
     return result;
 }
 
-VoiceClient::VoiceClient(const QString &endpoint, const QString &token,
+VoiceClient::VoiceClient(const std::string &endpoint, const std::string &token,
                          Core::Snowflake serverId, Core::Snowflake channelId,
-                         Core::Snowflake userId, const QString &sessionId,
-                         const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop, QObject *parent)
-    : QObject(parent),
-      endpoint(endpoint),
+                         Core::Snowflake userId, const std::string &sessionId,
+                         const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop)
+    : endpoint(endpoint),
       token(token),
       proxy(proxy),
       serverId(serverId),
@@ -63,7 +66,7 @@ VoiceClient::~VoiceClient()
     stop();
 }
 
-void VoiceClient::seedConnectedUsers(const QList<Core::Snowflake> &userIds)
+void VoiceClient::seedConnectedUsers(const std::vector<Core::Snowflake> &userIds)
 {
     for (auto id : userIds)
         connectedUserIds.insert(std::to_string(id));
@@ -72,7 +75,7 @@ void VoiceClient::seedConnectedUsers(const QList<Core::Snowflake> &userIds)
 void VoiceClient::start()
 {
     if (currentState != State::Disconnected) {
-        qCWarning(LogVoice) << "VoiceClient::start called in non-disconnected state";
+        Core::log(Core::LogLevel::Warning,LogVoice) << "VoiceClient::start called in non-disconnected state";
         return;
     }
 
@@ -80,43 +83,33 @@ void VoiceClient::start()
 
     setState(State::Connecting);
 
-    gateway = new VoiceGateway(endpoint, serverId, channelId, userId, sessionId, token, proxy, this);
+    gateway = std::make_unique<VoiceGateway>(endpoint, serverId, channelId, userId, sessionId, token, proxy, m_loop);
 
-    connect(gateway, &VoiceGateway::connected, this, &VoiceClient::onGatewayConnected);
-    connect(gateway, &VoiceGateway::disconnected, this, &VoiceClient::onGatewayDisconnected);
-    connect(gateway, &VoiceGateway::readyReceived, this, &VoiceClient::onGatewayReady);
-    connect(gateway, &VoiceGateway::sessionDescriptionReceived, this, &VoiceClient::onSessionDescription);
-    connect(gateway, &VoiceGateway::speakingReceived, this, &VoiceClient::onSpeaking);
-    connect(gateway, &VoiceGateway::clientConnected, this, &VoiceClient::onClientConnect);
-    connect(gateway, &VoiceGateway::clientsConnected, this, &VoiceClient::onClientsConnect);
-    connect(gateway, &VoiceGateway::clientDisconnected, this, &VoiceClient::onClientDisconnect);
-    connect(gateway, &VoiceGateway::resumed, this, &VoiceClient::onGatewayResumed);
-
-    connect(gateway, &VoiceGateway::binaryPayloadReceived,
-            this, [this](int opcode, const QByteArray &payload) {
-                if (daveSession)
-                    daveSession->handleBinaryPayload(opcode, payload);
-            });
-    connect(gateway, &VoiceGateway::daveTransitionPrepare,
-            this, [this](int protocolVersion, int transitionId) {
-                if (daveSession)
-                    daveSession->onPrepareTransition(protocolVersion, transitionId);
-            });
-    connect(gateway, &VoiceGateway::daveTransitionExecute,
-            this, [this](int transitionId) {
-                if (daveSession)
-                    daveSession->onExecuteTransition(transitionId);
-            });
-    connect(gateway, &VoiceGateway::daveEpochPrepare,
-            this, [this](int protocolVersion, int epoch) {
-                if (!daveSession && protocolVersion > 0) {
-                    // mid-call upgrade attempt. return cuz onPrepareEpoch also reinits
-                    ensureDaveSession(static_cast<uint16_t>(protocolVersion));
-                    return;
-                }
-                if (daveSession)
-                    daveSession->onPrepareEpoch(protocolVersion, epoch);
-            });
+    track(gateway->connected.connect([this] { onGatewayConnected(); }));
+    track(gateway->disconnected.connect([this](auto code, const auto &reason) { onGatewayDisconnected(code, reason); }));
+    track(gateway->readyReceived.connect([this](const auto &data) { onGatewayReady(data); }));
+    track(gateway->sessionDescriptionReceived.connect([this](const auto &data) { onSessionDescription(data); }));
+    track(gateway->speakingReceived.connect([this](const auto &data) { onSpeaking(data); }));
+    track(gateway->clientConnected.connect([this](const auto &data) { onClientConnect(data); }));
+    track(gateway->clientsConnected.connect([this](const auto &ids) { onClientsConnect(ids); }));
+    track(gateway->clientDisconnected.connect([this](auto id) { onClientDisconnect(id); }));
+    track(gateway->resumed.connect([this] { onGatewayResumed(); }));
+    track(gateway->binaryPayloadReceived.connect([this](int opcode, const std::string &payload) {
+        if (daveSession) daveSession->handleBinaryPayload(opcode, payload);
+    }));
+    track(gateway->daveTransitionPrepare.connect([this](int version, int id) {
+        if (daveSession) daveSession->onPrepareTransition(version, id);
+    }));
+    track(gateway->daveTransitionExecute.connect([this](int id) {
+        if (daveSession) daveSession->onExecuteTransition(id);
+    }));
+    track(gateway->daveEpochPrepare.connect([this](int version, int epoch) {
+        if (!daveSession && version > 0) {
+            ensureDaveSession(static_cast<uint16_t>(version));
+            return;
+        }
+        if (daveSession) daveSession->onPrepareEpoch(version, epoch);
+    }));
 
     gateway->start();
 }
@@ -128,8 +121,7 @@ void VoiceClient::stop()
 
     if (gateway) {
         gateway->hardStop();
-        delete gateway;
-        gateway = nullptr;
+        gateway.reset();
     }
 
     cleanupTransport();
@@ -155,8 +147,7 @@ void VoiceClient::cleanupTransport()
 
     daveSession.reset();
 
-    delete udpTransport;
-    udpTransport = nullptr;
+    udpTransport.reset();
 
     rtpSequence = 0;
     rtpTimestamp = 0;
@@ -165,28 +156,28 @@ void VoiceClient::cleanupTransport()
 
 void VoiceClient::onGatewayConnected()
 {
-    qCInfo(LogVoice) << "Voice gateway WebSocket connected, waiting for Hello + Identify";
+    Core::log(Core::LogLevel::Info,LogVoice) << "Voice gateway WebSocket connected, waiting for Hello + Identify";
     setState(State::Identifying);
 }
 
-void VoiceClient::onGatewayDisconnected(VoiceCloseCode code, const QString &reason)
+void VoiceClient::onGatewayDisconnected(VoiceCloseCode code, const std::string &reason)
 {
-    qCWarning(LogVoice) << "Voice gateway disconnected, code:" << code << "reason:" << reason;
+    Core::log(Core::LogLevel::Warning,LogVoice) << "Voice gateway disconnected, code:" << static_cast<int>(code) << "reason:" << reason;
 
     cleanupTransport();
 
     // done if not reconnected
     if (currentState != State::Disconnected) {
         setState(State::Disconnected);
-        emit disconnected();
+        disconnected.publish();
     }
 }
 
 void VoiceClient::onGatewayReady(const VoiceReady &data)
 {
-    qCInfo(LogVoice) << "Voice Ready: SSRC =" << data.ssrc
+    Core::log(Core::LogLevel::Info,LogVoice) << "Voice Ready: SSRC =" << data.ssrc
                      << "server =" << data.ip << ":" << data.port
-                     << "modes =" << data.modes.get();
+                    ;
 
     localSsrc = data.ssrc;
     serverIp = data.ip;
@@ -200,35 +191,35 @@ void VoiceClient::onGatewayReady(const VoiceReady &data)
 
     EncryptionMode mode = EncryptionMode::UNKNOWN;
     for (auto candidate : preferred) {
-        if (serverModes.contains(encryptionModeToString(candidate)) && VoiceEncryption::isModeAvailable(candidate)) {
+        if (std::find(serverModes.begin(), serverModes.end(), encryptionModeToString(candidate)) != serverModes.end() && VoiceEncryption::isModeAvailable(candidate)) {
             mode = candidate;
             break;
         }
     }
 
     if (mode == EncryptionMode::UNKNOWN) {
-        qCCritical(LogVoice) << "No supported encryption mode found! Server offered:" << serverModes;
+        Core::log(Core::LogLevel::Error,LogVoice) << "No supported encryption mode found! Server offered:";
         stop();
         return;
     }
     selectedMode = encryptionModeToString(mode);
-    qCInfo(LogVoice) << "Selected encryption mode:" << selectedMode;
+    Core::log(Core::LogLevel::Info,LogVoice) << "Selected encryption mode:" << selectedMode;
 
     setState(State::DiscoveringIP);
 
     cleanupTransport();
 
-    udpTransport = new UdpTransport(proxy, m_loop, this);
-    connect(udpTransport, &UdpTransport::ipDiscovered, this, &VoiceClient::onIpDiscovered);
-    connect(udpTransport, &UdpTransport::ipDiscoveryFailed, this, &VoiceClient::onIpDiscoveryFailed);
-    connect(udpTransport, &UdpTransport::datagramReceived, this, &VoiceClient::onDatagram);
+    udpTransport = std::make_unique<UdpTransport>(proxy, m_loop);
+    track(udpTransport->ipDiscovered.connect([this](const auto &ip, int port) { onIpDiscovered(ip, port); }));
+    track(udpTransport->ipDiscoveryFailed.connect([this](const auto &error) { onIpDiscoveryFailed(error); }));
+    track(udpTransport->datagramReceived.connect([this](const auto &data) { onDatagram(data); }));
 
     udpTransport->startIpDiscovery(serverIp, serverPort, localSsrc);
 }
 
 void VoiceClient::onSessionDescription(const SessionDescription &desc)
 {
-    qCInfo(LogVoice) << "Session established: mode =" << desc.mode
+    Core::log(Core::LogLevel::Info,LogVoice) << "Session established: mode =" << desc.mode
                      << "key length =" << desc.secretKey->size();
 
     sessionKey = desc.secretKey;
@@ -238,7 +229,7 @@ void VoiceClient::onSessionDescription(const SessionDescription &desc)
     encryption = std::make_unique<VoiceEncryption>(mode, sessionKey);
 
     int daveVersion = desc.daveProtocolVersion.hasValue() ? desc.daveProtocolVersion.get() : 0;
-    qCInfo(LogVoice) << "dave_protocol_version =" << daveVersion;
+    Core::log(Core::LogLevel::Info,LogVoice) << "dave_protocol_version =" << daveVersion;
 
     if (daveVersion > 0)
         ensureDaveSession(static_cast<uint16_t>(daveVersion));
@@ -246,7 +237,7 @@ void VoiceClient::onSessionDescription(const SessionDescription &desc)
     rtpEpoch = std::chrono::steady_clock::now();
 
     setState(State::Connected);
-    emit connected();
+    connected.publish();
 
     // send silence so discord sends us audio immediately
     sendSilence();
@@ -258,7 +249,7 @@ void VoiceClient::onSessionDescription(const SessionDescription &desc)
     }
 }
 
-void VoiceClient::sendAudio(const QByteArray &opusData)
+void VoiceClient::sendAudio(const std::string &opusData)
 {
     if (currentState != State::Connected || !encryption || !udpTransport)
         return;
@@ -282,7 +273,7 @@ void VoiceClient::sendAudio(const QByteArray &opusData)
 
     newTalkspurt = false;
 
-    QByteArray payloadForTransport = opusData;
+    std::string payloadForTransport = opusData;
 
     if (isDaveEnabled()) {
         auto *enc = daveSession->encryptor();
@@ -293,25 +284,25 @@ void VoiceClient::sendAudio(const QByteArray &opusData)
                 discord::dave::MediaType::Audio,
                 localSsrc,
                 discord::dave::ArrayView<const uint8_t>(
-                        reinterpret_cast<const uint8_t *>(payloadForTransport.constData()),
+                        reinterpret_cast<const uint8_t *>(payloadForTransport.data()),
                         payloadForTransport.size()),
                 discord::dave::ArrayView<uint8_t>(daveEncrypted.data(), daveEncrypted.size()),
                 &bytesWritten);
 
         if (result == discord::dave::IEncryptor::Success) {
-            payloadForTransport = QByteArray(reinterpret_cast<const char *>(daveEncrypted.data()), bytesWritten);
+            payloadForTransport = std::string(reinterpret_cast<const char *>(daveEncrypted.data()), bytesWritten);
         } else {
-            qCWarning(LogVoice) << "DAVE encrypt failed: result =" << static_cast<int>(result);
+            Core::log(Core::LogLevel::Warning,LogVoice) << "DAVE encrypt failed: result =" << static_cast<int>(result);
             return;
         }
     }
 
-    QByteArray headerBytes = header.serialize();
-    QByteArray encryptedSection = encryption->encrypt(headerBytes, payloadForTransport);
-    if (encryptedSection.isEmpty())
+    std::string headerBytes = header.serialize();
+    std::string encryptedSection = encryption->encrypt(headerBytes, payloadForTransport);
+    if (encryptedSection.empty())
         return;
 
-    QByteArray packet = headerBytes + encryptedSection;
+    std::string packet = headerBytes + encryptedSection;
     udpTransport->send(packet);
 
     lastAudioSendTime = now;
@@ -340,18 +331,18 @@ void VoiceClient::sendSilence()
     if (elapsed.count() < 5)
         return;
 
-    QByteArray silencePayload(reinterpret_cast<const char *>(Core::Audio::OPUS_SILENCE), sizeof(Core::Audio::OPUS_SILENCE));
+    std::string silencePayload(reinterpret_cast<const char *>(Core::Audio::OPUS_SILENCE), sizeof(Core::Audio::OPUS_SILENCE));
     sendAudio(silencePayload);
 
-    qCDebug(LogVoice) << "Sent keepalive silence frame";
+    Core::log(Core::LogLevel::Debug,LogVoice) << "Sent keepalive silence frame";
 }
 
-void VoiceClient::onDatagram(const QByteArray &data)
+void VoiceClient::onDatagram(const std::string &data)
 {
     if (data.size() < RtpHeader::FIXED_SIZE)
         return;
 
-    const auto *p = reinterpret_cast<const uint8_t *>(data.constData());
+    const auto *p = reinterpret_cast<const uint8_t *>(data.data());
 
     // rtp version = 2
     if (((p[0] >> 6) & 0x03) != 2)
@@ -375,23 +366,23 @@ void VoiceClient::onDatagram(const QByteArray &data)
     if (data.size() <= headerSize + 4)
         return;
 
-    RtpHeader header = RtpHeader::parse(data);
+    RtpHeader header = RtpHeader::parse(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(data.data()), data.size()));
 
     // ignore our own packets
     if (header.ssrc == localSsrc)
         return;
 
-    QByteArray rtpHeaderBytes = data.left(headerSize);
-    QByteArray encryptedSection = data.mid(headerSize);
+    std::string rtpHeaderBytes = data.substr(0, headerSize);
+    std::string encryptedSection = data.substr(headerSize);
 
     if (!encryption) {
-        qCDebug(LogVoice) << "Received RTP but no encryption context, SSRC =" << header.ssrc;
+        Core::log(Core::LogLevel::Debug,LogVoice) << "Received RTP but no encryption context, SSRC =" << header.ssrc;
         return;
     }
 
-    QByteArray decrypted = encryption->decrypt(rtpHeaderBytes, encryptedSection);
-    if (decrypted.isEmpty()) {
-        qCDebug(LogVoice) << "Decrypt failed: SSRC =" << header.ssrc
+    std::string decrypted = encryption->decrypt(rtpHeaderBytes, encryptedSection);
+    if (decrypted.empty()) {
+        Core::log(Core::LogLevel::Debug,LogVoice) << "Decrypt failed: SSRC =" << header.ssrc
                           << "seq =" << header.sequence
                           << "pktSize =" << data.size()
                           << "hdrSize =" << headerSize
@@ -408,18 +399,18 @@ void VoiceClient::onDatagram(const QByteArray &data)
         int extBytes = extWords * 4;
         if (decrypted.size() <= extBytes)
             return;
-        decrypted = decrypted.mid(extBytes);
+        decrypted = decrypted.substr(extBytes);
     }
 
     if (daveSession) {
         // https://daveprotocol.com/#silence-packets
-        if (decrypted.size() == sizeof(Core::Audio::OPUS_SILENCE) && memcmp(decrypted.constData(), Core::Audio::OPUS_SILENCE, sizeof(Core::Audio::OPUS_SILENCE)) == 0) {
-            emit audioReceived(header.ssrc, header.sequence, header.timestamp, decrypted);
+        if (decrypted.size() == sizeof(Core::Audio::OPUS_SILENCE) && memcmp(decrypted.data(), Core::Audio::OPUS_SILENCE, sizeof(Core::Audio::OPUS_SILENCE)) == 0) {
+            audioReceived.publish(header.ssrc, header.sequence, header.timestamp, decrypted);
             return;
         }
 
         if (daveSession->isDaveEnabled()) {
-            uint64_t ssrcUid = ssrcToUserIdMap.value(header.ssrc, 0);
+            uint64_t ssrcUid = (ssrcToUserIdMap.contains(header.ssrc) ? ssrcToUserIdMap.at(header.ssrc) : 0);
             auto *dec = daveSession->getOrCreateDecryptor(header.ssrc, ssrcUid);
             auto maxSize = dec->GetMaxPlaintextByteSize(discord::dave::MediaType::Audio, decrypted.size());
             std::vector<uint8_t> davePlaintext(maxSize);
@@ -427,13 +418,13 @@ void VoiceClient::onDatagram(const QByteArray &data)
             auto result = dec->Decrypt(
                     discord::dave::MediaType::Audio,
                     discord::dave::ArrayView<const uint8_t>(
-                            reinterpret_cast<const uint8_t *>(decrypted.constData()),
+                            reinterpret_cast<const uint8_t *>(decrypted.data()),
                             decrypted.size()),
                     discord::dave::ArrayView<uint8_t>(davePlaintext.data(), davePlaintext.size()),
                     &bytesWritten);
 
             if (result == discord::dave::IDecryptor::Success) {
-                decrypted = QByteArray(reinterpret_cast<const char *>(davePlaintext.data()), bytesWritten);
+                decrypted = std::string(reinterpret_cast<const char *>(davePlaintext.data()), bytesWritten);
             } else {
                 static constexpr const char *kResultNames[] = {
                     "Success",
@@ -445,7 +436,7 @@ void VoiceClient::onDatagram(const QByteArray &data)
                 int ri = static_cast<int>(result);
                 const char *rn = (ri >= 0 && ri < 5) ? kResultNames[ri] : "Unknown";
                 bool hasMagic = decrypted.size() >= 2 && static_cast<uint8_t>(decrypted[decrypted.size() - 2]) == 0xFA && static_cast<uint8_t>(decrypted[decrypted.size() - 1]) == 0xFA;
-                qCDebug(LogDave) << "DAVE decrypt failed: SSRC =" << header.ssrc
+                Core::log(Core::LogLevel::Debug,LogDave) << "DAVE decrypt failed: SSRC =" << header.ssrc
                                  << "result =" << rn
                                  << "frameSize =" << decrypted.size()
                                  << "hasMagicMarker =" << hasMagic;
@@ -458,7 +449,7 @@ void VoiceClient::onDatagram(const QByteArray &data)
         }
     }
 
-    emit audioReceived(header.ssrc, header.sequence, header.timestamp, decrypted);
+    audioReceived.publish(header.ssrc, header.sequence, header.timestamp, decrypted);
 }
 
 bool VoiceClient::isDaveEnabled() const
@@ -467,17 +458,17 @@ bool VoiceClient::isDaveEnabled() const
 }
 
 void VoiceClient::requestVerificationCode(Core::Snowflake targetUserId,
-                                          std::function<void(const QString &)> callback)
+                                          std::function<void(const std::string &)> callback)
 {
     if (!isDaveEnabled()) {
-        callback(QString());
+        callback(std::string());
         return;
     }
     std::string uid = std::to_string(targetUserId);
     daveSession->getPairwiseFingerprint(uid,
                                         [cb = std::move(callback)](const std::vector<uint8_t> &fingerprint) {
                                             if (fingerprint.empty()) {
-                                                cb(QString());
+                                                cb(std::string());
                                                 return;
                                             }
                                             cb(formatDisplayableCode(fingerprint, 45));
@@ -490,20 +481,20 @@ void VoiceClient::onSpeaking(const SpeakingData &data)
         std::string uid = std::to_string(data.userId.get());
         connectedUserIds.insert(uid);
         if (data.ssrc.get() != 0)
-            ssrcToUserIdMap.insert(data.ssrc, data.userId.get());
+            ssrcToUserIdMap[data.ssrc.get()] = static_cast<uint64_t>(data.userId.get());
         if (daveSession) {
             daveSession->addConnectedUser(uid);
             if (data.ssrc.get() != 0)
                 daveSession->applyKeyRatchetForSsrc(data.ssrc, data.userId.get());
         }
     }
-    emit speakingReceived(data);
+    speakingReceived.publish(data);
 }
 
-void VoiceClient::onClientsConnect(const QStringList &userIds)
+void VoiceClient::onClientsConnect(const std::vector<std::string> &userIds)
 {
     for (const auto &id : userIds) {
-        std::string uid = id.toStdString();
+        std::string uid = id;
         connectedUserIds.insert(uid);
         if (daveSession)
             daveSession->addConnectedUser(uid);
@@ -516,11 +507,11 @@ void VoiceClient::onClientConnect(const ClientConnectData &data)
         std::string uid = std::to_string(data.userId.get());
         connectedUserIds.insert(uid);
         if (data.audioSsrc.get() != 0)
-            ssrcToUserIdMap.insert(data.audioSsrc, data.userId.get());
+            ssrcToUserIdMap[data.audioSsrc.get()] = static_cast<uint64_t>(data.userId.get());
         if (daveSession)
             daveSession->addConnectedUser(uid);
     }
-    emit clientConnected(data);
+    clientConnected.publish(data);
 }
 
 void VoiceClient::onClientDisconnect(Core::Snowflake uid)
@@ -532,24 +523,24 @@ void VoiceClient::onClientDisconnect(Core::Snowflake uid)
         daveSession->removeConnectedUser(uidStr);
 
     for (auto it = ssrcToUserIdMap.begin(); it != ssrcToUserIdMap.end(); ++it) {
-        if (it.value() == static_cast<quint64>(uid)) {
+        if (it->second == static_cast<uint64_t>(uid)) {
             ssrcToUserIdMap.erase(it);
             break;
         }
     }
 
-    emit clientDisconnected(uid);
+    clientDisconnected.publish(uid);
 }
 
 void VoiceClient::onGatewayResumed()
 {
-    qCInfo(LogVoice) << "Voice session resumed, restoring to Connected state";
+    Core::log(Core::LogLevel::Info,LogVoice) << "Voice session resumed, restoring to Connected state";
 
-    if (localSsrc == 0 || sessionKey.isEmpty() || !encryption || !udpTransport) {
+    if (localSsrc == 0 || sessionKey.empty() || !encryption || !udpTransport) {
         cleanupTransport();
         if (currentState != State::Disconnected) {
             setState(State::Disconnected);
-            emit disconnected();
+            disconnected.publish();
         }
         return;
     }
@@ -565,9 +556,9 @@ void VoiceClient::onGatewayResumed()
     }
 }
 
-void VoiceClient::onIpDiscovered(const QString &ip, int port)
+void VoiceClient::onIpDiscovered(const std::string &ip, int port)
 {
-    qCInfo(LogVoice) << "IP Discovery: external" << ip << ":" << port;
+    Core::log(Core::LogLevel::Info,LogVoice) << "IP Discovery: external" << ip << ":" << port;
 
     setState(State::SelectingProtocol);
 
@@ -576,9 +567,9 @@ void VoiceClient::onIpDiscovered(const QString &ip, int port)
     setState(State::WaitingForSession);
 }
 
-void VoiceClient::onIpDiscoveryFailed(const QString &error)
+void VoiceClient::onIpDiscoveryFailed(const std::string &error)
 {
-    qCCritical(LogVoice) << "IP Discovery failed:" << error;
+    Core::log(Core::LogLevel::Error,LogVoice) << "IP Discovery failed:" << error;
     stop();
 }
 
@@ -587,38 +578,34 @@ void VoiceClient::ensureDaveSession(uint16_t protocolVersion)
     if (daveSession)
         return;
 
-    qCInfo(LogVoice) << "Creating DAVE session, protocol version =" << protocolVersion;
+    Core::log(Core::LogLevel::Info,LogVoice) << "Creating DAVE session, protocol version =" << protocolVersion;
 
-    daveSession = std::make_unique<DaveSession>(channelId, userId, ssrcToUserIdMap, this);
+    daveSession = std::make_unique<DaveSession>(channelId, userId, ssrcToUserIdMap);
     daveSession->setLocalSsrc(localSsrc);
 
     for (const auto &uid : connectedUserIds)
         daveSession->addConnectedUser(uid);
 
-    // binary
-    connect(daveSession.get(), &DaveSession::sendKeyPackage,
-            gateway, &VoiceGateway::sendBinaryPayload);
-    connect(daveSession.get(), &DaveSession::sendCommitWelcome,
-            gateway, &VoiceGateway::sendBinaryPayload);
-
-    // json
-    connect(daveSession.get(), &DaveSession::sendReadyForTransition,
-            gateway, &VoiceGateway::sendDaveReadyForTransition);
-    connect(daveSession.get(), &DaveSession::sendInvalidCommitWelcome,
-            gateway, &VoiceGateway::sendDaveInvalidCommitWelcome);
-
-    connect(daveSession.get(), &DaveSession::daveStateChanged,
-            this, [this](bool enabled) {
-                if (enabled) {
-                    auto auth = daveSession->lastEpochAuthenticator();
-                    if (!auth.empty())
-                        emit privacyCodeChanged(formatDisplayableCode(auth));
-                    else
-                        emit privacyCodeChanged(QString());
-                } else {
-                    emit privacyCodeChanged(QString());
-                }
-            });
+    track(daveSession->sendKeyPackage.connect([this](int op, const std::string &data) {
+        if (gateway) gateway->sendBinaryPayload(op, data);
+    }));
+    track(daveSession->sendCommitWelcome.connect([this](int op, const std::string &data) {
+        if (gateway) gateway->sendBinaryPayload(op, data);
+    }));
+    track(daveSession->sendReadyForTransition.connect([this](int id) {
+        if (gateway) gateway->sendDaveReadyForTransition(id);
+    }));
+    track(daveSession->sendInvalidCommitWelcome.connect([this](int id) {
+        if (gateway) gateway->sendDaveInvalidCommitWelcome(id);
+    }));
+    track(daveSession->daveStateChanged.connect([this](bool enabled) {
+        if (enabled) {
+            auto auth = daveSession->lastEpochAuthenticator();
+            privacyCodeChanged.publish(auth.empty() ? std::string{} : formatDisplayableCode(auth));
+        } else {
+            privacyCodeChanged.publish({});
+        }
+    }));
 
     daveSession->init(protocolVersion);
 }
@@ -628,9 +615,9 @@ void VoiceClient::setState(State state)
     if (currentState == state)
         return;
 
-    qCDebug(LogVoice) << "VoiceClient state:" << currentState.load() << "->" << state;
+    Core::log(Core::LogLevel::Debug,LogVoice) << "VoiceClient state:" << static_cast<int>(currentState.load()) << "->" << static_cast<int>(state);
     currentState = state;
-    emit stateChanged(state);
+    stateChanged.publish(state);
 }
 
 } // namespace Voice

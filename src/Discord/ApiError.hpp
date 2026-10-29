@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QString>
+#include <string>
 
 namespace Styx {
 namespace Discord {
@@ -18,7 +18,7 @@ struct ApiError
     static constexpr int CannotResizeAnimated = 50138;
 
     int code = 0;
-    QString message;
+    std::string message;
 
     static ApiError fromResponse(const HttpResponse &response);
 };

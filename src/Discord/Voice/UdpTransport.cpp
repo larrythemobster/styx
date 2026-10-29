@@ -1,7 +1,7 @@
 #include "UdpTransport.hpp"
 #include "Core/Logging.hpp"
 
-#include <QtEndian>
+#include <cstring>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -37,15 +37,15 @@ namespace Discord {
 namespace Voice {
 
 static constexpr int IP_DISCOVERY_PACKET_SIZE = 74;
-static constexpr quint16 IP_DISCOVERY_REQUEST_TYPE = 0x0001;
-static constexpr quint16 IP_DISCOVERY_RESPONSE_TYPE = 0x0002;
-static constexpr quint16 IP_DISCOVERY_LENGTH = 70;
+static constexpr std::uint16_t IP_DISCOVERY_REQUEST_TYPE = 0x0001;
+static constexpr std::uint16_t IP_DISCOVERY_RESPONSE_TYPE = 0x0002;
+static constexpr std::uint16_t IP_DISCOVERY_LENGTH = 70;
 
 namespace {
 
-bool resolveSockAddr(const QString &ip, quint16 port, sockaddr_storage &storage, socklen_t &len)
+bool resolveSockAddr(const std::string &ip, std::uint16_t port, sockaddr_storage &storage, socklen_t &len)
 {
-    std::string ipStr = ip.toStdString();
+    const std::string &ipStr = ip;
     sockaddr_in *sin = reinterpret_cast<sockaddr_in *>(&storage);
     if (inet_pton(AF_INET, ipStr.c_str(), &sin->sin_addr) == 1) {
         sin->sin_family = AF_INET;
@@ -76,8 +76,8 @@ bool resolveSockAddr(const QString &ip, quint16 port, sockaddr_storage &storage,
 
 } // namespace
 
-UdpTransport::UdpTransport(const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop, QObject *parent)
-    : QObject(parent), proxy(proxy), m_loop(loop)
+UdpTransport::UdpTransport(const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop)
+    : m_loop(loop), proxy(proxy)
 {
 }
 
@@ -96,17 +96,17 @@ UdpTransport::~UdpTransport()
     }
 }
 
-void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
+void UdpTransport::startIpDiscovery(const std::string &ip, int port, std::uint32_t ssrc)
 {
     serverAddress = ip;
-    serverPort = static_cast<quint16>(port);
+    serverPort = static_cast<std::uint16_t>(port);
     discoveryPending = true;
     this->ssrc = ssrc;
 
     if (!openSocket())
         return;
 
-    qCInfo(LogVoice) << "UDP socket bound to port" << localPort()
+    Core::log(Core::LogLevel::Info, LogVoice) << "UDP socket bound to port" << localPort()
                      << "- starting IP discovery to" << ip << ":" << serverPort;
 
     startDiscoveryTimeout();
@@ -116,14 +116,9 @@ void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
         return;
     }
 
-    if (association) {
-        association->deleteLater();
-        association = nullptr;
-    }
-
-    association = new Socks5UdpAssociation(this);
-    connect(association, &Socks5UdpAssociation::established, this, &UdpTransport::sendDiscoveryPacket);
-    connect(association, &Socks5UdpAssociation::failed, this, [this](const QString &error) {
+    association = std::make_unique<Socks5UdpAssociation>(m_loop);
+    track(association->established.connect([this] { sendDiscoveryPacket(); }));
+    track(association->failed.connect([this](const std::string &error) {
         if (!discoveryPending)
             return;
         discoveryPending = false;
@@ -131,8 +126,8 @@ void UdpTransport::startIpDiscovery(const QString &ip, int port, quint32 ssrc)
             m_loop->cancelTimer(m_discoveryTimerId);
             m_discoveryTimerId = 0;
         }
-        emit ipDiscoveryFailed("SOCKS5 proxy: " + error);
-    });
+        ipDiscoveryFailed.publish("SOCKS5 proxy: " + error);
+    }));
     association->open(proxy);
 }
 
@@ -148,8 +143,8 @@ bool UdpTransport::openSocket()
 
     native_socket_t sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock == kInvalidNativeSocket) {
-        qCWarning(LogVoice) << "Failed to create UDP socket";
-        emit ipDiscoveryFailed(QStringLiteral("Failed to create UDP socket"));
+        Core::log(Core::LogLevel::Warning, LogVoice) << "Failed to create UDP socket";
+        ipDiscoveryFailed.publish(("Failed to create UDP socket"));
         return false;
     }
 
@@ -159,9 +154,9 @@ bool UdpTransport::openSocket()
     bindAddr.sin_port = 0;
 
     if (::bind(sock, reinterpret_cast<sockaddr *>(&bindAddr), sizeof(bindAddr)) != 0) {
-        qCWarning(LogVoice) << "Failed to bind UDP socket";
+        Core::log(Core::LogLevel::Warning, LogVoice) << "Failed to bind UDP socket";
         closeNativeSocket(sock);
-        emit ipDiscoveryFailed(QStringLiteral("Failed to bind UDP socket"));
+        ipDiscoveryFailed.publish(("Failed to bind UDP socket"));
         return false;
     }
 
@@ -178,10 +173,10 @@ bool UdpTransport::openSocket()
 
 void UdpTransport::sendDiscoveryPacket()
 {
-    QByteArray packet(IP_DISCOVERY_PACKET_SIZE, '\0');
-    quint16 type = qToBigEndian(IP_DISCOVERY_REQUEST_TYPE);
-    quint16 length = qToBigEndian(IP_DISCOVERY_LENGTH);
-    quint32 ssrcBE = qToBigEndian(ssrc);
+    std::string packet(IP_DISCOVERY_PACKET_SIZE, '\0');
+    std::uint16_t type = htons(IP_DISCOVERY_REQUEST_TYPE);
+    std::uint16_t length = htons(IP_DISCOVERY_LENGTH);
+    std::uint32_t ssrcBE = htonl(ssrc);
 
     memcpy(packet.data() + 0, &type, 2);
     memcpy(packet.data() + 2, &length, 2);
@@ -199,25 +194,27 @@ void UdpTransport::startDiscoveryTimeout()
         m_discoveryTimerId = m_loop->setTimer(std::chrono::milliseconds(DISCOVERY_TIMEOUT_MS), false, [this] {
             if (discoveryPending) {
                 discoveryPending = false;
-                emit ipDiscoveryFailed("IP discovery timed out");
+                ipDiscoveryFailed.publish("IP discovery timed out");
             }
         });
     }
 }
 
-void UdpTransport::send(const QByteArray &data)
+void UdpTransport::send(const std::string &data)
 {
     if (m_socket == -1)
         return;
 
-    QString targetIp = serverAddress;
-    quint16 targetPort = serverPort;
+    std::string targetIp = serverAddress;
+    std::uint16_t targetPort = serverPort;
 
-    QByteArray packet = data;
+    std::string encapsulated;
+    const std::string *packet = &data;
     if (association) {
         if (!association->isEstablished())
             return;
-        packet = Socks5UdpAssociation::encapsulate(data, serverAddress, serverPort);
+        encapsulated = Socks5UdpAssociation::encapsulate(data, serverAddress, serverPort);
+        packet = &encapsulated;
         targetIp = association->relayAddress();
         targetPort = association->relayPort();
     }
@@ -225,7 +222,7 @@ void UdpTransport::send(const QByteArray &data)
     sockaddr_storage destAddr{};
     socklen_t destLen = 0;
     if (resolveSockAddr(targetIp, targetPort, destAddr, destLen)) {
-        ::sendto(static_cast<native_socket_t>(m_socket), packet.constData(), static_cast<int>(packet.size()), 0,
+        ::sendto(static_cast<native_socket_t>(m_socket), packet->data(), static_cast<int>(packet->size()), 0,
                  reinterpret_cast<const sockaddr *>(&destAddr), destLen);
     }
 }
@@ -235,7 +232,7 @@ bool UdpTransport::isBound() const
     return m_socket != -1;
 }
 
-quint16 UdpTransport::localPort() const
+std::uint16_t UdpTransport::localPort() const
 {
     if (m_socket == -1)
         return 0;
@@ -257,8 +254,8 @@ void UdpTransport::onReadyRead()
     if (m_socket == -1)
         return;
 
-    const QString expectedSender = association ? association->relayAddress() : serverAddress;
-    const quint16 expectedPort = association ? association->relayPort() : serverPort;
+    const std::string expectedSender = association ? association->relayAddress() : serverAddress;
+    const std::uint16_t expectedPort = association ? association->relayPort() : serverPort;
 
     native_socket_t sock = static_cast<native_socket_t>(m_socket);
 
@@ -273,7 +270,7 @@ void UdpTransport::onReadyRead()
             break;
 
         char ipBuf[INET6_ADDRSTRLEN]{};
-        quint16 senderPort = 0;
+        std::uint16_t senderPort = 0;
         if (senderAddr.ss_family == AF_INET) {
             auto *sin = reinterpret_cast<sockaddr_in *>(&senderAddr);
             inet_ntop(AF_INET, &sin->sin_addr, ipBuf, sizeof(ipBuf));
@@ -284,35 +281,35 @@ void UdpTransport::onReadyRead()
             senderPort = ntohs(sin6->sin6_port);
         }
 
-        QString senderIp = QString::fromLatin1(ipBuf);
-        if (senderPort != expectedPort || (!expectedSender.isEmpty() && senderIp != expectedSender)) {
-            qCDebug(LogVoice) << "Dropping UDP datagram from unexpected sender" << senderIp << senderPort;
+        std::string senderIp = std::string(ipBuf);
+        if (senderPort != expectedPort || (!expectedSender.empty() && senderIp != expectedSender)) {
+            Core::log(Core::LogLevel::Debug, LogVoice) << "Dropping UDP datagram from unexpected sender" << senderIp << senderPort;
             continue;
         }
 
-        QByteArray datagram(buffer, bytesRead);
+        std::string datagram(buffer, bytesRead);
         if (association) {
             datagram = Socks5UdpAssociation::decapsulate(datagram);
-            if (datagram.isEmpty())
+            if (datagram.empty())
                 continue;
         }
 
         if (discoveryPending && datagram.size() >= IP_DISCOVERY_PACKET_SIZE) {
             parseIpDiscoveryResponse(datagram);
         } else {
-            emit datagramReceived(datagram);
+            datagramReceived.publish(datagram);
         }
     }
 }
 
-void UdpTransport::parseIpDiscoveryResponse(const QByteArray &data)
+void UdpTransport::parseIpDiscoveryResponse(const std::string &data)
 {
-    quint16 type = 0;
-    memcpy(&type, data.constData(), 2);
-    type = qToBigEndian(type);
+    std::uint16_t type = 0;
+    memcpy(&type, data.data(), 2);
+    type = ntohs(type);
 
     if (type != IP_DISCOVERY_RESPONSE_TYPE) {
-        qCDebug(LogVoice) << "Dropping non-discovery packet while discovery pending";
+        Core::log(Core::LogLevel::Debug, LogVoice) << "Dropping non-discovery packet while discovery pending";
         return;
     }
 
@@ -321,19 +318,19 @@ void UdpTransport::parseIpDiscoveryResponse(const QByteArray &data)
         m_loop->cancelTimer(m_discoveryTimerId);
         m_discoveryTimerId = 0;
     }
-    const char *ipStart = data.constData() + 8;
+    const char *ipStart = data.data() + 8;
     int ipLen = 0;
     while (ipLen < 64 && ipStart[ipLen] != '\0') {
         ipLen++;
     }
-    QString externalIp = QString::fromUtf8(ipStart, ipLen);
+    std::string externalIp = std::string(ipStart, ipLen);
 
-    quint16 externalPort = 0;
-    memcpy(&externalPort, data.constData() + data.size() - 2, 2);
-    externalPort = qFromBigEndian(externalPort);
+    std::uint16_t externalPort = 0;
+    memcpy(&externalPort, data.data() + data.size() - 2, 2);
+    externalPort = ntohs(externalPort);
 
-    qCInfo(LogVoice) << "Discovered external IP:" << externalIp << ":" << externalPort;
-    emit ipDiscovered(externalIp, externalPort);
+    Core::log(Core::LogLevel::Info, LogVoice) << "Discovered external IP:" << externalIp << ":" << externalPort;
+    ipDiscovered.publish(externalIp, externalPort);
 }
 
 } // namespace Voice

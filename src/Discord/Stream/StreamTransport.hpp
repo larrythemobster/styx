@@ -1,9 +1,9 @@
 #pragma once
 
-#include <QByteArray>
-#include <QList>
-#include <QObject>
-#include <QString>
+#include "Platform/Trackable.hpp"
+#include <string>
+#include <vector>
+#include <cstdint>
 
 #include <atomic>
 #include <chrono>
@@ -35,53 +35,52 @@ inline constexpr uint32_t OPUS_CLOCK_RATE = 48000;
 // hands back fragments of an SDP, so the answer is rebuilt from them (applyServerSdp).
 //
 // Lives on the stream thread. libdatachannel calls back on its own threads; everything that
-// reaches Qt is queued onto this object's thread. send*() are safe from any thread.
-class StreamTransport : public QObject
+// reaches the main dispatcher is queued. send*() are safe from any thread.
+class StreamTransport : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     enum class Role {
         Sender,
         Viewer,
     };
 
-    explicit StreamTransport(Role role, QObject *parent = nullptr);
+    explicit StreamTransport(Role role);
     ~StreamTransport() override;
 
     // Codecs offered in SELECT_PROTOCOL. Only H264 is offered so every stream we watch is
     // H264 and every viewer of ours decodes it.
-    static QList<Voice::Codec> codecs();
+    static std::vector<Voice::Codec> codecs();
 
     // Before createOffer(): the SSRCs READY assigned. A viewer passes its (unused) audio SSRC.
-    void setLocalSsrcs(quint32 audioSsrc, quint32 videoSsrc, quint32 rtxSsrc);
+    void setLocalSsrcs(uint32_t audioSsrc, uint32_t videoSsrc, uint32_t rtxSsrc);
     // Sender, before createOffer(): the stream's peak bitrate, for pacing.
     void setMaxBitrate(int bitsPerSecond) { maxBitrate = bitsPerSecond; }
 
     void createOffer();
-    bool applyServerSdp(const QString &serverSdp);
+    bool applyServerSdp(const std::string &serverSdp);
     void close();
 
     [[nodiscard]] bool isConnected() const { return connectedFlag.load(); }
 
     // Sender. frame is one encoded (and DAVE-encrypted) access unit in Annex B form.
-    void sendVideoFrame(const QByteArray &frame, std::chrono::microseconds pts);
-    void sendAudioFrame(const QByteArray &opus, std::chrono::microseconds pts);
+    void sendVideoFrame(const std::string &frame, std::chrono::microseconds pts);
+    void sendAudioFrame(const std::string &opus, std::chrono::microseconds pts);
 
     // Viewer. Sends one RTCP feedback packet (NACK, PLI, RR).
-    void sendRtcp(const QByteArray &packet);
+    void sendRtcp(const std::string &packet);
 
-signals:
-    void localOfferReady(const QString &sdp);
-    void connected();
-    void failed(const QString &reason);
+public:
+    Platform::Signal<const std::string &> localOfferReady;
+    Platform::Signal<> connected;
+    Platform::Signal<const std::string &> failed;
 
     // Sender: the media server asked for a keyframe (PLI/FIR) or estimated our bandwidth (REMB).
-    void keyframeRequested();
-    void bandwidthEstimate(unsigned int bitsPerSecond);
+    Platform::Signal<> keyframeRequested;
+    Platform::Signal<unsigned int> bandwidthEstimate;
 
     // Viewer: one decrypted RTP packet, header included. Emitted from a libdatachannel
     // thread, so receivers get it queued.
-    void rtpReceived(const QByteArray &packet);
+    Platform::Signal<const std::string &> rtpReceived;
 
 private:
     void setupSenderChain();
@@ -92,9 +91,9 @@ private:
     std::shared_ptr<rtc::Track> audioTrack;
     std::shared_ptr<rtc::Track> videoTrack;
 
-    quint32 audioSsrc = 0;
-    quint32 videoSsrc = 0;
-    quint32 rtxSsrc = 0;
+    uint32_t audioSsrc = 0;
+    uint32_t videoSsrc = 0;
+    uint32_t rtxSsrc = 0;
     int maxBitrate = 0;
 
     std::atomic<bool> connectedFlag{ false };

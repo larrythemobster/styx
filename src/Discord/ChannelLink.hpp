@@ -1,14 +1,13 @@
 #pragma once
 
+#include <charconv>
 #include <optional>
-
-#include <QRegularExpression>
-#include <QString>
+#include <regex>
+#include <string>
 
 #include "Core/Snowflake.hpp"
 
-namespace Styx {
-namespace Discord {
+namespace Styx::Discord {
 
 // https://[canary.|ptb.]discord[app].com/channels/<guild or @me>/<channel>[/<message>]
 struct ChannelLink
@@ -17,43 +16,47 @@ struct ChannelLink
     Core::Snowflake channelId;
     Core::Snowflake messageId = Core::Snowflake::Invalid;
 
-    static QRegularExpression pattern(const QString &suffix = {})
+    static std::regex pattern(const std::string &suffix = {})
     {
-        return QRegularExpression(
-                R"(^https?:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/channels\/(@me|\d+)\/(\d+)(?:\/(\d+))?\/?)" + suffix,
-                QRegularExpression::CaseInsensitiveOption);
+        return std::regex(R"(^https?://(?:(?:canary|ptb)\.)?discord(?:app)?\.com/channels/(@me|\d+)/(\d+)(?:/(\d+))?/?)" + suffix,
+                          std::regex::icase);
     }
 
-    static ChannelLink fromMatch(const QRegularExpressionMatch &match)
+    static ChannelLink fromMatch(const std::smatch &match)
     {
+        auto id = [](const std::ssub_match &part) {
+            std::uint64_t value = 0;
+            const auto text = part.str();
+            std::from_chars(text.data(), text.data() + text.size(), value);
+            return Core::Snowflake(value);
+        };
         ChannelLink link;
-        if (match.captured(1) != "@me")
-            link.guildId = Core::Snowflake(match.captured(1).toULongLong());
-        link.channelId = Core::Snowflake(match.captured(2).toULongLong());
-        if (!match.captured(3).isEmpty())
-            link.messageId = Core::Snowflake(match.captured(3).toULongLong());
+        if (match[1].str() != "@me")
+            link.guildId = id(match[1]);
+        link.channelId = id(match[2]);
+        if (match[3].matched)
+            link.messageId = id(match[3]);
         return link;
     }
 
-    static std::optional<ChannelLink> parse(const QString &url)
+    static std::optional<ChannelLink> parse(const std::string &url)
     {
-        static const QRegularExpression whole = pattern("$");
-        auto match = whole.match(url);
-        if (!match.hasMatch())
+        static const std::regex whole = pattern("$");
+        std::smatch match;
+        if (!std::regex_search(url, match, whole))
             return std::nullopt;
         return fromMatch(match);
     }
 
-    QString toUrl() const
+    std::string toUrl() const
     {
-        QString url = "https://discord.com/channels/";
-        url += guildId.isValid() ? QString::number(guildId) : QString("@me");
-        url += "/" + QString::number(channelId);
+        std::string url = "https://discord.com/channels/";
+        url += guildId.isValid() ? guildId.toString() : "@me";
+        url += "/" + channelId.toString();
         if (messageId.isValid())
-            url += "/" + QString::number(messageId);
+            url += "/" + messageId.toString();
         return url;
     }
 };
 
-} // namespace Discord
-} // namespace Styx
+} // namespace Styx::Discord

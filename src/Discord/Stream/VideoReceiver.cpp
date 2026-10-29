@@ -4,7 +4,8 @@
 
 #include "Core/Logging.hpp"
 
-#include <QtEndian>
+#include <algorithm>
+#include <cstdlib>
 
 #include <vector>
 
@@ -13,6 +14,9 @@ namespace Discord {
 namespace Stream {
 
 namespace {
+
+template<typename T> T readBigEndian(const uint8_t *p) { T value = 0; for (size_t i = 0; i < sizeof(T); ++i) value = static_cast<T>((value << 8) | p[i]); return value; }
+template<typename T, typename P> void writeBigEndian(T value, P *p) { for (size_t i = 0; i < sizeof(T); ++i) p[i] = static_cast<P>(value >> (8 * (sizeof(T) - i - 1))); }
 
 constexpr uint8_t NAL_TYPE_MASK = 0x1F;
 constexpr uint8_t NAL_IDR = 5;
@@ -25,19 +29,19 @@ struct ParsedRtp
 {
     uint8_t payloadType = 0;
     bool marker = false;
-    quint16 sequence = 0;
-    quint32 timestamp = 0;
-    quint32 ssrc = 0;
+    uint16_t sequence = 0;
+    uint32_t timestamp = 0;
+    uint32_t ssrc = 0;
     int payloadOffset = 0;
     int payloadSize = 0;
 };
 
-bool parseRtp(const QByteArray &packet, ParsedRtp &out)
+bool parseRtp(const std::string &packet, ParsedRtp &out)
 {
     const int size = static_cast<int>(packet.size());
     if (size < 12)
         return false;
-    const auto *p = reinterpret_cast<const uint8_t *>(packet.constData());
+    const auto *p = reinterpret_cast<const uint8_t *>(packet.data());
     if ((p[0] >> 6) != 2)
         return false;
 
@@ -47,15 +51,15 @@ bool parseRtp(const QByteArray &packet, ParsedRtp &out)
 
     out.marker = p[1] & 0x80;
     out.payloadType = p[1] & 0x7F;
-    out.sequence = qFromBigEndian<quint16>(p + 2);
-    out.timestamp = qFromBigEndian<quint32>(p + 4);
-    out.ssrc = qFromBigEndian<quint32>(p + 8);
+    out.sequence = readBigEndian<uint16_t>(p + 2);
+    out.timestamp = readBigEndian<uint32_t>(p + 4);
+    out.ssrc = readBigEndian<uint32_t>(p + 8);
 
     int offset = 12 + csrcCount * 4;
     if (extension) {
         if (size < offset + 4)
             return false;
-        offset += 4 + qFromBigEndian<quint16>(p + offset + 2) * 4;
+        offset += 4 + readBigEndian<uint16_t>(p + offset + 2) * 4;
     }
     int end = size;
     if (padding) {
@@ -73,15 +77,12 @@ bool parseRtp(const QByteArray &packet, ParsedRtp &out)
 
 } // namespace
 
-VideoReceiver::VideoReceiver(QObject *parent) : QObject(parent)
+VideoReceiver::VideoReceiver()
 {
-    clock.start();
-    tick.setInterval(20);
-    connect(&tick, &QTimer::timeout, this, &VideoReceiver::onTick);
-    tick.start();
+    tick.start(std::chrono::milliseconds(20), true, [this] { onTick(); });
 }
 
-void VideoReceiver::setSsrcs(quint32 video, quint32 rtx, quint32 audio)
+void VideoReceiver::setSsrcs(uint32_t video, uint32_t rtx, uint32_t audio)
 {
     if (video != videoSsrc)
         reset();
@@ -99,25 +100,25 @@ void VideoReceiver::reset()
     waitingForKeyframe = true;
 }
 
-int64_t VideoReceiver::unwrap(quint16 sequence)
+int64_t VideoReceiver::unwrap(uint16_t sequence)
 {
     if (!lastUnwrapped) {
         lastUnwrapped = sequence;
         return sequence;
     }
-    const auto lastLow = static_cast<quint16>(*lastUnwrapped & 0xFFFF);
-    const int16_t delta = static_cast<int16_t>(static_cast<quint16>(sequence - lastLow));
+    const auto lastLow = static_cast<uint16_t>(*lastUnwrapped & 0xFFFF);
+    const int16_t delta = static_cast<int16_t>(static_cast<uint16_t>(sequence - lastLow));
     const int64_t value = *lastUnwrapped + delta;
     if (value > *lastUnwrapped)
         lastUnwrapped = value;
     return value;
 }
 
-bool VideoReceiver::payloadStartsKeyframe(const QByteArray &payload)
+bool VideoReceiver::payloadStartsKeyframe(const std::string &payload)
 {
-    if (payload.isEmpty())
+    if (payload.empty())
         return false;
-    const auto *p = reinterpret_cast<const uint8_t *>(payload.constData());
+    const auto *p = reinterpret_cast<const uint8_t *>(payload.data());
     const uint8_t type = p[0] & NAL_TYPE_MASK;
     if (type == NAL_SPS)
         return true;
@@ -130,7 +131,7 @@ bool VideoReceiver::payloadStartsKeyframe(const QByteArray &payload)
     return false;
 }
 
-void VideoReceiver::handleRtp(const QByteArray &packet)
+void VideoReceiver::handleRtp(const std::string &packet)
 {
     ParsedRtp rtp;
     if (!parseRtp(packet, rtp))
@@ -139,7 +140,7 @@ void VideoReceiver::handleRtp(const QByteArray &packet)
     const bool isAudio = (audioSsrc != 0 && rtp.ssrc == audioSsrc) || (audioSsrc == 0 && rtp.payloadType == OPUS_PAYLOAD_TYPE);
     if (isAudio) {
         if (rtp.payloadSize > 0)
-            emit audioReady(rtp.ssrc, rtp.sequence, rtp.timestamp, packet.mid(rtp.payloadOffset, rtp.payloadSize));
+            audioReady.publish(rtp.ssrc, rtp.sequence, rtp.timestamp, packet.substr(rtp.payloadOffset, rtp.payloadSize));
         return;
     }
 
@@ -148,10 +149,10 @@ void VideoReceiver::handleRtp(const QByteArray &packet)
         // Shorter packets are bandwidth probes (padding only).
         if (rtp.payloadSize <= 2)
             return;
-        const auto *p = reinterpret_cast<const uint8_t *>(packet.constData()) + rtp.payloadOffset;
-        const quint16 original = qFromBigEndian<quint16>(p);
+        const auto *p = reinterpret_cast<const uint8_t *>(packet.data()) + rtp.payloadOffset;
+        const uint16_t original = readBigEndian<uint16_t>(p);
         counters.packets++;
-        insertVideo(original, rtp.timestamp, rtp.marker, packet.mid(rtp.payloadOffset + 2, rtp.payloadSize - 2));
+        insertVideo(original, rtp.timestamp, rtp.marker, packet.substr(rtp.payloadOffset + 2, rtp.payloadSize - 2));
         return;
     }
 
@@ -165,13 +166,13 @@ void VideoReceiver::handleRtp(const QByteArray &packet)
         return;
 
     counters.packets++;
-    insertVideo(rtp.sequence, rtp.timestamp, rtp.marker, packet.mid(rtp.payloadOffset, rtp.payloadSize));
+    insertVideo(rtp.sequence, rtp.timestamp, rtp.marker, packet.substr(rtp.payloadOffset, rtp.payloadSize));
 }
 
-void VideoReceiver::insertVideo(quint16 sequence, quint32 timestamp, bool marker, QByteArray payload)
+void VideoReceiver::insertVideo(uint16_t sequence, uint32_t timestamp, bool marker, std::string payload)
 {
     const int64_t seq = unwrap(sequence);
-    const qint64 now = clock.elapsed();
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - clock).count();
 
     if (nextFrameStart && seq < *nextFrameStart)
         return; // already emitted or given up on
@@ -183,7 +184,7 @@ void VideoReceiver::insertVideo(quint16 sequence, quint32 timestamp, bool marker
 
     // a jump this large is a sender restart, not loss
     if (!buffer.empty() && std::abs(seq - buffer.rbegin()->first) > 1000) {
-        qCInfo(LogStream) << "Video sequence jumped, resetting receiver";
+        Core::log(Core::LogLevel::Info, LogStream) << "Video sequence jumped, resetting receiver";
         reset();
         unwrap(sequence);
     }
@@ -214,10 +215,10 @@ void VideoReceiver::insertVideo(quint16 sequence, quint32 timestamp, bool marker
 void VideoReceiver::resyncToKeyframe()
 {
     // NAL type the packet's payload begins with (inner type for STAP-A / a starting FU-A)
-    auto firstNalType = [](const QByteArray &payload) -> int {
-        if (payload.isEmpty())
+    auto firstNalType = [](const std::string &payload) -> int {
+        if (payload.empty())
             return -1;
-        const auto *p = reinterpret_cast<const uint8_t *>(payload.constData());
+        const auto *p = reinterpret_cast<const uint8_t *>(payload.data());
         const uint8_t type = p[0] & NAL_TYPE_MASK;
         if (type == NAL_STAP_A)
             return payload.size() >= 4 ? (p[3] & NAL_TYPE_MASK) : -1;
@@ -268,7 +269,7 @@ void VideoReceiver::assembleFrames()
         if (it == buffer.end())
             return;
 
-        const quint32 timestamp = it->second.timestamp;
+        const uint32_t timestamp = it->second.timestamp;
         int64_t seq = start;
         int64_t end = -1;
         for (;;) {
@@ -296,8 +297,8 @@ void VideoReceiver::assembleFrames()
 
 bool VideoReceiver::emitFrame(int64_t first, int64_t last)
 {
-    QByteArray frame;
-    quint32 timestamp = 0;
+    std::string frame;
+    uint32_t timestamp = 0;
     bool keyframe = false;
     bool malformed = false;
 
@@ -307,8 +308,8 @@ bool VideoReceiver::emitFrame(int64_t first, int64_t last)
             continue;
         const Packet &packet = it->second;
         timestamp = packet.timestamp;
-        const QByteArray &payload = packet.payload;
-        const auto *p = reinterpret_cast<const uint8_t *>(payload.constData());
+        const std::string &payload = packet.payload;
+        const auto *p = reinterpret_cast<const uint8_t *>(payload.data());
         const int size = static_cast<int>(payload.size());
         const uint8_t type = p[0] & NAL_TYPE_MASK;
 
@@ -319,7 +320,7 @@ bool VideoReceiver::emitFrame(int64_t first, int64_t last)
         } else if (type == NAL_STAP_A) {
             int offset = 1;
             while (offset + 2 <= size) {
-                const int length = qFromBigEndian<quint16>(p + offset);
+                const int length = readBigEndian<uint16_t>(p + offset);
                 offset += 2;
                 if (length == 0 || offset + length > size) {
                     malformed = true;
@@ -328,7 +329,7 @@ bool VideoReceiver::emitFrame(int64_t first, int64_t last)
                 const uint8_t inner = p[offset] & NAL_TYPE_MASK;
                 keyframe |= inner == NAL_IDR || inner == NAL_SPS;
                 frame.append(START_CODE, 4);
-                frame.append(payload.constData() + offset, length);
+                frame.append(payload.data() + offset, length);
                 offset += length;
             }
         } else if (type == NAL_FU_A && size >= 2) {
@@ -337,9 +338,9 @@ bool VideoReceiver::emitFrame(int64_t first, int64_t last)
                 const uint8_t reconstructed = (p[0] & 0xE0) | (header & NAL_TYPE_MASK);
                 keyframe |= (header & NAL_TYPE_MASK) == NAL_IDR;
                 frame.append(START_CODE, 4);
-                frame.append(static_cast<char>(reconstructed));
+                frame.push_back(static_cast<char>(reconstructed));
             }
-            frame.append(payload.constData() + 2, size - 2);
+            frame.append(payload.data() + 2, size - 2);
         } else {
             malformed = true;
         }
@@ -348,14 +349,14 @@ bool VideoReceiver::emitFrame(int64_t first, int64_t last)
     buffer.erase(buffer.lower_bound(first), buffer.upper_bound(last));
     missing.erase(missing.begin(), missing.upper_bound(last));
 
-    if (malformed || frame.isEmpty()) {
+    if (malformed || frame.empty()) {
         counters.framesDropped++;
         requestKeyframe();
         return false;
     }
 
     counters.frames++;
-    emit frameReady(frame, timestamp, keyframe);
+    frameReady.publish(frame, timestamp, keyframe);
     return true;
 }
 
@@ -368,24 +369,24 @@ void VideoReceiver::requestKeyframe()
 
 void VideoReceiver::sendPli()
 {
-    const qint64 now = clock.elapsed();
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - clock).count();
     if (videoSsrc == 0 || now - lastPliMs < PLI_INTERVAL_MS)
         return;
     lastPliMs = now;
     counters.keyframeRequests++;
 
     // RFC 4585 6.3.1: PSFB (206), FMT 1, no FCI
-    QByteArray pli(12, '\0');
+    std::string pli(12, '\0');
     auto *p = reinterpret_cast<uint8_t *>(pli.data());
     p[0] = 0x80 | 1;
     p[1] = 206;
-    qToBigEndian<quint16>(2, p + 2);
-    qToBigEndian<quint32>(localSsrc, p + 4);
-    qToBigEndian<quint32>(videoSsrc, p + 8);
-    emit sendRtcp(pli);
+    writeBigEndian<uint16_t>(2, p + 2);
+    writeBigEndian<uint32_t>(localSsrc, p + 4);
+    writeBigEndian<uint32_t>(videoSsrc, p + 8);
+    sendRtcp.publish(pli);
 }
 
-void VideoReceiver::sendNacks(qint64 now)
+void VideoReceiver::sendNacks(int64_t now)
 {
     if (videoSsrc == 0 || missing.empty())
         return;
@@ -404,38 +405,38 @@ void VideoReceiver::sendNacks(qint64 now)
         return;
 
     // RFC 4585 6.2.1: RTPFB (205), FMT 1, one (PID, BLP) per 17-packet window
-    QByteArray fci;
+    std::string fci;
     for (size_t i = 0; i < due.size();) {
         const int64_t pid = due[i];
-        quint16 blp = 0;
+        uint16_t blp = 0;
         size_t j = i + 1;
         while (j < due.size() && due[j] - pid <= 16) {
-            blp |= static_cast<quint16>(1u << (due[j] - pid - 1));
+            blp |= static_cast<uint16_t>(1u << (due[j] - pid - 1));
             ++j;
         }
         char word[4];
-        qToBigEndian<quint16>(static_cast<quint16>(pid & 0xFFFF), word);
-        qToBigEndian<quint16>(blp, word + 2);
+        writeBigEndian<uint16_t>(static_cast<uint16_t>(pid & 0xFFFF), word);
+        writeBigEndian<uint16_t>(blp, word + 2);
         fci.append(word, 4);
         i = j;
     }
 
-    QByteArray nack(12, '\0');
+    std::string nack(12, '\0');
     auto *p = reinterpret_cast<uint8_t *>(nack.data());
     p[0] = 0x80 | 1;
     p[1] = 205;
-    qToBigEndian<quint16>(static_cast<quint16>(2 + fci.size() / 4), p + 2);
-    qToBigEndian<quint32>(localSsrc, p + 4);
-    qToBigEndian<quint32>(videoSsrc, p + 8);
+    writeBigEndian<uint16_t>(static_cast<uint16_t>(2 + fci.size() / 4), p + 2);
+    writeBigEndian<uint32_t>(localSsrc, p + 4);
+    writeBigEndian<uint32_t>(videoSsrc, p + 8);
     nack.append(fci);
 
     counters.nacksSent += due.size();
-    emit sendRtcp(nack);
+    sendRtcp.publish(nack);
 }
 
 void VideoReceiver::onTick()
 {
-    const qint64 now = clock.elapsed();
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - clock).count();
     sendNacks(now);
 
     // give up on a hole once retransmission had its chance; restart at the next keyframe
@@ -444,7 +445,7 @@ void VideoReceiver::onTick()
             continue;
         if (now - entry.firstSeenMs < GIVE_UP_AFTER_MS)
             break;
-        qCDebug(LogStream) << "Giving up on video packet" << seq << "- requesting keyframe";
+        Core::log(Core::LogLevel::Debug, LogStream) << "Giving up on video packet" << seq << "- requesting keyframe";
         counters.framesDropped++;
         buffer.erase(buffer.begin(), buffer.upper_bound(seq));
         missing.erase(missing.begin(), missing.upper_bound(seq));

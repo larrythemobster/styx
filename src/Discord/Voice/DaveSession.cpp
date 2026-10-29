@@ -7,9 +7,8 @@ namespace Discord {
 namespace Voice {
 
 DaveSession::DaveSession(Core::Snowflake channelId, Core::Snowflake userId,
-                         const QHash<quint32, uint64_t> &ssrcMap, QObject *parent)
-    : QObject(parent),
-      channelId(channelId),
+                         const std::unordered_map<uint32_t, uint64_t> &ssrcMap)
+    : channelId(channelId),
       userId(userId),
       ssrcMap(ssrcMap)
 {
@@ -17,8 +16,8 @@ DaveSession::DaveSession(Core::Snowflake channelId, Core::Snowflake userId,
             nullptr,
             "",
             [](const std::string &reason, const std::string &detail) {
-                qCWarning(LogDave) << "MLS failure:" << QString::fromStdString(reason)
-                                   << QString::fromStdString(detail);
+                Core::log(Core::LogLevel::Warning, LogDave) << "MLS failure:" << reason
+                                   << detail;
             });
 }
 
@@ -38,7 +37,7 @@ void DaveSession::reinit()
 
     connectedUserIds.insert(std::to_string(static_cast<uint64_t>(userId)));
 
-    qCInfo(LogDave) << "Initializing DAVE session: channel =" << channelId
+    Core::log(Core::LogLevel::Info, LogDave) << "Initializing DAVE session: channel =" << channelId
                     << "protocol version =" << protocolVersion
                     << "connectedUsers =" << connectedUserIds.size();
 
@@ -59,21 +58,21 @@ void DaveSession::reinit()
 
     auto keyPackage = mlsSession->GetMarshalledKeyPackage();
     if (!keyPackage.empty()) {
-        QByteArray data(reinterpret_cast<const char *>(keyPackage.data()), keyPackage.size());
-        qCInfo(LogDave) << "Sending MLS key package, size =" << data.size();
-        emit sendKeyPackage(static_cast<int>(VoiceOpCode::DAVE_MLS_KEY_PACKAGE), data);
+        std::string data(reinterpret_cast<const char *>(keyPackage.data()), keyPackage.size());
+        Core::log(Core::LogLevel::Info, LogDave) << "Sending MLS key package, size =" << data.size();
+        sendKeyPackage.publish(static_cast<int>(VoiceOpCode::DAVE_MLS_KEY_PACKAGE), data);
     }
 }
 
-void DaveSession::onExternalSenderPackage(const QByteArray &payload)
+void DaveSession::onExternalSenderPackage(const std::string &payload)
 {
-    qCInfo(LogDave) << "Received external sender package, size =" << payload.size();
+    Core::log(Core::LogLevel::Info, LogDave) << "Received external sender package, size =" << payload.size();
 
     std::vector<uint8_t> data(payload.begin(), payload.end());
     mlsSession->SetExternalSender(data);
 }
 
-void DaveSession::handleBinaryPayload(int opcode, const QByteArray &payload)
+void DaveSession::handleBinaryPayload(int opcode, const std::string &payload)
 {
     switch (opcode) {
     case static_cast<int>(VoiceOpCode::DAVE_MLS_EXTERNAL_SENDER_PACKAGE):
@@ -89,66 +88,66 @@ void DaveSession::handleBinaryPayload(int opcode, const QByteArray &payload)
         onWelcome(payload);
         break;
     default:
-        qCDebug(LogVoice) << "Unhandled DAVE binary opcode:" << opcode;
+        Core::log(Core::LogLevel::Debug, LogVoice) << "Unhandled DAVE binary opcode:" << opcode;
         break;
     }
 }
 
-void DaveSession::onProposals(const QByteArray &payload)
+void DaveSession::onProposals(const std::string &payload)
 {
-    qCInfo(LogDave) << "Received proposals, size =" << payload.size()
+    Core::log(Core::LogLevel::Info, LogDave) << "Received proposals, size =" << payload.size()
                     << "connectedUsers =" << connectedUserIds.size();
 
     std::vector<uint8_t> data(payload.begin(), payload.end());
     auto response = mlsSession->ProcessProposals(std::move(data), connectedUserIds);
 
     if (response) {
-        QByteArray commitWelcome(reinterpret_cast<const char *>(response->data()), response->size());
-        qCInfo(LogDave) << "Sending commit+welcome, size =" << commitWelcome.size();
-        emit sendCommitWelcome(
+        std::string commitWelcome(reinterpret_cast<const char *>(response->data()), response->size());
+        Core::log(Core::LogLevel::Info, LogDave) << "Sending commit+welcome, size =" << commitWelcome.size();
+        sendCommitWelcome.publish(
                 static_cast<int>(VoiceOpCode::DAVE_MLS_COMMIT_WELCOME), commitWelcome);
     }
 }
 
-void DaveSession::onAnnounceCommitTransition(const QByteArray &payload)
+void DaveSession::onAnnounceCommitTransition(const std::string &payload)
 {
     if (payload.size() < 2)
         return;
 
-    const auto *raw = reinterpret_cast<const uint8_t *>(payload.constData());
+    const auto *raw = reinterpret_cast<const uint8_t *>(payload.data());
     int transitionId = (raw[0] << 8) | raw[1];
     pendingTransitionId = transitionId;
 
-    qCDebug(LogDave) << "Received announce commit transition: transitionId ="
+    Core::log(Core::LogLevel::Debug, LogDave) << "Received announce commit transition: transitionId ="
                      << transitionId << "size =" << payload.size();
 
     std::vector<uint8_t> data(payload.begin() + 2, payload.end());
     auto result = mlsSession->ProcessCommit(std::move(data));
 
     if (auto *roster = std::get_if<discord::dave::RosterMap>(&result)) {
-        qCInfo(LogDave) << "ProcessCommit succeeded, roster size =" << roster->size();
+        Core::log(Core::LogLevel::Info, LogDave) << "ProcessCommit succeeded, roster size =" << roster->size();
         pendingTransitionReady = true;
-        emit sendReadyForTransition(transitionId);
+        sendReadyForTransition.publish(transitionId);
         if (transitionId == 0)
             completeTransition();
     } else if (std::holds_alternative<discord::dave::failed_t>(result)) {
-        qCWarning(LogDave) << "ProcessCommit failed (hard reject)";
-        emit sendInvalidCommitWelcome(transitionId);
+        Core::log(Core::LogLevel::Warning, LogDave) << "ProcessCommit failed (hard reject)";
+        sendInvalidCommitWelcome.publish(transitionId);
     } else {
-        qCDebug(LogDave) << "ProcessCommit ignored (soft reject)";
+        Core::log(Core::LogLevel::Debug, LogDave) << "ProcessCommit ignored (soft reject)";
     }
 }
 
-void DaveSession::onWelcome(const QByteArray &payload)
+void DaveSession::onWelcome(const std::string &payload)
 {
     if (payload.size() < 2)
         return;
 
-    const auto *raw = reinterpret_cast<const uint8_t *>(payload.constData());
+    const auto *raw = reinterpret_cast<const uint8_t *>(payload.data());
     int transitionId = (raw[0] << 8) | raw[1];
     pendingTransitionId = transitionId;
 
-    qCInfo(LogDave) << "Received welcome: transitionId =" << transitionId
+    Core::log(Core::LogLevel::Info, LogDave) << "Received welcome: transitionId =" << transitionId
                     << "size =" << payload.size()
                     << "connectedUsers =" << connectedUserIds.size();
 
@@ -156,46 +155,46 @@ void DaveSession::onWelcome(const QByteArray &payload)
     auto roster = mlsSession->ProcessWelcome(std::move(data), connectedUserIds);
 
     if (roster) {
-        qCInfo(LogDave) << "ProcessWelcome succeeded, roster size =" << roster->size();
+        Core::log(Core::LogLevel::Info, LogDave) << "ProcessWelcome succeeded, roster size =" << roster->size();
         pendingTransitionReady = true;
-        emit sendReadyForTransition(transitionId);
+        sendReadyForTransition.publish(transitionId);
         if (transitionId == 0)
             completeTransition();
     } else {
-        qCWarning(LogDave) << "ProcessWelcome failed";
-        emit sendInvalidCommitWelcome(transitionId);
+        Core::log(Core::LogLevel::Warning, LogDave) << "ProcessWelcome failed";
+        sendInvalidCommitWelcome.publish(transitionId);
     }
 }
 
 void DaveSession::onPrepareTransition(int version, int transitionId)
 {
-    qCInfo(LogDave) << "Prepare transition: version =" << version
+    Core::log(Core::LogLevel::Info, LogDave) << "Prepare transition: version =" << version
                     << "transitionId =" << transitionId;
 
     pendingTransitionId = transitionId;
 
     pendingProtocolVersion = static_cast<uint16_t>(version);
 
-    emit sendReadyForTransition(transitionId);
+    sendReadyForTransition.publish(transitionId);
 }
 
 void DaveSession::onExecuteTransition(int transitionId)
 {
-    qCInfo(LogDave) << "Execute transition: transitionId =" << transitionId;
+    Core::log(Core::LogLevel::Info, LogDave) << "Execute transition: transitionId =" << transitionId;
 
     if (pendingProtocolVersion != protocolVersion) {
         protocolVersion = pendingProtocolVersion;
         if (protocolVersion == 0) {
-            qCInfo(LogDave) << "DAVE downgrade to version 0, disabling";
+            Core::log(Core::LogLevel::Info, LogDave) << "DAVE downgrade to version 0, disabling";
             daveEnabled = false;
             daveDowngraded = true;
-            emit daveStateChanged(false);
+            daveStateChanged.publish(false);
             return;
         }
     }
 
     if (!pendingTransitionReady) {
-        qCWarning(LogDave) << "Execute transition" << transitionId
+        Core::log(Core::LogLevel::Warning, LogDave) << "Execute transition" << transitionId
                            << "but no pending commit/welcome, reinitializing DAVE session";
         reinit();
         return;
@@ -207,7 +206,7 @@ void DaveSession::onExecuteTransition(int transitionId)
 void DaveSession::completeTransition()
 {
     if (!pendingTransitionReady) {
-        qCWarning(LogDave) << "completeTransition but no pending commit/welcome!";
+        Core::log(Core::LogLevel::Warning, LogDave) << "completeTransition but no pending commit/welcome!";
         return;
     }
     pendingTransitionReady = false;
@@ -215,36 +214,36 @@ void DaveSession::completeTransition()
     auto selfRatchet = mlsSession->GetKeyRatchet(std::to_string(userId));
     if (selfRatchet) {
         daveEncryptor->SetKeyRatchet(std::move(selfRatchet));
-        qCInfo(LogDave) << "Refreshed encryptor key ratchet for new epoch";
+        Core::log(Core::LogLevel::Info, LogDave) << "Refreshed encryptor key ratchet for new epoch";
     } else {
-        qCWarning(LogDave) << "Could not get own key ratchet from MLS session";
+        Core::log(Core::LogLevel::Warning, LogDave) << "Could not get own key ratchet from MLS session";
     }
 
     for (auto &[ssrc, dec] : daveDecryptors) {
-        auto it = ssrcMap.constFind(ssrc);
-        if (it == ssrcMap.constEnd())
+        auto it = ssrcMap.find(ssrc);
+        if (it == ssrcMap.end())
             continue;
-        auto ratchet = mlsSession->GetKeyRatchet(std::to_string(it.value()));
+        auto ratchet = mlsSession->GetKeyRatchet(std::to_string(it->second));
         if (ratchet) {
             dec->TransitionToKeyRatchet(std::move(ratchet));
-            qCDebug(LogDave) << "Refreshed decryptor key ratchet for SSRC =" << ssrc;
+            Core::log(Core::LogLevel::Debug, LogDave) << "Refreshed decryptor key ratchet for SSRC =" << ssrc;
         }
     }
 
     if (!daveEnabled) {
         daveEnabled = true;
         daveDowngraded = false;
-        qCInfo(LogDave) << "DAVE encryption enabled";
+        Core::log(Core::LogLevel::Info, LogDave) << "DAVE encryption enabled";
     }
 
-    emit daveStateChanged(true);
+    daveStateChanged.publish(true);
 
     pendingTransitionId = -1;
 }
 
 void DaveSession::onPrepareEpoch(int version, int epoch)
 {
-    qCInfo(LogDave) << "Prepare epoch: version =" << version << "epoch =" << epoch;
+    Core::log(Core::LogLevel::Info, LogDave) << "Prepare epoch: version =" << version << "epoch =" << epoch;
 
     if (epoch == 1) {
         protocolVersion = static_cast<uint16_t>(version);
@@ -257,7 +256,7 @@ discord::dave::IEncryptor *DaveSession::encryptor()
     return daveEncryptor.get();
 }
 
-discord::dave::IDecryptor *DaveSession::getOrCreateDecryptor(quint32 ssrc, uint64_t uid)
+discord::dave::IDecryptor *DaveSession::getOrCreateDecryptor(uint32_t ssrc, uint64_t uid)
 {
     auto it = daveDecryptors.find(ssrc);
     if (it != daveDecryptors.end())
@@ -277,19 +276,19 @@ discord::dave::IDecryptor *DaveSession::getOrCreateDecryptor(quint32 ssrc, uint6
     auto *ptr = decryptor.get();
     daveDecryptors.emplace(ssrc, std::move(decryptor));
 
-    qCDebug(LogDave) << "Created decryptor for SSRC =" << ssrc
+    Core::log(Core::LogLevel::Debug, LogDave) << "Created decryptor for SSRC =" << ssrc
                      << "hasRatchet =" << hasRatchet;
     return ptr;
 }
 
-void DaveSession::setLocalSsrc(quint32 ssrc)
+void DaveSession::setLocalSsrc(uint32_t ssrc)
 {
     localSsrc = ssrc;
     if (daveEncryptor)
         daveEncryptor->AssignSsrcToCodec(ssrc, discord::dave::Codec::Opus);
 }
 
-void DaveSession::assignSsrcCodec(quint32 ssrc, discord::dave::Codec codec)
+void DaveSession::assignSsrcCodec(uint32_t ssrc, discord::dave::Codec codec)
 {
     extraCodecs[ssrc] = codec;
     if (daveEncryptor)
@@ -306,9 +305,9 @@ void DaveSession::removeConnectedUser(const std::string &id)
     connectedUserIds.erase(id);
 
     uint64_t uid = std::stoull(id);
-    for (auto it = ssrcMap.constBegin(); it != ssrcMap.constEnd(); ++it) {
-        if (it.value() == uid) {
-            daveDecryptors.erase(it.key());
+    for (auto it = ssrcMap.begin(); it != ssrcMap.end(); ++it) {
+        if (it->second == uid) {
+            daveDecryptors.erase(it->first);
             break;
         }
     }
@@ -331,7 +330,7 @@ std::vector<uint8_t> DaveSession::lastEpochAuthenticator() const
     return mlsSession->GetLastEpochAuthenticator();
 }
 
-void DaveSession::applyKeyRatchetForSsrc(quint32 ssrc, uint64_t uid)
+void DaveSession::applyKeyRatchetForSsrc(uint32_t ssrc, uint64_t uid)
 {
     auto it = daveDecryptors.find(ssrc);
     if (it == daveDecryptors.end())
@@ -340,7 +339,7 @@ void DaveSession::applyKeyRatchetForSsrc(quint32 ssrc, uint64_t uid)
     auto keyRatchet = mlsSession->GetKeyRatchet(std::to_string(uid));
     if (keyRatchet) {
         it->second->TransitionToKeyRatchet(std::move(keyRatchet));
-        qCInfo(LogDave) << "Applied key ratchet for SSRC =" << ssrc << "user =" << uid;
+        Core::log(Core::LogLevel::Info, LogDave) << "Applied key ratchet for SSRC =" << ssrc << "user =" << uid;
     }
 }
 

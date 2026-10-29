@@ -1,9 +1,6 @@
 #include "ApiError.hpp"
 
-#include <QCoreApplication>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
+#include <nlohmann/json.hpp>
 
 #include "HttpClient.hpp"
 
@@ -12,17 +9,23 @@ namespace Discord {
 
 namespace {
 
-QString firstNestedMessage(const QJsonObject &errors)
+std::string firstNestedMessage(const nlohmann::json &errors)
 {
-    const auto own = errors.constFind(QLatin1String("_errors"));
-    if (own != errors.constEnd()) {
-        const QJsonArray messages = own.value().toArray();
-        if (!messages.isEmpty())
-            return messages.first().toObject().value("message").toString();
+    if (!errors.is_object())
+        return {};
+    const auto own = errors.find("_errors");
+    if (own != errors.end() && own->is_array() && !own->empty()) {
+        const auto &first = own->front();
+        if (first.is_object()) {
+            const auto message = first.find("message");
+            if (message != first.end() && message->is_string())
+                return message->get<std::string>();
+        }
+        return {};
     }
-    for (auto it = errors.constBegin(); it != errors.constEnd(); ++it)
-        if (it.value().isObject())
-            return firstNestedMessage(it.value().toObject());
+    for (auto it = errors.begin(); it != errors.end(); ++it)
+        if (it->is_object())
+            return firstNestedMessage(*it);
     return {};
 }
 
@@ -31,18 +34,26 @@ QString firstNestedMessage(const QJsonObject &errors)
 ApiError ApiError::fromResponse(const HttpResponse &response)
 {
     ApiError error;
-    const QJsonObject body = QJsonDocument::fromJson(response.body).object();
-    error.code = body.value("code").toInt();
-
-    if (error.code == InvalidFormBody)
-        error.message = firstNestedMessage(body.value("errors").toObject());
-    if (error.message.isEmpty())
-        error.message = body.value("message").toString();
-    if (error.message.isEmpty())
+    const auto body = nlohmann::json::parse(response.body, nullptr, false);
+    if (body.is_object()) {
+        const auto code = body.find("code");
+        if (code != body.end() && code->is_number_integer())
+            error.code = code->get<int>();
+        if (error.code == InvalidFormBody) {
+            const auto errors = body.find("errors");
+            if (errors != body.end())
+                error.message = firstNestedMessage(*errors);
+        }
+        if (error.message.empty()) {
+            const auto message = body.find("message");
+            if (message != body.end() && message->is_string())
+                error.message = message->get<std::string>();
+        }
+    }
+    if (error.message.empty())
         error.message = response.error;
-    if (error.message.isEmpty())
-        error.message = QCoreApplication::translate("ApiError", "An unexpected error occurred.");
-
+    if (error.message.empty())
+        error.message = "An unexpected error occurred.";
     return error;
 }
 

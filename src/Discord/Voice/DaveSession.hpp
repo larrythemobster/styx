@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QObject>
-#include <QHash>
+#include <cstdint>
+#include "Platform/Trackable.hpp"
 
 #include <functional>
 #include <memory>
@@ -22,23 +22,22 @@ namespace Styx {
 namespace Discord {
 namespace Voice {
 
-class DaveSession : public QObject
+class DaveSession : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     // groupId is the MLS group: the channel ID for voice, rtc_server_id - 1 for Go Live.
     DaveSession(Core::Snowflake groupId, Core::Snowflake userId,
-                const QHash<quint32, uint64_t> &ssrcMap, QObject *parent = nullptr);
+                const std::unordered_map<uint32_t, uint64_t> &ssrcMap);
     ~DaveSession() override;
 
     void init(uint16_t protocolVersion);
 
     // binary
-    void handleBinaryPayload(int opcode, const QByteArray &payload);
-    void onExternalSenderPackage(const QByteArray &payload);
-    void onProposals(const QByteArray &payload);
-    void onAnnounceCommitTransition(const QByteArray &payload);
-    void onWelcome(const QByteArray &payload);
+    void handleBinaryPayload(int opcode, const std::string &payload);
+    void onExternalSenderPackage(const std::string &payload);
+    void onProposals(const std::string &payload);
+    void onAnnounceCommitTransition(const std::string &payload);
+    void onWelcome(const std::string &payload);
 
     // json
     void onPrepareTransition(int protocolVersion, int transitionId);
@@ -46,7 +45,7 @@ public:
     void onPrepareEpoch(int protocolVersion, int epoch);
 
     discord::dave::IEncryptor *encryptor();
-    discord::dave::IDecryptor *getOrCreateDecryptor(quint32 ssrc, uint64_t userId);
+    discord::dave::IDecryptor *getOrCreateDecryptor(uint32_t ssrc, uint64_t userId);
 
     bool isDaveEnabled() const { return daveEnabled; }
 
@@ -57,19 +56,18 @@ public:
 
     std::vector<uint8_t> lastEpochAuthenticator() const;
 
-    void setLocalSsrc(quint32 ssrc);
+    void setLocalSsrc(uint32_t ssrc);
     // Codec for a sending SSRC other than the Opus one; survives reinit().
-    void assignSsrcCodec(quint32 ssrc, discord::dave::Codec codec);
+    void assignSsrcCodec(uint32_t ssrc, discord::dave::Codec codec);
     void addConnectedUser(const std::string &userId);
     void removeConnectedUser(const std::string &userId);
-    void applyKeyRatchetForSsrc(quint32 ssrc, uint64_t userId);
+    void applyKeyRatchetForSsrc(uint32_t ssrc, uint64_t userId);
 
-signals:
-    void sendKeyPackage(int opcode, const QByteArray &data);
-    void sendCommitWelcome(int opcode, const QByteArray &data);
-    void sendReadyForTransition(int transitionId);
-    void sendInvalidCommitWelcome(int transitionId);
-    void daveStateChanged(bool enabled);
+    Platform::Signal<int, std::string> sendKeyPackage;
+    Platform::Signal<int, std::string> sendCommitWelcome;
+    Platform::Signal<int> sendReadyForTransition;
+    Platform::Signal<int> sendInvalidCommitWelcome;
+    Platform::Signal<bool> daveStateChanged;
 
 private:
     void reinit();
@@ -77,14 +75,14 @@ private:
 
     std::unique_ptr<discord::dave::mls::ISession> mlsSession;
     std::unique_ptr<discord::dave::IEncryptor> daveEncryptor;
-    std::unordered_map<quint32, std::unique_ptr<discord::dave::IDecryptor>> daveDecryptors;
+    std::unordered_map<uint32_t, std::unique_ptr<discord::dave::IDecryptor>> daveDecryptors;
 
     uint16_t protocolVersion = 0;
     uint16_t pendingProtocolVersion = 0;
     Core::Snowflake channelId;
     Core::Snowflake userId;
-    quint32 localSsrc = 0;
-    std::unordered_map<quint32, discord::dave::Codec> extraCodecs;
+    uint32_t localSsrc = 0;
+    std::unordered_map<uint32_t, discord::dave::Codec> extraCodecs;
 
     std::set<std::string> connectedUserIds;
     int pendingTransitionId = -1;
@@ -92,7 +90,7 @@ private:
     bool daveDowngraded = false;
     bool pendingTransitionReady = false;
 
-    const QHash<quint32, uint64_t> &ssrcMap;
+    const std::unordered_map<uint32_t, uint64_t> &ssrcMap;
 
     std::shared_ptr<::mlspp::SignaturePrivateKey> transientKey;
 };

@@ -21,7 +21,7 @@ struct Outbound : public T
 
 struct IdentifyData : Core::JsonUtils::JsonObject
 {
-    Field<QString> token;
+    Field<std::string> token;
     Field<Capabilities> capabilities;
     Field<ClientProperties> properties;
     Field<UpdatePresence> presence;
@@ -46,7 +46,7 @@ struct QoSPayload : Core::JsonUtils::JsonObject
 {
     Field<int> ver;
     Field<bool> active;
-    Field<QList<QString>> reasons;
+    Field<std::vector<std::string>> reasons;
 
     Core::OrderedJson toJson() const
     {
@@ -75,9 +75,9 @@ using QoSHeartbeat = Outbound<OpCode::QOS_HEARTBEAT, QoSHeartbeatData>;
 
 struct UpdateTimeSpentSessionIdData : Core::JsonUtils::JsonObject
 {
-    Field<qint64> initializationTimestamp;
-    Field<QString> sessionId;
-    Field<QString> clientLaunchId;
+    Field<std::int64_t> initializationTimestamp;
+    Field<std::string> sessionId;
+    Field<std::string> clientLaunchId;
 
     Core::OrderedJson toJson() const
     {
@@ -99,7 +99,7 @@ struct GuildSubscriptionsBulkData : Core::JsonUtils::JsonObject
         Field<bool, true> threads;
         Field<bool, true> memberUpdates;
         // channel_id -> list of [start, end] range pairs for member list subscriptions
-        QMap<Core::Snowflake, QList<QPair<int, int>>> channels;
+        std::map<Core::Snowflake, std::vector<std::pair<int, int>>> channels;
 
         Core::OrderedJson toJson() const
         {
@@ -109,13 +109,13 @@ struct GuildSubscriptionsBulkData : Core::JsonUtils::JsonObject
             insert(obj, "threads", threads);
             insert(obj, "member_updates", memberUpdates);
 
-            if (!channels.isEmpty()) {
+            if (!channels.empty()) {
                 Core::OrderedJson channelsObj;
                 for (auto it = channels.begin(); it != channels.end(); ++it) {
                     Core::OrderedJson::Array ranges;
                     for (const auto &range : it.value())
-                        ranges.append(Core::OrderedJson::Array().append(range.first).append(range.second));
-                    channelsObj.insert(QString::number(it.key()), ranges);
+                        ranges.push_back(Core::OrderedJson::Array().push_back(range.first).push_back(range.second));
+                    channelsObj.insert(std::to_string(it.key()), ranges);
                 }
                 obj.insert("channels", channelsObj);
             }
@@ -124,7 +124,7 @@ struct GuildSubscriptionsBulkData : Core::JsonUtils::JsonObject
         }
     };
 
-    Field<QMap<Core::Snowflake, SubscriptionData>> subscriptions;
+    Field<std::map<Core::Snowflake, SubscriptionData>> subscriptions;
 
     Core::OrderedJson toJson() const
     {
@@ -141,7 +141,7 @@ struct RequestForumUnreadsData : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> guildId;
     Field<Core::Snowflake> channelId; // the forum
     // (post id, message id or invalid if not acked)
-    QList<QPair<Core::Snowflake, Core::Snowflake>> threads;
+    std::vector<std::pair<Core::Snowflake, Core::Snowflake>> threads;
 
     Core::OrderedJson toJson() const
     {
@@ -152,11 +152,11 @@ struct RequestForumUnreadsData : Core::JsonUtils::JsonObject
         Core::OrderedJson::Array arr;
         for (const auto &[threadId, ackMessageId] : threads) {
             Core::OrderedJson t;
-            t.insert("thread_id", QString::number(threadId));
+            t.insert("thread_id", std::to_string(threadId));
             t.insert("ack_message_id", ackMessageId.isValid()
-                                               ? QJsonValue(QString::number(ackMessageId))
-                                               : QJsonValue(QJsonValue::Null));
-            arr.append(t);
+                                               ? nlohmann::json(std::to_string(ackMessageId))
+                                               : nlohmann::json(nlohmann::json()));
+            arr.push_back(t);
         }
         obj.insert("threads", arr);
         return obj;
@@ -167,15 +167,15 @@ using RequestForumUnreads = Outbound<OpCode::REQUEST_FORUM_UNREADS, RequestForum
 struct RequestGuildMembersData : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> guildId;
-    Field<QString, true> query;
+    Field<std::string, true> query;
     Field<int, true> limit;
-    Field<QList<Core::Snowflake>, true> userIds;
+    Field<std::vector<Core::Snowflake>, true> userIds;
     Field<bool, true> presences;
 
     Core::OrderedJson toJson() const
     {
         Core::OrderedJson obj;
-        obj.insert("guild_id", Core::OrderedJson::Array().append(QString::number(guildId.get())));
+        obj.insert("guild_id", Core::OrderedJson::Array().push_back(std::to_string(guildId.get())));
         insert(obj, "query", query);
         insert(obj, "limit", limit);
         insert(obj, "user_ids", userIds);
@@ -187,8 +187,8 @@ using RequestGuildMembers = Outbound<OpCode::REQUEST_GUILD_MEMBERS, RequestGuild
 
 struct ResumeData : Core::JsonUtils::JsonObject
 {
-    Field<QString> token;
-    Field<QString> sessionId;
+    Field<std::string> token;
+    Field<std::string> sessionId;
     Field<int, false, true> seq;
 
     Core::OrderedJson toJson() const
@@ -225,12 +225,45 @@ struct UpdateVoiceStateData : Core::JsonUtils::JsonObject
 };
 using UpdateVoiceState = Outbound<OpCode::VOICE_STATE_UPDATE, UpdateVoiceStateData>;
 
+// An invalid guild is a private call and an invalid channel leaves voice; both are sent as null.
+// `selfVideo` is whether the account's camera is on, which every update repeats.
+inline UpdateVoiceState voiceStateUpdate(Core::Snowflake guildId, Core::Snowflake channelId, bool selfMute, bool selfDeaf, bool selfVideo)
+{
+    UpdateVoiceState update;
+    if (guildId.isValid())
+        update.guildId = guildId;
+    else
+        update.guildId = nullptr;
+    if (channelId.isValid())
+        update.channelId = channelId;
+    else
+        update.channelId = nullptr;
+    update.selfMute = selfMute;
+    update.selfDeaf = selfDeaf;
+    update.selfVideo = selfVideo;
+    return update;
+}
+
+struct ConnectCallData : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> channelId;
+
+    Core::OrderedJson toJson() const
+    {
+        Core::OrderedJson obj;
+        insert(obj, "channel_id", channelId);
+        return obj;
+    }
+};
+using ConnectCall = Outbound<OpCode::CALL_CONNECT, ConnectCallData>;
+using ConnectCallRequest = ConnectCall;
+
 struct StreamCreateData : Core::JsonUtils::JsonObject
 {
-    Field<QString> type; // "guild" or "call"
+    Field<std::string> type; // "guild" or "call"
     Field<Core::Snowflake, false, true> guildId;
     Field<Core::Snowflake> channelId;
-    Field<QString, false, true> preferredRegion = nullptr;
+    Field<std::string, false, true> preferredRegion = nullptr;
 
     Core::OrderedJson toJson() const
     {
@@ -243,10 +276,11 @@ struct StreamCreateData : Core::JsonUtils::JsonObject
     }
 };
 using StreamCreateRequest = Outbound<OpCode::STREAM_CREATE, StreamCreateData>;
-
+using CreateStreamData = StreamCreateData;
+using CreateStream = Outbound<OpCode::STREAM_CREATE, CreateStreamData>;
 struct StreamKeyData : Core::JsonUtils::JsonObject
 {
-    Field<QString> streamKey;
+    Field<std::string> streamKey;
 
     Core::OrderedJson toJson() const
     {
@@ -257,10 +291,12 @@ struct StreamKeyData : Core::JsonUtils::JsonObject
 };
 using StreamDeleteRequest = Outbound<OpCode::STREAM_DELETE, StreamKeyData>;
 using StreamWatchRequest = Outbound<OpCode::STREAM_WATCH, StreamKeyData>;
-
+using DeleteStream = Outbound<OpCode::STREAM_DELETE, StreamKeyData>;
+using WatchStream = Outbound<OpCode::STREAM_WATCH, StreamKeyData>;
+using PingStream = Outbound<OpCode::STREAM_PING, StreamKeyData>;
 struct StreamSetPausedData : Core::JsonUtils::JsonObject
 {
-    Field<QString> streamKey;
+    Field<std::string> streamKey;
     Field<bool> paused;
 
     Core::OrderedJson toJson() const
@@ -272,6 +308,7 @@ struct StreamSetPausedData : Core::JsonUtils::JsonObject
     }
 };
 using StreamSetPausedRequest = Outbound<OpCode::STREAM_SET_PAUSED, StreamSetPausedData>;
-
+using SetStreamPausedData = StreamSetPausedData;
+using SetStreamPaused = Outbound<OpCode::STREAM_SET_PAUSED, SetStreamPausedData>;
 } // namespace Discord
 } // namespace Styx

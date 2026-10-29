@@ -1,32 +1,35 @@
 #pragma once
 
-#include <QObject>
-#include <QString>
-#include <QStringList>
-
 #include <curl/curl.h>
+#include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "Core/ProxyConfig.hpp"
 #include "Core/Snowflake.hpp"
+#include "Platform/Trackable.hpp"
 #include "VoiceEnums.hpp"
 #include "VoiceEntities.hpp"
 
-namespace Styx {
-namespace Discord {
-namespace Voice {
+namespace Styx::Platform { class WorkerLoop; }
 
-class VoiceGateway : public QObject
+namespace Styx::Discord::Voice {
+
+class VoiceGateway : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    VoiceGateway(const QString &endpoint, Core::Snowflake serverId, Core::Snowflake channelId,
-                 Core::Snowflake userId, const QString &sessionId, const QString &token,
-                 const Core::ProxyConfig &proxy, QObject *parent = nullptr);
-    ~VoiceGateway();
+    VoiceGateway(const std::string &endpoint, Core::Snowflake serverId, Core::Snowflake channelId,
+                 Core::Snowflake userId, const std::string &sessionId, const std::string &token,
+                 const Core::ProxyConfig &proxy, Platform::WorkerLoop *ownerLoop = nullptr);
+    ~VoiceGateway() override;
 
     void start();
     void stop();
@@ -35,102 +38,88 @@ public:
     // A Go Live session identifies with video and its "screen" layer. Set before start().
     void setVideoEnabled(bool enabled) { videoEnabled = enabled; }
 
-    void sendSelectProtocol(const QString &address, int port, const QString &mode);
-    void sendSelectProtocolWebRtc(const QString &sdp, const QList<Codec> &codecs, const QString &rtcConnectionId);
+    void sendSelectProtocol(const std::string &address, int port, const std::string &mode);
+    void sendSelectProtocolWebRtc(const std::string &sdp, const std::vector<Codec> &codecs,
+                                  const std::string &rtcConnectionId);
     void sendVideo(const Core::OrderedJson &d);
     void sendMediaSinkWants(const Core::OrderedJson &d);
-    void sendSpeaking(int flags, int delay, quint32 ssrc);
-    void sendBinaryPayload(int opcode, const QByteArray &data);
+    void sendSpeaking(int flags, int delay, uint32_t ssrc);
+    void sendBinaryPayload(int opcode, const std::string &data);
     void sendDaveReadyForTransition(int transitionId);
     void sendDaveInvalidCommitWelcome(int transitionId);
 
     [[nodiscard]] uint64_t currentGeneration() const { return generation.load(); }
 
-signals:
-    void connected();
-    void disconnected(VoiceCloseCode code, const QString &reason);
-    void reconnecting(int attempt, int maxAttempts);
-
-    void helloReceived(int heartbeatInterval);
-    void readyReceived(const VoiceReady &data);
-    void sessionDescriptionReceived(const SessionDescription &data);
-    void speakingReceived(const SpeakingData &data);
-    void videoReceived(const VideoData &data);
-    void clientConnected(const ClientConnectData &data);
-    void clientsConnected(const QStringList &userIds);
-    void clientDisconnected(Core::Snowflake userId);
-    void resumed();
-
-    void payloadReceived(const QJsonObject &root);
-
-    void binaryPayloadReceived(int opcode, const QByteArray &payload);
-    void daveTransitionPrepare(int protocolVersion, int transitionId);
-    void daveTransitionExecute(int transitionId);
-    void daveEpochPrepare(int protocolVersion, int epoch);
+    Platform::Signal<> connected;
+    Platform::Signal<VoiceCloseCode, const std::string &> disconnected;
+    Platform::Signal<int, int> reconnecting;
+    Platform::Signal<int> helloReceived;
+    Platform::Signal<const VoiceReady &> readyReceived;
+    Platform::Signal<const SessionDescription &> sessionDescriptionReceived;
+    Platform::Signal<const SpeakingData &> speakingReceived;
+    Platform::Signal<const VideoData &> videoReceived;
+    Platform::Signal<const ClientConnectData &> clientConnected;
+    Platform::Signal<const std::vector<std::string> &> clientsConnected;
+    Platform::Signal<Core::Snowflake> clientDisconnected;
+    Platform::Signal<> resumed;
+    Platform::Signal<const nlohmann::json &> payloadReceived;
+    Platform::Signal<int, const std::string &> binaryPayloadReceived;
+    Platform::Signal<int, int> daveTransitionPrepare;
+    Platform::Signal<int> daveTransitionExecute;
+    Platform::Signal<int, int> daveEpochPrepare;
 
 private:
+    void dispatch(std::function<void()> task);
     void sendPayload(VoiceOpCode op, const Core::OrderedJson &d);
-    void sendPayload(const QByteArray &data);
-
-    void onPayloadReceived(const QJsonObject &root);
-    void handleHello(const QJsonObject &data);
-    void handleReady(const QJsonObject &data);
-    void handleSessionDescription(const QJsonObject &data);
-    void handleSpeaking(const QJsonObject &data);
-    void handleHeartbeatAck(quint64 nonce);
+    void sendPayload(const std::string &data);
+    void onPayloadReceived(const nlohmann::json &root);
+    void handleHello(const nlohmann::json &data);
+    void handleReady(const nlohmann::json &data);
+    void handleSessionDescription(const nlohmann::json &data);
+    void handleSpeaking(const nlohmann::json &data);
+    void handleHeartbeatAck(uint64_t nonce);
     void handleResumed();
-    void handleClientConnect(const QJsonObject &data);
-    void handleClientsConnected(const QJsonObject &data);
-    void handleClientDisconnect(const QJsonObject &data);
-    void handleDavePrepareTransition(const QJsonObject &data);
-    void handleDaveExecuteTransition(const QJsonObject &data);
-    void handleDavePrepareEpoch(const QJsonObject &data);
-
+    void handleClientConnect(const nlohmann::json &data);
+    void handleClientsConnected(const nlohmann::json &data);
+    void handleClientDisconnect(const nlohmann::json &data);
+    void handleDavePrepareTransition(const nlohmann::json &data);
+    void handleDaveExecuteTransition(const nlohmann::json &data);
+    void handleDavePrepareEpoch(const nlohmann::json &data);
     void identify();
     void resume();
     bool isFatalCloseCode(VoiceCloseCode code) const;
-
     void networkLoop();
     void heartbeatLoop();
 
-private:
-    QString endpoint;
+    std::string endpoint;
     Core::Snowflake serverId;
     Core::Snowflake channelId;
     Core::Snowflake userId;
-    QString sessionId;
-    QString token;
+    std::string sessionId;
+    std::string token;
     Core::ProxyConfig proxy;
+    Platform::WorkerLoop *ownerLoop;
     bool videoEnabled = false;
-
     std::atomic<bool> running{ false };
-
     std::mutex curlMutex;
     CURL *curl = nullptr;
-
     std::atomic<bool> wantToClose{ false };
     std::thread networkThread;
     std::chrono::steady_clock::time_point closeTime;
-    static constexpr std::chrono::milliseconds closeTimeout = std::chrono::milliseconds(1000);
-
+    static constexpr std::chrono::milliseconds closeTimeout{ 1000 };
     std::atomic<int> heartbeatInterval{ 0 };
     std::mutex heartbeatMutex;
     std::condition_variable heartbeatCv;
     std::thread heartbeatThread;
-
     std::atomic<bool> heartbeatAckReceived{ true };
-    std::atomic<quint64> lastSentNonce{ 0 };
+    std::atomic<uint64_t> lastSentNonce{ 0 };
     std::atomic<int> lastReceivedSeq{ -1 };
-
     std::atomic<bool> shouldReconnect{ false };
     std::atomic<bool> canResume{ false };
     std::atomic<bool> isResuming{ false };
     std::atomic<int> reconnectAttempts{ 0 };
     static constexpr int maxReconnectAttempts = 5;
-
     std::atomic<uint64_t> generation{ 0 };
 };
 
-} // namespace Voice
-} // namespace Discord
-} // namespace Styx
+} // namespace Styx::Discord::Voice

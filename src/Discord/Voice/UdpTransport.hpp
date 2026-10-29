@@ -1,40 +1,34 @@
 #pragma once
 
-#include <QByteArray>
-#include <QObject>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include "Platform/Trackable.hpp"
 #include "Platform/WorkerLoop.hpp"
-
 #include "Core/ProxyConfig.hpp"
 #include "Socks5UdpAssociation.hpp"
 
-namespace Styx {
-namespace Discord {
-namespace Voice {
+namespace Styx::Discord::Voice {
 
-class UdpTransport : public QObject
+class UdpTransport : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit UdpTransport(const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop = nullptr, QObject *parent = nullptr);
+    explicit UdpTransport(const Core::ProxyConfig &proxy, Platform::WorkerLoop *loop = nullptr);
     void setWorkerLoop(Platform::WorkerLoop *loop) { m_loop = loop; }
     ~UdpTransport() override;
 
-    void startIpDiscovery(const QString &ip, int port, quint32 ssrc);
-    void send(const QByteArray &data);
-
+    void startIpDiscovery(const std::string &ip, int port, std::uint32_t ssrc);
+    void send(const std::string &data);
     [[nodiscard]] bool isBound() const;
-    [[nodiscard]] quint16 localPort() const;
+    [[nodiscard]] std::uint16_t localPort() const;
 
-signals:
-    void ipDiscovered(const QString &externalIp, int externalPort);
-    void ipDiscoveryFailed(const QString &error);
-    void datagramReceived(const QByteArray &data);
-
-private slots:
-    void onReadyRead();
+    Platform::Signal<std::string, int> ipDiscovered;
+    Platform::Signal<std::string> ipDiscoveryFailed;
+    Platform::Signal<std::string> datagramReceived;
 
 private:
-    void parseIpDiscoveryResponse(const QByteArray &data);
+    void onReadyRead();
+    void parseIpDiscoveryResponse(const std::string &data);
     bool openSocket();
     void sendDiscoveryPacket();
     void startDiscoveryTimeout();
@@ -42,17 +36,13 @@ private:
     intptr_t m_socket{-1};
     Platform::WorkerLoop *m_loop = nullptr;
     Platform::TimerId m_discoveryTimerId{0};
-    QString serverAddress;
-    quint16 serverPort = 0;
-    quint32 ssrc = 0;
+    std::string serverAddress;
+    std::uint16_t serverPort = 0;
+    std::uint32_t ssrc = 0;
     bool discoveryPending = false;
-
     Core::ProxyConfig proxy;
-    Socks5UdpAssociation *association = nullptr;
-
+    std::unique_ptr<Socks5UdpAssociation> association;
     static constexpr int DISCOVERY_TIMEOUT_MS = 5000;
 };
 
-} // namespace Voice
-} // namespace Discord
-} // namespace Styx
+} // namespace Styx::Discord::Voice

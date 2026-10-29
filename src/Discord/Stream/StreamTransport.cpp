@@ -4,7 +4,9 @@
 
 #include <rtc/rtc.hpp>
 
-#include <QStringList>
+#include "Platform/Dispatcher.hpp"
+#include "Platform/Utf8.hpp"
+#include <sstream>
 
 #include <cstring>
 #include <deque>
@@ -139,19 +141,21 @@ private:
     uint16_t nextRtxSequence = 0;
 };
 
-QString sdpLine(const QStringList &lines, const QString &prefix)
+std::string sdpLine(const std::string &sdp, std::string_view prefix)
 {
-    for (const QString &line : lines) {
-        if (line.startsWith(prefix))
-            return line.trimmed();
+    std::istringstream input(sdp);
+    std::string line;
+    while (std::getline(input, line)) {
+        if (line.starts_with(prefix))
+            return Platform::trim(line);
     }
     return {};
 }
 
 } // namespace
 
-StreamTransport::StreamTransport(Role role, QObject *parent)
-    : QObject(parent), role(role), guard(std::make_shared<Guard>())
+StreamTransport::StreamTransport(Role role)
+    : role(role), guard(std::make_shared<Guard>())
 {
 }
 
@@ -160,17 +164,17 @@ StreamTransport::~StreamTransport()
     close();
 }
 
-QList<Voice::Codec> StreamTransport::codecs()
+std::vector<Voice::Codec> StreamTransport::codecs()
 {
     Voice::Codec opus;
-    opus.name = QStringLiteral("opus");
-    opus.type = QStringLiteral("audio");
+    opus.name = "opus";
+    opus.type = "audio";
     opus.priority = 1000;
     opus.payloadType = OPUS_PAYLOAD_TYPE;
 
     Voice::Codec h264;
-    h264.name = QStringLiteral("H264");
-    h264.type = QStringLiteral("video");
+    h264.name = "H264";
+    h264.type = "video";
     h264.priority = 1000;
     h264.payloadType = H264_PAYLOAD_TYPE;
     h264.rtxPayloadType = H264_RTX_PAYLOAD_TYPE;
@@ -180,7 +184,7 @@ QList<Voice::Codec> StreamTransport::codecs()
     return { opus, h264 };
 }
 
-void StreamTransport::setLocalSsrcs(quint32 audio, quint32 video, quint32 rtx)
+void StreamTransport::setLocalSsrcs(uint32_t audio, uint32_t video, uint32_t rtx)
 {
     audioSsrc = audio;
     videoSsrc = video;
@@ -189,7 +193,8 @@ void StreamTransport::setLocalSsrcs(quint32 audio, quint32 video, quint32 rtx)
 
 void StreamTransport::postToThread(std::function<void()> fn)
 {
-    QMetaObject::invokeMethod(this, std::move(fn), Qt::QueuedConnection);
+    auto weak = lifetime();
+    Platform::Dispatcher::main().post([weak, fn = std::move(fn)] { if (!weak.expired()) fn(); });
 }
 
 void StreamTransport::createOffer()
@@ -229,8 +234,8 @@ void StreamTransport::createOffer()
             std::lock_guard lock(g->mutex);
             if (!g->alive)
                 return;
-            QByteArray packet(reinterpret_cast<const char *>(message->data()), static_cast<qsizetype>(message->size()));
-            emit rtpReceived(packet);
+            std::string packet(reinterpret_cast<const char *>(message->data()), static_cast<size_t>(message->size()));
+            postToThread([this, packet = std::move(packet)] { rtpReceived.publish(packet); });
         }));
     }
 
@@ -238,28 +243,27 @@ void StreamTransport::createOffer()
         std::lock_guard lock(g->mutex);
         if (!g->alive)
             return;
-        QString sdp = QString::fromStdString(std::string(description));
-        postToThread([this, sdp] { emit localOfferReady(sdp); });
+        std::string sdp(description);
+        postToThread([this, sdp] { localOfferReady.publish(sdp); });
     });
 
     pc->onStateChange([this, g](rtc::PeerConnection::State state) {
         std::lock_guard lock(g->mutex);
         if (!g->alive)
             return;
-        qCInfo(LogStream) << "Stream transport state:" << static_cast<int>(state);
+        Core::log(Core::LogLevel::Info, LogStream) << "Stream transport state:" << static_cast<int>(state);
         switch (state) {
         case rtc::PeerConnection::State::Connected:
             connectedFlag = true;
-            postToThread([this] { emit connected(); });
+            postToThread([this] { connected.publish(); });
             break;
         case rtc::PeerConnection::State::Failed:
         case rtc::PeerConnection::State::Closed:
         case rtc::PeerConnection::State::Disconnected: {
             bool was = connectedFlag.exchange(false);
-            QString reason = state == rtc::PeerConnection::State::Failed ? QStringLiteral("ICE/DTLS failed")
-                                                                          : QStringLiteral("transport closed");
+            std::string reason = state == rtc::PeerConnection::State::Failed ? "ICE/DTLS failed" : "transport closed";
             if (was || state == rtc::PeerConnection::State::Failed)
-                postToThread([this, reason] { emit failed(reason); });
+                postToThread([this, reason] { failed.publish(reason); });
             break;
         }
         default:
@@ -294,12 +298,12 @@ void StreamTransport::setupSenderChain()
     videoPacketizer->addToChain(std::make_shared<rtc::PliHandler>([this, g] {
         std::lock_guard lock(g->mutex);
         if (g->alive)
-            postToThread([this] { emit keyframeRequested(); });
+            postToThread([this] { keyframeRequested.publish(); });
     }));
     videoPacketizer->addToChain(std::make_shared<rtc::RembHandler>([this, g](unsigned int bitrate) {
         std::lock_guard lock(g->mutex);
         if (g->alive)
-            postToThread([this, bitrate] { emit bandwidthEstimate(bitrate); });
+            postToThread([this, bitrate] { bandwidthEstimate.publish(bitrate); });
     }));
     // Spread keyframe bursts (100+ KB) over 5 ms slots at a few times the stream bitrate
     // instead of dumping them on the socket at once.
@@ -308,119 +312,89 @@ void StreamTransport::setupSenderChain()
     videoTrack->setMediaHandler(videoPacketizer);
 }
 
-bool StreamTransport::applyServerSdp(const QString &serverSdp)
+bool StreamTransport::applyServerSdp(const std::string &serverSdp)
 {
     if (!pc)
         return false;
 
-    const QStringList lines = serverSdp.split(QLatin1Char('\n'));
-    const QString connection = sdpLine(lines, QStringLiteral("c="));
-    const QString rtcp = sdpLine(lines, QStringLiteral("a=rtcp:"));
-    const QString ufrag = sdpLine(lines, QStringLiteral("a=ice-ufrag"));
-    const QString pwd = sdpLine(lines, QStringLiteral("a=ice-pwd"));
-    const QString fingerprint = sdpLine(lines, QStringLiteral("a=fingerprint"));
-    const QString candidate = sdpLine(lines, QStringLiteral("a=candidate"));
-    const QString port = rtcp.section(QLatin1Char(':'), 1, 1).section(QLatin1Char(' '), 0, 0);
-
-    if (connection.isEmpty() || port.isEmpty() || ufrag.isEmpty() || pwd.isEmpty() || fingerprint.isEmpty() || candidate.isEmpty()) {
-        qCWarning(LogStream) << "Server SDP is missing fields:" << serverSdp;
+    const std::string connection = sdpLine(serverSdp, "c=");
+    const std::string rtcp = sdpLine(serverSdp, "a=rtcp:");
+    const std::string ufrag = sdpLine(serverSdp, "a=ice-ufrag");
+    const std::string pwd = sdpLine(serverSdp, "a=ice-pwd");
+    const std::string fingerprint = sdpLine(serverSdp, "a=fingerprint");
+    const std::string candidate = sdpLine(serverSdp, "a=candidate");
+    const auto colon = rtcp.find(':');
+    const auto space = rtcp.find(' ', colon == std::string::npos ? 0 : colon + 1);
+    const std::string port = colon == std::string::npos ? "" : rtcp.substr(colon + 1, space - colon - 1);
+    if (connection.empty() || port.empty() || ufrag.empty() || pwd.empty() || fingerprint.empty() || candidate.empty()) {
+        Core::log(Core::LogLevel::Warning, LogStream) << "Server SDP is missing fields:" << serverSdp;
         return false;
     }
-
-    const QString transport = QStringList{ ufrag, pwd, fingerprint, candidate, QStringLiteral("a=rtcp-mux"), QStringLiteral("a=ice-lite") }.join(QLatin1Char('\n'));
-
-    QStringList sdp;
-    sdp << QStringLiteral("v=0")
-        << QStringLiteral("o=- 0 0 IN IP4 127.0.0.1")
-        << QStringLiteral("s=-")
-        << QStringLiteral("t=0 0")
-        << QStringLiteral("a=group:BUNDLE 0 1");
-
-    sdp << QStringLiteral("m=audio %1 UDP/TLS/RTP/SAVPF %2").arg(port).arg(OPUS_PAYLOAD_TYPE)
-        << connection
-        << QStringLiteral("a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level")
-        << QStringLiteral("a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01")
-        << QStringLiteral("a=setup:passive")
-        << QStringLiteral("a=mid:0")
-        << QStringLiteral("a=maxptime:60")
-        << QStringLiteral("a=inactive")
-        << transport
-        << QStringLiteral("a=rtpmap:%1 opus/48000/2").arg(OPUS_PAYLOAD_TYPE)
-        << QStringLiteral("a=fmtp:%1 minptime=10;useinbandfec=1;usedtx=1").arg(OPUS_PAYLOAD_TYPE)
-        << QStringLiteral("a=rtcp-fb:%1 transport-cc").arg(OPUS_PAYLOAD_TYPE)
-        << QStringLiteral("a=rtcp-fb:%1 nack").arg(OPUS_PAYLOAD_TYPE);
-    // libdatachannel routes incoming RTCP by the SSRCs in the *remote* description. Feedback
-    // from the media server (NACK, PLI, REMB) names our SSRCs as its media source, so list
-    // them here or it never reaches the NACK responder and PLI handler.
-    if (audioSsrc != 0)
-        sdp << QStringLiteral("a=ssrc:%1 cname:styx").arg(audioSsrc);
-
-    sdp << QStringLiteral("m=video %1 UDP/TLS/RTP/SAVPF %2 %3").arg(port).arg(H264_PAYLOAD_TYPE).arg(H264_RTX_PAYLOAD_TYPE)
-        << connection
-        << QStringLiteral("a=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time")
-        << QStringLiteral("a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01")
-        << QStringLiteral("a=extmap:14 urn:ietf:params:rtp-hdrext:toffset")
-        << QStringLiteral("a=extmap:13 urn:3gpp:video-orientation")
-        << QStringLiteral("a=extmap:5 http://www.webrtc.org/experiments/rtp-hdrext/playout-delay")
-        << QStringLiteral("a=setup:passive")
-        << QStringLiteral("a=mid:1")
-        << QStringLiteral("a=inactive")
-        << transport
-        << QStringLiteral("a=rtpmap:%1 H264/90000").arg(H264_PAYLOAD_TYPE)
-        << QStringLiteral("a=fmtp:%1 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f").arg(H264_PAYLOAD_TYPE)
-        << QStringLiteral("a=rtpmap:%1 rtx/90000").arg(H264_RTX_PAYLOAD_TYPE)
-        << QStringLiteral("a=fmtp:%1 apt=%2").arg(H264_RTX_PAYLOAD_TYPE).arg(H264_PAYLOAD_TYPE)
-        << QStringLiteral("a=rtcp-fb:%1 ccm fir").arg(H264_PAYLOAD_TYPE)
-        << QStringLiteral("a=rtcp-fb:%1 nack").arg(H264_PAYLOAD_TYPE)
-        << QStringLiteral("a=rtcp-fb:%1 nack pli").arg(H264_PAYLOAD_TYPE)
-        << QStringLiteral("a=rtcp-fb:%1 goog-remb").arg(H264_PAYLOAD_TYPE)
-        << QStringLiteral("a=rtcp-fb:%1 transport-cc").arg(H264_PAYLOAD_TYPE);
-    if (videoSsrc != 0)
-        sdp << QStringLiteral("a=ssrc:%1 cname:styx").arg(videoSsrc);
-    if (rtxSsrc != 0)
-        sdp << QStringLiteral("a=ssrc:%1 cname:styx").arg(rtxSsrc);
-
+    const std::string transport = ufrag + "\r\n" + pwd + "\r\n" + fingerprint + "\r\n" + candidate + "\r\na=rtcp-mux\r\na=ice-lite\r\n";
+    std::ostringstream sdp;
+    sdp << "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\n"
+        << "m=audio " << port << " UDP/TLS/RTP/SAVPF " << OPUS_PAYLOAD_TYPE << "\r\n" << connection << "\r\n"
+        << "a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level\r\n"
+        << "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01\r\n"
+        << "a=setup:passive\r\na=mid:0\r\na=maxptime:60\r\na=inactive\r\n" << transport
+        << "a=rtpmap:" << OPUS_PAYLOAD_TYPE << " opus/48000/2\r\na=fmtp:" << OPUS_PAYLOAD_TYPE
+        << " minptime=10;useinbandfec=1;usedtx=1\r\na=rtcp-fb:" << OPUS_PAYLOAD_TYPE
+        << " transport-cc\r\na=rtcp-fb:" << OPUS_PAYLOAD_TYPE << " nack\r\n";
+    if (audioSsrc) sdp << "a=ssrc:" << audioSsrc << " cname:styx\r\n";
+    sdp << "m=video " << port << " UDP/TLS/RTP/SAVPF " << H264_PAYLOAD_TYPE << ' ' << H264_RTX_PAYLOAD_TYPE << "\r\n" << connection << "\r\n"
+        << "a=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time\r\n"
+        << "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01\r\n"
+        << "a=extmap:14 urn:ietf:params:rtp-hdrext:toffset\r\na=extmap:13 urn:3gpp:video-orientation\r\n"
+        << "a=extmap:5 http://www.webrtc.org/experiments/rtp-hdrext/playout-delay\r\n"
+        << "a=setup:passive\r\na=mid:1\r\na=inactive\r\n" << transport
+        << "a=rtpmap:" << H264_PAYLOAD_TYPE << " H264/90000\r\na=fmtp:" << H264_PAYLOAD_TYPE
+        << " level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f\r\na=rtpmap:" << H264_RTX_PAYLOAD_TYPE
+        << " rtx/90000\r\na=fmtp:" << H264_RTX_PAYLOAD_TYPE << " apt=" << H264_PAYLOAD_TYPE << "\r\n";
+    for (const char *feedback : { "ccm fir", "nack", "nack pli", "goog-remb", "transport-cc" })
+        sdp << "a=rtcp-fb:" << H264_PAYLOAD_TYPE << ' ' << feedback << "\r\n";
+    if (videoSsrc) sdp << "a=ssrc:" << videoSsrc << " cname:styx\r\n";
+    if (rtxSsrc) sdp << "a=ssrc:" << rtxSsrc << " cname:styx\r\n";
     try {
-        pc->setRemoteDescription(rtc::Description(sdp.join(QStringLiteral("\r\n")).toStdString() + "\r\n", rtc::Description::Type::Answer));
+        pc->setRemoteDescription(rtc::Description(sdp.str(), rtc::Description::Type::Answer));
     } catch (const std::exception &e) {
-        qCWarning(LogStream) << "Rejected server SDP:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogStream) << "Rejected server SDP:" << e.what();
         return false;
     }
     return true;
 }
 
-void StreamTransport::sendVideoFrame(const QByteArray &frame, std::chrono::microseconds pts)
+void StreamTransport::sendVideoFrame(const std::string &frame, std::chrono::microseconds pts)
 {
     if (!connectedFlag || !videoTrack || !videoTrack->isOpen())
         return;
     try {
-        videoTrack->sendFrame(reinterpret_cast<const std::byte *>(frame.constData()), static_cast<size_t>(frame.size()),
+        videoTrack->sendFrame(reinterpret_cast<const std::byte *>(frame.data()), static_cast<size_t>(frame.size()),
                               rtc::FrameInfo(std::chrono::duration<double>(pts)));
     } catch (const std::exception &e) {
-        qCWarning(LogStream) << "Video send failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogStream) << "Video send failed:" << e.what();
     }
 }
 
-void StreamTransport::sendAudioFrame(const QByteArray &opus, std::chrono::microseconds pts)
+void StreamTransport::sendAudioFrame(const std::string &opus, std::chrono::microseconds pts)
 {
     if (!connectedFlag || !audioTrack || !audioTrack->isOpen())
         return;
     try {
-        audioTrack->sendFrame(reinterpret_cast<const std::byte *>(opus.constData()), static_cast<size_t>(opus.size()),
+        audioTrack->sendFrame(reinterpret_cast<const std::byte *>(opus.data()), static_cast<size_t>(opus.size()),
                               rtc::FrameInfo(std::chrono::duration<double>(pts)));
     } catch (const std::exception &e) {
-        qCWarning(LogStream) << "Audio send failed:" << e.what();
+        Core::log(Core::LogLevel::Warning, LogStream) << "Audio send failed:" << e.what();
     }
 }
 
-void StreamTransport::sendRtcp(const QByteArray &packet)
+void StreamTransport::sendRtcp(const std::string &packet)
 {
     if (!connectedFlag || !videoTrack || !videoTrack->isOpen())
         return;
     try {
-        videoTrack->send(reinterpret_cast<const std::byte *>(packet.constData()), static_cast<size_t>(packet.size()));
+        videoTrack->send(reinterpret_cast<const std::byte *>(packet.data()), static_cast<size_t>(packet.size()));
     } catch (const std::exception &e) {
-        qCDebug(LogStream) << "RTCP send failed:" << e.what();
+        Core::log(Core::LogLevel::Debug, LogStream) << "RTCP send failed:" << e.what();
     }
 }
 
@@ -436,7 +410,7 @@ void StreamTransport::close()
         try {
             pc->close();
         } catch (const std::exception &e) {
-            qCDebug(LogStream) << "PeerConnection close:" << e.what();
+            Core::log(Core::LogLevel::Debug, LogStream) << "PeerConnection close:" << e.what();
         }
     }
     audioTrack.reset();

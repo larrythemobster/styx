@@ -1,13 +1,16 @@
 #pragma once
 
-#include <QObject>
-
-#include <QHash>
-#include <QJsonDocument>
-#include <QJsonArray>
-#include <QJsonObject>
-#include <QTimer>
-#include <QUrlQuery>
+#include "Platform/Trackable.hpp"
+#include "Platform/Timer.hpp"
+#include "Platform/Native.hpp"
+#include <nlohmann/json.hpp>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <unordered_set>
+#include <map>
+#include <memory>
+#include <cstdint>
 
 #include <optional>
 
@@ -30,9 +33,8 @@ using Styx::Core::Snowflake;
 namespace Styx {
 namespace Discord {
 
-class Client : public QObject
+class Client : public Platform::Trackable
 {
-    Q_OBJECT
 public:
     enum class MessageLoadType {
         Latest,
@@ -41,11 +43,9 @@ public:
         Jump,
         Created,
     };
-    Q_ENUM(MessageLoadType)
 
-    explicit Client(const QString &token, const QString &gatewayUrl, const QString &baseUrl,
-                    const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver = nullptr,
-                    QObject *parent = nullptr);
+    explicit Client(const std::string &token, const std::string &gatewayUrl, const std::string &baseUrl,
+                    const Core::ProxyConfig &proxy, CaptchaResolver *captchaResolver = nullptr);
     ~Client() override;
 
     void start();
@@ -54,7 +54,7 @@ public:
     [[nodiscard]] Core::ConnectionState getState() const;
     [[nodiscard]] const Core::ProxyConfig &getProxy() const { return proxyConfig; }
 
-    using MessagesCallback = std::function<void(const Core::Result<QList<Message>> &)>;
+    using MessagesCallback = std::function<void(const Core::Result<std::vector<Message>> &)>;
     void fetchLatestMessages(Snowflake channelId, int limit, MessagesCallback callback);
     void fetchHistory(Snowflake channelId, Snowflake beforeId, int limit, MessagesCallback callback);
     void fetchMessagesAfter(Snowflake channelId, Snowflake afterId, int limit, MessagesCallback callback);
@@ -64,24 +64,24 @@ public:
     void fetchUserProfile(Snowflake userId, Snowflake guildId, ProfileCallback callback);
 
     // empty until its actually fetched
-    [[nodiscard]] QString applicationIconHash(Snowflake applicationId);
+    [[nodiscard]] std::string applicationIconHash(Snowflake applicationId);
 
-    void setUserNote(Snowflake userId, const QString &note);
+    void setUserNote(Snowflake userId, const std::string &note);
 
     using DmChannelCallback = std::function<void(const Core::Result<ChannelCreate> &)>;
     void openDmChannel(Snowflake userId, DmChannelCallback callback);
 
     struct ForumThreadSearchResult
     {
-        QList<Channel> threads;
-        QHash<Snowflake, Message> firstMessages; // (thread id, starter message)
+        std::vector<Channel> threads;
+        std::unordered_map<Snowflake, Message> firstMessages; // (thread id, starter message)
         bool hasMore = false;
         bool indexNotReady = false; // 202
         int retryAfterSeconds = 0;
     };
     using ForumThreadsCallback = std::function<void(const Core::Result<ForumThreadSearchResult> &)>;
     // "last_message_time" / "creation_time"
-    void searchForumThreads(Snowflake forumId, int offset, const QString &sortBy, ForumThreadsCallback callback);
+    void searchForumThreads(Snowflake forumId, int offset, const std::string &sortBy, ForumThreadsCallback callback);
 
     struct CreatedForumThread
     {
@@ -89,22 +89,22 @@ public:
         std::optional<Message> starterMessage;
     };
     using ForumThreadCallback = std::function<void(const Core::Result<CreatedForumThread> &)>;
-    void createForumThread(Snowflake forumId, const QString &name,
-                           const QList<Snowflake> &appliedTags, const QString &content,
-                           const QString &nonce,
-                           const QList<Core::PendingAttachment> &attachments,
+    void createForumThread(Snowflake forumId, const std::string &name,
+                           const std::vector<Snowflake> &appliedTags, const std::string &content,
+                           const std::string &nonce,
+                           const std::vector<Core::PendingAttachment> &attachments,
                            ForumThreadCallback callback);
 
-    using ForumPostDataCallback = std::function<void(const Core::Result<QHash<Snowflake, Message>> &)>;
-    void fetchForumPostData(Snowflake forumId, const QList<Snowflake> &threadIds, ForumPostDataCallback callback);
+    using ForumPostDataCallback = std::function<void(const Core::Result<std::unordered_map<Snowflake, Message>> &)>;
+    void fetchForumPostData(Snowflake forumId, const std::vector<Snowflake> &threadIds, ForumPostDataCallback callback);
 
     void joinThread(Snowflake threadId);
     void leaveThread(Snowflake threadId);
 
     struct ThreadListResult
     {
-        QList<Channel> threads;
-        QList<ThreadMember> members;
+        std::vector<Channel> threads;
+        std::vector<ThreadMember> members;
         bool hasMore = false;
         bool indexNotReady = false; // 202
         int retryAfterSeconds = 0;
@@ -112,14 +112,14 @@ public:
     using ThreadListCallback = std::function<void(const Core::Result<ThreadListResult> &)>;
     void searchThreads(Snowflake channelId, bool archived, int offset, ThreadListCallback callback);
 
-    using RefreshedUrlsCallback = std::function<void(const Core::Result<QHash<QUrl, QUrl>> &)>;
-    void refreshAttachmentUrls(const QList<QUrl> &urls, RefreshedUrlsCallback callback);
+    using RefreshedUrlsCallback = std::function<void(const Core::Result<std::unordered_map<std::string, std::string>> &)>;
+    void refreshAttachmentUrls(const std::vector<std::string> &urls, RefreshedUrlsCallback callback);
 
-    void sendMessage(Snowflake channelId, const QString &content, const QString &nonce,
+    void sendMessage(Snowflake channelId, const std::string &content, const std::string &nonce,
                      Snowflake replyToMessageId = Snowflake::Invalid,
-                     const QList<Core::PendingAttachment> &attachments = {});
-    bool cancelMessageSend(const QString &nonce);
-    void editMessage(Snowflake channelId, Snowflake messageId, const QString &content);
+                     const std::vector<Core::PendingAttachment> &attachments = {});
+    bool cancelMessageSend(const std::string &nonce);
+    void editMessage(Snowflake channelId, Snowflake messageId, const std::string &content);
     void deleteMessage(Snowflake channelId, Snowflake messageId);
     void pinMessage(Snowflake channelId, Snowflake messageId);
     void unpinMessage(Snowflake channelId, Snowflake messageId);
@@ -141,8 +141,8 @@ public:
     };
     using ReactionCallback = std::function<void(const ReactionResult &)>;
 
-    void addReaction(Snowflake channelId, Snowflake messageId, const QString &reactionKey, bool isBurst, ReactionLocation location, ReactionCallback callback);
-    void removeReaction(Snowflake channelId, Snowflake messageId, const QString &reactionKey, bool isBurst, ReactionLocation location, std::optional<Snowflake> reactorUnlessMe, ReactionCallback callback);
+    void addReaction(Snowflake channelId, Snowflake messageId, const std::string &reactionKey, bool isBurst, ReactionLocation location, ReactionCallback callback);
+    void removeReaction(Snowflake channelId, Snowflake messageId, const std::string &reactionKey, bool isBurst, ReactionLocation location, std::optional<Snowflake> reactorUnlessMe, ReactionCallback callback);
 
     struct AckEntry
     {
@@ -152,14 +152,16 @@ public:
     };
 
     void ackMessage(Snowflake channelId, Snowflake messageId, int flags, int lastViewed);
-    void ackBulk(const QList<AckEntry> &entries, std::function<void(bool success)> onFinished);
+    void ackBulk(const std::vector<AckEntry> &entries, std::function<void(bool success)> onFinished);
 
     void sendVoiceStateUpdate(Snowflake guildId, Snowflake channelId, bool selfMute, bool selfDeaf);
+    void sendCallConnect(Snowflake channelId);
     void sendStreamCreate(Snowflake guildId, Snowflake channelId);
-    void sendStreamDelete(const QString &streamKey);
-    void sendStreamWatch(const QString &streamKey);
-    void sendStreamSetPaused(const QString &streamKey, bool paused);
+    void sendStreamDelete(const std::string &streamKey);
+    void sendStreamWatch(const std::string &streamKey);
+    void sendStreamSetPaused(const std::string &streamKey, bool paused);
     void setVoiceConnected(bool connected);
+    void setAppFocused(bool focused);
 
     void restoreHeartbeatSession(const std::optional<HeartbeatSession> &stored);
 
@@ -168,17 +170,17 @@ public:
     void debugForceReconnect();
 
     void subscribeToGuildChannel(Snowflake guildId, Snowflake channelId,
-                                 const QList<QPair<int, int>> &ranges);
+                                 const std::vector<std::pair<int, int>> &ranges);
     void ensureSubscriptionByChannel(Snowflake channelId);
-    void requestForumUnreads(Snowflake forumId, const QList<QPair<Snowflake, Snowflake>> &threads);
-    void requestGuildMembers(Snowflake guildId, const QList<Snowflake> &userIds, bool presences = true);
-    void queryGuildMembers(Snowflake guildId, const QString &query, int limit);
+    void requestForumUnreads(Snowflake forumId, const std::vector<std::pair<Snowflake, Snowflake>> &threads);
+    void requestGuildMembers(Snowflake guildId, const std::vector<Snowflake> &userIds, bool presences = true);
+    void queryGuildMembers(Snowflake guildId, const std::string &query, int limit);
 
     [[nodiscard]] Snowflake getGuildIdForChannel(Snowflake channelId) const;
     void registerChannelGuild(Snowflake channelId, Snowflake guildId);
 
     [[nodiscard]] PremiumTier getGuildPremiumTier(Snowflake guildId) const;
-    [[nodiscard]] qint64 getMaxUploadSize(Snowflake channelId) const;
+    [[nodiscard]] int64_t getMaxUploadSize(Snowflake channelId) const;
 
     using FrecencyCallback = std::function<void(const Core::Result<Proto::FrecencyUserSettings> &)>;
     void fetchFrecencySettings(FrecencyCallback callback);
@@ -188,11 +190,11 @@ public:
         bool success = false;
         bool rateLimited = false;
         bool outOfDate = false;
-        QString error;
+        std::string error;
         std::optional<Proto::FrecencyUserSettings> settings; // server state after the patch
     };
     using FrecencyPatchCallback = std::function<void(const FrecencyPatchResult &)>;
-    void patchFrecencySettings(const QByteArray &partialProto,
+    void patchFrecencySettings(const std::string &partialProto,
                                std::optional<uint32_t> requiredDataVersion,
                                FrecencyPatchCallback callback);
 
@@ -204,58 +206,58 @@ public:
     using ResultCallback = std::function<void(const Core::Result<T> &)>;
     using ActionCallback = ResultCallback<void>;
 
-    void fetchReactors(Snowflake channelId, Snowflake messageId, const QString &reactionKey, bool isBurst, int limit, std::optional<Snowflake> after, ResultCallback<QList<User>> callback);
+    void fetchReactors(Snowflake channelId, Snowflake messageId, const std::string &reactionKey, bool isBurst, int limit, std::optional<Snowflake> after, ResultCallback<std::vector<User>> callback);
 
     void fetchGuildProfile(Snowflake guildId, ResultCallback<GuildProfileEdit> callback);
     void modifyGuildProfile(Snowflake guildId, const GuildProfileEdit &edit, ResultCallback<GuildProfileEdit> callback);
-    void modifyGuild(Snowflake guildId, const GuildEdit &edit, const QMap<QString, QByteArray> &originalMd5s, ActionCallback callback);
+    void modifyGuild(Snowflake guildId, const GuildEdit &edit, const std::map<std::string, std::string> &originalMd5s, ActionCallback callback);
     void deleteGuild(Snowflake guildId, ActionCallback callback);
 
     void createRole(Snowflake guildId, ResultCallback<Role> callback);
     void modifyRole(Snowflake guildId, Snowflake roleId, const RoleEdit &edit, ActionCallback callback);
-    void modifyRolePositions(Snowflake guildId, const QList<QPair<Snowflake, int>> &positions, ActionCallback callback);
+    void modifyRolePositions(Snowflake guildId, const std::vector<std::pair<Snowflake, int>> &positions, ActionCallback callback);
     void deleteRole(Snowflake guildId, Snowflake roleId, ActionCallback callback);
-    void fetchRoleMemberCounts(Snowflake guildId, ResultCallback<QHash<Snowflake, int>> callback);
-    void fetchRoleMemberIds(Snowflake guildId, Snowflake roleId, ResultCallback<QList<Snowflake>> callback);
-    void addRoleMembers(Snowflake guildId, Snowflake roleId, const QList<Snowflake> &userIds, ResultCallback<QList<Snowflake>> callback);
+    void fetchRoleMemberCounts(Snowflake guildId, ResultCallback<std::unordered_map<Snowflake, int>> callback);
+    void fetchRoleMemberIds(Snowflake guildId, Snowflake roleId, ResultCallback<std::vector<Snowflake>> callback);
+    void addRoleMembers(Snowflake guildId, Snowflake roleId, const std::vector<Snowflake> &userIds, ResultCallback<std::vector<Snowflake>> callback);
 
     struct MemberSearchPage
     {
-        QList<MemberSearchResult> members;
+        std::vector<MemberSearchResult> members;
         int totalResultCount = 0;
         std::optional<int> indexingRetryAfterSeconds;
     };
     void searchGuildMembers(Snowflake guildId, const MemberSearchQuery &query, ResultCallback<MemberSearchPage> callback);
-    void setMemberRoles(Snowflake guildId, Snowflake userId, const QList<Snowflake> &roleIds,
-                        const QList<Snowflake> &added, const QList<Snowflake> &removed, ActionCallback callback);
-    void setMemberNickname(Snowflake guildId, Snowflake userId, const QString &nick, ActionCallback callback);
-    void setMemberTimeout(Snowflake guildId, Snowflake userId, const QDateTime &until, const std::optional<QString> &reason, ActionCallback callback);
-    void kickMember(Snowflake guildId, Snowflake userId, const QString &reason, ActionCallback callback);
-    void banMember(Snowflake guildId, Snowflake userId, int deleteMessageSeconds, const QString &reason, ActionCallback callback);
+    void setMemberRoles(Snowflake guildId, Snowflake userId, const std::vector<Snowflake> &roleIds,
+                        const std::vector<Snowflake> &added, const std::vector<Snowflake> &removed, ActionCallback callback);
+    void setMemberNickname(Snowflake guildId, Snowflake userId, const std::string &nick, ActionCallback callback);
+    void setMemberTimeout(Snowflake guildId, Snowflake userId, const Platform::DateTime &until, const std::optional<std::string> &reason, ActionCallback callback);
+    void kickMember(Snowflake guildId, Snowflake userId, const std::string &reason, ActionCallback callback);
+    void banMember(Snowflake guildId, Snowflake userId, int deleteMessageSeconds, const std::string &reason, ActionCallback callback);
     void unbanMember(Snowflake guildId, Snowflake userId, ActionCallback callback);
-    void requestPruneCount(Snowflake guildId, int days, const QList<Snowflake> &includeRoles, ActionCallback callback);
-    void pruneMembers(Snowflake guildId, int days, const QList<Snowflake> &includeRoles, ActionCallback callback);
+    void requestPruneCount(Snowflake guildId, int days, const std::vector<Snowflake> &includeRoles, ActionCallback callback);
+    void pruneMembers(Snowflake guildId, int days, const std::vector<Snowflake> &includeRoles, ActionCallback callback);
     void setMemberUpdatesSubscription(Snowflake guildId, bool subscribed);
 
-    void fetchBans(Snowflake guildId, Snowflake after, ResultCallback<QList<Ban>> callback);
-    void searchBans(Snowflake guildId, const QString &query, const QList<Snowflake> &userIds, ResultCallback<QList<Ban>> callback);
+    void fetchBans(Snowflake guildId, Snowflake after, ResultCallback<std::vector<Ban>> callback);
+    void searchBans(Snowflake guildId, const std::string &query, const std::vector<Snowflake> &userIds, ResultCallback<std::vector<Ban>> callback);
 
-    void fetchGuildInvites(Snowflake guildId, ResultCallback<QList<Invite>> callback);
+    void fetchGuildInvites(Snowflake guildId, ResultCallback<std::vector<Invite>> callback);
     void createInvite(Snowflake channelId, int maxAgeSeconds, int maxUses, bool temporary, ResultCallback<Invite> callback);
-    void revokeInvite(const QString &code, ActionCallback callback);
-    void setIncidentActions(Snowflake guildId, const QDateTime &invitesDisabledUntil, const QDateTime &dmsDisabledUntil,
+    void revokeInvite(const std::string &code, ActionCallback callback);
+    void setIncidentActions(Snowflake guildId, const Platform::DateTime &invitesDisabledUntil, const Platform::DateTime &dmsDisabledUntil,
                             std::optional<int> lockdownHours, ActionCallback callback);
 
-    void fetchGuildEmojis(Snowflake guildId, ResultCallback<QList<Emoji>> callback);
-    void createGuildEmoji(Snowflake guildId, const QString &name, const QString &imageDataUri, const QByteArray &originalMd5, ResultCallback<Emoji> callback);
-    void renameGuildEmoji(Snowflake guildId, Snowflake emojiId, const QString &name, ActionCallback callback);
+    void fetchGuildEmojis(Snowflake guildId, ResultCallback<std::vector<Emoji>> callback);
+    void createGuildEmoji(Snowflake guildId, const std::string &name, const std::string &imageDataUri, const std::string &originalMd5, ResultCallback<Emoji> callback);
+    void renameGuildEmoji(Snowflake guildId, Snowflake emojiId, const std::string &name, ActionCallback callback);
     void deleteGuildEmoji(Snowflake guildId, Snowflake emojiId, ActionCallback callback);
 
-    void fetchGuildStickers(Snowflake guildId, ResultCallback<QList<Sticker>> callback);
-    void createGuildSticker(Snowflake guildId, const QString &name, const QString &tags, const QString &description,
-                            const FileUpload &file, const QByteArray &originalMd5, ResultCallback<Sticker> callback);
-    void modifyGuildSticker(Snowflake guildId, Snowflake stickerId, const QString &name, const QString &tags,
-                            const QString &description, ActionCallback callback);
+    void fetchGuildStickers(Snowflake guildId, ResultCallback<std::vector<Sticker>> callback);
+    void createGuildSticker(Snowflake guildId, const std::string &name, const std::string &tags, const std::string &description,
+                            const FileUpload &file, const std::string &originalMd5, ResultCallback<Sticker> callback);
+    void modifyGuildSticker(Snowflake guildId, Snowflake stickerId, const std::string &name, const std::string &tags,
+                            const std::string &description, ActionCallback callback);
     void deleteGuildSticker(Snowflake guildId, Snowflake stickerId, ActionCallback callback);
 
     struct AuditLogQuery
@@ -267,83 +269,86 @@ public:
     };
     void fetchAuditLog(Snowflake guildId, const AuditLogQuery &query, ResultCallback<AuditLog> callback);
 
-    void sendFriendRequest(const QString &username, ActionCallback callback);
+    void sendFriendRequest(const std::string &username, ActionCallback callback);
 
-signals:
-    void stateChanged(Core::ConnectionState state);
-    void ready(const Ready &data);
-    void readySupplemental(const ReadySupplemental &data);
-    void messageCreated(const Message &msg);
-    void messageUpdated(const Message &msg);
-    void messageDeleted(const MessageDelete &event);
-    void typingStart(const TypingStart &event);
-    void channelCreated(const ChannelCreate &event);
-    void channelUpdated(const ChannelUpdate &event);
-    void channelDeleted(const ChannelDelete &event);
-    void threadCreated(const ChannelCreate &event);
-    void threadUpdated(const ChannelUpdate &event);
-    void threadDeleted(const ThreadDelete &event);
-    void threadListSync(const ThreadListSync &event);
-    void threadMemberUpdated(const ThreadMemberUpdate &event);
-    void threadMembersUpdated(const ThreadMembersUpdate &event);
-    void forumUnreads(const ForumUnreads &event);
-    void guildCreated(const GatewayGuild &guild);
-    void guildUpdated(const Guild &guild);
-    void guildDeleted(const GuildDelete &event);
-    void guildMembersChunk(const GuildMembersChunk &chunk);
-    void guildMemberAdded(const GuildMemberAdd &event);
-    void guildMemberUpdated(const GuildMemberUpdate &event);
-    void guildMemberRemoved(const GuildMemberRemove &event);
-    void guildRoleCreated(const GuildRoleCreate &event);
-    void guildRoleUpdated(const GuildRoleUpdate &event);
-    void guildRoleDeleted(const GuildRoleDelete &event);
-    void roleMemberCountChanged(Snowflake guildId, Snowflake roleId, int delta);
-    void guildEmojisUpdated(const GuildEmojisUpdate &event);
-    void guildStickersUpdated(const GuildStickersUpdate &event);
-    void guildBanAdded(const GuildBanEvent &event);
-    void guildBanRemoved(const GuildBanEvent &event);
-    void inviteCreated(const Invite &invite);
-    void inviteRevoked(const QString &code);
-    void guildPruneUpdated(const GuildPruneUpdate &event);
-    void messageAcked(const MessageAck &event);
-    void messageReactionAdd(const MessageReactionAdd &event);
-    void messageReactionAddMany(const MessageReactionAddMany &event);
-    void messageReactionRemove(const MessageReactionRemove &event);
-    void messageReactionRemoveAll(const MessageReactionRemoveAll &event);
-    void messageReactionRemoveEmoji(const MessageReactionRemoveEmoji &event);
-    void userGuildSettingsUpdated(const UserGuildSettings &settings);
-    void notificationSettingsUpdated(const NotificationSettings &settings);
-    void guildMemberListUpdate(const GuildMemberListUpdate &event);
-    void voiceStateUpdated(const VoiceState &event);
-    void voiceServerUpdated(const VoiceServerUpdate &event);
-    void streamCreated(const StreamCreate &event);
-    void streamUpdated(const StreamUpdate &event);
-    void streamServerUpdated(const StreamServerUpdate &event);
-    void streamDeleted(const StreamDelete &event);
-    void relationshipAdded(const Relationship &event);
-    void relationshipUpdated(const RelationshipPartial &event);
-    void relationshipRemoved(const RelationshipPartial &event);
-    void userNoteUpdated(const UserNoteUpdate &event);
-    void userSettingsProtoUpdated(const UserSettingsProtoUpdate &event);
-    void frecencySettingsReceived(const Proto::FrecencyUserSettings &settings);
-    void settingsChanged();
-    void applicationIconResolved(Snowflake applicationId);
-    void presenceUpdated(const Presence &event);
-    void presencesReplaced(const QList<Presence> &presences);
-    void sessionsReplaced(const QList<UserSession> &sessions);
-    void messageSendFailed(const QString &nonce, const QString &error);
-    void guildLeaveFailed(Core::Snowflake guildId, const QString &error);
-    void attachmentUploadProgress(const QString &nonce, int fileIndex, qint64 sent, qint64 total);
+public:
+    Platform::Signal<Core::ConnectionState> stateChanged;
+    Platform::Signal<const Ready &data> ready;
+    Platform::Signal<const ReadySupplemental &data> readySupplemental;
+    Platform::Signal<const Message &msg> messageCreated;
+    Platform::Signal<const Message &msg> messageUpdated;
+    Platform::Signal<const MessageDelete &event> messageDeleted;
+    Platform::Signal<const TypingStart &event> typingStart;
+    Platform::Signal<const ChannelCreate &event> channelCreated;
+    Platform::Signal<const ChannelUpdate &event> channelUpdated;
+    Platform::Signal<const ChannelDelete &event> channelDeleted;
+    Platform::Signal<const ChannelCreate &event> threadCreated;
+    Platform::Signal<const ChannelUpdate &event> threadUpdated;
+    Platform::Signal<const ThreadDelete &event> threadDeleted;
+    Platform::Signal<const ThreadListSync &event> threadListSync;
+    Platform::Signal<const ThreadMemberUpdate &event> threadMemberUpdated;
+    Platform::Signal<const ThreadMembersUpdate &event> threadMembersUpdated;
+    Platform::Signal<const ForumUnreads &event> forumUnreads;
+    Platform::Signal<const GatewayGuild &guild> guildCreated;
+    Platform::Signal<const Guild &guild> guildUpdated;
+    Platform::Signal<const GuildDelete &event> guildDeleted;
+    Platform::Signal<const GuildMembersChunk &chunk> guildMembersChunk;
+    Platform::Signal<const GuildMemberAdd &event> guildMemberAdded;
+    Platform::Signal<const GuildMemberUpdate &event> guildMemberUpdated;
+    Platform::Signal<const GuildMemberRemove &event> guildMemberRemoved;
+    Platform::Signal<const GuildRoleCreate &event> guildRoleCreated;
+    Platform::Signal<const GuildRoleUpdate &event> guildRoleUpdated;
+    Platform::Signal<const GuildRoleDelete &event> guildRoleDeleted;
+    Platform::Signal<Snowflake, Snowflake, int> roleMemberCountChanged;
+    Platform::Signal<const GuildEmojisUpdate &event> guildEmojisUpdated;
+    Platform::Signal<const GuildStickersUpdate &event> guildStickersUpdated;
+    Platform::Signal<const GuildBanEvent &event> guildBanAdded;
+    Platform::Signal<const GuildBanEvent &event> guildBanRemoved;
+    Platform::Signal<const Invite &invite> inviteCreated;
+    Platform::Signal<const std::string &code> inviteRevoked;
+    Platform::Signal<const GuildPruneUpdate &event> guildPruneUpdated;
+    Platform::Signal<const MessageAck &event> messageAcked;
+    Platform::Signal<const MessageReactionAdd &event> messageReactionAdd;
+    Platform::Signal<const MessageReactionAddMany &event> messageReactionAddMany;
+    Platform::Signal<const MessageReactionRemove &event> messageReactionRemove;
+    Platform::Signal<const MessageReactionRemoveAll &event> messageReactionRemoveAll;
+    Platform::Signal<const MessageReactionRemoveEmoji &event> messageReactionRemoveEmoji;
+    Platform::Signal<const UserGuildSettings &settings> userGuildSettingsUpdated;
+    Platform::Signal<const NotificationSettings &settings> notificationSettingsUpdated;
+    Platform::Signal<const GuildMemberListUpdate &event> guildMemberListUpdate;
+    Platform::Signal<const VoiceState &event> voiceStateUpdated;
+    Platform::Signal<const VoiceServerUpdate &event> voiceServerUpdated;
+    Platform::Signal<const CallCreate &event> callCreated;
+    Platform::Signal<const CallUpdate &event> callUpdated;
+    Platform::Signal<const CallDelete &event> callDeleted;
+    Platform::Signal<const StreamCreate &event> streamCreated;
+    Platform::Signal<const StreamUpdate &event> streamUpdated;
+    Platform::Signal<const StreamServerUpdate &event> streamServerUpdated;
+    Platform::Signal<const StreamDelete &event> streamDeleted;
+    Platform::Signal<const Relationship &event> relationshipAdded;
+    Platform::Signal<const RelationshipPartial &event> relationshipUpdated;
+    Platform::Signal<const RelationshipPartial &event> relationshipRemoved;
+    Platform::Signal<const UserNoteUpdate &event> userNoteUpdated;
+    Platform::Signal<const UserSettingsProtoUpdate &event> userSettingsProtoUpdated;
+    Platform::Signal<const Proto::FrecencyUserSettings &settings> frecencySettingsReceived;
+    Platform::Signal<> settingsChanged;
+    Platform::Signal<Snowflake> applicationIconResolved;
+    Platform::Signal<const Presence &event> presenceUpdated;
+    Platform::Signal<const std::vector<Presence> &presences> presencesReplaced;
+    Platform::Signal<const std::vector<UserSession> &sessions> sessionsReplaced;
+    Platform::Signal<const std::string &nonce, const std::string &error> messageSendFailed;
+    Platform::Signal<Core::Snowflake, const std::string &error> guildLeaveFailed;
+    Platform::Signal<const std::string &nonce, int, int64_t, int64_t> attachmentUploadProgress;
 
-    void reconnecting(int attempt, int maxAttempts);
-    void errorOccurred(const QString &errorStr);
-    void authenticationFailed();
-    void heartbeatSessionChanged(const HeartbeatSession &session);
+    Platform::Signal<int, int> reconnecting;
+    Platform::Signal<const std::string &errorStr> errorOccurred;
+    Platform::Signal<> authenticationFailed;
+    Platform::Signal<const HeartbeatSession &session> heartbeatSessionChanged;
 
-private slots:
+private:
     void onConnected();
     void onHeartbeatSessionTimer();
-    void onDisconnected(CloseCode code, const QString &reason);
+    void onDisconnected(CloseCode code, const std::string &reason);
 
     void onGatewayReady(const Ready &data);
     void onGatewayReadySupplemental(const ReadySupplemental &data);
@@ -366,7 +371,7 @@ private slots:
     void onGatewayUserSettingsProtoUpdate(const UserSettingsProtoUpdate &event);
 
 private:
-    void fetchMessages(Snowflake channelId, QUrlQuery query, int limit, MessagesCallback callback);
+    void fetchMessages(Snowflake channelId, std::vector<std::pair<std::string, std::string>> query, int limit, MessagesCallback callback);
     void indexGuildMappings(const GatewayGuild &guild);
     void applyDiscordLocale();
     void updateActiveState();
@@ -376,66 +381,60 @@ private:
     struct UploadState
     {
         Snowflake channelId;
-        QString nonce;
-        QList<Core::PendingAttachment> attachments;
-        QStringList uploadFilenames;
-        QList<bool> uploaded;
+        std::string nonce;
+        std::vector<Core::PendingAttachment> attachments;
+        std::vector<std::string> uploadFilenames;
+        std::vector<bool> uploaded;
         int remaining = 0;
         bool failed = false;
         std::shared_ptr<std::atomic<bool>> cancelFlag;
 
-        std::function<void(const QJsonArray &attachmentsJson)> onUploaded;
-        std::function<void(const QString &error)> onFailed;
+        std::function<void(const nlohmann::json &attachmentsJson)> onUploaded;
+        std::function<void(const std::string &error)> onFailed;
     };
 
     void setState(Core::ConnectionState state);
     void uploadAttachmentsAndSend(const std::shared_ptr<UploadState> &state);
     void finishUpload(const std::shared_ptr<UploadState> &state);
-    void failUpload(const std::shared_ptr<UploadState> &state, const QString &error);
-    void postForumThread(Snowflake forumId, const QString &name,
-                         const QList<Snowflake> &appliedTags,
-                         const QJsonObject &message,
+    void failUpload(const std::shared_ptr<UploadState> &state, const std::string &error);
+    void postForumThread(Snowflake forumId, const std::string &name,
+                         const std::vector<Snowflake> &appliedTags,
+                         const nlohmann::json &message,
                          ForumThreadCallback callback);
     void cleanupUploadedSlots(const std::shared_ptr<UploadState> &state);
     void settleUpload(const std::shared_ptr<UploadState> &state);
 
-    HttpCallback applyThen(std::function<void(const QJsonDocument &)> apply, HttpCallback finish);
+    HttpCallback applyThen(std::function<void(const nlohmann::json &)> apply, HttpCallback finish);
     HttpCallback memberUpdateHandler(Snowflake guildId, const char *what, ActionCallback callback);
     HttpCallback memberRemovalHandler(Snowflake guildId, Snowflake userId, const char *what, ActionCallback callback);
 
 private:
     Core::ConnectionState state = Core::ConnectionState::Disconnected;
 
-    QString baseUrl;
+    std::string baseUrl;
     Core::ProxyConfig proxyConfig;
-    QString token;
+    std::string token;
 
     ClientIdentity identity;
     HttpClient *httpClient;
     Gateway *gateway;
 
-    QHash<Snowflake, Snowflake> channelToGuild; // todo prob move this somewhere or just a cache
-    QHash<Snowflake, PremiumTier> guildPremiumTiers;
-    QSet<Snowflake> subscribedGuilds;
-    QHash<QString, std::shared_ptr<UploadState>> activeUploads; // by nonce
+    std::unordered_map<Snowflake, Snowflake> channelToGuild; // todo prob move this somewhere or just a cache
+    std::unordered_map<Snowflake, PremiumTier> guildPremiumTiers;
+    std::unordered_set<Snowflake> subscribedGuilds;
+    std::unordered_map<std::string, std::shared_ptr<UploadState>> activeUploads; // by nonce
 
-    QHash<Snowflake, QString> applicationIcons;
-    QSet<Snowflake> applicationIconRequests;
+    std::unordered_map<Snowflake, std::string> applicationIcons;
+    std::unordered_set<Snowflake> applicationIconRequests;
 
     Proto::PreloadedUserSettings settings;
     User me;
 
     bool appFocused = true;
     bool voiceConnected = false;
-    QTimer *heartbeatSessionTimer;
+    Platform::Timer heartbeatSessionTimer;
 };
 
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-inline uint qHash(Client::MessageLoadType type, uint seed = 0) noexcept
-{
-    return ::qHash(static_cast<int>(type), seed);
-}
-#endif
 
 } // namespace Discord
 } // namespace Styx

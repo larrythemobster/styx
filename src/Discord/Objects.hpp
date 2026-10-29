@@ -1,8 +1,12 @@
 #pragma once
 
-#include <QJsonObject>
-#include <QString>
-#include <QVariantMap>
+#include <nlohmann/json.hpp>
+#include <cstdint>
+#include <map>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <optional>
 
@@ -18,27 +22,27 @@ namespace Discord {
 
 struct ClientProperties : Styx::Core::JsonUtils::JsonObject
 {
-    Field<QString> os;
-    Field<QString> browser;
-    Field<QString> device;
-    Field<QString> systemLocale;
+    Field<std::string> os;
+    Field<std::string> browser;
+    Field<std::string> device;
+    Field<std::string> systemLocale;
     Field<bool> hasClientMods;
-    Field<QString> browserUserAgent;
-    Field<QString> browserVersion;
-    Field<QString> osVersion;
-    Field<QString> referrer;
-    Field<QString> referringDomain;
-    Field<QString> referrerCurrent;
-    Field<QString> referringDomainCurrent;
-    Field<QString> releaseChannel;
+    Field<std::string> browserUserAgent;
+    Field<std::string> browserVersion;
+    Field<std::string> osVersion;
+    Field<std::string> referrer;
+    Field<std::string> referringDomain;
+    Field<std::string> referrerCurrent;
+    Field<std::string> referringDomainCurrent;
+    Field<std::string> releaseChannel;
     Field<int> clientBuildNumber;
-    Field<QString, false, true> clientEventSource;
-    Field<QString> clientLaunchId;
-    Field<QString> launchSignature;
-    Field<QString> clientAppState;
+    Field<std::string, false, true> clientEventSource;
+    Field<std::string> clientLaunchId;
+    Field<std::string> launchSignature;
+    Field<std::string> clientAppState;
     Field<bool, true> isFastConnect;
-    Field<QString, true> gatewayConnectReasons;
-    Field<QString, true> clientHeartbeatSessionId;
+    Field<std::string, true> gatewayConnectReasons;
+    Field<std::string, true> clientHeartbeatSessionId;
 
     Core::OrderedJson toJson() const
     {
@@ -71,7 +75,7 @@ struct ClientProperties : Styx::Core::JsonUtils::JsonObject
 
 struct UpdatePresence : Styx::Core::JsonUtils::JsonObject
 {
-    Field<QString> status;
+    Field<std::string> status;
     Field<int> since;
     Field<bool> afk;
 
@@ -80,7 +84,7 @@ struct UpdatePresence : Styx::Core::JsonUtils::JsonObject
         Core::OrderedJson obj;
         insert(obj, "status", status);
         insert(obj, "since", since);
-        obj.insert("activities", QJsonArray());
+        obj.insert("activities", nlohmann::json());
         insert(obj, "afk", afk);
         return obj;
     }

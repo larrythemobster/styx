@@ -1,7 +1,12 @@
 #pragma once
 
-#include <QHash>
-#include <QString>
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include <optional>
 
 #include "Core/JsonUtils.hpp"
 #include "Core/Snowflake.hpp"
@@ -12,10 +17,10 @@ namespace Discord {
 
 struct MergedPresences : Core::JsonUtils::JsonObject
 {
-    Field<QList<Presence>, true> friends;
-    Field<QList<QList<Presence>>, true> guilds;
+    Field<std::vector<Presence>, true> friends;
+    Field<std::vector<std::vector<Presence>>, true> guilds;
 
-    static MergedPresences fromJson(const QJsonObject &obj)
+    static MergedPresences fromJson(const nlohmann::json &obj)
     {
         MergedPresences merged;
         get(obj, "friends", merged.friends);
@@ -27,22 +32,22 @@ struct MergedPresences : Core::JsonUtils::JsonObject
 struct Ready : Core::JsonUtils::JsonObject
 {
     Field<User> user;
-    Field<QList<GatewayGuild>> guilds;
-    Field<QString> userSettingsProto;
-    Field<QList<QList<Member>>, true> mergedMembers;
+    Field<std::vector<GatewayGuild>> guilds;
+    Field<std::string> userSettingsProto;
+    Field<std::vector<std::vector<Member>>, true> mergedMembers;
     Field<MergedPresences, true> mergedPresences;
-    Field<QList<User>, true> users;
-    Field<QList<Channel>, true> privateChannels;
-    Field<QList<ReadStateEntry>, true> readState;
-    Field<QList<UserGuildSettings>, true> userGuildSettings;
+    Field<std::vector<User>, true> users;
+    Field<std::vector<Channel>, true> privateChannels;
+    Field<std::vector<ReadStateEntry>, true> readState;
+    Field<std::vector<UserGuildSettings>, true> userGuildSettings;
     Field<NotificationSettings, true> notificationSettings;
     Field<UserSettings, true> userSettings;
-    Field<QList<Relationship>> relationships;
-    Field<QString> sessionId;
-    Field<QString> resumeGatewayUrl;
-    Field<QHash<Core::Snowflake, QString>> notes;
+    Field<std::vector<Relationship>> relationships;
+    Field<std::string> sessionId;
+    Field<std::string> resumeGatewayUrl;
+    Field<QHash<Core::Snowflake, std::string>> notes;
 
-    static Ready fromJson(const QJsonObject &obj)
+    static Ready fromJson(const nlohmann::json &obj)
     {
         Ready ready;
         get(obj, "user", ready.user);
@@ -60,25 +65,25 @@ struct Ready : Core::JsonUtils::JsonObject
         get(obj, "notes", ready.notes);
 
         if (obj.contains("read_state")) {
-            QJsonObject rsObj = obj["read_state"].toObject();
+            nlohmann::json rsObj = obj["read_state"];
             if (rsObj.contains("entries")) {
-                QJsonArray arr = rsObj["entries"].toArray();
-                QList<ReadStateEntry> entries;
+                nlohmann::json arr = rsObj["entries"];
+                std::vector<ReadStateEntry> entries;
                 entries.reserve(arr.size());
-                for (const QJsonValue &val : arr)
-                    entries.append(ReadStateEntry::fromJson(val.toObject()));
+                for (const nlohmann::json &val : arr)
+                    entries.push_back(ReadStateEntry::fromJson(val));
                 ready.readState = entries;
             }
         }
 
         if (obj.contains("user_guild_settings")) {
-            QJsonObject ugsObj = obj["user_guild_settings"].toObject();
+            nlohmann::json ugsObj = obj["user_guild_settings"];
             if (ugsObj.contains("entries")) {
-                QJsonArray arr = ugsObj["entries"].toArray();
-                QList<UserGuildSettings> entries;
+                nlohmann::json arr = ugsObj["entries"];
+                std::vector<UserGuildSettings> entries;
                 entries.reserve(arr.size());
-                for (const QJsonValue &val : arr)
-                    entries.append(UserGuildSettings::fromJson(val.toObject()));
+                for (const nlohmann::json &val : arr)
+                    entries.push_back(UserGuildSettings::fromJson(val));
                 ready.userGuildSettings = entries;
             }
         }
@@ -90,9 +95,9 @@ struct Ready : Core::JsonUtils::JsonObject
 struct SupplementalGuild : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> id;
-    Field<QList<VoiceState>, true> voiceStates;
+    Field<std::vector<VoiceState>, true> voiceStates;
 
-    static SupplementalGuild fromJson(const QJsonObject &obj)
+    static SupplementalGuild fromJson(const nlohmann::json &obj)
     {
         SupplementalGuild supplementalGuild;
         get(obj, "id", supplementalGuild.id);
@@ -103,11 +108,11 @@ struct SupplementalGuild : Core::JsonUtils::JsonObject
 
 struct ReadySupplemental : Core::JsonUtils::JsonObject
 {
-    Field<QList<SupplementalGuild>> guilds;
-    Field<QList<QList<Member>>> mergedMembers;
+    Field<std::vector<SupplementalGuild>> guilds;
+    Field<std::vector<std::vector<Member>>> mergedMembers;
     Field<MergedPresences, true> mergedPresences;
 
-    static ReadySupplemental fromJson(const QJsonObject &obj)
+    static ReadySupplemental fromJson(const nlohmann::json &obj)
     {
         ReadySupplemental readySupplemental;
         get(obj, "guilds", readySupplemental.guilds);
@@ -122,17 +127,17 @@ struct TypingStart : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> channelId;
     Field<Core::Snowflake, true> guildId;
     Field<Core::Snowflake> userId;
-    Field<QDateTime> timestamp;
+    Field<Platform::DateTime> timestamp;
     Field<Member, true> member;
 
-    static TypingStart fromJson(const QJsonObject &obj)
+    static TypingStart fromJson(const nlohmann::json &obj)
     {
         TypingStart typingStart;
         get(obj, "channel_id", typingStart.channelId);
         get(obj, "guild_id", typingStart.guildId);
         get(obj, "user_id", typingStart.userId);
         get(obj, "member", typingStart.member);
-        typingStart.timestamp = QDateTime::fromSecsSinceEpoch(obj["timestamp"].toVariant().toLongLong());
+        typingStart.timestamp = Platform::DateTime::fromSecsSinceEpoch(obj["timestamp"].get<int64_t>());
         return typingStart;
     }
 };
@@ -141,7 +146,7 @@ struct ChannelCreate : Core::JsonUtils::JsonObject
 {
     Field<Channel> channel;
 
-    static ChannelCreate fromJson(const QJsonObject &obj)
+    static ChannelCreate fromJson(const nlohmann::json &obj)
     {
         ChannelCreate event;
         event.channel = Channel::fromJson(obj);
@@ -153,7 +158,7 @@ struct ChannelUpdate : Core::JsonUtils::JsonObject
 {
     Field<Channel> channel;
 
-    static ChannelUpdate fromJson(const QJsonObject &obj)
+    static ChannelUpdate fromJson(const nlohmann::json &obj)
     {
         ChannelUpdate update;
         update.channel = Channel::fromJson(obj);
@@ -166,7 +171,7 @@ struct ChannelDelete : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> id;
     Field<Core::Snowflake, true> guildId;
 
-    static ChannelDelete fromJson(const QJsonObject &obj)
+    static ChannelDelete fromJson(const nlohmann::json &obj)
     {
         ChannelDelete event;
         get(obj, "id", event.id);
@@ -181,7 +186,7 @@ struct ThreadDelete : Core::JsonUtils::JsonObject
     Field<Core::Snowflake, true, true> parentId;
     Field<Core::Snowflake, true> guildId;
 
-    static ThreadDelete fromJson(const QJsonObject &obj)
+    static ThreadDelete fromJson(const nlohmann::json &obj)
     {
         ThreadDelete event;
         get(obj, "id", event.id);
@@ -196,7 +201,7 @@ struct ForumUnread : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> threadId;
     Field<int, true> count;
 
-    static ForumUnread fromJson(const QJsonObject &obj)
+    static ForumUnread fromJson(const nlohmann::json &obj)
     {
         ForumUnread unread;
         get(obj, "thread_id", unread.threadId);
@@ -207,10 +212,10 @@ struct ForumUnread : Core::JsonUtils::JsonObject
 
 struct ForumUnreads : Core::JsonUtils::JsonObject
 {
-    Field<QList<ForumUnread>, true> threads;
+    Field<std::vector<ForumUnread>, true> threads;
     Field<bool, true> permissionDenied;
 
-    static ForumUnreads fromJson(const QJsonObject &obj)
+    static ForumUnreads fromJson(const nlohmann::json &obj)
     {
         ForumUnreads event;
         get(obj, "threads", event.threads);
@@ -222,11 +227,11 @@ struct ForumUnreads : Core::JsonUtils::JsonObject
 struct ThreadListSync : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> guildId;
-    Field<QList<Core::Snowflake>, true> channelIds;
-    Field<QList<Channel>, true> threads;
-    Field<QList<ThreadMember>, true> members;
+    Field<std::vector<Core::Snowflake>, true> channelIds;
+    Field<std::vector<Channel>, true> threads;
+    Field<std::vector<ThreadMember>, true> members;
 
-    static ThreadListSync fromJson(const QJsonObject &obj)
+    static ThreadListSync fromJson(const nlohmann::json &obj)
     {
         ThreadListSync event;
         get(obj, "guild_id", event.guildId);
@@ -243,7 +248,7 @@ struct ThreadMemberUpdate : Core::JsonUtils::JsonObject
     Field<Core::Snowflake, true> userId;
     Field<Core::Snowflake, true> guildId;
 
-    static ThreadMemberUpdate fromJson(const QJsonObject &obj)
+    static ThreadMemberUpdate fromJson(const nlohmann::json &obj)
     {
         ThreadMemberUpdate event;
         event.member = ThreadMember::fromJson(obj);
@@ -258,10 +263,10 @@ struct ThreadMembersUpdate : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> id; // thread id
     Field<Core::Snowflake, true> guildId;
     Field<int, true> memberCount;
-    Field<QList<ThreadMember>, true> addedMembers;
-    Field<QList<Core::Snowflake>, true> removedMemberIds;
+    Field<std::vector<ThreadMember>, true> addedMembers;
+    Field<std::vector<Core::Snowflake>, true> removedMemberIds;
 
-    static ThreadMembersUpdate fromJson(const QJsonObject &obj)
+    static ThreadMembersUpdate fromJson(const nlohmann::json &obj)
     {
         ThreadMembersUpdate event;
         get(obj, "id", event.id);
@@ -276,13 +281,13 @@ struct ThreadMembersUpdate : Core::JsonUtils::JsonObject
 struct GuildMembersChunk : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> guildId;
-    Field<QList<Member>> members;
+    Field<std::vector<Member>> members;
     Field<int> chunkIndex;
     Field<int> chunkCount;
-    Field<QList<Core::Snowflake>, true> notFound;
-    Field<QList<Presence>, true> presences;
+    Field<std::vector<Core::Snowflake>, true> notFound;
+    Field<std::vector<Presence>, true> presences;
 
-    static GuildMembersChunk fromJson(const QJsonObject &obj)
+    static GuildMembersChunk fromJson(const nlohmann::json &obj)
     {
         GuildMembersChunk chunk;
         get(obj, "guild_id", chunk.guildId);
@@ -300,7 +305,7 @@ struct GuildMemberUpdate : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> guildId;
     Field<Member> member;
 
-    static GuildMemberUpdate fromJson(const QJsonObject &obj)
+    static GuildMemberUpdate fromJson(const nlohmann::json &obj)
     {
         GuildMemberUpdate event;
         get(obj, "guild_id", event.guildId);
@@ -314,7 +319,7 @@ struct GuildMemberAdd : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> guildId;
     Field<Member> member;
 
-    static GuildMemberAdd fromJson(const QJsonObject &obj)
+    static GuildMemberAdd fromJson(const nlohmann::json &obj)
     {
         GuildMemberAdd event;
         get(obj, "guild_id", event.guildId);
@@ -328,7 +333,7 @@ struct GuildMemberRemove : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> guildId;
     Field<User> user;
 
-    static GuildMemberRemove fromJson(const QJsonObject &obj)
+    static GuildMemberRemove fromJson(const nlohmann::json &obj)
     {
         GuildMemberRemove event;
         get(obj, "guild_id", event.guildId);
@@ -342,7 +347,7 @@ struct GuildBanEvent : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> guildId;
     Field<User> user;
 
-    static GuildBanEvent fromJson(const QJsonObject &obj)
+    static GuildBanEvent fromJson(const nlohmann::json &obj)
     {
         GuildBanEvent event;
         get(obj, "guild_id", event.guildId);
@@ -354,9 +359,9 @@ struct GuildBanEvent : Core::JsonUtils::JsonObject
 struct GuildStickersUpdate : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> guildId;
-    Field<QList<Sticker>> stickers;
+    Field<std::vector<Sticker>> stickers;
 
-    static GuildStickersUpdate fromJson(const QJsonObject &obj)
+    static GuildStickersUpdate fromJson(const nlohmann::json &obj)
     {
         GuildStickersUpdate event;
         get(obj, "guild_id", event.guildId);
@@ -372,16 +377,16 @@ struct GuildPruneUpdate : Core::JsonUtils::JsonObject
     Field<int, true> pruneCount;
     Field<bool, true> isPreview;
     Field<bool, true> isFinished;
-    Field<QList<Core::Snowflake>, true> includeRoles;
+    Field<std::vector<Core::Snowflake>, true> includeRoles;
 
-    static GuildPruneUpdate fromJson(const QJsonObject &obj)
+    static GuildPruneUpdate fromJson(const nlohmann::json &obj)
     {
         GuildPruneUpdate event;
         get(obj, "guild_id", event.guildId);
-        const QJsonObject prune = obj.value("prune").toObject();
+        const nlohmann::json prune = obj.value("prune", nlohmann::json());
         get(prune, "days", event.days);
         if (prune.contains("prune_count"))
-            event.pruneCount = prune.value("prune_count").toVariant().toInt();
+            event.pruneCount = prune.value("prune_count", nlohmann::json()).get<int>();
         get(prune, "is_preview", event.isPreview);
         get(prune, "is_finished", event.isFinished);
         get(prune, "include_roles", event.includeRoles);
@@ -395,7 +400,7 @@ struct MessageDelete : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> channelId;
     Field<Core::Snowflake, true> guildId;
 
-    static MessageDelete fromJson(const QJsonObject &obj)
+    static MessageDelete fromJson(const nlohmann::json &obj)
     {
         MessageDelete event;
         get(obj, "id", event.id);
@@ -410,7 +415,7 @@ struct GuildRoleCreate : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> guildId;
     Field<Role> role;
 
-    static GuildRoleCreate fromJson(const QJsonObject &obj)
+    static GuildRoleCreate fromJson(const nlohmann::json &obj)
     {
         GuildRoleCreate event;
         get(obj, "guild_id", event.guildId);
@@ -424,7 +429,7 @@ struct GuildRoleUpdate : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> guildId;
     Field<Role> role;
 
-    static GuildRoleUpdate fromJson(const QJsonObject &obj)
+    static GuildRoleUpdate fromJson(const nlohmann::json &obj)
     {
         GuildRoleUpdate event;
         get(obj, "guild_id", event.guildId);
@@ -438,7 +443,7 @@ struct GuildRoleDelete : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> guildId;
     Field<Core::Snowflake> roleId;
 
-    static GuildRoleDelete fromJson(const QJsonObject &obj)
+    static GuildRoleDelete fromJson(const nlohmann::json &obj)
     {
         GuildRoleDelete event;
         get(obj, "guild_id", event.guildId);
@@ -450,9 +455,9 @@ struct GuildRoleDelete : Core::JsonUtils::JsonObject
 struct GuildEmojisUpdate : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> guildId;
-    Field<QList<Emoji>> emojis;
+    Field<std::vector<Emoji>> emojis;
 
-    static GuildEmojisUpdate fromJson(const QJsonObject &obj)
+    static GuildEmojisUpdate fromJson(const nlohmann::json &obj)
     {
         GuildEmojisUpdate event;
         get(obj, "guild_id", event.guildId);
@@ -464,13 +469,13 @@ struct GuildEmojisUpdate : Core::JsonUtils::JsonObject
 struct UserSettingsProtoUpdate : Core::JsonUtils::JsonObject
 {
     Field<UserSettingsProtoType> type;
-    Field<QString> proto; // base64
+    Field<std::string> proto; // base64
     Field<bool, true> partial;
 
-    static UserSettingsProtoUpdate fromJson(const QJsonObject &obj)
+    static UserSettingsProtoUpdate fromJson(const nlohmann::json &obj)
     {
         UserSettingsProtoUpdate event;
-        const QJsonObject settings = obj["settings"].toObject();
+        const nlohmann::json settings = obj["settings"];
         get(settings, "type", event.type);
         get(settings, "proto", event.proto);
         get(obj, "partial", event.partial);
@@ -485,7 +490,7 @@ struct GuildDelete : Core::JsonUtils::JsonObject
 
     [[nodiscard]] bool userRemoved() const { return !(unavailable.hasValue() && unavailable.get()); }
 
-    static GuildDelete fromJson(const QJsonObject &obj)
+    static GuildDelete fromJson(const nlohmann::json &obj)
     {
         GuildDelete event;
         get(obj, "id", event.id);
@@ -503,7 +508,7 @@ struct MessageAck : Core::JsonUtils::JsonObject
     Field<int, true> flags;
     Field<int, true> version;
 
-    static MessageAck fromJson(const QJsonObject &obj)
+    static MessageAck fromJson(const nlohmann::json &obj)
     {
         MessageAck ack;
         get(obj, "channel_id", ack.channelId);
@@ -525,9 +530,9 @@ struct MessageReactionAdd : Core::JsonUtils::JsonObject
     Field<Core::Snowflake, true> guildId;
     Field<Emoji> emoji;
     Field<int, true> type; // 0 = normal, 1 = burst
-    Field<QList<QString>, true> burstColors;
+    Field<std::vector<std::string>, true> burstColors;
 
-    static MessageReactionAdd fromJson(const QJsonObject &obj)
+    static MessageReactionAdd fromJson(const nlohmann::json &obj)
     {
         MessageReactionAdd event;
         get(obj, "user_id", event.userId);
@@ -544,10 +549,10 @@ struct MessageReactionAdd : Core::JsonUtils::JsonObject
 
 struct DebouncedReaction : Core::JsonUtils::JsonObject
 {
-    Field<QList<Core::Snowflake>> users;
+    Field<std::vector<Core::Snowflake>> users;
     Field<Emoji> emoji;
 
-    static DebouncedReaction fromJson(const QJsonObject &obj)
+    static DebouncedReaction fromJson(const nlohmann::json &obj)
     {
         DebouncedReaction reaction;
         get(obj, "users", reaction.users);
@@ -561,9 +566,9 @@ struct MessageReactionAddMany : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> channelId;
     Field<Core::Snowflake> messageId;
     Field<Core::Snowflake, true> guildId;
-    Field<QList<DebouncedReaction>> reactions;
+    Field<std::vector<DebouncedReaction>> reactions;
 
-    static MessageReactionAddMany fromJson(const QJsonObject &obj)
+    static MessageReactionAddMany fromJson(const nlohmann::json &obj)
     {
         MessageReactionAddMany event;
         get(obj, "channel_id", event.channelId);
@@ -583,7 +588,7 @@ struct MessageReactionRemove : Core::JsonUtils::JsonObject
     Field<Emoji> emoji;
     Field<int, true> type;
 
-    static MessageReactionRemove fromJson(const QJsonObject &obj)
+    static MessageReactionRemove fromJson(const nlohmann::json &obj)
     {
         MessageReactionRemove event;
         get(obj, "user_id", event.userId);
@@ -602,7 +607,7 @@ struct MessageReactionRemoveAll : Core::JsonUtils::JsonObject
     Field<Core::Snowflake> messageId;
     Field<Core::Snowflake, true> guildId;
 
-    static MessageReactionRemoveAll fromJson(const QJsonObject &obj)
+    static MessageReactionRemoveAll fromJson(const nlohmann::json &obj)
     {
         MessageReactionRemoveAll event;
         get(obj, "channel_id", event.channelId);
@@ -619,7 +624,7 @@ struct MessageReactionRemoveEmoji : Core::JsonUtils::JsonObject
     Field<Core::Snowflake, true> guildId;
     Field<Emoji> emoji;
 
-    static MessageReactionRemoveEmoji fromJson(const QJsonObject &obj)
+    static MessageReactionRemoveEmoji fromJson(const nlohmann::json &obj)
     {
         MessageReactionRemoveEmoji event;
         get(obj, "channel_id", event.channelId);
@@ -634,10 +639,10 @@ struct GuildMemberListUpdate : Core::JsonUtils::JsonObject
 {
     struct Group : Core::JsonUtils::JsonObject
     {
-        Field<QString> id; // role snowflake string, "online", or "offline"
+        Field<std::string> id; // role snowflake string, "online", or "offline"
         Field<int> count;
 
-        static Group fromJson(const QJsonObject &obj)
+        static Group fromJson(const nlohmann::json &obj)
         {
             Group group;
             get(obj, "id", group.id);
@@ -651,61 +656,61 @@ struct GuildMemberListUpdate : Core::JsonUtils::JsonObject
         Field<Group, true> group;
         Field<Member, true> member;
 
-        static SyncItem fromJson(const QJsonObject &obj)
+        static SyncItem fromJson(const nlohmann::json &obj)
         {
             SyncItem item;
             if (obj.contains("group"))
-                item.group = Group::fromJson(obj["group"].toObject());
+                item.group = Group::fromJson(obj["group"]);
             if (obj.contains("member"))
-                item.member = Member::fromJson(obj["member"].toObject());
+                item.member = Member::fromJson(obj["member"]);
             return item;
         }
     };
 
     struct ListOp : Core::JsonUtils::JsonObject
     {
-        Field<QString> op;
-        Field<QPair<int, int>, true> range;
-        Field<QList<SyncItem>, true> items;
+        Field<std::string> op;
+        Field<std::pair<int, int>, true> range;
+        Field<std::vector<SyncItem>, true> items;
         Field<int, true> index;
         Field<SyncItem, true> item;
 
-        static ListOp fromJson(const QJsonObject &obj)
+        static ListOp fromJson(const nlohmann::json &obj)
         {
             ListOp listOp;
             get(obj, "op", listOp.op);
             get(obj, "index", listOp.index);
 
             if (obj.contains("range")) {
-                QJsonArray rangeArr = obj["range"].toArray();
+                nlohmann::json rangeArr = obj["range"];
                 if (rangeArr.size() == 2)
-                    listOp.range = QPair<int, int>(rangeArr[0].toInt(), rangeArr[1].toInt());
+                    listOp.range = std::pair<int, int>(rangeArr[0].get<int>(), rangeArr[1].get<int>());
             }
 
             if (obj.contains("items")) {
-                QJsonArray itemsArr = obj["items"].toArray();
-                QList<SyncItem> syncItems;
+                nlohmann::json itemsArr = obj["items"];
+                std::vector<SyncItem> syncItems;
                 syncItems.reserve(itemsArr.size());
-                for (const QJsonValue &val : itemsArr)
-                    syncItems.append(SyncItem::fromJson(val.toObject()));
+                for (const nlohmann::json &val : itemsArr)
+                    syncItems.push_back(SyncItem::fromJson(val));
                 listOp.items = syncItems;
             }
 
             if (obj.contains("item"))
-                listOp.item = SyncItem::fromJson(obj["item"].toObject());
+                listOp.item = SyncItem::fromJson(obj["item"]);
 
             return listOp;
         }
     };
 
-    Field<QString> id; // member list id
+    Field<std::string> id; // member list id
     Field<Core::Snowflake> guildId;
-    Field<QList<Group>> groups;
-    Field<QList<ListOp>> ops;
+    Field<std::vector<Group>> groups;
+    Field<std::vector<ListOp>> ops;
     Field<int> memberCount;
     Field<int> onlineCount;
 
-    static GuildMemberListUpdate fromJson(const QJsonObject &obj)
+    static GuildMemberListUpdate fromJson(const nlohmann::json &obj)
     {
         GuildMemberListUpdate event;
         get(obj, "id", event.id);
@@ -714,20 +719,20 @@ struct GuildMemberListUpdate : Core::JsonUtils::JsonObject
         get(obj, "online_count", event.onlineCount);
 
         if (obj.contains("groups")) {
-            QJsonArray groupsArr = obj["groups"].toArray();
-            QList<Group> groups;
+            nlohmann::json groupsArr = obj["groups"];
+            std::vector<Group> groups;
             groups.reserve(groupsArr.size());
-            for (const QJsonValue &val : groupsArr)
-                groups.append(Group::fromJson(val.toObject()));
+            for (const nlohmann::json &val : groupsArr)
+                groups.push_back(Group::fromJson(val));
             event.groups = groups;
         }
 
         if (obj.contains("ops")) {
-            QJsonArray opsArr = obj["ops"].toArray();
-            QList<ListOp> ops;
+            nlohmann::json opsArr = obj["ops"];
+            std::vector<ListOp> ops;
             ops.reserve(opsArr.size());
-            for (const QJsonValue &val : opsArr)
-                ops.append(ListOp::fromJson(val.toObject()));
+            for (const nlohmann::json &val : opsArr)
+                ops.push_back(ListOp::fromJson(val));
             event.ops = ops;
         }
 
@@ -737,11 +742,11 @@ struct GuildMemberListUpdate : Core::JsonUtils::JsonObject
 
 struct VoiceServerUpdate : Core::JsonUtils::JsonObject
 {
-    Field<QString> token;
+    Field<std::string> token;
     Field<Core::Snowflake> guildId;
-    Field<QString, false, true> endpoint;
+    Field<std::string, false, true> endpoint;
 
-    static VoiceServerUpdate fromJson(const QJsonObject &obj)
+    static VoiceServerUpdate fromJson(const nlohmann::json &obj)
     {
         VoiceServerUpdate event;
         get(obj, "token", event.token);
@@ -751,15 +756,81 @@ struct VoiceServerUpdate : Core::JsonUtils::JsonObject
     }
 };
 
+// The call in a DM or group DM, as CALL_CREATE and CALL_UPDATE describe it.
+struct CallDescription : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> channelId;
+    Field<Core::Snowflake, true, true> messageId;
+    // Null and absent both mean the call has no voice region yet.
+    std::optional<std::string> region;
+    // `ongoing_rings`: who is being rung, mapped to who rang them.
+    QHash<Core::Snowflake, Core::Snowflake> ongoingRings;
+
+protected:
+    void read(const nlohmann::json &obj)
+    {
+        get(obj, "channel_id", channelId);
+        get(obj, "message_id", messageId);
+
+        const nlohmann::json regionValue = obj.value("region", nlohmann::json()))
+        if (regionValue.isString())
+            region = regionValue.get<std::string>();
+
+        const nlohmann::json rings = obj.value("ongoing_rings", nlohmann::json()))
+        for (auto it = rings.constBegin(); it != rings.constEnd(); ++it) {
+            const std::uint64_t ringer = it.value().get<std::string>().empty() ? 0 : std::stoull(it.value().get<std::string>());
+            ongoingRings.insert(Core::Snowflake(it.key().get<uint64_t>()), ringer != 0 ? Core::Snowflake(ringer) : Core::Snowflake::Invalid);
+        }
+    }
+};
+
+struct CallCreate : CallDescription
+{
+    // Everyone already in the call. These never carry a guild id.
+    Field<std::vector<VoiceState>, true> voiceStates;
+
+    static CallCreate fromJson(const nlohmann::json &obj)
+    {
+        CallCreate event;
+        event.read(obj);
+        get(obj, "voice_states", event.voiceStates);
+        return event;
+    }
+};
+
+struct CallUpdate : CallDescription
+{
+    static CallUpdate fromJson(const nlohmann::json &obj)
+    {
+        CallUpdate event;
+        event.read(obj);
+        return event;
+    }
+};
+
+struct CallDelete : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> channelId;
+    Field<bool, true> unavailable;
+
+    static CallDelete fromJson(const nlohmann::json &obj)
+    {
+        CallDelete event;
+        get(obj, "channel_id", event.channelId);
+        get(obj, "unavailable", event.unavailable);
+        return event;
+    }
+};
+
 // Go Live. A stream key is "guild:<guild>:<channel>:<user>" or "call:<channel>:<user>".
 struct StreamCreate : Core::JsonUtils::JsonObject
 {
-    Field<QString> streamKey;
+    Field<std::string> streamKey;
     Field<Core::Snowflake> rtcServerId;
-    Field<QList<Core::Snowflake>, true> viewerIds;
+    Field<std::vector<Core::Snowflake>, true> viewerIds;
     Field<bool, true> paused;
 
-    static StreamCreate fromJson(const QJsonObject &obj)
+    static StreamCreate fromJson(const nlohmann::json &obj)
     {
         StreamCreate event;
         get(obj, "stream_key", event.streamKey);
@@ -772,11 +843,11 @@ struct StreamCreate : Core::JsonUtils::JsonObject
 
 struct StreamUpdate : Core::JsonUtils::JsonObject
 {
-    Field<QString> streamKey;
-    Field<QList<Core::Snowflake>, true> viewerIds;
+    Field<std::string> streamKey;
+    Field<std::vector<Core::Snowflake>, true> viewerIds;
     Field<bool, true> paused;
 
-    static StreamUpdate fromJson(const QJsonObject &obj)
+    static StreamUpdate fromJson(const nlohmann::json &obj)
     {
         StreamUpdate event;
         get(obj, "stream_key", event.streamKey);
@@ -788,11 +859,11 @@ struct StreamUpdate : Core::JsonUtils::JsonObject
 
 struct StreamServerUpdate : Core::JsonUtils::JsonObject
 {
-    Field<QString> streamKey;
-    Field<QString> token;
-    Field<QString, false, true> endpoint;
+    Field<std::string> streamKey;
+    Field<std::string> token;
+    Field<std::string, false, true> endpoint;
 
-    static StreamServerUpdate fromJson(const QJsonObject &obj)
+    static StreamServerUpdate fromJson(const nlohmann::json &obj)
     {
         StreamServerUpdate event;
         get(obj, "stream_key", event.streamKey);
@@ -804,11 +875,11 @@ struct StreamServerUpdate : Core::JsonUtils::JsonObject
 
 struct StreamDelete : Core::JsonUtils::JsonObject
 {
-    Field<QString> streamKey;
-    Field<QString, true, true> reason;
+    Field<std::string> streamKey;
+    Field<std::string, true, true> reason;
     Field<bool, true> unavailable;
 
-    static StreamDelete fromJson(const QJsonObject &obj)
+    static StreamDelete fromJson(const nlohmann::json &obj)
     {
         StreamDelete event;
         get(obj, "stream_key", event.streamKey);
@@ -820,9 +891,9 @@ struct StreamDelete : Core::JsonUtils::JsonObject
 
 struct VoiceStateUpdateBatch : Core::JsonUtils::JsonObject
 {
-    Field<QList<VoiceState>, true> voiceStates;
+    Field<std::vector<VoiceState>, true> voiceStates;
 
-    static VoiceStateUpdateBatch fromJson(const QJsonObject &obj)
+    static VoiceStateUpdateBatch fromJson(const nlohmann::json &obj)
     {
         VoiceStateUpdateBatch event;
         get(obj, "voice_states", event.voiceStates);
@@ -834,12 +905,12 @@ struct RelationshipPartial : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> id;
     Field<RelationshipType> type;
-    Field<QString, false, true> nickname;
-    Field<QDateTime, true> since;
+    Field<std::string, false, true> nickname;
+    Field<Platform::DateTime, true> since;
     Field<bool, true> strangerRequest;
     Field<bool> userIgnored;
 
-    static RelationshipPartial fromJson(const QJsonObject &obj)
+    static RelationshipPartial fromJson(const nlohmann::json &obj)
     {
         RelationshipPartial r;
         get(obj, "id", r.id);
@@ -855,9 +926,9 @@ struct RelationshipPartial : Core::JsonUtils::JsonObject
 struct UserNoteUpdate : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> id;
-    Field<QString> note;
+    Field<std::string> note;
 
-    static UserNoteUpdate fromJson(const QJsonObject &obj)
+    static UserNoteUpdate fromJson(const nlohmann::json &obj)
     {
         UserNoteUpdate n;
         get(obj, "id", n.id);

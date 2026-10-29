@@ -1,10 +1,15 @@
 #pragma once
 
-#include <QDateTime>
-#include <QRegularExpression>
-#include <QStringList>
-
+#include "Platform/Native.hpp"
+#include "Platform/Utf8.hpp"
 #include <optional>
+#include <regex>
+#include <string>
+#include <vector>
+
+#include "Platform/Utf8.hpp"
+#include <optional>
+#include <regex>
 
 #include "Entities.hpp"
 
@@ -13,8 +18,8 @@ namespace Discord {
 
 struct GuildEdit : Core::JsonUtils::JsonObject
 {
-    Field<QString, true, true> splash;
-    Field<QString, true, true> banner;
+    Field<std::string, true, true> splash;
+    Field<std::string, true, true> banner;
     Field<Core::Snowflake, true, true> afkChannelId;
     Field<int, true> afkTimeout;
     Field<Core::Snowflake, true, true> systemChannelId;
@@ -41,44 +46,44 @@ struct GuildProfileEdit
 {
     struct Trait
     {
-        QString label;
-        QJsonValue emojiId;
-        QJsonValue emojiName;
-        QJsonValue emojiAnimated;
+        std::string label;
+        nlohmann::json emojiId;
+        nlohmann::json emojiName;
+        nlohmann::json emojiAnimated;
     };
 
     static constexpr int TraitSlots = 5;
 
-    QString name;
-    QString description;
-    QJsonValue icon;
-    QJsonValue customBanner;
-    QJsonValue visibility;
-    QJsonValue brandColorPrimary;
-    QList<Trait> traits;
-    QJsonArray gameApplicationIds;
+    std::string name;
+    std::string description;
+    nlohmann::json icon;
+    nlohmann::json customBanner;
+    nlohmann::json visibility;
+    nlohmann::json brandColorPrimary;
+    std::vector<Trait> traits;
+    nlohmann::json gameApplicationIds;
 
-    static GuildProfileEdit fromProfile(const QJsonObject &profile)
+    static GuildProfileEdit fromProfile(const nlohmann::json &profile)
     {
         GuildProfileEdit edit;
-        edit.name = profile.value("name").toString();
-        edit.description = profile.value("description").toString();
-        edit.icon = profile.value("icon_hash");
-        edit.customBanner = profile.value("custom_banner_hash");
-        edit.visibility = profile.value("visibility");
-        const QJsonValue brandColor = profile.value("brand_color_primary");
-        edit.brandColorPrimary = brandColor.toString().isEmpty() ? QJsonValue(QJsonValue::Null) : brandColor;
+        edit.name = profile.value("name", nlohmann::json()).get<std::string>();
+        edit.description = profile.value("description", nlohmann::json()).get<std::string>();
+        edit.icon = profile.value("icon_hash", nlohmann::json());
+        edit.customBanner = profile.value("custom_banner_hash", nlohmann::json());
+        edit.visibility = profile.value("visibility", nlohmann::json());
+        const nlohmann::json brandColor = profile.value("brand_color_primary", nlohmann::json());
+        edit.brandColorPrimary = brandColor.get<std::string>().empty() ? nlohmann::json(nlohmann::json()) : brandColor;
 
         for (int i = 0; i < TraitSlots; i++)
-            edit.traits.append(Trait{});
-        for (const QJsonValue &value : profile.value("traits").toArray()) {
-            const QJsonObject trait = value.toObject();
-            const int position = trait.value("position").toInt(-1);
+            edit.traits.push_back(Trait{});
+        for (const nlohmann::json &value : profile.value("traits", nlohmann::json())) {
+            const nlohmann::json trait = value;
+            const int position = trait.value("position", -1).get<int>();
             if (position < 0 || position >= TraitSlots)
                 continue;
-            edit.traits[position] = { trait.value("label").toString(), trait.value("emoji_id"), trait.value("emoji_name"), trait.value("emoji_animated") };
+            edit.traits[position] = { trait.value("label", nlohmann::json()).get<std::string>(), trait.value("emoji_id", nlohmann::json()), trait.value("emoji_name", nlohmann::json()), trait.value("emoji_animated", nlohmann::json()) };
         }
-        edit.gameApplicationIds = profile.value("game_application_ids").toArray();
+        edit.gameApplicationIds = profile.value("game_application_ids", nlohmann::json());
         return edit;
     }
 
@@ -87,20 +92,20 @@ struct GuildProfileEdit
         Core::OrderedJson obj;
         obj.insert("name", name);
         obj.insert("description", description);
-        obj.insert("icon", icon.isUndefined() ? QJsonValue(QJsonValue::Null) : icon);
-        obj.insert("custom_banner", customBanner.isUndefined() ? QJsonValue(QJsonValue::Null) : customBanner);
-        if (!visibility.isNull() && !visibility.isUndefined())
+        obj.insert("icon", icon ? nlohmann::json(nlohmann::json()) : icon);
+        obj.insert("custom_banner", customBanner ? nlohmann::json(nlohmann::json()) : customBanner);
+        if (!visibility.isNull() && !visibility)
             obj.insert("visibility", visibility);
-        obj.insert("brand_color_primary", brandColorPrimary.isUndefined() ? QJsonValue(QJsonValue::Null) : brandColorPrimary);
+        obj.insert("brand_color_primary", brandColorPrimary ? nlohmann::json(nlohmann::json()) : brandColorPrimary);
 
         Core::OrderedJson::Array traitArray;
         for (int i = 0; i < traits.size(); i++) {
             const Trait &trait = traits[i];
-            if (trait.label.isEmpty())
+            if (trait.label.empty())
                 continue;
             Core::OrderedJson entry;
-            auto insertIfSet = [&entry](const QString &key, const QJsonValue &value) {
-                if (!value.isNull() && !value.isUndefined())
+            auto insertIfSet = [&entry](const std::string &key, const nlohmann::json &value) {
+                if (!value.isNull() && !value)
                     entry.insert(key, value);
             };
             entry.insert("label", trait.label);
@@ -108,7 +113,7 @@ struct GuildProfileEdit
             insertIfSet("emoji_id", trait.emojiId);
             insertIfSet("emoji_name", trait.emojiName);
             insertIfSet("emoji_animated", trait.emojiAnimated);
-            traitArray.append(entry);
+            traitArray.push_back(entry);
         }
         obj.insert("traits", traitArray);
         obj.insert("game_application_ids", gameApplicationIds);
@@ -118,14 +123,14 @@ struct GuildProfileEdit
 
 struct RoleEdit : Core::JsonUtils::JsonObject
 {
-    Field<QString> name;
+    Field<std::string> name;
     Field<Permissions> permissions;
     Field<int> color;
     Field<RoleColors, true, true> colors;
     Field<bool> hoist;
     Field<bool> mentionable;
-    Field<QString, true, true> icon;
-    Field<QString, false, true> unicodeEmoji;
+    Field<std::string, true, true> icon;
+    Field<std::string, false, true> unicodeEmoji;
 
     static RoleEdit fromRole(const Role &role)
     {
@@ -148,7 +153,7 @@ struct RoleEdit : Core::JsonUtils::JsonObject
     {
         Core::OrderedJson obj;
         insert(obj, "name", name);
-        obj.insert("permissions", QString::number(static_cast<quint64>(permissions.get())));
+        obj.insert("permissions", std::to_string(static_cast<std::uint64_t>(permissions.get())));
         insert(obj, "color", color);
         if (colors.hasValue())
             insert(obj, "colors", colors);
@@ -171,13 +176,13 @@ struct MemberSearchQuery
 
     struct Cursor
     {
-        qint64 guildJoinedAtMs = 0;
+        std::int64_t guildJoinedAtMs = 0;
         Core::Snowflake userId;
     };
 
     static constexpr int MinimumTextLength = 2;
 
-    QString text;
+    std::string text;
     bool onlyTimedOut = false;
     std::optional<Sort> sort;
     int limit = 250;
@@ -189,21 +194,25 @@ struct MemberSearchQuery
     {
         Core::OrderedJson andQuery;
         if (searchesText()) {
-            QStringList usernames;
-            QStringList userIds;
-            static const QRegularExpression snowflakePattern(QStringLiteral("^\\d{17,19}$"));
-            for (const QString &term : text.split(QLatin1Char(',')))
-                (snowflakePattern.match(term.trimmed()).hasMatch() ? userIds : usernames).append(term.trimmed());
-            if (!usernames.isEmpty())
-                andQuery.insert("usernames", Core::OrderedJson().insert("or_query", QJsonArray::fromStringList(usernames)));
-            if (!userIds.isEmpty())
-                andQuery.insert("user_id", Core::OrderedJson().insert("or_query", QJsonArray::fromStringList(userIds)));
+            std::vector<std::string> usernames;
+            std::vector<std::string> userIds;
+            static const std::regex snowflakePattern("^[0-9]{17,19}$");
+            for (std::string_view raw : Platform::split(text, ',')) {
+                const std::string_view term = Platform::trim(raw);
+                if (term.empty())
+                    continue;
+                (std::regex_match(term.begin(), term.end(), snowflakePattern) ? userIds : usernames).emplace_back(term);
+            }
+            if (!usernames.empty())
+                andQuery.insert("usernames", Core::OrderedJson().insert("or_query", nlohmann::json(usernames)));
+            if (!userIds.empty())
+                andQuery.insert("user_id", Core::OrderedJson().insert("or_query", nlohmann::json(userIds)));
         }
 
         Core::OrderedJson orQuery;
         if (onlyTimedOut) {
             Core::OrderedJson range;
-            range.insert("gte", QDateTime::currentMSecsSinceEpoch());
+            range.insert("gte", Platform::DateTime::now().unixMillis());
             Core::OrderedJson safetySignals;
             safetySignals.insert("communication_disabled_until", Core::OrderedJson().insert("range", range));
             orQuery.insert("safety_signals", safetySignals);
@@ -218,7 +227,7 @@ struct MemberSearchQuery
         if (after) {
             Core::OrderedJson cursor;
             cursor.insert("guild_joined_at", after->guildJoinedAtMs);
-            cursor.insert("user_id", QString::number(quint64(after->userId)));
+            cursor.insert("user_id", std::to_string(std::uint64_t(after->userId)));
             obj.insert("after", cursor);
         }
         return obj;
