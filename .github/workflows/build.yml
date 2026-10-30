@@ -205,7 +205,8 @@ jobs:
             libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
             libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev libwayland-dev \
             libasound2-dev libpulse-dev libdbus-1-dev xvfb xauth \
-            dbus gnome-keyring libglib2.0-bin nasm
+            dbus gnome-keyring libglib2.0-bin nasm \
+            autoconf automake libtool libtool-bin m4 gettext autopoint
 
 
       - name: Bootstrap vcpkg
@@ -277,7 +278,8 @@ jobs:
             libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
             libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev libwayland-dev \
             libasound2-dev libpulse-dev libdbus-1-dev xvfb xauth \
-            dbus gnome-keyring libglib2.0-bin nasm
+            dbus gnome-keyring libglib2.0-bin nasm \
+            autoconf automake libtool libtool-bin m4 gettext autopoint
 
 
       - name: Bootstrap vcpkg

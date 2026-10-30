@@ -115,6 +115,9 @@ nested navigation and viewport bounds.
 - rnnoise (optional, noise suppression, vendored)
 - libdatachannel with libsrtp and FFmpeg (optional, Go Live, Windows only)
 
+Linux builds also need Autoconf, Automake, Libtool, Gettext, M4 and NASM.
+The Linux CI jobs install these build tools explicitly.
+
 ## Credits
 
 - [ouwou](https://github.com/ouwou) wrote [Acheron](https://github.com/ouwou/acheron),
