@@ -62,6 +62,7 @@ public:
     DateTime addMillis(int64_t milliseconds) const;
     int64_t secondsUntil(const DateTime &other) const;
     int64_t millisUntil(const DateTime &other) const;
+    int64_t daysUntil(const DateTime &other) const;
     bool sameDate(const DateTime &other) const;
     auto operator<=>(const DateTime &) const = default;
 private:
@@ -75,6 +76,8 @@ std::string readFile(const std::filesystem::path &path);
 bool writeFile(const std::filesystem::path &path, std::string_view bytes);
 }
 
+std::string pathUtf8(const std::filesystem::path &path);
+std::filesystem::path utf8Path(std::string_view value);
 std::string htmlEscape(std::string_view text);
 std::string urlEncode(std::string_view text);
 std::string urlDecode(std::string_view text);

@@ -14,6 +14,9 @@ std::string fromUtf16(std::wstring_view utf16);
 std::string_view trimLeft(std::string_view str);
 std::string_view trimRight(std::string_view str);
 std::string_view trim(std::string_view str);
+std::string simplified(std::string_view str);
+std::string truncateUtf8(std::string_view str, size_t codePoints);
+std::string caseFold(std::string_view str);
 
 // String splitting by char or substring delimiter
 std::vector<std::string_view> split(std::string_view str, char delimiter, bool skipEmpty = false);

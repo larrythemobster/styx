@@ -11,6 +11,7 @@
 #include "Platform/Utf8.hpp"
 #include "Platform/WorkerLoop.hpp"
 #include "Platform/ThreadPool.hpp"
+#include "Platform/Base64.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -469,31 +470,47 @@ TEST_CASE("SecureStore: write, read, delete throwaway credential", "[securestore
     REQUIRE_FALSE(afterDelete.has_value());
 }
 
-TEST_CASE("Image: decode resource PNG and scale", "[image]")
+TEST_CASE("PNG round trips preserve RGBA channels and transparency", "[image]")
 {
-    std::filesystem::path placeholderPath = "resources/placeholder.png";
-    if (!std::filesystem::exists(placeholderPath)) {
-        placeholderPath = "../resources/placeholder.png";
-    }
+    ImageBuffer source{2, 1, 4, {255, 0, 0, 128, 0, 0, 255, 255}};
+    const auto png = Image::encodePng(source);
+    const auto decoded = Image::decode(reinterpret_cast<const uint8_t *>(png.data()), png.size());
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->width == 2);
+    REQUIRE(decoded->height == 1);
+    REQUIRE(decoded->pixels == source.pixels);
+}
 
-    if (std::filesystem::exists(placeholderPath)) {
-        auto img = Image::decodeFile(placeholderPath);
-        REQUIRE(img.has_value());
-        REQUIRE_FALSE(img->empty());
-        REQUIRE(img->width > 0);
-        REQUIRE(img->height > 0);
-        REQUIRE(img->channels == 4);
-        REQUIRE(img->pixels.size() == static_cast<size_t>(img->width) * img->height * 4);
-
-        // Test scaling
-        int targetW = 32;
-        int targetH = 32;
-        ImageBuffer scaled = Image::scale(*img, targetW, targetH);
-        REQUIRE(scaled.width == targetW);
-        REQUIRE(scaled.height == targetH);
-        REQUIRE(scaled.channels == 4);
-        REQUIRE(scaled.pixels.size() == static_cast<size_t>(targetW) * targetH * 4);
+TEST_CASE("SVG decoding returns straight RGBA rather than premultiplied BGRA", "[image]")
+{
+    constexpr std::string_view svg = R"(<svg xmlns="http://www.w3.org/2000/svg" width="2" height="1"><rect width="2" height="1" fill="red" opacity="0.5"/></svg>)";
+    const auto decoded = Image::decode(reinterpret_cast<const uint8_t *>(svg.data()), svg.size());
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->width == 2);
+    REQUIRE(decoded->height == 1);
+    for (size_t pixel = 0; pixel < decoded->pixels.size(); pixel += 4) {
+        REQUIRE(decoded->pixels[pixel] == 255);
+        REQUIRE(decoded->pixels[pixel + 1] == 0);
+        REQUIRE(decoded->pixels[pixel + 2] == 0);
+        REQUIRE(decoded->pixels[pixel + 3] >= 127);
+        REQUIRE(decoded->pixels[pixel + 3] <= 128);
     }
+}
+
+TEST_CASE("Animated GIF buffers outlive their input and preserve frame colors and delays", "[image]")
+{
+    auto frames = [] {
+        const auto bytes = Styx::Platform::fromBase64("R0lGODlhAgABAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQABAAAACwAAAAAAgABAAAIBQABAAgIACH5BAEIAAEALAAAAAACAAEAgQAA/wAAAAAAAAAAAAgFAAEACAgAOw==");
+        REQUIRE(bytes.has_value());
+        return Image::decodeGif(bytes->data(), bytes->size());
+    }();
+    REQUIRE(frames.has_value());
+    REQUIRE((frames->size == Styx::Platform::Size{2, 1}));
+    REQUIRE(frames->count == 2);
+    REQUIRE(frames->delays[0] == 40);
+    REQUIRE(frames->delays[1] == 80);
+    const std::vector<uint8_t> pixels(frames->pixels.get(), frames->pixels.get() + 16);
+    REQUIRE((pixels == std::vector<uint8_t>{255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255}));
 }
 
 TEST_CASE("Http: GET, POST and cancellation", "[http]")
@@ -922,4 +939,24 @@ TEST_CASE("ThreadPool - post and stopAndWait", "[platform]")
 
     REQUIRE(completed.load() == kTasks);
     pool.stopAndWait();
+}
+
+TEST_CASE("Chat previews keep complete UTF8 characters and collapse Unicode whitespace", "[utf8]")
+{
+    using namespace Styx::Platform;
+    REQUIRE(truncateUtf8("a😀é", 2) == "a😀");
+    REQUIRE(truncateUtf8("a😀é", 0).empty());
+    REQUIRE(simplified("\u00a0  Hello\r\n\tworld \u2003") == "Hello world");
+    REQUIRE(caseFold("Straße Σςσ Ä") == "strasse σσσ ä");
+}
+
+TEST_CASE("Calendar day differences follow local dates rather than elapsed hours", "[platform]")
+{
+    using Styx::Platform::DateTime;
+    const auto beforeMidnight = DateTime::parse("2024-04-10T23:59:59");
+    const auto afterMidnight = DateTime::parse("2024-04-11T00:00:01");
+    REQUIRE(beforeMidnight.secondsUntil(afterMidnight) == 2);
+    REQUIRE(beforeMidnight.daysUntil(afterMidnight) == 1);
+    REQUIRE(afterMidnight.daysUntil(beforeMidnight) == -1);
+    REQUIRE(afterMidnight.daysUntil(afterMidnight.addSeconds(60)) == 0);
 }

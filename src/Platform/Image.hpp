@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace Styx::Platform {
 
@@ -20,10 +21,19 @@ struct ImageBuffer {
     size_t stride() const { return static_cast<size_t>(width) * 4; }
 };
 
+struct GifFrames {
+    struct Free { void operator()(void *data) const noexcept; };
+    Size size;
+    int count = 0;
+    std::unique_ptr<uint8_t[], Free> pixels;
+    std::unique_ptr<int[], Free> delays;
+};
+
 class Image {
 public:
     // Decode image from memory (PNG, JPEG, GIF first frame, WebP, BMP) to RGBA8.
     static std::optional<ImageBuffer> decode(const uint8_t *data, size_t size);
+    static std::optional<GifFrames> decodeGif(const uint8_t *data, size_t size);
 
     // Decode image from file path to RGBA8.
     static std::optional<ImageBuffer> decodeFile(const std::filesystem::path &path);

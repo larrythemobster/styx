@@ -5,6 +5,9 @@
 #include <curl/curl.h>
 #include <openssl/rand.h>
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -26,7 +29,6 @@
 #include <stdexcept>
 
 namespace Styx::Platform {
-namespace {
 std::string pathUtf8(const std::filesystem::path &path)
 {
     auto value = path.generic_u8string();
@@ -36,6 +38,7 @@ std::filesystem::path utf8Path(std::string_view value)
 {
     return std::filesystem::u8path(value.begin(), value.end());
 }
+namespace {
 int hex(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -226,6 +229,15 @@ DateTime DateTime::addSeconds(int64_t seconds) const { return value_ ? DateTime(
 DateTime DateTime::addMillis(int64_t ms) const { return value_ ? DateTime(*value_ + std::chrono::milliseconds(ms)) : DateTime{}; }
 int64_t DateTime::secondsUntil(const DateTime &other) const { return value_ && other.value_ ? std::chrono::duration_cast<std::chrono::seconds>(*other.value_ - *value_).count() : 0; }
 int64_t DateTime::millisUntil(const DateTime &other) const { return value_ && other.value_ ? (*other.value_ - *value_).count() : 0; }
+int64_t DateTime::daysUntil(const DateTime &other) const
+{
+    if (!value_ || !other.value_) return 0;
+    auto day = [](TimePoint value) {
+        auto local = localTm(Clock::to_time_t(std::chrono::floor<std::chrono::seconds>(value)));
+        return std::chrono::sys_days(std::chrono::year(local.tm_year + 1900) / (local.tm_mon + 1) / local.tm_mday);
+    };
+    return (day(*other.value_) - day(*value_)).count();
+}
 bool DateTime::sameDate(const DateTime &other) const
 {
     if (!value_ || !other.value_) return false;
@@ -415,3 +427,4 @@ std::string unicodeUpper(std::string_view text)
     return toUpperAscii(text);
 #endif
 }
+} // namespace Styx::Platform

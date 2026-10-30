@@ -10,6 +10,7 @@
 #include <avif/avif.h>
 #include <lunasvg.h>
 
+#define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -22,6 +23,21 @@
 #include <webp/demux.h>
 
 namespace Styx::Platform {
+
+void GifFrames::Free::operator()(void *data) const noexcept { stbi_image_free(data); }
+
+std::optional<GifFrames> Image::decodeGif(const uint8_t *data, size_t size)
+{
+    if (!data || size == 0 || size > static_cast<size_t>(std::numeric_limits<int>::max())) return std::nullopt;
+    GifFrames frames;
+    int *delays = nullptr;
+    int channels = 0;
+    frames.pixels.reset(stbi_load_gif_from_memory(data, static_cast<int>(size), &delays,
+        &frames.size.width, &frames.size.height, &frames.count, &channels, 4));
+    frames.delays.reset(delays);
+    if (!frames.pixels || frames.count <= 0 || frames.size.empty()) return std::nullopt;
+    return frames;
+}
 
 std::optional<ImageBuffer> Image::decode(const uint8_t *data, size_t size)
 {
@@ -78,6 +94,7 @@ std::optional<ImageBuffer> Image::decode(const uint8_t *data, size_t size)
         rgb.pixels = result.pixels.data();
         rgb.rowBytes = static_cast<uint32_t>(result.stride());
         if (avifImageYUVToRGB(image.get(), &rgb) != AVIF_RESULT_OK)
+            return std::nullopt;
         return result;
     }
 
@@ -91,10 +108,9 @@ std::optional<ImageBuffer> Image::decode(const uint8_t *data, size_t size)
             webp.pixels.resize(static_cast<size_t>(webpWidth) * webpHeight * 4);
             if (WebPDecodeRGBAInto(data, size, webp.pixels.data(), webp.pixels.size(), webpWidth * 4))
                 return webp;
-            }
         }
+        return std::nullopt;
     }
-#endif
 
     if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
         return std::nullopt;
