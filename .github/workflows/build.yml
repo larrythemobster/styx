@@ -85,6 +85,9 @@ jobs:
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
 
+      - name: Install software Mesa for tests
+        uses: ssciwr/setup-mesa-dist-win@v3
+
       - name: Test
         run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
 
@@ -157,6 +160,9 @@ jobs:
       - name: Build
         run: cmake --build build --config RelWithDebInfo --parallel
 
+      - name: Install software Mesa for tests
+        uses: ssciwr/setup-mesa-dist-win@v3
+
       - name: Test
         run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
 
@@ -195,7 +201,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libsecret-1-dev zlib1g-dev \
-            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
+            libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev libwayland-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev xvfb xauth \
+            dbus gnome-keyring libglib2.0-bin
 
 
       - name: Bootstrap vcpkg
@@ -235,7 +245,20 @@ jobs:
         run: cmake --build build --parallel $(nproc)
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          test_home=$(mktemp -d)
+          trap 'rm -rf "$test_home"' EXIT
+          export XDG_RUNTIME_DIR="$test_home/runtime"
+          export XDG_DATA_HOME="$test_home/data"
+          export XDG_CONFIG_HOME="$test_home/config"
+          mkdir -m 700 "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
+          unset XDG_CURRENT_DESKTOP DESKTOP_SESSION KDE_FULL_SESSION KDE_SESSION_VERSION GNOME_KEYRING_CONTROL
+          export LIBGL_ALWAYS_SOFTWARE=1
+          dbus-run-session -- bash -e -o pipefail -c '
+            printf "%s\n" "styx-ci-keyring" | gnome-keyring-daemon --unlock --components=secrets
+            gdbus wait --session --timeout 15 org.freedesktop.secrets
+            xvfb-run -a ctest --test-dir build --output-on-failure
+          '
 
   build-appimage:
     # The builder's glibc is the minimum version supported by the AppImage.
@@ -250,7 +273,11 @@ jobs:
         run: |
           sudo apt-get update
           # Jammy's FFmpeg is too old; use the prebuilt prefix below instead.
-          sudo apt-get install -y libcurl4-openssl-dev libsecret-1-dev zlib1g-dev
+          sudo apt-get install -y libcurl4-openssl-dev libsecret-1-dev zlib1g-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
+            libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev libwayland-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev xvfb xauth \
+            dbus gnome-keyring libglib2.0-bin
 
 
       - name: Bootstrap vcpkg
@@ -304,7 +331,20 @@ jobs:
       - name: Test
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/ffmpeg/lib
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          test_home=$(mktemp -d)
+          trap 'rm -rf "$test_home"' EXIT
+          export XDG_RUNTIME_DIR="$test_home/runtime"
+          export XDG_DATA_HOME="$test_home/data"
+          export XDG_CONFIG_HOME="$test_home/config"
+          mkdir -m 700 "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
+          unset XDG_CURRENT_DESKTOP DESKTOP_SESSION KDE_FULL_SESSION KDE_SESSION_VERSION GNOME_KEYRING_CONTROL
+          export LIBGL_ALWAYS_SOFTWARE=1
+          dbus-run-session -- bash -e -o pipefail -c '
+            printf "%s\n" "styx-ci-keyring" | gnome-keyring-daemon --unlock --components=secrets
+            gdbus wait --session --timeout 15 org.freedesktop.secrets
+            xvfb-run -a ctest --test-dir build --output-on-failure
+          '
 
       - name: Build AppDir
         run: |
@@ -313,9 +353,6 @@ jobs:
           # The prebuilt libcurl-impersonate.a carries -g, so even a Release binary
           # ships ~30 MB of DWARF for curl and BoringSSL
           strip AppDir/usr/bin/styx
-
-          # Resources are resolved relative to the executable.
-          cp -r resources AppDir/usr/bin/resources
 
 
       - name: Get linuxdeploy
@@ -414,6 +451,7 @@ jobs:
           mkdir -p "$app/MacOS" "$app/Frameworks"
 
           cp build/styx "$app/MacOS/"
+          cp curl-impersonate/libcurl-impersonate.dylib "$app/Frameworks/"
 
           cp -r resources "$app/MacOS/resources"
 
