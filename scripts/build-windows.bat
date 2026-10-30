@@ -6,10 +6,11 @@ rem   %DEPS%\ffmpeg   %DEPS%\curl-impersonate
 setlocal
 set REPO=%~dp0..\
 if "%DEPS%"=="" set DEPS=%REPO%..\deps
+if "%BUILD_DIR%"=="" set BUILD_DIR=build
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%REPO%" || exit /b 1
 if "%1"=="configure" (
-  cmake -G Ninja -B build -S . ^
+  cmake -G Ninja -B "%BUILD_DIR%" -S . ^
     -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
     -DVCPKG_TARGET_TRIPLET=x64-windows-static-md ^
     -DCMAKE_PREFIX_PATH="%DEPS%\ffmpeg" ^
@@ -17,4 +18,4 @@ if "%1"=="configure" (
     -DCURL_LIBRARY="%DEPS%\curl-impersonate\lib\libcurl-impersonate_imp.lib" ^
     -DBUILD_TESTS=ON || exit /b 1
 )
-cmake --build build --parallel --target styx || exit /b 1
+cmake --build "%BUILD_DIR%" --parallel --target styx || exit /b 1

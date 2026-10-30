@@ -1,7 +1,7 @@
 # Styx
 
-A native Discord client in C++ with Qt 6, using an RmlUi interface modelled on
-the official client. It also supports Go Live screen sharing.
+A native Discord client in C++ using SDL3 to host an RmlUi interface modelled
+on the official client. It also supports Go Live screen sharing.
 
 Styx is a fork of [Acheron](https://github.com/ouwou/acheron) by
 [ouwou](https://github.com/ouwou). Acheron provides the gateway, REST client,
@@ -18,7 +18,7 @@ client, use upstream Acheron and
 ## What this fork adds
 
 **RmlUi main window.** The main window is drawn with [RmlUi](https://github.com/mikke89/RmlUi)
-(HTML/CSS-style documents) on an OpenGL 3.3 `QOpenGLWidget`, in place of
+(HTML/CSS-style documents) using OpenGL 3.3 in an SDL3 window, in place of
 Acheron's Qt widget layout. It has:
 
 - a server rail with folders, unread and mention badges
@@ -34,9 +34,8 @@ in the same view, with keyboard navigation, nested menus and viewport clamping.
 Member moderation includes kick, ban, timeout, nickname and searchable role
 forms. CAPTCHA prompts use RmlUi while the challenge still opens in your browser.
 
-Qt remains the application and OpenGL window host. Backend Qt types and models,
-native file dialogs, the system tray and the startup database error dialog have
-not yet been ported.
+Native platform services provide file dialogs, the system tray, credential
+storage and startup error dialogs.
 
 **Go Live screen sharing (Windows 10+).**
 
@@ -47,7 +46,7 @@ not yet been ported.
   Discord only allows 720p30 without Nitro.
 - Sends media over WebRTC through libdatachannel with SRTP and DAVE end-to-end
   encryption.
-- Can watch other people's streams in a separate viewer window.
+- Can watch other people's streams in the call view.
 
 **Fixes.** Repaints triggered by timers and network events no longer free GPU
 resources without the window's OpenGL context current. The renderer queues
@@ -64,14 +63,14 @@ migrates existing Acheron data on first launch.
 
 Requirements:
 
-- Visual Studio 2022 with the C++ workload, plus CMake and Ninja
-- Qt 6.12 for MSVC 2022 x64, including OpenGL, OpenGLWidgets, Svg, Sql and Test
+- Visual Studio 2022 with the C++ workload, CMake 3.21 or newer, and Ninja
 - prebuilt FFmpeg (shared) and
   [curl-impersonate](https://github.com/lexiforest/curl-impersonate)
 - an OpenGL 3.3 driver
 
-vcpkg is vendored as a submodule and installs the remaining libraries,
-including RmlUi, libdatachannel, libsodium, opus and OpenSSL.
+vcpkg is vendored as a submodule and installs SDL3 3.2 or newer for tray
+support, RmlUi, FreeType, HarfBuzz, LunaSVG, libavif, utf8proc, PCRE2,
+libdatachannel, libsodium, opus, OpenSSL and the remaining libraries.
 
 ```bat
 git clone --recursive https://github.com/larrythemobster/styx.git
@@ -80,16 +79,16 @@ set DEPS=C:\path\to\deps
 scripts\build-windows.bat configure
 ```
 
-`DEPS` should contain `Qt\6.12.0\msvc2022_64`, `ffmpeg` and `curl-impersonate`.
-If it isn't set, the script looks for `..\deps`. Later builds only need
-`scripts\build-windows.bat`. The script builds `build\styx.exe` and runs
-`windeployqt`. FFmpeg and curl-impersonate DLLs must be beside the executable
-or on `PATH`.
+`DEPS` should contain `ffmpeg` and `curl-impersonate`. If it isn't set, the
+script looks for `..\deps`. Later builds only need
+`scripts\build-windows.bat`. The script defaults to the `build` directory;
+set `BUILD_DIR` to override it. CMake deploys runtime DLLs and resources beside
+the executable.
 
 ### Tests
 
 After a `configure` build, run the renderer and menu regression tests from an
-MSVC prompt. Put Qt's `bin` and curl-impersonate's `lib` directories on `PATH`:
+MSVC prompt. Replace `build` with `BUILD_DIR` if you used an override:
 
 ```bat
 cmake --build build --target TestRmlRender
@@ -102,10 +101,13 @@ nested navigation and viewport bounds.
 
 ## Dependencies
 
-- Qt 6.7+ with OpenGL and OpenGLWidgets
-- RmlUi 6.1
+- SDL3 3.2+ and OpenGL 3.3
+- RmlUi 6.1, FreeType, HarfBuzz, LunaSVG, libavif with dav1d, utf8proc and PCRE2
 - libcurl-impersonate (plain libcurl works but isn't recommended)
-- OpenSSL, zlib, QtKeychain
+- OpenSSL and zlib
+- libsecret (Linux) or the system Security framework (macOS) for credential storage;
+  KDE sessions use KWallet over D-Bus. Existing QtKeychain service/account identities
+  are retained.
 - nayuki/QR-Code-generator and emoji-segmenter (vendored)
 - rlottie (optional, Lottie stickers)
 - libsodium, libopus, libdave, mlspp, miniaudio (optional, voice; the last
