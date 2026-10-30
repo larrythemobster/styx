@@ -23,7 +23,7 @@ namespace Styx::Core::JsonUtils {
 namespace detail {
 template <class> struct is_flags : std::false_type {};
 template <class E> struct is_flags<Flags<E>> : std::true_type {};
-template <class T> concept Sequence = requires(T t) {
+template <class T> concept Sequence = !std::same_as<T, std::string> && requires(T t) {
     typename T::value_type;
     t.begin();
     t.end();

@@ -187,6 +187,17 @@ TEST_CASE("OrderedJson: testFieldInsert", "[ordered-json]")
                         R"("by_id":{"7":{"name":"two","value":2}},"bytes":[0,255],"ssrc":4000000000})"));
 }
 
+TEST_CASE("OrderedJson: string fields remain strings", "[ordered-json]")
+{
+    Inner inner;
+    inner.name = std::string("caf\xC3\xA9\n");
+    inner.value = 0;
+    REQUIRE(inner.toJson().toBytes() == std::string("{\"name\":\"caf\xC3\xA9\\n\",\"value\":0}"));
+
+    inner.name = std::string();
+    REQUIRE(inner.toJson().toBytes() == std::string(R"({"name":"","value":0})"));
+}
+
 TEST_CASE("OrderedJson: testContextProperties", "[ordered-json]")
 {
     REQUIRE(Discord::ContextProperties::empty().toHeaderValue() == std::string("e30="));
