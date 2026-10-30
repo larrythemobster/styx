@@ -4,7 +4,9 @@
 #include "Shell.hpp"
 
 #include "Core/AccountInfo.hpp"
+#ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
+#endif
 #include "Core/ClientInstance.hpp"
 #include "Core/Presence/ActivityFormat.hpp"
 #include "Core/Presence/PresenceBadge.hpp"
@@ -140,7 +142,7 @@ void UserPanelController::renderVoicePanel()
         return;
 
     bool inVoice = false;
-    Discord::Voice::VoiceClient::State clientState = Discord::Voice::VoiceClient::State::Disconnected;
+    bool connected = false;
     Snowflake currentChannelId;
     Snowflake currentGuildId;
 
@@ -148,8 +150,9 @@ void UserPanelController::renderVoicePanel()
     auto *inst = shell.currentInstance();
     if (inst) {
         if (auto *vm = inst->voice()) {
-            clientState = vm->clientState();
+            const auto clientState = vm->clientState();
             inVoice = (clientState != Discord::Voice::VoiceClient::State::Disconnected);
+            connected = (clientState == Discord::Voice::VoiceClient::State::Connected);
             currentChannelId = vm->currentChannelId();
             currentGuildId = vm->currentGuildId();
         }
@@ -164,7 +167,6 @@ void UserPanelController::renderVoicePanel()
 
     voicePanel->SetProperty("display", "flex");
 
-    const bool connected = (clientState == Discord::Voice::VoiceClient::State::Connected);
     const std::string statusText = connected ? "Voice Connected" : "Connecting...";
     const std::string statusClass = connected ? "voice-conn-status" : "voice-conn-status connecting";
 
@@ -256,7 +258,7 @@ void UserPanelController::renderUserPanel()
         if (const auto *activity = Core::ActivityFormat::custom(activities))
             customStatus = activity->stateText();
     }
-    std::string subName = !customStatus.empty() ? customStatus : (me ? "@" + me->username : "@" + info.username);
+    std::string subName = !customStatus.empty() ? customStatus : (me ? "@" + me->username.get() : "@" + info.username);
 
     std::string avatarHash = (me && me->avatar.hasValue()) ? *me->avatar : info.avatar;
     std::string avatarUrl = !avatarHash.empty()

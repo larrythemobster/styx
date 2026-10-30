@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 
 option(USE_VCPKG "Use bundled vcpkg toolchain" ON)
 option(ENABLE_LOTTIE "Build with rlottie for Lottie sticker playback" ON)
@@ -77,8 +77,26 @@ find_package(Stb REQUIRED)
 find_package(WebP CONFIG REQUIRED)
 find_package(lunasvg CONFIG REQUIRED)
 find_package(libavif CONFIG REQUIRED)
-find_package(utf8proc CONFIG REQUIRED)
+find_package(utf8proc CONFIG QUIET)
+if(NOT TARGET utf8proc)
+    find_path(UTF8PROC_INCLUDE_DIR NAMES utf8proc.h REQUIRED)
+    find_library(UTF8PROC_LIBRARY_RELEASE NAMES utf8proc_static utf8proc REQUIRED)
+    find_library(UTF8PROC_LIBRARY_DEBUG NAMES utf8proc_static utf8proc
+        HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib" NO_DEFAULT_PATH)
+    include(SelectLibraryConfigurations)
+    select_library_configurations(UTF8PROC)
+    add_library(utf8proc INTERFACE IMPORTED)
+    target_include_directories(utf8proc INTERFACE "${UTF8PROC_INCLUDE_DIR}")
+    target_link_libraries(utf8proc INTERFACE ${UTF8PROC_LIBRARIES})
+    if(UTF8PROC_LIBRARY_RELEASE MATCHES "utf8proc_static")
+        target_compile_definitions(utf8proc INTERFACE UTF8PROC_STATIC)
+    endif()
+endif()
 find_package(PCRE2 CONFIG REQUIRED)
+find_package(SDL3 CONFIG REQUIRED)
+find_package(OpenGL REQUIRED)
+find_package(Freetype REQUIRED)
+find_package(harfbuzz CONFIG REQUIRED)
 if(BUILD_TESTS)
     find_package(Catch2 3 CONFIG REQUIRED)
 endif()
@@ -199,10 +217,6 @@ set(PROJECT_SOURCES
     src/UI/ChannelList/ServerRailModel.cpp
     src/UI/Chat/ChatModel.cpp
     src/UI/Chat/GifPlayback.cpp
-    src/UI/Chat/GifPainting.cpp
-    src/UI/Chat/EmojiTextObject.cpp
-    src/UI/Chat/MessageTextDocument.cpp
-    src/UI/Chat/MessageTextBrowser.cpp
     src/UI/MemberList/MemberListModel.cpp
     src/UI/Gifs/GifMasonryLayout.cpp
     src/UI/Rml/EmojiGridModel.cpp
@@ -249,7 +263,6 @@ set(PROJECT_SOURCES
     src/UI/Rml/UserPanelController.cpp
     src/UI/Rml/ChatController.cpp
     src/UI/Rml/MemberListController.cpp
-    src/UI/Rml/CallController.cpp
     src/UI/Rml/FriendsController.cpp
     src/UI/Rml/SettingsController.cpp
     src/UI/Rml/AccountsController.cpp
@@ -268,6 +281,7 @@ endif()
 
 if(ENABLE_VOICE)
     list(APPEND PROJECT_SOURCES
+        src/UI/Rml/CallController.cpp
         src/Discord/Voice/VoiceGateway.cpp
         src/Discord/Voice/UdpTransport.cpp
         src/Discord/Voice/Socks5UdpAssociation.cpp
@@ -329,6 +343,21 @@ else()
     target_include_directories(${PROJECT_NAME} PRIVATE vendor/qrcodegen/cpp)
 endif()
 
+if(WIN32)
+    find_file(STYX_CURL_RUNTIME_DLL NAMES libcurl-impersonate.dll libcurl.dll
+        HINTS "${CURL_INCLUDE_DIR}/../lib" "${CURL_INCLUDE_DIR}/../bin"
+        NO_DEFAULT_PATH NO_CACHE)
+endif()
+function(styx_deploy_curl target)
+    if(STYX_CURL_RUNTIME_DLL)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${STYX_CURL_RUNTIME_DLL}" "$<TARGET_FILE_DIR:${target}>"
+            COMMENT "Deploying curl runtime library" VERBATIM)
+    endif()
+endfunction()
+styx_deploy_curl(${PROJECT_NAME})
+
 if(BUILD_TESTS)
     function(styx_test target test_name)
         add_executable(${target} ${ARGN})
@@ -338,10 +367,11 @@ if(BUILD_TESTS)
             target_compile_options(${target} PRIVATE /utf-8)
         endif()
         add_test(NAME ${test_name} COMMAND ${target})
+        styx_deploy_curl(${target})
     endfunction()
 
     styx_test(TestMarkdown MarkdownTests tests/tst_Markdown.cpp src/Core/Markdown/Parser.cpp
-        src/Core/EmojiSegmenter.cpp src/Core/Snowflake.cpp)
+        src/Core/EmojiSegmenter.cpp src/Core/Snowflake.cpp src/Discord/CdnUrls.cpp)
     target_include_directories(TestMarkdown PRIVATE vendor/emoji-segmenter)
     target_link_libraries(TestMarkdown PRIVATE PCRE2::8BIT utf8proc)
     styx_test(TestFrecency FrecencyTests tests/tst_Frecency.cpp src/Core/Emoji/FrecencyTracker.cpp)
@@ -357,7 +387,7 @@ if(BUILD_TESTS)
         src/Proto/ProtoWriter.cpp src/Proto/FrecencySettings.cpp)
     styx_test(TestProxy ProxyTests tests/tst_Proxy.cpp src/Core/ProxyConfig.cpp
         src/Core/Logging.cpp src/Core/ImageManager.cpp src/Core/Snowflake.cpp
-        src/Discord/Voice/Socks5UdpAssociation.cpp)
+        src/Discord/Voice/Socks5UdpAssociation.cpp src/Discord/CdnUrls.cpp)
     styx_test(TestEmojiGrid EmojiGridTests tests/tst_EmojiGrid.cpp
         src/UI/Rml/EmojiGridModel.cpp src/Core/Snowflake.cpp)
     styx_test(TestCdnUrls CdnUrlTests tests/tst_CdnUrls.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
@@ -366,10 +396,10 @@ if(BUILD_TESTS)
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)
-    target_link_libraries(TestRmlRender PRIVATE RmlUi::RmlUi utf8proc)
+    target_link_libraries(TestRmlRender PRIVATE RmlUi::RmlUi utf8proc SDL3::SDL3 OpenGL::GL Freetype::Freetype harfbuzz::harfbuzz)
     target_include_directories(TestRmlRender PRIVATE vendor/emoji-segmenter vendor/rmlui-backend)
     if(WIN32)
-        target_link_libraries(TestRmlRender PRIVATE opengl32 imm32 shell32 user32 gdi32 dwrite d2d1)
+        target_link_libraries(TestRmlRender PRIVATE user32 gdi32)
     endif()
     styx_test(TestEmbeds EmbedTests tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestFavoriteGifs FavoriteGifTests tests/tst_FavoriteGifs.cpp
@@ -387,7 +417,7 @@ if(BUILD_TESTS)
 endif()
 
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /utf-8 /Zi)
+    target_compile_options(${PROJECT_NAME} PRIVATE /utf-8 /Zi /bigobj)
 endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/vendor/rmlui-backend)
@@ -404,9 +434,7 @@ endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     styx_platform RmlUi::RmlUi OpenSSL::Crypto ZLIB::ZLIB PCRE2::8BIT utf8proc WebP::webpdemux)
-if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE opengl32 imm32 shell32 user32 gdi32 dwrite d2d1)
-endif()
+target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3 OpenGL::GL Freetype::Freetype harfbuzz::harfbuzz)
 if(ENABLE_VOICE)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         ${SODIUM_TARGET}
@@ -461,27 +489,6 @@ else()
         "-DALLOW_PLAIN_CURL=ON to build against plain libcurl anyway.")
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/certs/cacert.pem")
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/certs"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources/certs/cacert.pem"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/certs/cacert.pem"
-        COMMENT "Copying cacert.pem to build directory"
-    )
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/TwemojiCOLRv0.ttf")
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources/TwemojiCOLRv0.ttf"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts/TwemojiCOLRv0.ttf"
-        COMMENT "Copying TwemojiCOLRv0.ttf to build directory"
-    )
-endif()
 
 if(FFMPEG_RUNTIME_DLLS)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -538,9 +545,13 @@ if(WIN32)
 else()
     list(APPEND PLATFORM_SOURCES
         src/Platform/Paths_other.cpp
-        src/Platform/SecureStore_other.cpp
         src/Platform/Utf8_other.cpp
     )
+    if(APPLE)
+        list(APPEND PLATFORM_SOURCES src/Platform/SecureStore_apple.cpp)
+    else()
+        list(APPEND PLATFORM_SOURCES src/Platform/SecureStore_secret.cpp)
+    endif()
 endif()
 
 add_library(styx_platform STATIC ${PLATFORM_SOURCES})
@@ -564,9 +575,44 @@ if(TARGET WebP::webp)
     target_link_libraries(styx_platform PUBLIC WebP::webp)
 endif()
 if(WIN32)
+    target_compile_definitions(styx_platform PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(styx_platform PUBLIC ws2_32 PRIVATE advapi32 crypt32 ole32 shell32 comdlg32 user32)
+elseif(APPLE)
+    find_library(STYX_SECURITY_FRAMEWORK Security REQUIRED)
+    find_library(STYX_COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    target_link_libraries(styx_platform PRIVATE SDL3::SDL3
+        "${STYX_SECURITY_FRAMEWORK}" "${STYX_COREFOUNDATION_FRAMEWORK}")
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(STYX_SECRET REQUIRED IMPORTED_TARGET libsecret-1)
+    target_link_libraries(styx_platform PRIVATE SDL3::SDL3 PkgConfig::STYX_SECRET)
 endif()
 target_compile_features(styx_platform PUBLIC cxx_std_20)
+target_compile_definitions(styx_platform PRIVATE STYX_RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources")
+add_custom_target(styx_resources ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/resources"
+    COMMENT "Staging Styx resources")
+add_dependencies(${PROJECT_NAME} styx_resources)
+install(DIRECTORY resources/ DESTINATION ${CMAKE_INSTALL_BINDIR}/resources)
+if(STYX_CURL_RUNTIME_DLL)
+    install(FILES "${STYX_CURL_RUNTIME_DLL}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+if(FFMPEG_RUNTIME_DLLS)
+    install(FILES ${FFMPEG_RUNTIME_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+if(WIN32 AND ENABLE_VOICE)
+    foreach(_runtime_target IN ITEMS ${OPUS_TARGET} libdave)
+        get_target_property(_runtime_type ${_runtime_target} TYPE)
+        if(_runtime_type STREQUAL "SHARED_LIBRARY" OR _runtime_type STREQUAL "MODULE_LIBRARY")
+            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<TARGET_FILE:${_runtime_target}>" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+                COMMENT "Deploying ${_runtime_target} runtime library" VERBATIM)
+            install(FILES "$<TARGET_FILE:${_runtime_target}>" DESTINATION ${CMAKE_INSTALL_BINDIR})
+        endif()
+    endforeach()
+endif()
 if(MSVC)
     target_compile_options(styx_platform PRIVATE /utf-8)
 endif()
@@ -576,7 +622,7 @@ endif()
 # ---------------------------------------------------------------------------
 
 find_package(Catch2 3 CONFIG QUIET)
-if(Catch2_FOUND)
+if(BUILD_TESTS AND Catch2_FOUND)
     add_executable(TestPlatform tests/tst_Platform.cpp)
     target_link_libraries(TestPlatform PRIVATE styx_platform Catch2::Catch2WithMain)
     target_include_directories(TestPlatform PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -584,6 +630,7 @@ if(Catch2_FOUND)
         target_compile_options(TestPlatform PRIVATE /utf-8)
     endif()
     add_test(NAME PlatformTests COMMAND TestPlatform)
+    styx_deploy_curl(TestPlatform)
 endif()
 
 # Video engine ported from ouwou/acheron upstream/video-streams.

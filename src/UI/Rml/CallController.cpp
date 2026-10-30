@@ -19,6 +19,16 @@
 #include <algorithm>
 #include <format>
 #include <string_view>
+#include <charconv>
+
+namespace {
+Styx::Core::Snowflake parseUserId(std::string_view value)
+{
+    uint64_t id = 0;
+    std::from_chars(value.data(), value.data() + value.size(), id);
+    return id;
+}
+}
 
 namespace Styx {
 namespace UI {
@@ -26,13 +36,9 @@ namespace Rml {
 
 using Core::Snowflake;
 
-CallController::CallController(Shell &shell, ::Rml::Element *root, QObject *parent)
-    : Controller(shell, root, parent)
+CallController::CallController(Shell &shell, ::Rml::Element *root)
+    : Controller(shell, root)
 {
-    updateDebounceTimer.setSingleShot(true);
-    updateDebounceTimer.setInterval(16);
-    connect(&updateDebounceTimer, &QTimer::timeout, this, &CallController::updateCallView);
-
     setupConnections();
 
     // Event delegation on root
@@ -73,7 +79,7 @@ CallController::CallController(Shell &shell, ::Rml::Element *root, QObject *pare
         if (auto *watchEl = closest(target, "data-action-watch")) {
             std::string idStr = attribute(watchEl, "data-action-watch");
             if (!idStr.empty()) {
-                onWatchClicked(Snowflake(idStr.toULongLong()));
+                onWatchClicked(parseUserId(idStr));
                 return;
             }
         }
@@ -82,7 +88,7 @@ CallController::CallController(Shell &shell, ::Rml::Element *root, QObject *pare
         if (auto *stopEl = closest(target, "data-action-stop-watch")) {
             std::string idStr = attribute(stopEl, "data-action-stop-watch");
             if (!idStr.empty()) {
-                onStopWatchClicked(Snowflake(idStr.toULongLong()));
+                onStopWatchClicked(parseUserId(idStr));
                 return;
             }
         }
@@ -91,7 +97,7 @@ CallController::CallController(Shell &shell, ::Rml::Element *root, QObject *pare
         if (auto *tileEl = closest(target, "data-user-id")) {
             std::string idStr = attribute(tileEl, "data-user-id");
             if (!idStr.empty()) {
-                onTileClicked(Snowflake(idStr.toULongLong()));
+                onTileClicked(parseUserId(idStr));
                 return;
             }
         }
@@ -108,20 +114,26 @@ CallController::~CallController()
 
 void CallController::setupConnections()
 {
-    connect(&shell, &Shell::locationChanged, this, &CallController::onLocationChanged);
-    connect(&shell, &Shell::instanceChanged, this, &CallController::onInstanceChanged);
-    connect(&shell, &Shell::callOpenChanged, this, &CallController::onCallOpenChanged);
+    track(shell.locationChanged.connect([this](const Location &) { onLocationChanged(); }));
+    track(shell.instanceChanged.connect([this](Core::ClientInstance *) { onInstanceChanged(); }));
+    track(shell.callOpenChanged.connect([this](bool open) { onCallOpenChanged(open); }));
+}
+
+void CallController::scheduleUpdate()
+{
+    if (!updateDebounceTimer.active())
+        updateDebounceTimer.start(std::chrono::milliseconds(16), false, [this] { updateCallView(); });
 }
 
 void CallController::onLocationChanged()
 {
-    updateDebounceTimer.start();
+    scheduleUpdate();
 }
 
 void CallController::onCallOpenChanged(bool open)
 {
     if (open)
-        updateDebounceTimer.start();
+        scheduleUpdate();
 }
 
 void CallController::onInstanceChanged()
@@ -145,62 +157,43 @@ void CallController::onInstanceChanged()
     }
 
     focusedUserId = Snowflake::Invalid;
-    updateDebounceTimer.start();
+    scheduleUpdate();
 }
 
 void CallController::connectCurrentVoice()
 {
     if (currentVoiceManager) {
-        connect(currentVoiceManager, &Core::Audio::VoiceManager::voiceConnected,
-                this, [this]() { updateDebounceTimer.start(); });
-        connect(currentVoiceManager, &Core::Audio::VoiceManager::voiceDisconnected,
-                this, [this]() { updateDebounceTimer.start(); });
-        connect(currentVoiceManager, &Core::Audio::VoiceManager::participantJoined,
-                this, [this](Snowflake) { updateDebounceTimer.start(); });
-        connect(currentVoiceManager, &Core::Audio::VoiceManager::participantLeft,
-                this, [this](Snowflake uid) {
-                    if (focusedUserId == uid)
-                        focusedUserId = Snowflake::Invalid;
-                    updateDebounceTimer.start();
-                });
-        connect(currentVoiceManager, &Core::Audio::VoiceManager::participantUpdated,
-                this, [this](Snowflake) { updateDebounceTimer.start(); });
-        connect(currentVoiceManager, &Core::Audio::VoiceManager::participantSpeakingChanged,
-                this, [this](Snowflake, bool) { updateDebounceTimer.start(); });
+        voiceConnections.push_back(currentVoiceManager->voiceConnected.connect([this] { scheduleUpdate(); }));
+        voiceConnections.push_back(currentVoiceManager->voiceDisconnected.connect([this] { scheduleUpdate(); }));
+        voiceConnections.push_back(currentVoiceManager->participantJoined.connect([this](Snowflake) { scheduleUpdate(); }));
+        voiceConnections.push_back(currentVoiceManager->participantLeft.connect([this](Snowflake id) {
+            if (focusedUserId == id) focusedUserId = Snowflake::Invalid;
+            scheduleUpdate();
+        }));
+        voiceConnections.push_back(currentVoiceManager->participantUpdated.connect([this](Snowflake) { scheduleUpdate(); }));
+        voiceConnections.push_back(currentVoiceManager->participantSpeakingChanged.connect([this](Snowflake, bool) { scheduleUpdate(); }));
     }
-
 #ifdef STYX_HAVE_SCREENSHARE
     if (currentStreamManager) {
-        connect(currentStreamManager, &Core::Stream::StreamManager::streamingChanged,
-                this, [this](bool) { updateDebounceTimer.start(); });
-        connect(currentStreamManager, &Core::Stream::StreamManager::watchStarted,
-                this, [this](Snowflake userId) {
-                    shell.setCallOpen(true);
-                    focusedUserId = userId;
-                    updateDebounceTimer.start();
-                });
-        connect(currentStreamManager, &Core::Stream::StreamManager::watchEnded,
-                this, [this](Snowflake userId, const std::string &) {
-                    Rml::Runtime::instance().clearFrame(userId.toString());
-                    if (focusedUserId == userId)
-                        focusedUserId = Snowflake::Invalid;
-                    updateDebounceTimer.start();
-                });
-        connect(currentStreamManager, &Core::Stream::StreamManager::viewerFrame,
-                this, [](Snowflake userId, const QImage &img, const QSize &) {
-                    Rml::Runtime::instance().setFrame(userId.toString(), img);
-                });
+        voiceConnections.push_back(currentStreamManager->streamingChanged.connect([this](bool) { scheduleUpdate(); }));
+        voiceConnections.push_back(currentStreamManager->watchStarted.connect([this](Snowflake id) { shell.setCallOpen(true); focusedUserId = id; scheduleUpdate(); }));
+        voiceConnections.push_back(currentStreamManager->watchEnded.connect([this](Snowflake id, const std::string &) {
+            Runtime::instance().clearFrame(id.toString());
+            if (focusedUserId == id) focusedUserId = Snowflake::Invalid;
+            scheduleUpdate();
+        }));
+        voiceConnections.push_back(currentStreamManager->viewerFrame.connect([](Snowflake id, const Platform::ImageBuffer &image, const Platform::Size &) {
+            Runtime::instance().setFrame(id.toString(), image);
+        }));
     }
 #endif
 }
-
 void CallController::disconnectCurrentVoice()
 {
-    if (currentVoiceManager)
-        QObject::disconnect(currentVoiceManager, nullptr, this, nullptr);
+    voiceConnections.clear();
 #ifdef STYX_HAVE_SCREENSHARE
-    if (currentStreamManager)
-        QObject::disconnect(currentStreamManager, nullptr, this, nullptr);
+    if (currentStreamManager) for (const auto &participant : currentVoiceManager ? currentVoiceManager->currentParticipants() : std::vector<Core::Audio::VoiceParticipant>{})
+        Runtime::instance().clearFrame(participant.userId.toString());
 #endif
 }
 
@@ -217,7 +210,7 @@ void CallController::onFullscreenClicked()
     } else {
         shell.showNormal();
     }
-    updateDebounceTimer.start();
+    scheduleUpdate();
 }
 
 void CallController::onMuteClicked()
@@ -228,7 +221,7 @@ void CallController::onMuteClicked()
     const auto *selfPart = currentVoiceManager->participant(selfId);
     bool currentMute = selfPart ? selfPart->selfMute : false;
     shell.setSelfMute(!currentMute);
-    updateDebounceTimer.start();
+    scheduleUpdate();
 }
 
 void CallController::onDeafClicked()
@@ -239,7 +232,7 @@ void CallController::onDeafClicked()
     const auto *selfPart = currentVoiceManager->participant(selfId);
     bool currentDeaf = selfPart ? selfPart->selfDeaf : false;
     shell.setSelfDeaf(!currentDeaf);
-    updateDebounceTimer.start();
+    scheduleUpdate();
 }
 
 void CallController::onShareClicked()
@@ -250,7 +243,7 @@ void CallController::onShareClicked()
 
     if (currentStreamManager->isStreaming()) {
         currentStreamManager->stopStreaming();
-        updateDebounceTimer.start();
+        scheduleUpdate();
         return;
     }
 
@@ -274,7 +267,7 @@ void CallController::onWatchClicked(Snowflake userId)
     currentStreamManager->setViewerSize(userId, Platform::Size{1280, 720});
     focusedUserId = userId;
     shell.setCallOpen(true);
-    updateDebounceTimer.start();
+    scheduleUpdate();
 #endif
 }
 
@@ -288,7 +281,7 @@ void CallController::onStopWatchClicked(Snowflake userId)
     Rml::Runtime::instance().clearFrame(userId.toString());
     if (focusedUserId == userId)
         focusedUserId = Snowflake::Invalid;
-    updateDebounceTimer.start();
+    scheduleUpdate();
 #endif
 }
 
@@ -299,7 +292,7 @@ void CallController::onTileClicked(Snowflake userId)
     } else {
         focusedUserId = userId; // focus this tile
     }
-    updateDebounceTimer.start();
+    scheduleUpdate();
 }
 
 void CallController::updateCallView()
@@ -360,7 +353,7 @@ void CallController::updateCallView()
                     avatarUrl = Discord::Cdn::userAvatar(uid, u->avatar.get(), 128);
             }
         }
-        if (!avatarUrl.isValid())
+        if (avatarUrl.empty())
             avatarUrl = Discord::Cdn::defaultUserAvatar(uid, 128);
 
         std::string avatarSrc = shell.imageSource(avatarUrl, inStrip ? Platform::Size{48, 48} : Platform::Size{80, 80});

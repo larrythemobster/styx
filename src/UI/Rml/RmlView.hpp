@@ -1,76 +1,97 @@
 #pragma once
 
-#include <QElapsedTimer>
-#include <QOpenGLWidget>
-#include <QString>
-#include <QTimer>
+#include "Platform/Native.hpp"
+#include "Platform/Timer.hpp"
+#include "Platform/Trackable.hpp"
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
 
-namespace Rml {
-class Context;
-class ElementDocument;
-} // namespace Rml
+union SDL_Event;
+struct SDL_Window;
+struct SDL_Cursor;
+namespace Rml { class Context; class ElementDocument; }
 
-namespace Styx {
-namespace UI {
-namespace Rml {
+namespace Styx::UI::Rml {
 
-// A QOpenGLWidget that hosts one RmlUi context: renders it with the GL3 backend and feeds
-// it Qt's mouse, keyboard, wheel and input-method events. Repaints on demand (input, data
-// changes, texture arrivals) plus a short burst afterwards so CSS transitions finish; an
-// idle window draws nothing.
-class View : public QOpenGLWidget
-{
-    Q_OBJECT
+class RenderContextScope {
 public:
-    explicit View(const QString &contextName, QWidget *parent = nullptr);
-    ~View() override;
-
-    [[nodiscard]] ::Rml::Context *context() const { return rmlContext; }
-
-    // Loads and shows a document from :/ui once the GL context exists (emits documentLoaded).
-    void loadDocument(const QString &path);
-    [[nodiscard]] ::Rml::ElementDocument *document() const { return rmlDocument; }
-
-    // Ask for a frame; keeps drawing for `animateMs` so transitions/animations complete.
-    void requestRender(int animateMs = 0);
-
-signals:
-    void documentLoaded(::Rml::ElementDocument *document);
-    void initialisationFailed(const QString &error);
-
-protected:
-    void initializeGL() override;
-    void resizeGL(int w, int h) override;
-    void paintGL() override;
-
-    void mouseMoveEvent(QMouseEvent *event) override;
-    void mousePressEvent(QMouseEvent *event) override;
-    void mouseReleaseEvent(QMouseEvent *event) override;
-    void mouseDoubleClickEvent(QMouseEvent *event) override;
-    void wheelEvent(QWheelEvent *event) override;
-    void leaveEvent(QEvent *event) override;
-    void keyPressEvent(QKeyEvent *event) override;
-    void keyReleaseEvent(QKeyEvent *event) override;
-    void inputMethodEvent(QInputMethodEvent *event) override;
-    QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
-    void focusOutEvent(QFocusEvent *event) override;
-    bool focusNextPrevChild(bool next) override;
-    bool event(QEvent *event) override;
-
+    RenderContextScope();
+    ~RenderContextScope() noexcept(false);
+    RenderContextScope(const RenderContextScope &) = delete;
+    RenderContextScope &operator=(const RenderContextScope &) = delete;
 private:
-    int modifiers() const;
-    void applyCursor();
-
-    QString name;
-    QString pendingDocument;
-    ::Rml::Context *rmlContext = nullptr;
-    ::Rml::ElementDocument *rmlDocument = nullptr;
-    QTimer animationTimer;
-    QElapsedTimer animationClock;
-    qint64 animateUntilMs = 0;
-    QString lastCursor;
+    SDL_Window *previousWindow = nullptr;
+    void *previousContext = nullptr;
+#ifdef _WIN32
+    void *previousNativeContext = nullptr;
+    void *previousNativeDc = nullptr;
+#endif
+    bool changed = false;
 };
 
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+class View : public Platform::Trackable {
+public:
+    explicit View(const std::string &contextName);
+    ~View() override;
+    ::Rml::Context *context() const { return rmlContext; }
+    ::Rml::ElementDocument *document() const { return rmlDocument; }
+    void loadDocument(const std::string &path);
+    void requestRender(int animateMs = 0);
+    void renderNow();
+    void makeCurrent();
+    void doneCurrent();
+    void show();
+    void hide();
+    void close();
+    void raise();
+    void activateWindow();
+    void showMaximized();
+    void showFullScreen();
+    void showNormal();
+    void resize(int width, int height);
+    void move(int x, int y);
+    int width() const;
+    int height() const;
+    Platform::Point position() const;
+    float devicePixelRatioF() const;
+    bool isVisible() const;
+    bool isActiveWindow() const;
+    bool isMaximized() const;
+    void setWindowTitle(const std::string &title);
+    std::string windowTitle() const;
+    void *nativeHandle() const;
+    SDL_Window *window() const { return nativeWindow; }
+    Platform::Point mapFromGlobal(Platform::Point point) const;
+    Platform::Point mapToGlobal(Platform::Point point) const;
+
+    Platform::Signal<::Rml::ElementDocument *> documentLoaded;
+    Platform::Signal<const std::string &> initialisationFailed;
+    Platform::Signal<> shown;
+    std::function<bool()> closeRequested;
+
+    static void processEvents();
+    static void dispatchEvent(const SDL_Event &event);
+    static void renderPending();
+    static std::optional<std::chrono::milliseconds> nextRenderDelay();
+    static bool quitRequested();
+
+private:
+    void initialise();
+    void updateDimensions();
+    void handleEvent(const SDL_Event &event);
+    void applyCursor();
+    SDL_Window *nativeWindow = nullptr;
+    SDL_Cursor *cursor = nullptr;
+    std::string name;
+    std::string pendingDocument;
+    std::string lastCursor;
+    ::Rml::Context *rmlContext = nullptr;
+    ::Rml::ElementDocument *rmlDocument = nullptr;
+    std::chrono::steady_clock::time_point animateUntil{};
+    bool dirty = true;
+    bool closed = false;
+};
+}

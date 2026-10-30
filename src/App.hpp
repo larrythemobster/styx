@@ -1,19 +1,16 @@
 #pragma once
 
-#include <QtCore/QTimer>
-#include <QtWidgets/QApplication>
-
 namespace Styx {
-class App : public QApplication
-{
-    Q_OBJECT
+class App {
 public:
-    explicit App(int &argc, char **argv);
-
-public slots:
-    void pumpDispatcher();
-
+    App(int &argc, char **argv);
+    ~App();
+    App(const App &) = delete;
+    App &operator=(const App &) = delete;
+    int exec();
+    static void quit(int code = 0);
 private:
-    QTimer m_dispatcherTimer;
+    static bool stopping;
+    static int exitCode;
 };
-} // namespace Styx
+}

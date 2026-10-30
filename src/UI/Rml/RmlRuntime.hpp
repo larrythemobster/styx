@@ -1,114 +1,57 @@
 #pragma once
 
-#include <QByteArray>
-#include <QElapsedTimer>
-#include <QHash>
-#include <QImage>
-#include <QObject>
-#include <QPointer>
-#include <QSet>
-#include <QSize>
-#include <QString>
-#include <QUrl>
-
-#include <RmlUi/Core/FileInterface.h>
-#include <RmlUi/Core/SystemInterface.h>
-
-#include <memory>
-
 #include "Core/Snowflake.hpp"
+#include "Platform/Image.hpp"
+#include "Platform/Trackable.hpp"
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
-class QWidget;
-
-namespace Styx {
-namespace Core {
-class ImageManager;
-}
-namespace UI {
-namespace Rml {
-
+namespace Styx::Core { class ImageManager; }
+namespace Styx::UI::Rml {
 class RenderInterface;
-
-// Process-wide RmlUi state: interfaces, fonts and the texture sources the documents use.
-//
-// Texture sources understood by <img src> / decorators:
-//   :/path.png          Qt resource (any QImage format)
-//   icon:<name>         a Lucide icon from :/resources/icons/lucide, rasterised white
-//                       (tint it with RCSS image-color)
-//   emoji:<hex-hex>     a Unicode emoji, rasterised from the bundled Twemoji font
-//   img:<n>             a remote image registered with imageSource()
-//   frame:<key>         a live video frame pushed with setFrame()
-class Runtime : public QObject
-{
-    Q_OBJECT
+class Runtime : public Platform::Trackable {
 public:
     static Runtime &instance();
     ~Runtime() override;
-
-    // Needs a current OpenGL 3.3 context; called by the first View.
-    bool initialise(QString *error);
-    // Called by the last View before its OpenGL context is destroyed.
+    bool initialise(std::string *error);
     void shutdown();
-    [[nodiscard]] bool isInitialised() const { return initialised; }
+    bool isInitialised() const { return initialised; }
     RenderInterface *renderer() const { return render.get(); }
-    // Cursor the hovered element asked for (RCSS `cursor`), e.g. "pointer", "text".
-    [[nodiscard]] QString cursorName() const;
-
+    std::string cursorName() const;
     void setImageManager(Core::ImageManager *manager);
-
-    // Source string for a remote image; the image is fetched on first use and the
-    // element redraws when it arrives.
-    QString imageSource(const QUrl &url, const QSize &logicalSize, Core::Snowflake accountId);
-    static QString emojiSource(const QString &emoji);
-    static QString iconSource(const QString &name) { return QStringLiteral("icon:") + name; }
-
-    // Live video frames (Go Live). The element showing frame:<key> redraws on each call.
-    void setFrame(const QString &key, const QImage &frame);
-    void clearFrame(const QString &key);
-
-    // Resolves a texture source to an image (called by the renderer on demand).
-    QImage loadImage(const QString &source);
-
-    // Needs a current OpenGL context. Returns whether frame dimensions changed.
+    std::string imageSource(const std::string &url, Platform::Size logicalSize, Core::Snowflake accountId);
+    static std::string emojiSource(const std::string &emoji);
+    static std::string iconSource(const std::string &name) { return "icon:" + name; }
+    void setFrame(const std::string &key, const Platform::ImageBuffer &frame);
+    void clearFrame(const std::string &key);
+    Platform::ImageBuffer loadImage(const std::string &source);
     bool releaseChangedTextures();
-
-signals:
-    // A texture changed; views should repaint.
-    void texturesChanged();
-
+    Platform::Signal<> texturesChanged;
 private:
-    Runtime() = default;
+    Runtime();
     void loadFonts();
-    void onImageFetched(const QUrl &url, const QSize &size);
-
-    struct ImageRequest
-    {
-        QUrl url;
-        QSize size;
-        Core::Snowflake accountId;
-    };
-
+    void onImageFetched(const std::string &url, Platform::Size size);
+    struct ImageRequest { std::string url; Platform::Size size; Core::Snowflake accountId; };
     class System;
     class Files;
-
+    class EmojiRenderer;
     bool initialised = false;
     std::unique_ptr<System> system;
     std::unique_ptr<Files> files;
     std::unique_ptr<RenderInterface> render;
-    QPointer<Core::ImageManager> images;
-
-    QHash<QString, int> imageIds; // "url|w|h" -> id
-    QHash<int, ImageRequest> imageRequests;
-    QHash<QString, QImage> frames;
-    QSet<QString> changedTextures;
+    std::unique_ptr<EmojiRenderer> emoji;
+    Platform::Guard<Core::ImageManager> images;
+    Platform::Connection imageConnection;
+    std::unordered_map<std::string, int> imageIds;
+    std::unordered_map<int, ImageRequest> imageRequests;
+    std::unordered_map<std::string, Platform::ImageBuffer> frames;
+    std::unordered_set<std::string> changedTextures;
     bool textureSizesChanged = false;
-    QList<QByteArray> fontData; // FreeType reads faces straight from these buffers
+    std::vector<std::string> fontData;
 };
-
-// Escapes text for RML and turns Unicode emoji into inline <img class="emoji">.
-QString richText(const QString &plain);
-QString escape(const QString &plain);
-
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+std::string richText(const std::string &plain);
+std::string escape(const std::string &plain);
+}

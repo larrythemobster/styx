@@ -1,57 +1,27 @@
 #include "TrayIcon.hpp"
+#include "Core/Logging.hpp"
+#include "Platform/Image.hpp"
+#include "Platform/Native.hpp"
+#include <SDL3/SDL.h>
 
-#include <QGuiApplication>
-#include <QPainter>
-#include <QSvgRenderer>
-
-namespace Styx {
-namespace UI {
-
-#ifdef Q_OS_MACOS
-static constexpr bool ClickOpensTheMenu = true;
-#else
-static constexpr bool ClickOpensTheMenu = false;
-#endif
-
-static QIcon applicationIcon()
+namespace Styx::UI {
+TrayIcon::TrayIcon()
 {
-    QSvgRenderer renderer(QStringLiteral(":/styx.svg"));
-    QIcon rendered;
-    for (int side : { 16, 24, 32, 48, 64 }) {
-        QPixmap pixmap(side, side);
-        pixmap.fill(Qt::transparent);
-
-        QPainter painter(&pixmap);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        renderer.render(&painter);
-        painter.end();
-
-        rendered.addPixmap(pixmap);
-    }
-    return rendered;
+    auto image = Platform::Image::decodeFile(Platform::Resources::path("app/styx.svg"));
+    SDL_Surface *surface = image ? SDL_CreateSurfaceFrom(image->width, image->height, SDL_PIXELFORMAT_RGBA32,
+        image->pixels.data(), static_cast<int>(image->stride())) : nullptr;
+    tray = SDL_CreateTray(surface, "Styx");
+    if (surface) SDL_DestroySurface(surface);
+    if (!tray) { Core::log(Core::LogLevel::Warning, LogUI) << "System tray unavailable:" << SDL_GetError(); return; }
+    auto *menu = SDL_CreateTrayMenu(tray);
+    if (!menu) { SDL_DestroyTray(tray); tray = nullptr; return; }
+    auto *show = SDL_InsertTrayEntryAt(menu, -1, "Show Styx", SDL_TRAYENTRY_BUTTON);
+    SDL_InsertTrayEntryAt(menu, -1, nullptr, SDL_TRAYENTRY_BUTTON);
+    auto *quit = SDL_InsertTrayEntryAt(menu, -1, "Quit", SDL_TRAYENTRY_BUTTON);
+    if (!show || !quit) { SDL_DestroyTray(tray); tray = nullptr; return; }
+    SDL_SetTrayEntryCallback(show, [](void *data, SDL_TrayEntry *) { static_cast<TrayIcon *>(data)->showWindowRequested.publish(); }, this);
+    SDL_SetTrayEntryCallback(quit, [](void *data, SDL_TrayEntry *) { static_cast<TrayIcon *>(data)->quitRequested.publish(); }, this);
 }
-
-TrayIcon::TrayIcon(QObject *parent) : QObject(parent), icon(applicationIcon())
-{
-    menu.addAction(tr("Show Styx"), this, &TrayIcon::showWindowRequested);
-    menu.addSeparator();
-    menu.addAction(tr("Quit"), this, &TrayIcon::quitRequested);
-    icon.setContextMenu(&menu);
-
-    connect(&icon, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
-        if (reason == QSystemTrayIcon::Trigger && !ClickOpensTheMenu)
-            emit showWindowRequested();
-    });
-
-    setToolTip({});
-    icon.show();
+TrayIcon::~TrayIcon() { if (tray) SDL_DestroyTray(tray); }
+void TrayIcon::setToolTip(const std::string &title) { if (tray) SDL_SetTrayTooltip(tray, title.empty() ? "Styx" : title.c_str()); }
 }
-
-void TrayIcon::setToolTip(const QString &windowTitle)
-{
-    icon.setToolTip(windowTitle.isEmpty() ? QGuiApplication::applicationDisplayName() : windowTitle);
-}
-
-} // namespace UI
-} // namespace Styx

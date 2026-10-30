@@ -2,7 +2,9 @@
 
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
+#ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
+#endif
 #include "Core/ClientInstance.hpp"
 #include "Core/Presence/ActivityFormat.hpp"
 #include "Core/Presence/PresenceManager.hpp"

@@ -1,27 +1,18 @@
 #pragma once
+#include "Platform/Trackable.hpp"
+#include <string>
+struct SDL_Tray;
 
-#include <QMenu>
-#include <QSystemTrayIcon>
-
-namespace Styx {
-namespace UI {
-
-class TrayIcon : public QObject
-{
-    Q_OBJECT
+namespace Styx::UI {
+class TrayIcon : public Platform::Trackable {
 public:
-    explicit TrayIcon(QObject *parent = nullptr);
-
-    void setToolTip(const QString &windowTitle);
-
-signals:
-    void showWindowRequested();
-    void quitRequested();
-
+    TrayIcon();
+    ~TrayIcon() override;
+    bool available() const { return tray != nullptr; }
+    void setToolTip(const std::string &title);
+    Platform::Signal<> showWindowRequested;
+    Platform::Signal<> quitRequested;
 private:
-    QMenu menu;
-    QSystemTrayIcon icon;
+    SDL_Tray *tray = nullptr;
 };
-
-} // namespace UI
-} // namespace Styx
+}

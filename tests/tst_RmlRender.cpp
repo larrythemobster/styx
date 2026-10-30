@@ -10,35 +10,64 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#ifdef _WIN32
 #include <windows.h>
-#include <GL/gl.h>
+#endif
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_opengl.h>
 
 #include <array>
 #include <string>
 #include <vector>
+#include <memory>
 
 using namespace Styx::UI::Rml;
 
 namespace {
+#ifdef _WIN32
 HWND window(View &view)
 {
     return static_cast<HWND>(view.nativeHandle());
 }
+#endif
 
-void key(View &view, WPARAM code)
+void key(View &view, SDL_Keycode code)
 {
-    SendMessageW(window(view), WM_KEYDOWN, code, 0);
-    SendMessageW(window(view), WM_KEYUP, code, 0);
+    SDL_Event event{};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.windowID = SDL_GetWindowID(view.window());
+    event.key.key = code;
+    event.key.down = true;
+    REQUIRE(SDL_PushEvent(&event));
+    event.type = SDL_EVENT_KEY_UP;
+    event.key.down = false;
+    REQUIRE(SDL_PushEvent(&event));
+    View::processEvents();
 }
 
 void click(View &view, int x, int y)
 {
-    const LPARAM position = MAKELPARAM(x, y);
-    SendMessageW(window(view), WM_MOUSEMOVE, 0, position);
-    SendMessageW(window(view), WM_LBUTTONDOWN, MK_LBUTTON, position);
-    SendMessageW(window(view), WM_LBUTTONUP, 0, position);
+    SDL_Event event{};
+    event.type = SDL_EVENT_MOUSE_MOTION;
+    event.motion.windowID = SDL_GetWindowID(view.window());
+    event.motion.x = float(x);
+    event.motion.y = float(y);
+    REQUIRE(SDL_PushEvent(&event));
+    event = {};
+    event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    event.button.windowID = SDL_GetWindowID(view.window());
+    event.button.button = SDL_BUTTON_LEFT;
+    event.button.down = true;
+    event.button.x = float(x);
+    event.button.y = float(y);
+    REQUIRE(SDL_PushEvent(&event));
+    event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    event.button.down = false;
+    REQUIRE(SDL_PushEvent(&event));
+    View::processEvents();
 }
 
+#ifdef _WIN32
 class ForeignContext {
 public:
     explicit ForeignContext(HWND owner)
@@ -79,12 +108,13 @@ private:
     HDC dc = nullptr;
     HGLRC context = nullptr;
 };
+#endif
 
 void prepare(View &view, int width, int height)
 {
     view.resize(width, height);
     view.show();
-    REQUIRE(window(view));
+    REQUIRE(view.window());
     REQUIRE(view.context());
     REQUIRE(Runtime::instance().isInitialised());
     view.renderNow();
@@ -93,7 +123,9 @@ void prepare(View &view, int width, int height)
 
 TEST_CASE("Texture release waits for the owning OpenGL context", "[rml][render]")
 {
+#ifdef _WIN32
     const bool foreignContext = GENERATE(false, true);
+#endif
     View view("resource-lifetime");
     prepare(view, 320, 200);
     view.makeCurrent();
@@ -104,10 +136,12 @@ TEST_CASE("Texture release waits for the owning OpenGL context", "[rml][render]"
     REQUIRE(glIsTexture(static_cast<GLuint>(texture)) == GL_TRUE);
     view.doneCurrent();
 
-    GLuint foreignTexture = 0;
+#ifdef _WIN32
     if (foreignContext) {
+        view.makeCurrent();
         ForeignContext foreign(window(view));
         foreign.makeCurrent();
+        GLuint foreignTexture = 0;
         glGenTextures(1, &foreignTexture);
         glBindTexture(GL_TEXTURE_2D, foreignTexture);
         renderer->ReleaseTexture(texture);
@@ -123,7 +157,9 @@ TEST_CASE("Texture release waits for the owning OpenGL context", "[rml][render]"
         foreign.makeCurrent();
         REQUIRE(glIsTexture(foreignTexture) == GL_TRUE);
         glDeleteTextures(1, &foreignTexture);
-    } else {
+    } else
+#endif
+    {
         renderer->ReleaseTexture(texture);
         view.makeCurrent();
         REQUIRE(glIsTexture(static_cast<GLuint>(texture)) == GL_TRUE);
@@ -134,6 +170,34 @@ TEST_CASE("Texture release waits for the owning OpenGL context", "[rml][render]"
         REQUIRE(glIsTexture(static_cast<GLuint>(texture)) == GL_FALSE);
         view.doneCurrent();
     }
+}
+
+TEST_CASE("Image uploads outside a render pass restore the caller's context", "[rml][render]")
+{
+    View view("background-image-upload");
+    prepare(view, 320, 200);
+#ifdef _WIN32
+    const bool useForeign = GENERATE(false, true);
+    std::unique_ptr<ForeignContext> foreign;
+    if (useForeign) {
+        view.makeCurrent();
+        foreign = std::make_unique<ForeignContext>(window(view));
+        foreign->makeCurrent();
+    }
+    const auto previousNative = wglGetCurrentContext();
+#endif
+    const auto previous = SDL_GL_GetCurrentContext();
+    auto *renderer = Runtime::instance().renderer();
+    ::Rml::Vector2i dimensions;
+    const auto texture = renderer->LoadTexture(dimensions, "icon:x");
+    REQUIRE(SDL_GL_GetCurrentContext() == previous);
+#ifdef _WIN32
+    REQUIRE(wglGetCurrentContext() == previousNative);
+#endif
+    view.makeCurrent();
+    REQUIRE(glIsTexture(static_cast<GLuint>(texture)) == GL_TRUE);
+    view.doneCurrent();
+    renderer->ReleaseTexture(texture);
 }
 
 TEST_CASE("Background document refresh keeps rendering", "[rml][render]")
@@ -151,7 +215,7 @@ TEST_CASE("Background document refresh keeps rendering", "[rml][render]")
     view.doneCurrent();
 
     for (int i = 0; i < 64; ++i) {
-        REQUIRE(wglGetCurrentContext() == nullptr);
+        REQUIRE(SDL_GL_GetCurrentContext() == nullptr);
         const std::array<GLubyte, 3> expected = i % 2
             ? std::array<GLubyte, 3>{ 0x18, 0x24, 0x30 }
             : std::array<GLubyte, 3>{ 0x24, 0x34, 0x48 };
@@ -188,8 +252,8 @@ TEST_CASE("Context menu keyboard and pointer actions", "[rml][menu]")
         { "Second", [&] { selected = 2; } }
     };
     menu.show(entries, { 20, 20 });
-    key(view, VK_DOWN);
-    key(view, VK_RETURN);
+    key(view, SDLK_DOWN);
+    key(view, SDLK_RETURN);
     REQUIRE(selected == 2);
     REQUIRE_FALSE(menu.isVisible());
 
@@ -202,8 +266,8 @@ TEST_CASE("Context menu keyboard and pointer actions", "[rml][menu]")
         REQUIRE(element);
         const auto p = element->GetAbsoluteOffset(::Rml::BoxArea::Border);
         const auto scale = view.devicePixelRatioF();
-        return POINT{ LONG((p.x + element->GetOffsetWidth() / 2) / scale),
-                      LONG((p.y + element->GetOffsetHeight() / 2) / scale) };
+        return Styx::Platform::Point{(p.x + element->GetOffsetWidth() / 2) / scale,
+                                     (p.y + element->GetOffsetHeight() / 2) / scale};
     };
     auto point = center("menu-item-0");
     click(view, point.x, point.y);
@@ -215,7 +279,7 @@ TEST_CASE("Context menu keyboard and pointer actions", "[rml][menu]")
     REQUIRE_FALSE(menu.isVisible());
 
     menu.show(entries, { 20, 20 });
-    key(view, VK_ESCAPE);
+    key(view, SDLK_ESCAPE);
     REQUIRE_FALSE(menu.isVisible());
     REQUIRE(selected == 1);
     menu.show(entries, { 20, 20 });
@@ -244,12 +308,12 @@ TEST_CASE("Context menu nested navigation stays within the viewport", "[rml][men
     REQUIRE(offset.y >= 0);
     REQUIRE(offset.x + panel->GetOffsetWidth() <= dimensions.x);
     REQUIRE(offset.y + panel->GetOffsetHeight() <= dimensions.y);
-    key(view, VK_RIGHT);
+    key(view, SDLK_RIGHT);
     REQUIRE(doc->GetElementById("context-menu-back"));
-    key(view, VK_LEFT);
+    key(view, SDLK_LEFT);
     REQUIRE_FALSE(doc->GetElementById("context-menu-back"));
-    key(view, VK_RETURN);
-    key(view, VK_RETURN);
+    key(view, SDLK_RETURN);
+    key(view, SDLK_RETURN);
     REQUIRE(selected);
     REQUIRE_FALSE(menu.isVisible());
 }

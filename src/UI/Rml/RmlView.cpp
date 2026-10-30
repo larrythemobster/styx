@@ -1,368 +1,370 @@
 #include "RmlView.hpp"
-
-#include "RmlRender.hpp"
 #include "RmlRuntime.hpp"
-
+#include "RmlRender.hpp"
 #include "Core/Logging.hpp"
+#include "Platform/Desktop.hpp"
+#include "Platform/Image.hpp"
 
 #include <RmlUi/Core.h>
+#include <SDL3/SDL.h>
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+#include <unordered_map>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
-#include <QApplication>
-#include <QInputMethodEvent>
-#include <QKeyEvent>
-#include <QMouseEvent>
-#include <QSurfaceFormat>
-#include <QWheelEvent>
-
-namespace Styx {
-namespace UI {
-namespace Rml {
-
-namespace KI = ::Rml::Input;
-
+namespace Styx::UI::Rml {
 namespace {
+namespace KI = ::Rml::Input;
+SDL_GLContext sharedContext = nullptr;
+#ifdef _WIN32
+HGLRC sharedNativeContext = nullptr;
+#endif
+std::unordered_map<SDL_WindowID, View *> windows;
+bool quitting = false;
 
-KI::KeyIdentifier mapKey(int key)
+int modifiers(SDL_Keymod mod = SDL_GetModState())
 {
-    if (key >= Qt::Key_A && key <= Qt::Key_Z)
-        return static_cast<KI::KeyIdentifier>(KI::KI_A + (key - Qt::Key_A));
-    if (key >= Qt::Key_0 && key <= Qt::Key_9)
-        return static_cast<KI::KeyIdentifier>(KI::KI_0 + (key - Qt::Key_0));
-    if (key >= Qt::Key_F1 && key <= Qt::Key_F12)
-        return static_cast<KI::KeyIdentifier>(KI::KI_F1 + (key - Qt::Key_F1));
+    int result = 0;
+    if (mod & SDL_KMOD_CTRL) result |= KI::KM_CTRL;
+    if (mod & SDL_KMOD_SHIFT) result |= KI::KM_SHIFT;
+    if (mod & SDL_KMOD_ALT) result |= KI::KM_ALT;
+    if (mod & SDL_KMOD_GUI) result |= KI::KM_META;
+    if (mod & SDL_KMOD_CAPS) result |= KI::KM_CAPSLOCK;
+    if (mod & SDL_KMOD_NUM) result |= KI::KM_NUMLOCK;
+    return result;
+}
+KI::KeyIdentifier mapKey(SDL_Keycode key)
+{
+    if (key >= SDLK_A && key <= SDLK_Z) return static_cast<KI::KeyIdentifier>(KI::KI_A + key - SDLK_A);
+    if (key >= SDLK_0 && key <= SDLK_9) return static_cast<KI::KeyIdentifier>(KI::KI_0 + key - SDLK_0);
+    if (key >= SDLK_F1 && key <= SDLK_F12) return static_cast<KI::KeyIdentifier>(KI::KI_F1 + key - SDLK_F1);
     switch (key) {
-    case Qt::Key_Backspace: return KI::KI_BACK;
-    case Qt::Key_Tab: return KI::KI_TAB;
-    case Qt::Key_Backtab: return KI::KI_TAB;
-    case Qt::Key_Return: return KI::KI_RETURN;
-    case Qt::Key_Enter: return KI::KI_NUMPADENTER;
-    case Qt::Key_Escape: return KI::KI_ESCAPE;
-    case Qt::Key_Space: return KI::KI_SPACE;
-    case Qt::Key_Delete: return KI::KI_DELETE;
-    case Qt::Key_Insert: return KI::KI_INSERT;
-    case Qt::Key_Home: return KI::KI_HOME;
-    case Qt::Key_End: return KI::KI_END;
-    case Qt::Key_PageUp: return KI::KI_PRIOR;
-    case Qt::Key_PageDown: return KI::KI_NEXT;
-    case Qt::Key_Left: return KI::KI_LEFT;
-    case Qt::Key_Right: return KI::KI_RIGHT;
-    case Qt::Key_Up: return KI::KI_UP;
-    case Qt::Key_Down: return KI::KI_DOWN;
-    case Qt::Key_Shift: return KI::KI_LSHIFT;
-    case Qt::Key_Control: return KI::KI_LCONTROL;
-    case Qt::Key_Alt: return KI::KI_LMENU;
-    case Qt::Key_Meta: return KI::KI_LMETA;
-    case Qt::Key_Minus: return KI::KI_OEM_MINUS;
-    case Qt::Key_Equal: return KI::KI_OEM_PLUS;
-    case Qt::Key_Comma: return KI::KI_OEM_COMMA;
-    case Qt::Key_Period: return KI::KI_OEM_PERIOD;
-    case Qt::Key_Slash: return KI::KI_OEM_2;
-    case Qt::Key_Semicolon: return KI::KI_OEM_1;
+    case SDLK_BACKSPACE: return KI::KI_BACK;
+    case SDLK_TAB: return KI::KI_TAB;
+    case SDLK_RETURN: return KI::KI_RETURN;
+    case SDLK_KP_ENTER: return KI::KI_NUMPADENTER;
+    case SDLK_ESCAPE: return KI::KI_ESCAPE;
+    case SDLK_SPACE: return KI::KI_SPACE;
+    case SDLK_DELETE: return KI::KI_DELETE;
+    case SDLK_INSERT: return KI::KI_INSERT;
+    case SDLK_HOME: return KI::KI_HOME;
+    case SDLK_END: return KI::KI_END;
+    case SDLK_PAGEUP: return KI::KI_PRIOR;
+    case SDLK_PAGEDOWN: return KI::KI_NEXT;
+    case SDLK_LEFT: return KI::KI_LEFT;
+    case SDLK_RIGHT: return KI::KI_RIGHT;
+    case SDLK_UP: return KI::KI_UP;
+    case SDLK_DOWN: return KI::KI_DOWN;
+    case SDLK_LSHIFT: return KI::KI_LSHIFT;
+    case SDLK_RSHIFT: return KI::KI_RSHIFT;
+    case SDLK_LCTRL: return KI::KI_LCONTROL;
+    case SDLK_RCTRL: return KI::KI_RCONTROL;
+    case SDLK_LALT: return KI::KI_LMENU;
+    case SDLK_RALT: return KI::KI_RMENU;
+    case SDLK_LGUI: return KI::KI_LMETA;
+    case SDLK_RGUI: return KI::KI_RMETA;
+    case SDLK_MINUS: return KI::KI_OEM_MINUS;
+    case SDLK_EQUALS: return KI::KI_OEM_PLUS;
+    case SDLK_COMMA: return KI::KI_OEM_COMMA;
+    case SDLK_PERIOD: return KI::KI_OEM_PERIOD;
+    case SDLK_SLASH: return KI::KI_OEM_2;
+    case SDLK_SEMICOLON: return KI::KI_OEM_1;
+    case SDLK_APOSTROPHE: return KI::KI_OEM_7;
+    case SDLK_LEFTBRACKET: return KI::KI_OEM_4;
+    case SDLK_RIGHTBRACKET: return KI::KI_OEM_6;
+    case SDLK_BACKSLASH: return KI::KI_OEM_5;
+    case SDLK_GRAVE: return KI::KI_OEM_3;
     default: return KI::KI_UNKNOWN;
     }
 }
-
-int mapButton(Qt::MouseButton button)
+int mouseButton(Uint8 button)
 {
     switch (button) {
-    case Qt::LeftButton: return 0;
-    case Qt::RightButton: return 1;
-    case Qt::MiddleButton: return 2;
+    case SDL_BUTTON_LEFT: return 0;
+    case SDL_BUTTON_RIGHT: return 1;
+    case SDL_BUTTON_MIDDLE: return 2;
     default: return -1;
     }
 }
-
-} // namespace
-
-View::View(const QString &contextName, QWidget *parent) : QOpenGLWidget(parent), name(contextName)
-{
-    QSurfaceFormat format;
-    format.setVersion(3, 3);
-    format.setProfile(QSurfaceFormat::CoreProfile);
-    format.setStencilBufferSize(8);
-    format.setDepthBufferSize(0);
-    setFormat(format);
-
-    setMouseTracking(true);
-    setFocusPolicy(Qt::StrongFocus);
-    setAttribute(Qt::WA_InputMethodEnabled);
-    setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
-
-    animationTimer.setInterval(16);
-    animationTimer.setTimerType(Qt::PreciseTimer);
-    connect(&animationTimer, &QTimer::timeout, this, [this] {
-        update();
-        if (animationClock.elapsed() >= animateUntilMs)
-            animationTimer.stop();
-    });
-    animationClock.start();
-
-    connect(&Runtime::instance(), &Runtime::texturesChanged, this, [this] { requestRender(); });
+void require(bool ok) { if (!ok) throw std::runtime_error(SDL_GetError()); }
 }
 
+View::View(const std::string &contextName) : name(contextName)
+{
+    if (!SDL_WasInit(SDL_INIT_VIDEO)) require(SDL_InitSubSystem(SDL_INIT_VIDEO));
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
+    nativeWindow = SDL_CreateWindow("Styx", 1280, 800,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+    if (!nativeWindow) throw std::runtime_error(SDL_GetError());
+    windows.emplace(SDL_GetWindowID(nativeWindow), this);
+    quitting = false;
+    track(Runtime::instance().texturesChanged.connect([this] { requestRender(); }));
+    auto icon = Platform::Image::decodeFile(Platform::Resources::path("app/styx.svg"));
+    if (icon) {
+        auto *surface = SDL_CreateSurfaceFrom(icon->width, icon->height, SDL_PIXELFORMAT_RGBA32,
+            icon->pixels.data(), static_cast<int>(icon->stride()));
+        if (surface) { SDL_SetWindowIcon(nativeWindow, surface); SDL_DestroySurface(surface); }
+    }
+}
 View::~View()
 {
-    if (!QOpenGLWidget::context())
-        return;
-    makeCurrent();
-    if (rmlContext) {
-        ::Rml::RemoveContext(name.toStdString());
+    if (sharedContext) {
+        makeCurrent();
+        if (rmlContext) ::Rml::RemoveContext(name);
         rmlContext = nullptr;
         rmlDocument = nullptr;
+        auto &runtime = Runtime::instance();
+        if (::Rml::GetNumContexts() == 0) runtime.shutdown();
+        else if (runtime.renderer()) runtime.renderer()->flushReleasedResources();
+        doneCurrent();
     }
-    auto &runtime = Runtime::instance();
-    if (runtime.renderer()) {
-        if (!runtime.isInitialised() || ::Rml::GetNumContexts() == 0)
-            runtime.shutdown();
-        else
-            runtime.renderer()->flushReleasedResources();
+    windows.erase(SDL_GetWindowID(nativeWindow));
+    if (windows.empty() && sharedContext) {
+        SDL_GL_DestroyContext(sharedContext);
+        sharedContext = nullptr;
     }
-    doneCurrent();
+    if (cursor) SDL_DestroyCursor(cursor);
+    SDL_DestroyWindow(nativeWindow);
 }
-
-void View::requestRender(int animateMs)
+RenderContextScope::RenderContextScope()
 {
-    update();
-    if (animateMs > 0) {
-        animateUntilMs = std::max(animateUntilMs, animationClock.elapsed() + animateMs);
-        if (!animationTimer.isActive())
-            animationTimer.start();
-    }
+    if (!sharedContext || windows.empty()) throw std::logic_error("No window for GL resource upload");
+#ifdef _WIN32
+    if (wglGetCurrentContext() == sharedNativeContext) return;
+    previousNativeContext = wglGetCurrentContext();
+    previousNativeDc = wglGetCurrentDC();
+#else
+    if (SDL_GL_GetCurrentContext() == sharedContext) return;
+#endif
+    previousWindow = SDL_GL_GetCurrentWindow();
+    previousContext = SDL_GL_GetCurrentContext();
+    windows.begin()->second->makeCurrent();
+    changed = true;
 }
-
-void View::loadDocument(const QString &path)
+RenderContextScope::~RenderContextScope() noexcept(false)
 {
-    if (!rmlContext) {
-        pendingDocument = path;
-        return;
-    }
-    if (rmlDocument)
-        rmlDocument->Close();
-    rmlDocument = rmlContext->LoadDocument(path.toStdString());
-    if (!rmlDocument) {
-        qCWarning(LogUI) << "RmlUi: could not load" << path;
-        return;
-    }
-    rmlDocument->Show();
-    emit documentLoaded(rmlDocument);
-    requestRender();
+    if (!changed) return;
+    require(SDL_GL_MakeCurrent(previousWindow, static_cast<SDL_GLContext>(previousContext)));
+#ifdef _WIN32
+    if (wglGetCurrentContext() != previousNativeContext &&
+        !wglMakeCurrent(static_cast<HDC>(previousNativeDc), static_cast<HGLRC>(previousNativeContext)))
+        throw std::runtime_error("Cannot restore the caller's OpenGL context");
+#endif
 }
-
-void View::initializeGL()
+void View::makeCurrent()
 {
-    QString error;
+    if (!sharedContext) return;
+#ifdef _WIN32
+    if (SDL_GL_GetCurrentContext() == sharedContext && wglGetCurrentContext() != sharedNativeContext)
+        require(SDL_GL_MakeCurrent(nativeWindow, nullptr));
+#endif
+    require(SDL_GL_MakeCurrent(nativeWindow, sharedContext));
+}
+void View::doneCurrent() { require(SDL_GL_MakeCurrent(nativeWindow, nullptr)); }
+void View::initialise()
+{
+    if (rmlContext) return;
+    if (!sharedContext) {
+        sharedContext = SDL_GL_CreateContext(nativeWindow);
+        if (!sharedContext) throw std::runtime_error(SDL_GetError());
+#ifdef _WIN32
+        sharedNativeContext = wglGetCurrentContext();
+#endif
+        SDL_GL_SetSwapInterval(1);
+    }
+    makeCurrent();
+    std::string error;
     if (!Runtime::instance().initialise(&error)) {
-        qCCritical(LogUI) << "RmlUi initialisation failed:" << error;
-        emit initialisationFailed(error);
-        return;
+        doneCurrent();
+        initialisationFailed.publish(error);
+        throw std::runtime_error(error);
     }
-    const qreal dpr = devicePixelRatioF();
-    rmlContext = ::Rml::CreateContext(name.toStdString(), ::Rml::Vector2i(int(width() * dpr), int(height() * dpr)));
-    if (!rmlContext) {
-        emit initialisationFailed(QStringLiteral("could not create the RmlUi context"));
-        return;
-    }
-    rmlContext->SetDensityIndependentPixelRatio(static_cast<float>(dpr));
-    if (!pendingDocument.isEmpty()) {
-        const QString path = pendingDocument;
-        pendingDocument.clear();
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(nativeWindow, &w, &h);
+    rmlContext = ::Rml::CreateContext(name, {w, h});
+    if (!rmlContext) { doneCurrent(); throw std::runtime_error("Cannot create RmlUi context: " + name); }
+    rmlContext->SetDensityIndependentPixelRatio(SDL_GetWindowDisplayScale(nativeWindow));
+    doneCurrent();
+    SDL_StartTextInput(nativeWindow);
+    if (!pendingDocument.empty()) {
+        auto path = std::exchange(pendingDocument, {});
         loadDocument(path);
     }
 }
-
-void View::resizeGL(int w, int h)
+void View::loadDocument(const std::string &path)
 {
-    if (!rmlContext)
-        return;
-    const qreal dpr = devicePixelRatioF();
-    const ::Rml::Vector2i size(int(w * dpr), int(h * dpr));
-    rmlContext->SetDimensions(size);
-    rmlContext->SetDensityIndependentPixelRatio(static_cast<float>(dpr));
-    Runtime::instance().renderer()->SetViewport(size.x, size.y);
+    if (!rmlContext) { pendingDocument = path; return; }
+    if (rmlDocument) rmlDocument->Close();
+    rmlDocument = rmlContext->LoadDocument(path);
+    if (!rmlDocument) throw std::runtime_error("Cannot load RmlUi document: " + path);
+    rmlDocument->Show();
+    documentLoaded.publish(rmlDocument);
+    requestRender();
 }
-
-void View::paintGL()
+void View::requestRender(int animateMs)
 {
-    if (!rmlContext)
-        return;
-    auto *renderer = Runtime::instance().renderer();
+    dirty = true;
+    animateUntil = std::max(animateUntil, std::chrono::steady_clock::now() + std::chrono::milliseconds(animateMs));
+}
+void View::updateDimensions()
+{
+    if (!rmlContext) return;
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(nativeWindow, &w, &h);
+    rmlContext->SetDimensions({w, h});
+    rmlContext->SetDensityIndependentPixelRatio(SDL_GetWindowDisplayScale(nativeWindow));
+    requestRender();
+}
+void View::renderNow()
+{
+    if (!rmlContext || !isVisible() || SDL_GetWindowFlags(nativeWindow) & SDL_WINDOW_MINIMIZED) return;
+    makeCurrent();
+    auto &runtime = Runtime::instance();
+    auto *renderer = runtime.renderer();
     renderer->flushReleasedResources();
-    const qreal dpr = devicePixelRatioF();
-    renderer->SetViewport(int(width() * dpr), int(height() * dpr));
-    if (Runtime::instance().releaseChangedTextures() && rmlDocument) {
+    const auto size = rmlContext->GetDimensions();
+    renderer->SetViewport(size.x, size.y);
+    if (runtime.releaseChangedTextures() && rmlDocument) {
         ::Rml::ElementList images;
         rmlDocument->GetElementsByTagName(images, "img");
         for (auto *image : images) {
-            const auto source = image->GetAttribute<::Rml::String>("src", "");
-            if (source.starts_with("frame:"))
-                image->SetAttribute("src", source);
+            auto source = image->GetAttribute<::Rml::String>("src", "");
+            if (source.starts_with("frame:")) image->SetAttribute("src", source);
         }
     }
+    dirty = false;
     rmlContext->Update();
     renderer->BeginFrame();
     renderer->Clear();
     rmlContext->Render();
     renderer->EndFrame();
+    SDL_GL_SwapWindow(nativeWindow);
+    doneCurrent();
     applyCursor();
 }
-
 void View::applyCursor()
 {
-    const QString cursor = Runtime::instance().cursorName();
-    if (cursor == lastCursor)
-        return;
-    lastCursor = cursor;
-    if (cursor == QLatin1String("pointer"))
-        setCursor(Qt::PointingHandCursor);
-    else if (cursor == QLatin1String("text"))
-        setCursor(Qt::IBeamCursor);
-    else if (cursor == QLatin1String("move"))
-        setCursor(Qt::SizeAllCursor);
-    else if (cursor == QLatin1String("resize") || cursor == QLatin1String("ew-resize"))
-        setCursor(Qt::SizeHorCursor);
-    else if (cursor == QLatin1String("not-allowed"))
-        setCursor(Qt::ForbiddenCursor);
-    else
-        unsetCursor();
+    auto value = Runtime::instance().cursorName();
+    if (value == lastCursor) return;
+    lastCursor = value;
+    SDL_SystemCursor kind = SDL_SYSTEM_CURSOR_DEFAULT;
+    if (value == "pointer") kind = SDL_SYSTEM_CURSOR_POINTER;
+    else if (value == "text") kind = SDL_SYSTEM_CURSOR_TEXT;
+    else if (value == "move") kind = SDL_SYSTEM_CURSOR_MOVE;
+    else if (value == "resize" || value == "ew-resize") kind = SDL_SYSTEM_CURSOR_EW_RESIZE;
+    else if (value == "ns-resize") kind = SDL_SYSTEM_CURSOR_NS_RESIZE;
+    else if (value == "not-allowed" || value == "unavailable") kind = SDL_SYSTEM_CURSOR_NOT_ALLOWED;
+    auto *next = SDL_CreateSystemCursor(kind);
+    if (!next) return;
+    SDL_SetCursor(next);
+    if (cursor) SDL_DestroyCursor(cursor);
+    cursor = next;
 }
-
-int View::modifiers() const
+void View::handleEvent(const SDL_Event &event)
 {
-    const Qt::KeyboardModifiers m = QApplication::keyboardModifiers();
-    int out = 0;
-    if (m & Qt::ControlModifier)
-        out |= KI::KM_CTRL;
-    if (m & Qt::ShiftModifier)
-        out |= KI::KM_SHIFT;
-    if (m & Qt::AltModifier)
-        out |= KI::KM_ALT;
-    if (m & Qt::MetaModifier)
-        out |= KI::KM_META;
-    return out;
-}
-
-void View::mouseMoveEvent(QMouseEvent *event)
-{
-    if (!rmlContext)
-        return;
-    const QPointF p = event->position() * devicePixelRatioF();
-    rmlContext->ProcessMouseMove(int(p.x()), int(p.y()), modifiers());
-    requestRender(250);
-}
-
-void View::mousePressEvent(QMouseEvent *event)
-{
-    if (!rmlContext)
-        return;
-    const int button = mapButton(event->button());
-    if (button >= 0)
-        rmlContext->ProcessMouseButtonDown(button, modifiers());
-    requestRender(300);
-}
-
-void View::mouseReleaseEvent(QMouseEvent *event)
-{
-    if (!rmlContext)
-        return;
-    const int button = mapButton(event->button());
-    if (button >= 0)
-        rmlContext->ProcessMouseButtonUp(button, modifiers());
-    requestRender(300);
-}
-
-void View::mouseDoubleClickEvent(QMouseEvent *event)
-{
-    // RmlUi detects double clicks itself from down/up timing
-    mousePressEvent(event);
-}
-
-void View::wheelEvent(QWheelEvent *event)
-{
-    if (!rmlContext)
-        return;
-    // one notch (120) = one RmlUi wheel unit; pixel deltas from touchpads scale down
-    QPointF delta = event->angleDelta() / 120.0;
-    if (delta.isNull() && !event->pixelDelta().isNull())
-        delta = QPointF(event->pixelDelta()) / 40.0;
-    rmlContext->ProcessMouseWheel(::Rml::Vector2f(float(-delta.x()), float(-delta.y())), modifiers());
-    requestRender(300);
-}
-
-void View::leaveEvent(QEvent *event)
-{
-    if (rmlContext)
-        rmlContext->ProcessMouseLeave();
-    requestRender(250);
-    QOpenGLWidget::leaveEvent(event);
-}
-
-void View::keyPressEvent(QKeyEvent *event)
-{
-    if (!rmlContext)
-        return;
-    const bool propagate = rmlContext->ProcessKeyDown(mapKey(event->key()), modifiers());
-    // printable text; control characters are handled as keys
-    const QString text = event->text();
-    if (!text.isEmpty() && !(event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))) {
-        bool printable = true;
-        for (QChar c : text)
-            printable &= c.isPrint() || c.isSurrogate();
-        if (printable)
-            rmlContext->ProcessTextInput(text.toStdString());
+    if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) { close(); return; }
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) Platform::Desktop::setApplicationActive(true);
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) Platform::Desktop::setApplicationActive(SDL_GetKeyboardFocus() != nullptr);
+    if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) updateDimensions();
+    if (!rmlContext) return;
+    switch (event.type) {
+    case SDL_EVENT_MOUSE_MOTION: {
+        const auto scale = devicePixelRatioF();
+        rmlContext->ProcessMouseMove(static_cast<int>(event.motion.x * scale), static_cast<int>(event.motion.y * scale), modifiers());
+        break;
     }
-    requestRender(200);
-    if (propagate)
-        event->ignore();
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP: {
+        const auto button = mouseButton(event.button.button);
+        if (button >= 0) {
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) rmlContext->ProcessMouseButtonDown(button, modifiers());
+            else rmlContext->ProcessMouseButtonUp(button, modifiers());
+        }
+        break;
+    }
+    case SDL_EVENT_MOUSE_WHEEL: {
+        auto direction = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? 1.f : -1.f;
+        rmlContext->ProcessMouseWheel(::Rml::Vector2f(event.wheel.x * direction, event.wheel.y * direction), modifiers());
+        break;
+    }
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE: rmlContext->ProcessMouseLeave(); break;
+    case SDL_EVENT_KEY_DOWN: rmlContext->ProcessKeyDown(mapKey(event.key.key), modifiers(event.key.mod)); break;
+    case SDL_EVENT_KEY_UP: rmlContext->ProcessKeyUp(mapKey(event.key.key), modifiers(event.key.mod)); break;
+    case SDL_EVENT_TEXT_INPUT: rmlContext->ProcessTextInput(event.text.text); break;
+    default: break;
+    }
+    requestRender(250);
 }
-
-void View::keyReleaseEvent(QKeyEvent *event)
+void View::dispatchEvent(const SDL_Event &event)
 {
-    if (!rmlContext)
-        return;
-    rmlContext->ProcessKeyUp(mapKey(event->key()), modifiers());
-    requestRender();
+    if (event.type == SDL_EVENT_QUIT) { quitting = true; return; }
+    auto id = SDL_GetWindowID(SDL_GetWindowFromEvent(&event));
+    if (auto it = windows.find(id); it != windows.end()) it->second->handleEvent(event);
 }
-
-void View::inputMethodEvent(QInputMethodEvent *event)
+void View::processEvents() { SDL_Event event; while (SDL_PollEvent(&event)) dispatchEvent(event); }
+void View::renderPending()
 {
-    if (rmlContext && !event->commitString().isEmpty())
-        rmlContext->ProcessTextInput(event->commitString().toStdString());
-    requestRender();
-    event->accept();
+    const auto now = std::chrono::steady_clock::now();
+    for (auto [id, view] : windows) {
+        if (view->dirty || now < view->animateUntil || (view->rmlContext && view->rmlContext->GetNextUpdateDelay() <= 0)) view->renderNow();
+    }
 }
-
-QVariant View::inputMethodQuery(Qt::InputMethodQuery query) const
+std::optional<std::chrono::milliseconds> View::nextRenderDelay()
 {
-    if (query == Qt::ImEnabled)
-        return true;
-    return QOpenGLWidget::inputMethodQuery(query);
-}
-
-void View::focusOutEvent(QFocusEvent *event)
-{
-    QOpenGLWidget::focusOutEvent(event);
-    requestRender();
-}
-
-bool View::focusNextPrevChild(bool)
-{
-    // Tab belongs to the document (focus moves between RmlUi elements)
-    return false;
-}
-
-bool View::event(QEvent *event)
-{
-    // Tab and Shift+Tab reach keyPressEvent instead of moving Qt widget focus
-    if (event->type() == QEvent::KeyPress) {
-        auto *key = static_cast<QKeyEvent *>(event);
-        if (key->key() == Qt::Key_Tab || key->key() == Qt::Key_Backtab) {
-            keyPressEvent(key);
-            return true;
+    std::optional<std::chrono::milliseconds> delay;
+    for (auto [id, view] : windows) {
+        if (!view->isVisible() || !view->rmlContext) continue;
+        if (view->dirty) return std::chrono::milliseconds(0);
+        auto seconds = view->rmlContext->GetNextUpdateDelay();
+        if (std::chrono::steady_clock::now() < view->animateUntil) seconds = std::min(seconds, 0.016);
+        if (std::isfinite(seconds) && seconds < 86400) {
+            const auto next = std::chrono::milliseconds(static_cast<int64_t>(std::ceil(std::max(0.0, seconds) * 1000)));
+            if (!delay || next < *delay) delay = next;
         }
     }
-    return QOpenGLWidget::event(event);
+    return delay;
 }
-
-} // namespace Rml
-} // namespace UI
-} // namespace Styx
+bool View::quitRequested()
+{
+    return quitting || (!windows.empty() && std::all_of(windows.begin(), windows.end(), [](const auto &entry) { return entry.second->closed; }));
+}
+void View::show() { closed = false; require(SDL_ShowWindow(nativeWindow)); initialise(); shown.publish(); requestRender(); }
+void View::hide() { SDL_HideWindow(nativeWindow); }
+void View::close() { if (closeRequested && !closeRequested()) return; closed = true; hide(); }
+void View::raise() { SDL_RaiseWindow(nativeWindow); }
+void View::activateWindow() { raise(); }
+void View::showMaximized() { SDL_MaximizeWindow(nativeWindow); show(); }
+void View::showNormal() { SDL_SetWindowFullscreen(nativeWindow, false); SDL_RestoreWindow(nativeWindow); show(); }
+void View::showFullScreen() { require(SDL_SetWindowFullscreen(nativeWindow, true)); show(); }
+void View::resize(int w, int h) { require(SDL_SetWindowSize(nativeWindow, w, h)); updateDimensions(); }
+void View::move(int x, int y) { require(SDL_SetWindowPosition(nativeWindow, x, y)); }
+int View::width() const { int w = 0; SDL_GetWindowSize(nativeWindow, &w, nullptr); return w; }
+int View::height() const { int h = 0; SDL_GetWindowSize(nativeWindow, nullptr, &h); return h; }
+Platform::Point View::position() const { int x = 0, y = 0; SDL_GetWindowPosition(nativeWindow, &x, &y); return {float(x), float(y)}; }
+float View::devicePixelRatioF() const { int pixels = 0; SDL_GetWindowSizeInPixels(nativeWindow, &pixels, nullptr); const int logical = width(); return logical > 0 ? float(pixels) / logical : 1.f; }
+bool View::isVisible() const { return !(SDL_GetWindowFlags(nativeWindow) & SDL_WINDOW_HIDDEN); }
+bool View::isActiveWindow() const { return SDL_GetKeyboardFocus() == nativeWindow; }
+bool View::isMaximized() const { return SDL_GetWindowFlags(nativeWindow) & SDL_WINDOW_MAXIMIZED; }
+void View::setWindowTitle(const std::string &title) { SDL_SetWindowTitle(nativeWindow, title.c_str()); }
+std::string View::windowTitle() const { return SDL_GetWindowTitle(nativeWindow); }
+void *View::nativeHandle() const
+{
+#ifdef _WIN32
+    return SDL_GetPointerProperty(SDL_GetWindowProperties(nativeWindow), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#elif defined(__APPLE__)
+    return SDL_GetPointerProperty(SDL_GetWindowProperties(nativeWindow), SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+#else
+    return nativeWindow;
+#endif
+}
+Platform::Point View::mapFromGlobal(Platform::Point point) const { auto pos = position(); return {point.x - pos.x, point.y - pos.y}; }
+Platform::Point View::mapToGlobal(Platform::Point point) const { auto pos = position(); return {point.x + pos.x, point.y + pos.y}; }
+}
