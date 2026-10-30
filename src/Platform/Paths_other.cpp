@@ -2,6 +2,10 @@
 #include "Paths.hpp"
 
 #include <cstdlib>
+#include <vector>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 namespace Styx::Platform::Paths {
 
@@ -61,7 +65,15 @@ std::filesystem::path cacheDir()
 std::filesystem::path executablePath()
 {
     std::error_code ec;
+#ifdef __APPLE__
+    uint32_t length = 0;
+    _NSGetExecutablePath(nullptr, &length);
+    std::vector<char> path(length);
+    if (_NSGetExecutablePath(path.data(), &length) != 0) return {};
+    return std::filesystem::canonical(path.data(), ec);
+#else
     return std::filesystem::canonical("/proc/self/exe", ec);
+#endif
 }
 
 } // namespace Styx::Platform::Paths

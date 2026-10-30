@@ -12,6 +12,8 @@
 #include <shobjidl.h>
 #include <shellapi.h>
 #include <commdlg.h>
+#else
+#include <SDL3/SDL.h>
 #endif
 
 #include <memory>
@@ -54,6 +56,82 @@ std::vector<COMDLG_FILTERSPEC> makeWin32Filters(const std::vector<FileFilter> &f
     }
     return specs;
 }
+#else
+struct DialogState {
+    FileCallback callback;
+    std::vector<FileFilter> filters;
+    std::vector<SDL_DialogFileFilter> sdlFilters;
+};
+
+std::string sdlFilterPattern(const std::string &pattern)
+{
+    std::string result;
+    for (std::string_view extension : split(pattern, ';')) {
+        if (extension == "*" || extension == "*.*")
+            return "*";
+        if (extension.substr(0, 2) == "*.")
+            extension.remove_prefix(2);
+        if (!result.empty())
+            result += ';';
+        result.append(extension.data(), extension.size());
+    }
+    return result;
+}
+
+void SDLCALL dialogFinished(void *userdata, const char *const *files, int)
+{
+    std::unique_ptr<DialogState> state(static_cast<DialogState *>(userdata));
+    std::vector<std::string> results;
+    if (files) {
+        for (; *files; ++files)
+            results.emplace_back(*files);
+    }
+    if (state->callback) {
+        Dispatcher::main().post([callback = std::move(state->callback), results = std::move(results)]() mutable {
+            callback(std::move(results));
+        });
+    }
+}
+
+void showDialog(bool save, const std::string &title, const std::string &defaultName,
+                std::vector<FileFilter> filters, FileCallback callback, bool multiple)
+{
+    auto state = std::make_unique<DialogState>();
+    state->callback = std::move(callback);
+    state->filters = std::move(filters);
+    state->sdlFilters.reserve(state->filters.size());
+    for (auto &filter : state->filters) {
+        filter.pattern = sdlFilterPattern(filter.pattern);
+        state->sdlFilters.push_back({filter.name.c_str(), filter.pattern.c_str()});
+    }
+
+    auto *sdlFilters = state->sdlFilters.empty() ? nullptr : state->sdlFilters.data();
+    const auto filterCount = static_cast<int>(state->sdlFilters.size());
+    const char *location = defaultName.empty() ? nullptr : defaultName.c_str();
+    if (title.empty()) {
+        if (save)
+            SDL_ShowSaveFileDialog(dialogFinished, state.release(), nullptr, sdlFilters, filterCount, location);
+        else
+            SDL_ShowOpenFileDialog(dialogFinished, state.release(), nullptr, sdlFilters, filterCount, location, multiple);
+        return;
+    }
+
+    SDL_PropertiesID properties = SDL_CreateProperties();
+    if (!properties ||
+        !SDL_SetStringProperty(properties, SDL_PROP_FILE_DIALOG_TITLE_STRING, title.c_str()) ||
+        (location && !SDL_SetStringProperty(properties, SDL_PROP_FILE_DIALOG_LOCATION_STRING, location)) ||
+        (sdlFilters && !SDL_SetPointerProperty(properties, SDL_PROP_FILE_DIALOG_FILTERS_POINTER, sdlFilters)) ||
+        (sdlFilters && !SDL_SetNumberProperty(properties, SDL_PROP_FILE_DIALOG_NFILTERS_NUMBER, filterCount)) ||
+        (!save && !SDL_SetBooleanProperty(properties, SDL_PROP_FILE_DIALOG_MANY_BOOLEAN, multiple))) {
+        if (properties)
+            SDL_DestroyProperties(properties);
+        dialogFinished(state.release(), nullptr, -1);
+        return;
+    }
+    SDL_ShowFileDialogWithProperties(save ? SDL_FILEDIALOG_SAVEFILE : SDL_FILEDIALOG_OPENFILE,
+                                    dialogFinished, state.release(), properties);
+    SDL_DestroyProperties(properties);
+}
 #endif
 
 } // namespace
@@ -77,7 +155,12 @@ std::string clipboardText()
     CloseClipboard();
     return result;
 #else
-    return {};
+    char *text = SDL_GetClipboardText();
+    if (!text)
+        return {};
+    std::string result(text);
+    SDL_free(text);
+    return result;
 #endif
 }
 
@@ -99,6 +182,8 @@ void setClipboardText(const std::string &text)
         }
     }
     CloseClipboard();
+#else
+    SDL_SetClipboardText(text.c_str());
 #endif
 }
 
@@ -110,7 +195,7 @@ bool openUrl(const std::string &url)
         ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
     return res > 32;
 #else
-    return false;
+    return SDL_OpenURL(url.c_str());
 #endif
 }
 
@@ -138,6 +223,11 @@ Point cursorPosition()
     POINT pt;
     if (GetCursorPos(&pt))
         return { static_cast<float>(pt.x), static_cast<float>(pt.y) };
+#else
+    float x = 0.0f;
+    float y = 0.0f;
+    SDL_GetGlobalMouseState(&x, &y);
+    return {x, y};
 #endif
     return { 0.0f, 0.0f };
 }
@@ -195,8 +285,10 @@ void openFiles(std::string title, std::vector<FileFilter> filters, FileCallback 
             callback(std::move(results));
     });
 #else
-    if (callback)
-        callback({});
+    Dispatcher::main().post([title = std::move(title), filters = std::move(filters),
+                             callback = std::move(callback), multiple]() mutable {
+        showDialog(false, title, {}, std::move(filters), std::move(callback), multiple);
+    });
 #endif
 }
 
@@ -237,8 +329,10 @@ void saveFile(std::string title, std::string defaultName, FileCallback callback)
             callback(std::move(results));
     });
 #else
-    if (callback)
-        callback({});
+    Dispatcher::main().post([title = std::move(title), defaultName = std::move(defaultName),
+                             callback = std::move(callback)]() mutable {
+        showDialog(true, title, defaultName, {}, std::move(callback), false);
+    });
 #endif
 }
 
