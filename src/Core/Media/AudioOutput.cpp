@@ -132,9 +132,8 @@ private:
         return true;
     }
 
-    static void onPlayback(ma_device *device, void *output, const void *input, uint32_t frameCount)
+    static void onPlayback(ma_device *device, void *output, const void *, uint32_t frameCount)
     {
-        Q_UNUSED(input);
         if (auto *self = static_cast<MediaAudioDevice *>(device->pUserData))
             self->mix(output, frameCount);
     }

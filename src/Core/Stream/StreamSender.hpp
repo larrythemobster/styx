@@ -1,10 +1,9 @@
 #pragma once
 
-#include <QByteArray>
-#include <QElapsedTimer>
-#include <QObject>
-#include <QSize>
-#include <QTimer>
+#include "Platform/Trackable.hpp"
+#include "Platform/WorkerLoop.hpp"
+#include <chrono>
+#include <string>
 
 #include <atomic>
 #include <memory>
@@ -31,26 +30,23 @@ class LoopbackCapture;
 // Capture -> convert -> encode for the stream we send. Lives on its own thread; a timer
 // at the stream frame rate encodes whatever the capture produced last, so the output is
 // a steady frame rate no matter how often the source repaints.
-class StreamSender : public QObject
+class StreamSender : public Platform::Trackable
 {
-    Q_OBJECT
 public:
-    explicit StreamSender(QObject *parent = nullptr);
+    explicit StreamSender(Platform::WorkerLoop &loop);
     ~StreamSender() override;
 
-public slots:
     void start(const Styx::Core::Stream::CaptureSource &source, const Styx::Core::Stream::StreamQuality &quality,
                bool includeAudio);
     void stop();
     void requestKeyframe();
     void onBandwidthEstimate(unsigned int bitsPerSecond);
 
-signals:
-    void started(int width, int height, int framerate, int maxBitrate, bool audio, const QString &encoderName);
-    void failed(const QString &reason);
-    void sourceClosed();
-    void encodedVideo(const QByteArray &annexB, qint64 ptsUs, bool keyframe);
-    void encodedAudio(const QByteArray &opus, qint64 ptsUs);
+    Platform::Signal<int, int, int, int, bool, const std::string &> started;
+    Platform::Signal<const std::string &> failed;
+    Platform::Signal<> sourceClosed;
+    Platform::Signal<const std::string &, int64_t, bool> encodedVideo;
+    Platform::Signal<const std::string &, int64_t> encodedAudio;
 
 private:
     void encodeTick();
@@ -69,12 +65,13 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> cpuStaging; // NV12 readback
 
     StreamQuality quality;
-    QTimer timer{ this }; // parented, so moveToThread() takes it to the capture thread
-    QElapsedTimer clock;
-    qint64 frameIndex = 0;
+    Platform::WorkerLoop &loop;
+    Platform::TimerId timer = 0;
+    std::chrono::steady_clock::time_point clock;
+    int64_t frameIndex = 0;
     std::atomic<bool> keyframePending{ true };
-    qint64 lastKeyframeMs = -10000;
-    quint64 lastCaptureSequence = 0;
+    int64_t lastKeyframeMs = -10000;
+    uint64_t lastCaptureSequence = 0;
     bool running = false;
 
     // bitrate adaptation from REMB
@@ -84,7 +81,7 @@ private:
 
     std::mutex audioMutex;
     std::vector<int16_t> audioPending;
-    qint64 audioSamplesSent = 0;
+    int64_t audioSamplesSent = 0;
 };
 
 } // namespace Stream

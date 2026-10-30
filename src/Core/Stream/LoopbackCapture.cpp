@@ -4,7 +4,7 @@
 
 #include "Core/Logging.hpp"
 
-#include <QOperatingSystemVersion>
+#include <format>
 
 #include <Audioclient.h>
 #include <audioclientactivationparams.h>
@@ -48,9 +48,9 @@ public:
     ComPtr<IAudioClient> client;
 };
 
-QString hresultText(HRESULT hr)
+std::string hresultText(HRESULT hr)
 {
-    return QStringLiteral("0x%1").arg(static_cast<quint32>(hr), 8, 16, QLatin1Char('0'));
+    return std::format("0x{:08x}", static_cast<uint32_t>(hr));
 }
 
 } // namespace
@@ -62,11 +62,15 @@ LoopbackCapture::~LoopbackCapture()
 
 bool LoopbackCapture::isSupported()
 {
-    // AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK arrived in Windows 10 2004 (build 19041)
-    return QOperatingSystemVersion::current() >= QOperatingSystemVersion(QOperatingSystemVersion::Windows, 10, 0, 19041);
+    using RtlGetVersionFn = LONG(WINAPI *)(OSVERSIONINFOW *);
+    auto getVersion = reinterpret_cast<RtlGetVersionFn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
+    OSVERSIONINFOW version{};
+    version.dwOSVersionInfoSize = sizeof(version);
+    return getVersion && getVersion(&version) == 0
+        && (version.dwMajorVersion > 10 || (version.dwMajorVersion == 10 && version.dwBuildNumber >= 19041));
 }
 
-bool LoopbackCapture::start(Mode mode, quint32 processId, Callback cb, QString *error)
+bool LoopbackCapture::start(Mode mode, uint32_t processId, Callback cb, std::string *error)
 {
     stop();
     callback = std::move(cb);
@@ -79,7 +83,7 @@ bool LoopbackCapture::start(Mode mode, quint32 processId, Callback cb, QString *
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     if (startState != 1) {
         if (error)
-            *error = startError.isEmpty() ? QStringLiteral("audio capture did not start") : startError;
+            *error = startError.empty() ? "audio capture did not start" : startError;
         stop();
         return false;
     }
@@ -93,13 +97,13 @@ void LoopbackCapture::stop()
         thread.join();
 }
 
-void LoopbackCapture::run(Mode mode, quint32 processId)
+void LoopbackCapture::run(Mode mode, uint32_t processId)
 {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
-    auto fail = [this](const QString &message) {
+    auto fail = [this](const std::string &message) {
         startError = message;
-        qCWarning(LogStream) << "Stream audio capture:" << message;
+        log(LogLevel::Warning, LogStream) << "Stream audio capture:" << message;
         startState = -1;
     };
 
@@ -119,13 +123,13 @@ void LoopbackCapture::run(Mode mode, quint32 processId)
     HRESULT hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient),
                                              &activateParams, handler.Get(), &operation);
     if (FAILED(hr)) {
-        fail(QStringLiteral("ActivateAudioInterfaceAsync failed ") + hresultText(hr));
+        fail("ActivateAudioInterfaceAsync failed " + hresultText(hr));
         CoUninitialize();
         return;
     }
     WaitForSingleObject(handler->done, 3000);
     if (FAILED(handler->result) || !handler->client) {
-        fail(QStringLiteral("process loopback activation failed ") + hresultText(handler->result));
+        fail("process loopback activation failed " + hresultText(handler->result));
         CoUninitialize();
         return;
     }
@@ -152,7 +156,7 @@ void LoopbackCapture::run(Mode mode, quint32 processId)
     if (SUCCEEDED(hr))
         hr = client->Start();
     if (FAILED(hr)) {
-        fail(QStringLiteral("audio client setup failed ") + hresultText(hr));
+        fail("audio client setup failed " + hresultText(hr));
         CloseHandle(ready);
         CoUninitialize();
         return;

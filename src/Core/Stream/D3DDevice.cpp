@@ -5,6 +5,7 @@
 #include "Core/Logging.hpp"
 
 #include <d3d10.h>
+#include <format>
 
 namespace Styx {
 namespace Core {
@@ -20,7 +21,7 @@ std::shared_ptr<D3DDevice> D3DDevice::create()
     HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels, ARRAYSIZE(levels),
                                    D3D11_SDK_VERSION, &result->d3dDevice, nullptr, &result->d3dContext);
     if (FAILED(hr)) {
-        qCWarning(LogStream) << "D3D11CreateDevice failed:" << Qt::hex << static_cast<quint32>(hr);
+        Core::log(Core::LogLevel::Warning, LogStream) << std::format("D3D11CreateDevice failed: 0x{:08X}", static_cast<uint32_t>(hr));
         return nullptr;
     }
 

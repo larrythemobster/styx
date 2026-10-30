@@ -62,7 +62,7 @@ TEST_CASE("APNG testReportsCanvasAndFrameCount", "[apng]")
     const std::string apng = buildApng({ { solid({ 6, 4 }, red) }, { solid({ 6, 4 }, blue) }, { solid({ 6, 4 }, green) } });
     const auto reader = Apng::Reader::open(apng);
     REQUIRE(reader != nullptr);
-    REQUIRE(reader->canvasSize(), size(6 == 4));
+    REQUIRE(reader->canvasSize() == size(6, 4));
     REQUIRE(reader->frameCount() == 3);
 }
 

@@ -2,7 +2,7 @@
 
 #ifdef _WIN32
 
-#include <QString>
+#include <string>
 
 #include <atomic>
 #include <cstdint>
@@ -35,20 +35,20 @@ public:
 
     static bool isSupported();
 
-    bool start(Mode mode, quint32 processId, Callback callback, QString *error);
+    bool start(Mode mode, uint32_t processId, Callback callback, std::string *error);
     void stop();
 
     static constexpr int SAMPLE_RATE = 48000;
     static constexpr int CHANNELS = 2;
 
 private:
-    void run(Mode mode, quint32 processId);
+    void run(Mode mode, uint32_t processId);
 
     Callback callback;
     std::thread thread;
     std::atomic<bool> running{ false };
     std::atomic<int> startState{ 0 }; // 0 pending, 1 ok, -1 failed
-    QString startError;
+    std::string startError;
 };
 
 } // namespace Stream

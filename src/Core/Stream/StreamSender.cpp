@@ -8,8 +8,6 @@
 #include "Core/Audio/OpusEncoder.hpp"
 #include "Core/Logging.hpp"
 
-#include <QCoreApplication>
-
 #include <cstring>
 
 namespace Styx {
@@ -19,11 +17,7 @@ namespace Stream {
 static constexpr int OPUS_FRAME_SAMPLES = 960; // 20 ms at 48 kHz
 static constexpr int KEYFRAME_MIN_INTERVAL_MS = 500;
 
-StreamSender::StreamSender(QObject *parent) : QObject(parent)
-{
-    timer.setTimerType(Qt::PreciseTimer);
-    connect(&timer, &QTimer::timeout, this, &StreamSender::encodeTick);
-}
+StreamSender::StreamSender(Platform::WorkerLoop &loop) : loop(loop) {}
 
 StreamSender::~StreamSender()
 {
@@ -38,14 +32,14 @@ void StreamSender::start(const CaptureSource &source, const StreamQuality &q, bo
 
     device = D3DDevice::create();
     if (!device) {
-        emit failed(tr("Could not create a Direct3D 11 device."));
+        failed.publish("Could not create a Direct3D 11 device.");
         return;
     }
 
     capture = std::make_unique<ScreenCapture>(device);
-    QString error;
+    std::string error;
     if (!capture->start(source, true, &error)) {
-        emit failed(tr("Could not capture \"%1\": %2").arg(source.title, error));
+        failed.publish("Could not capture \"" + source.title + "\": " + error);
         capture.reset();
         return;
     }
@@ -69,11 +63,11 @@ void StreamSender::start(const CaptureSource &source, const StreamQuality &q, bo
             // so viewers never hear the call echoed back
             const bool window = source.kind == CaptureSource::Kind::Window && source.processId != 0;
             const auto mode = window ? LoopbackCapture::Mode::IncludeProcess : LoopbackCapture::Mode::ExcludeProcess;
-            const quint32 pid = window ? source.processId : static_cast<quint32>(QCoreApplication::applicationPid());
-            QString audioError;
+            const uint32_t pid = window ? source.processId : GetCurrentProcessId();
+            std::string audioError;
             audio = loopback->start(mode, pid, [this](const int16_t *samples, int frames) { onAudioSamples(samples, frames); }, &audioError);
             if (!audio) {
-                qCWarning(LogStream) << "Streaming without audio:" << audioError;
+                log(LogLevel::Warning, LogStream) << "Streaming without audio:" << audioError;
                 loopback.reset();
                 opus.reset();
             }
@@ -86,17 +80,17 @@ void StreamSender::start(const CaptureSource &source, const StreamQuality &q, bo
     frameIndex = 0;
     audioSamplesSent = 0;
     keyframePending = true;
-    clock.start();
-    timer.start(1000 / quality.framerate);
+    clock = std::chrono::steady_clock::now();
+    timer = loop.setTimer(std::chrono::milliseconds(1000 / quality.framerate), true, [this] { encodeTick(); });
 
-    emit started(encoder->settings().size.width(), encoder->settings().size.height(), quality.framerate,
+    started.publish(encoder->settings().size.width, encoder->settings().size.height, quality.framerate,
                  quality.maxBitrate, audio, encoder->name());
 }
 
 void StreamSender::stop()
 {
     running = false;
-    timer.stop();
+    if (timer) { loop.cancelTimer(timer); timer = 0; }
     if (loopback)
         loopback->stop();
     loopback.reset();
@@ -123,9 +117,9 @@ bool StreamSender::reopenEncoder(int bitrate)
     settings.bitrate = bitrate;
     settings.maxBitrate = std::max(bitrate, quality.maxBitrate * bitrate / std::max(1, quality.bitrate));
 
-    QString error;
+    std::string error;
     if (!encoder->open(settings, &error)) {
-        emit failed(tr("No usable H264 encoder: %1").arg(error));
+        failed.publish("No usable H264 encoder: " + error);
         return false;
     }
     targetBitrate = bitrate;
@@ -156,7 +150,7 @@ void StreamSender::onBandwidthEstimate(unsigned int bitsPerSecond)
             estimateBelowCount = 0;
             const int next = std::max(floor, estimate * 9 / 10);
             if (next < targetBitrate) {
-                qCInfo(LogStream) << "Lowering stream bitrate to" << next / 1000 << "kbps (REMB" << estimate / 1000 << ")";
+                log(LogLevel::Info, LogStream) << "Lowering stream bitrate to" << next / 1000 << "kbps (REMB" << estimate / 1000 << ")";
                 reopenEncoder(next);
             }
         }
@@ -165,7 +159,7 @@ void StreamSender::onBandwidthEstimate(unsigned int bitsPerSecond)
         if (++estimateAboveCount >= 5) {
             estimateAboveCount = 0;
             const int next = std::min(quality.bitrate, targetBitrate * 5 / 4);
-            qCInfo(LogStream) << "Raising stream bitrate to" << next / 1000 << "kbps";
+            log(LogLevel::Info, LogStream) << "Raising stream bitrate to" << next / 1000 << "kbps";
             reopenEncoder(next);
         }
     } else {
@@ -214,12 +208,12 @@ void StreamSender::encodeTick()
 
     if (capture->isClosed()) {
         running = false;
-        timer.stop();
-        emit sourceClosed();
+        if (timer) { loop.cancelTimer(timer); timer = 0; }
+        sourceClosed.publish();
         return;
     }
 
-    const QSize target = encoder->settings().size;
+    const Platform::Size target = encoder->settings().size;
     AVFrame *frame = nullptr;
     {
         std::lock_guard deviceLock(device->mutex());
@@ -241,8 +235,8 @@ void StreamSender::encodeTick()
         } else {
             if (!cpuTarget) {
                 D3D11_TEXTURE2D_DESC desc{};
-                desc.Width = static_cast<UINT>(target.width());
-                desc.Height = static_cast<UINT>(target.height());
+                desc.Width = static_cast<UINT>(target.width);
+                desc.Height = static_cast<UINT>(target.height);
                 desc.MipLevels = 1;
                 desc.ArraySize = 1;
                 desc.Format = DXGI_FORMAT_NV12;
@@ -263,14 +257,14 @@ void StreamSender::encodeTick()
     }
 
     bool forceKeyframe = false;
-    const qint64 now = clock.elapsed();
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - clock).count();
     if (keyframePending && now - lastKeyframeMs >= KEYFRAME_MIN_INTERVAL_MS) {
         keyframePending = false;
         forceKeyframe = true;
         lastKeyframeMs = now;
     }
 
-    const qint64 ptsUs = frameIndex * 1'000'000 / quality.framerate;
+    const int64_t ptsUs = frameIndex * 1'000'000 / quality.framerate;
     ++frameIndex;
 
     std::vector<EncodedPacket> packets;
@@ -278,15 +272,15 @@ void StreamSender::encodeTick()
     for (const auto &packet : packets) {
         if (packet.keyframe)
             lastKeyframeMs = now;
-        emit encodedVideo(packet.data, packet.ptsUs, packet.keyframe);
+        encodedVideo.publish(packet.data, packet.ptsUs, packet.keyframe);
     }
 }
 
 void StreamSender::onAudioSamples(const int16_t *samples, int frames)
 {
     // WASAPI thread
-    std::vector<QByteArray> encoded;
-    qint64 firstPts = 0;
+    std::vector<std::string> encoded;
+    int64_t firstPts = 0;
     {
         std::lock_guard lock(audioMutex);
         if (!opus)
@@ -296,17 +290,17 @@ void StreamSender::onAudioSamples(const int16_t *samples, int frames)
         firstPts = audioSamplesSent * 1'000'000 / LoopbackCapture::SAMPLE_RATE;
         size_t offset = 0;
         while (audioPending.size() - offset >= frameValues) {
-            QByteArray pcm(reinterpret_cast<const char *>(audioPending.data() + offset), static_cast<qsizetype>(frameValues * sizeof(int16_t)));
+            std::string pcm(reinterpret_cast<const char *>(audioPending.data() + offset), frameValues * sizeof(int16_t));
             encoded.push_back(opus->encode(pcm));
             offset += frameValues;
         }
         audioPending.erase(audioPending.begin(), audioPending.begin() + static_cast<std::ptrdiff_t>(offset));
-        audioSamplesSent += static_cast<qint64>(encoded.size()) * OPUS_FRAME_SAMPLES;
+        audioSamplesSent += static_cast<int64_t>(encoded.size()) * OPUS_FRAME_SAMPLES;
     }
-    qint64 pts = firstPts;
-    for (const QByteArray &packet : encoded) {
-        if (!packet.isEmpty())
-            emit encodedAudio(packet, pts);
+    int64_t pts = firstPts;
+    for (const std::string &packet : encoded) {
+        if (!packet.empty())
+            encodedAudio.publish(packet, pts);
         pts += 20'000;
     }
 }

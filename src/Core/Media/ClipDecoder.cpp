@@ -2,7 +2,7 @@
 
 #include "Core/AnimationTiming.hpp"
 
-#include <stb_image.h>
+#include <stb_image_resize2.h>
 #include <webp/demux.h>
 
 #include <algorithm>
@@ -42,6 +42,32 @@ enum class Container {
 
 constexpr int SniffedBytes = 12;
 
+size_t bytes(Platform::Size size)
+{
+    return static_cast<size_t>(size.width) * static_cast<size_t>(size.height) * 4;
+}
+
+void storeFrame(Platform::ImageBuffer &frame, const uint8_t *pixels,
+                Platform::Size sourceSize, Platform::Size frameSize)
+{
+    if (!pixels || sourceSize.empty() || frameSize.empty()) {
+        frame = {};
+        return;
+    }
+
+    frame.width = frameSize.width;
+    frame.height = frameSize.height;
+    frame.channels = 4;
+    frame.pixels.resize(bytes(frameSize));
+    if (sourceSize.width == frameSize.width && sourceSize.height == frameSize.height) {
+        std::memcpy(frame.pixels.data(), pixels, frame.pixels.size());
+    } else if (!stbir_resize_uint8_linear(pixels, sourceSize.width, sourceSize.height, 0,
+                                          frame.pixels.data(), frameSize.width, frameSize.height, 0,
+                                          STBIR_RGBA)) {
+        frame = {};
+    }
+}
+
 std::vector<uint8_t> readFile(const std::string &path)
 {
     std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
@@ -73,34 +99,27 @@ public:
         auto bytes = readFile(path);
         if (bytes.empty() || bytes.size() > static_cast<size_t>(INT_MAX))
             return nullptr;
+        auto frames = Platform::Image::decodeGif(bytes.data(), bytes.size());
+        if (!frames) return nullptr;
         auto decoder = std::unique_ptr<GifClipDecoder>(new GifClipDecoder);
-        int channels = 0;
-        decoder->pixels = stbi_load_gif_from_memory(bytes.data(), static_cast<int>(bytes.size()),
-                                                    &decoder->delays, &decoder->size.width,
-                                                    &decoder->size.height, &decoder->count, &channels, 4);
-        if (!decoder->pixels || decoder->count <= 0)
-            return nullptr;
+        decoder->frames = std::move(*frames);
         return decoder;
     }
-    ~GifClipDecoder() override { stbi_image_free(pixels); stbi_image_free(delays); }
-    Platform::Size nativeSize() const override { return size; }
+    Platform::Size nativeSize() const override { return frames.size; }
     bool nextFrameOfLoop(Platform::ImageBuffer &frame, int64_t &startMs, Platform::Size frameSize) override
     {
-        if (index >= count)
+        if (index >= frames.count)
             return false;
-        storeFrame(frame, pixels + bytes(size) * index, size, frameSize);
+        storeFrame(frame, frames.pixels.get() + bytes(frames.size) * index, frames.size, frameSize);
         startMs = elapsedMs;
-        elapsedMs += normalizedFrameDelayMs(delays ? delays[index] : 0);
+        elapsedMs += normalizedFrameDelayMs(frames.delays ? frames.delays[index] : 0);
         ++index;
         return !frame.empty();
     }
     int64_t finishedLoopMs() const override { return elapsedMs; }
     bool rewind() override { index = 0; elapsedMs = 0; return true; }
 private:
-    stbi_uc *pixels = nullptr;
-    int *delays = nullptr;
-    Platform::Size size;
-    int count = 0;
+    Platform::GifFrames frames;
     int index = 0;
     int64_t elapsedMs = 0;
 };
