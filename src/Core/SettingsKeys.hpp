@@ -11,7 +11,6 @@ namespace Keys {
 // General / System
 inline constexpr const char *InMemoryCache = "general/in_memory_cache";
 inline constexpr const char *CloseToTray = "general/close_to_tray";
-inline constexpr const char *FontEngine = "general/font_engine";
 
 // Chat / Media
 inline constexpr const char *AnimateEmoji = "chat/animate_emoji";
@@ -23,8 +22,7 @@ inline constexpr const char *AnimationCacheMb = "chat/animation_cache_mb";
 inline constexpr const char *AnimationMaxMb = "chat/animation_max_mb";
 
 // Theme / Appearance
-inline constexpr const char *ThemeUseSystemColors = "theme/use_system_colors";
-inline constexpr const char *ThemeUseSystemStyle = "theme/use_system_style";
+inline constexpr const char *ThemeUseSystemColors = "appearance/use_system_colors";
 
 // Audio & Voice
 inline constexpr const char *AudioBackend = "audio/backend";
@@ -42,7 +40,6 @@ namespace Defaults {
 // General
 inline constexpr bool InMemoryCache = false;
 inline constexpr bool CloseToTray = false;
-inline constexpr const char *FontEngine = "directwrite";
 
 // Chat
 inline constexpr bool AnimateEmoji = true;
@@ -55,7 +52,6 @@ inline constexpr int AnimationMaxMb = 16;
 
 // Theme
 inline constexpr bool ThemeUseSystemColors = false;
-inline constexpr bool ThemeUseSystemStyle = false;
 
 // Audio & Voice
 inline constexpr const char *AudioBackend = "";

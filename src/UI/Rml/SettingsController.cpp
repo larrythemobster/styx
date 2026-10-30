@@ -22,6 +22,7 @@
 #include <random>
 #include <sstream>
 #include <vector>
+#include <charconv>
 
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/AudioBackends.hpp"
@@ -346,15 +347,6 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", useSysColors ? std::string(" checked") : std::string(), Keys::ThemeUseSystemColors);
     rml += std::string("</div>");
 
-    const bool useSysStyle = getBool(Keys::ThemeUseSystemStyle, Defaults::ThemeUseSystemStyle);
-    rml += std::string("<div class=\"settings-switch-row\">");
-    rml += std::string("<div class=\"settings-switch-text\">");
-    rml += std::string("<div class=\"settings-switch-title\">Use system widget style</div>");
-    rml += std::string("<div class=\"settings-switch-desc\">Apply native OS widget style instead of Fusion.</div>");
-    rml += std::string("<div class=\"settings-note\">* Applies after restart</div>");
-    rml += std::string("</div>");
-    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", useSysStyle ? std::string(" checked") : std::string(), Keys::ThemeUseSystemStyle);
-    rml += std::string("</div>");
     rml += std::string("</div>"); // .settings-card
 
     // Font overrides
@@ -651,18 +643,6 @@ void SettingsController::renderAdvanced(std::string &rml)
     rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", closeToTray ? std::string(" checked") : std::string(), Keys::CloseToTray);
     rml += std::string("</div>");
 
-#ifdef _WIN32
-    // Font Engine
-    const std::string fontEngine = getString(Keys::FontEngine, Defaults::FontEngine);
-    rml += std::string("<div class=\"settings-row\" style=\"margin-top: 16dp;\">");
-    rml += std::string("<div class=\"settings-label\">Font Engine</div>");
-    rml += formatRml("<select class=\"settings-select\" data-setting=\"%1\">", Keys::FontEngine);
-    rml += formatRml("<option value=\"directwrite\"%1>DirectWrite (Default)</option>", fontEngine == std::string("directwrite") ? std::string(" selected") : std::string());
-    rml += formatRml("<option value=\"freetype\"%1>FreeType</option>", fontEngine == std::string("freetype") ? std::string(" selected") : std::string());
-    rml += std::string("</select>");
-    rml += std::string("<div class=\"settings-note\">* Windows font rasterization engine. Requires restart.</div>");
-    rml += std::string("</div>");
-#endif
 
     rml += std::string("</div>"); // .settings-card
 }
@@ -775,8 +755,6 @@ void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
         shell.applyCloseToTray();
     } else if (key == std::string(Keys::ThemeUseSystemColors)) {
         Core::Theme::Manager::instance().setUseSystemColors(nowChecked);
-    } else if (key == std::string(Keys::ThemeUseSystemStyle)) {
-        Core::Theme::Manager::setSystemStyleEnabled(nowChecked);
     }
 
     requestRender(100);
@@ -813,7 +791,10 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
     if (!input)
         return;
 
-    const int val = input->GetValue().toInt();
+    int val = 0;
+    const auto value = input->GetValue();
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), val);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) val = 0;
     setInt(key, val);
 
     // Update display label
@@ -896,7 +877,7 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
     } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
     } else if (action == std::string("open-upstream")) {
-        Platform::openUrl("https://github.com/ouwou/acheron");
+        Platform::Desktop::openUrl("https://github.com/ouwou/acheron");
     } else if (action == std::string("generate-theme")) {
         // Read seed color hex
         if (regionRoot) {

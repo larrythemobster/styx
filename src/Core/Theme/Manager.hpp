@@ -23,9 +23,6 @@ public:
     bool usesSystemColors() const;
     void setUseSystemColors(bool enabled);
     bool isSystemControlled(Token token) const;
-    static bool systemStyleEnabled();
-    static void setSystemStyleEnabled(bool enabled);
-    static bool startsWithSystemStyle();
     bool hasFontOverride(FontRole role) const;
     void setFontOverride(FontRole role, const Font &font);
     void clearFontOverride(FontRole role);

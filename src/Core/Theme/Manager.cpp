@@ -4,14 +4,15 @@
 #include <cstdio>
 #include <sstream>
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 
 namespace Styx::Core::Theme {
 namespace {
 constexpr const char *UseSystemColorsKey = "appearance/use_system_colors";
-constexpr const char *UseSystemStyleKey = "appearance/use_system_style";
 std::string hex(Platform::Color c) {
     char buf[10];
     if (c.a == 255) std::snprintf(buf, sizeof(buf), "#%02x%02x%02x", c.r, c.g, c.b);
@@ -45,9 +46,6 @@ void Manager::setOverrides(const std::unordered_map<Token, Platform::Color> &val
 bool Manager::usesSystemColors() const { return systemColors; }
 void Manager::setUseSystemColors(bool enabled) { systemColors = enabled; Platform::Settings::instance().setBool(UseSystemColorsKey, enabled); }
 bool Manager::isSystemControlled(Token token) const { return systemColors && (descriptor(token).role.has_value() || token == Token::DisabledText); }
-bool Manager::systemStyleEnabled() { return Platform::Settings::instance().getBool(UseSystemStyleKey); }
-void Manager::setSystemStyleEnabled(bool enabled) { Platform::Settings::instance().setBool(UseSystemStyleKey, enabled); }
-bool Manager::startsWithSystemStyle() { return systemStyleEnabled() && Platform::Settings::instance().getBool(UseSystemColorsKey); }
 std::optional<Platform::Color> Manager::systemColor(Token token) const {
 #ifdef _WIN32
     int index = -1;
@@ -98,7 +96,9 @@ void Manager::loadFromObject(const nlohmann::json &obj) {
 }
 bool Manager::load() {
     overrides.clear(); fontOverrides.clear(); systemColors = Platform::Settings::instance().getBool(UseSystemColorsKey);
-    auto data = Platform::Resources::readFile(defaultThemePath());
+    const auto path = defaultThemePath();
+    if (!std::filesystem::exists(path)) return false;
+    auto data = Platform::Resources::readFile(path);
     auto obj = nlohmann::json::parse(data, nullptr, false);
     if (!obj.is_object()) return false;
     loadFromObject(obj); return true;
