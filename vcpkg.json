@@ -27,9 +27,17 @@
     "stb",
     "libwebp",
     "lunasvg",
-    "libavif",
+    {
+      "name": "libavif",
+      "features": [
+        "dav1d"
+      ]
+    },
     "utf8proc",
-    "pcre2"
+    "pcre2",
+    "sdl3",
+    "freetype",
+    "harfbuzz"
   ],
   "features": {
     "ffmpeg": {

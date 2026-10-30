@@ -497,6 +497,22 @@ TEST_CASE("SVG decoding returns straight RGBA rather than premultiplied BGRA", "
     }
 }
 
+TEST_CASE("AVIF decoding produces opaque RGBA pixels", "[image]")
+{
+    const auto bytes = Styx::Platform::fromBase64("AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUEAAADrbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAAAAAAAOcGl0bQAAAAAAAQAAAB5pbG9jAAAAAEQAAAEAAQAAAAEAAAETAAAAHQAAAChpaW5mAAAAAAABAAAAGmluZmUCAAAAAAEAAGF2MDFDb2xvcgAAAABqaXBycAAAAEtpcGNvAAAAFGlzcGUAAAAAAAAAAgAAAAEAAAAQcGl4aQAAAAADCAgIAAAADGF2MUOBIAAAAAAAE2NvbHJuY2x4AAEADQAGgAAAABdpcG1hAAAAAAAAAAEAAQQBAoMEAAAAJW1kYXQSAAoEOAAmCTITEAAARmetHKM0brY+f3X7lQ2p0A==");
+    REQUIRE(bytes.has_value());
+    const auto decoded = Image::decode(bytes->data(), bytes->size());
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->width == 2);
+    REQUIRE(decoded->height == 1);
+    for (size_t pixel = 0; pixel < decoded->pixels.size(); pixel += 4) {
+        REQUIRE(decoded->pixels[pixel] >= 250);
+        REQUIRE(decoded->pixels[pixel + 1] <= 3);
+        REQUIRE(decoded->pixels[pixel + 2] <= 3);
+        REQUIRE(decoded->pixels[pixel + 3] == 255);
+    }
+}
+
 TEST_CASE("Animated GIF buffers outlive their input and preserve frame colors and delays", "[image]")
 {
     auto frames = [] {
