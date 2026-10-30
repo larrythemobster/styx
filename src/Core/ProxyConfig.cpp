@@ -90,6 +90,8 @@ std::optional<ProxyConfig> ProxyConfig::parse(const std::string &text)
     if (config.host.size() >= 2 && config.host.front() == '[' && config.host.back() == ']')
         config.host = config.host.substr(1, config.host.size() - 2);
     if (config.host.empty()) return std::nullopt;
+    std::transform(config.host.begin(), config.host.end(), config.host.begin(),
+                   [](unsigned char c) { return static_cast<char>(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c); });
     const auto portText = part(url.get(), CURLUPART_PORT);
     unsigned port = 0;
     auto [ptr, ec] = std::from_chars(portText.data(), portText.data() + portText.size(), port);
