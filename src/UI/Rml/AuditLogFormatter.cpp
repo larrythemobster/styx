@@ -1,10 +1,13 @@
 #include "AuditLogFormatter.hpp"
 
-#include <QCoreApplication>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QLocale>
-#include <QSet>
+#include "Core/UserManager.hpp"
+#include "Platform/Native.hpp"
+#include <charconv>
+#include <chrono>
+#include <ctime>
+#include <format>
+#include <locale>
+#include <unordered_set>
 
 #include <algorithm>
 #include <cmath>
@@ -47,11 +50,11 @@ enum class AuditLogFormatter::Target {
 
 struct AuditLogFormatter::Change
 {
-    QString key;
-    QJsonValue oldValue;
-    QJsonValue newValue;
-    QString subtarget;
-    QStringList items;
+    std::string key;
+    nlohmann::json oldValue;
+    nlohmann::json newValue;
+    std::string subtarget;
+    std::vector<std::string> items;
 };
 
 struct AuditLogFormatter::Entry
@@ -63,131 +66,114 @@ struct AuditLogFormatter::Entry
     Core::Snowflake id;
     Core::Snowflake userId;
     Core::Snowflake targetId;
-    QDateTime time;
-    QList<Change> changes;
+    Platform::DateTime time;
+    std::vector<Change> changes;
 };
 
 namespace {
 
-constexpr qint64 MergeWindowSecs = 30 * 60;
+constexpr int64_t MergeWindowSecs = 30 * 60;
 constexpr int MaxMerges = 50;
 
-QString tr(const char *text)
+std::string tr(const char *message) { return message; }
+
+const nlohmann::json &jsonMember(const nlohmann::json &object, std::string_view name)
 {
-    return QCoreApplication::translate("AuditLogFormatter", text);
+    static const nlohmann::json missing;
+    auto found = object.find(name);
+    return found != object.end() ? *found : missing;
 }
 
-QString bold(const QString &text)
+std::string join(const std::vector<std::string> &parts, std::string_view separator)
 {
-    return QStringLiteral("<b>%1</b>").arg(text.toHtmlEscaped());
-}
-
-bool isNull(const QJsonValue &value)
-{
-    return value.isNull() || value.isUndefined();
-}
-
-bool truthy(const QJsonValue &value)
-{
-    switch (value.type()) {
-    case QJsonValue::Bool:
-        return value.toBool();
-    case QJsonValue::Double:
-        return value.toDouble() != 0;
-    case QJsonValue::String:
-        return !value.toString().isEmpty();
-    case QJsonValue::Array:
-    case QJsonValue::Object:
-        return true;
-    default:
-        return false;
+    size_t length = parts.empty() ? 0 : separator.size() * (parts.size() - 1);
+    for (const auto &part : parts) length += part.size();
+    std::string result;
+    result.reserve(length);
+    for (const auto &part : parts) {
+        if (!result.empty()) result += separator;
+        result += part;
     }
+    return result;
 }
 
-QString text(const QJsonValue &value)
+std::string bold(const std::string &text) { return "<b>" + Platform::htmlEscape(text) + "</b>"; }
+bool isNull(const nlohmann::json &value) { return value.is_null(); }
+bool truthy(const nlohmann::json &value)
 {
-    switch (value.type()) {
-    case QJsonValue::Bool:
-        return value.toBool() ? QStringLiteral("true") : QStringLiteral("false");
-    case QJsonValue::Double: {
-        const double number = value.toDouble();
-        return number == std::floor(number) ? QString::number(qint64(number)) : QString::number(number);
+    if (value.is_boolean()) return value.get<bool>();
+    if (value.is_number()) return value.get<double>() != 0;
+    if (value.is_string()) return !value.get_ref<const std::string &>().empty();
+    return value.is_array() || value.is_object();
+}
+std::string text(const nlohmann::json &value)
+{
+    if (value.is_string()) return value.get<std::string>();
+    if (value.is_null() || value.is_discarded()) return {};
+    if (value.is_array()) {
+        std::vector<std::string> parts;
+        parts.reserve(value.size());
+        for (const auto &item : value) parts.push_back(text(item));
+        return join(parts, ", ");
     }
-    case QJsonValue::String:
-        return value.toString();
-    case QJsonValue::Array: {
-        QStringList parts;
-        for (const QJsonValue &item : value.toArray())
-            parts.append(text(item));
-        return parts.join(QStringLiteral(", "));
+    return value.dump();
+}
+int64_t number(const nlohmann::json &value)
+{
+    if (value.is_string()) {
+        const auto &string = value.get_ref<const std::string &>();
+        int64_t result = 0;
+        std::from_chars(string.data(), string.data() + string.size(), result);
+        return result;
     }
-    case QJsonValue::Object:
-        return QString::fromUtf8(QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact));
-    default:
-        return {};
+    return value.is_number() ? value.get<int64_t>() : 0;
+}
+uint64_t bitsOf(const nlohmann::json &value)
+{
+    if (value.is_string()) {
+        const auto &string = value.get_ref<const std::string &>();
+        uint64_t result = 0;
+        std::from_chars(string.data(), string.data() + string.size(), result);
+        return result;
     }
+    return value.is_number_unsigned() ? value.get<uint64_t>() : 0;
 }
-
-qint64 number(const QJsonValue &value)
+Core::Snowflake snowflakeOf(const nlohmann::json &value) { return Core::Snowflake(bitsOf(value)); }
+std::string countText(int64_t count, const char *one, const char *other)
 {
-    return value.isString() ? value.toString().toLongLong() : qint64(value.toDouble());
+    if (count == 1) return one;
+    auto formatted = std::format(std::locale(""), "{:L}", count);
+    return std::vformat(other, std::make_format_args(formatted));
 }
-
-quint64 bitsOf(const QJsonValue &value)
+std::string colorText(const nlohmann::json &value) { return std::format("#{:06X}", uint32_t(number(value)) & 0xffffff); }
+std::string swatch(const std::string &color) { return "<span style=\"color:" + Platform::htmlEscape(color) + "\">&#9632;</span>"; }
+std::chrono::sys_days localDate(const Platform::DateTime &time)
 {
-    return value.isString() ? value.toString().toULongLong() : 0;
+    auto seconds = static_cast<std::time_t>(time.unixMillis() / 1000);
+    std::tm date{};
+#ifdef _WIN32
+    localtime_s(&date, &seconds);
+#else
+    localtime_r(&seconds, &date);
+#endif
+    return std::chrono::sys_days(std::chrono::year(date.tm_year + 1900) / (date.tm_mon + 1) / date.tm_mday);
 }
-
-Core::Snowflake snowflakeOf(const QJsonValue &value)
+std::string calendar(const Platform::DateTime &time)
 {
-    if (value.isString())
-        return Core::Snowflake(value.toString().toULongLong());
-    if (value.isDouble())
-        return Core::Snowflake(quint64(value.toDouble()));
-    return {};
+    const auto days = (localDate(Platform::DateTime::now()) - localDate(time)).count();
+    auto clock = time.format("%I:%M %p");
+    auto weekday = time.format("%A");
+    if (days == 0) return "Today at " + clock;
+    if (days == 1) return "Yesterday at " + clock;
+    if (days > 1 && days < 7) return "Last " + weekday + " at " + clock;
+    if (days == -1) return "Tomorrow at " + clock;
+    if (days < -1 && days > -7) return weekday + " at " + clock;
+    return time.format("%m/%d/%Y");
 }
-
-QString countText(qint64 count, const char *one, const char *other)
+std::string longDateTime(const nlohmann::json &value)
 {
-    return count == 1 ? tr(one) : tr(other).arg(QLocale::system().toString(count));
-}
-
-QString colorText(const QJsonValue &value)
-{
-    return QStringLiteral("#%1").arg(quint32(number(value)) & 0xffffff, 6, 16, QLatin1Char('0')).toUpper();
-}
-
-QString swatch(const QString &color)
-{
-    return QStringLiteral("<span style=\"color:%1\">&#9632;</span>").arg(color.toHtmlEscaped());
-}
-
-QString calendar(const QDateTime &time)
-{
-    const QDateTime local = time.toLocalTime();
-    const qint64 days = local.date().daysTo(QDate::currentDate());
-    const QLocale locale = QLocale::system();
-    const QString clock = locale.toString(local.time(), QStringLiteral("h:mm AP"));
-    const QString weekday = locale.dayName(local.date().dayOfWeek());
-    if (days == 0)
-        return tr("Today at %1").arg(clock);
-    if (days == 1)
-        return tr("Yesterday at %1").arg(clock);
-    if (days > 1 && days < 7)
-        return tr("Last %1 at %2").arg(weekday, clock);
-    if (days == -1)
-        return tr("Tomorrow at %1").arg(clock);
-    if (days < -1 && days > -7)
-        return tr("%1 at %2").arg(weekday, clock);
-    return locale.toString(local.date(), QStringLiteral("MM/dd/yyyy"));
-}
-
-QString longDateTime(const QJsonValue &value)
-{
-    const QDateTime time = QDateTime::fromString(value.toString(), Qt::ISODateWithMs);
-    if (!time.isValid())
-        return text(value);
-    return QLocale::system().toString(time.toLocalTime(), QStringLiteral("dddd, MMMM d, yyyy h:mm AP"));
+    auto time = Platform::DateTime::parse(text(value));
+    return time.valid() ? time.format("%A, %B %d, %Y %I:%M %p") : text(value);
 }
 
 struct PermissionName
@@ -197,105 +183,105 @@ struct PermissionName
 };
 
 constexpr PermissionName PermissionNames[] = {
-    { 0, QT_TRANSLATE_NOOP("AuditLogFormatter", "Create Invite") },
-    { 1, QT_TRANSLATE_NOOP("AuditLogFormatter", "Kick Members") },
-    { 2, QT_TRANSLATE_NOOP("AuditLogFormatter", "Ban Members") },
-    { 3, QT_TRANSLATE_NOOP("AuditLogFormatter", "Administrator") },
-    { 4, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Channels") },
-    { 5, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Server") },
-    { 26, QT_TRANSLATE_NOOP("AuditLogFormatter", "Change Nickname") },
-    { 27, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Nicknames") },
-    { 28, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Roles") },
-    { 29, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Webhooks") },
-    { 30, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Expressions") },
-    { 43, QT_TRANSLATE_NOOP("AuditLogFormatter", "Create Expressions") },
-    { 7, QT_TRANSLATE_NOOP("AuditLogFormatter", "View Audit Log") },
-    { 10, QT_TRANSLATE_NOOP("AuditLogFormatter", "View Channels") },
-    { 19, QT_TRANSLATE_NOOP("AuditLogFormatter", "View Server Insights") },
-    { 41, QT_TRANSLATE_NOOP("AuditLogFormatter", "View Server Subscription Insights") },
-    { 40, QT_TRANSLATE_NOOP("AuditLogFormatter", "Timeout Members") },
-    { 39, QT_TRANSLATE_NOOP("AuditLogFormatter", "Use Activities") },
-    { 50, QT_TRANSLATE_NOOP("AuditLogFormatter", "Use External Apps") },
-    { 11, QT_TRANSLATE_NOOP("AuditLogFormatter", "Send Messages") },
-    { 12, QT_TRANSLATE_NOOP("AuditLogFormatter", "Send TTS Messages") },
-    { 13, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Messages") },
-    { 14, QT_TRANSLATE_NOOP("AuditLogFormatter", "Embed Links") },
-    { 15, QT_TRANSLATE_NOOP("AuditLogFormatter", "Attach Files") },
-    { 16, QT_TRANSLATE_NOOP("AuditLogFormatter", "Read Message History") },
-    { 17, QT_TRANSLATE_NOOP("AuditLogFormatter", "Mention @everyone, @here, and All Roles") },
-    { 18, QT_TRANSLATE_NOOP("AuditLogFormatter", "Use External Emoji") },
-    { 6, QT_TRANSLATE_NOOP("AuditLogFormatter", "Add Reactions") },
-    { 31, QT_TRANSLATE_NOOP("AuditLogFormatter", "Use Application Commands") },
-    { 34, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Threads") },
-    { 35, QT_TRANSLATE_NOOP("AuditLogFormatter", "Create Public Threads") },
-    { 36, QT_TRANSLATE_NOOP("AuditLogFormatter", "Create Private Threads") },
-    { 37, QT_TRANSLATE_NOOP("AuditLogFormatter", "Use External Stickers") },
-    { 38, QT_TRANSLATE_NOOP("AuditLogFormatter", "Send Messages in Threads") },
-    { 46, QT_TRANSLATE_NOOP("AuditLogFormatter", "Send Voice Messages") },
-    { 49, QT_TRANSLATE_NOOP("AuditLogFormatter", "Create Polls") },
-    { 51, QT_TRANSLATE_NOOP("AuditLogFormatter", "Pin Messages") },
-    { 52, QT_TRANSLATE_NOOP("AuditLogFormatter", "Bypass Slowmode") },
-    { 53, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Official Messages") },
-    { 20, QT_TRANSLATE_NOOP("AuditLogFormatter", "Connect") },
-    { 21, QT_TRANSLATE_NOOP("AuditLogFormatter", "Speak") },
-    { 22, QT_TRANSLATE_NOOP("AuditLogFormatter", "Mute Members") },
-    { 23, QT_TRANSLATE_NOOP("AuditLogFormatter", "Deafen Members") },
-    { 24, QT_TRANSLATE_NOOP("AuditLogFormatter", "Move Members") },
-    { 25, QT_TRANSLATE_NOOP("AuditLogFormatter", "Use Voice Activity") },
-    { 8, QT_TRANSLATE_NOOP("AuditLogFormatter", "Priority Speaker") },
-    { 9, QT_TRANSLATE_NOOP("AuditLogFormatter", "Video") },
-    { 42, QT_TRANSLATE_NOOP("AuditLogFormatter", "Use Soundboard") },
-    { 45, QT_TRANSLATE_NOOP("AuditLogFormatter", "Use External Sounds") },
-    { 48, QT_TRANSLATE_NOOP("AuditLogFormatter", "Set Voice Channel Status") },
-    { 32, QT_TRANSLATE_NOOP("AuditLogFormatter", "Request to Speak") },
-    { 33, QT_TRANSLATE_NOOP("AuditLogFormatter", "Manage Events") },
-    { 44, QT_TRANSLATE_NOOP("AuditLogFormatter", "Create Events") },
+    { 0, "Create Invite" },
+    { 1, "Kick Members" },
+    { 2, "Ban Members" },
+    { 3, "Administrator" },
+    { 4, "Manage Channels" },
+    { 5, "Manage Server" },
+    { 26, "Change Nickname" },
+    { 27, "Manage Nicknames" },
+    { 28, "Manage Roles" },
+    { 29, "Manage Webhooks" },
+    { 30, "Manage Expressions" },
+    { 43, "Create Expressions" },
+    { 7, "View Audit Log" },
+    { 10, "View Channels" },
+    { 19, "View Server Insights" },
+    { 41, "View Server Subscription Insights" },
+    { 40, "Timeout Members" },
+    { 39, "Use Activities" },
+    { 50, "Use External Apps" },
+    { 11, "Send Messages" },
+    { 12, "Send TTS Messages" },
+    { 13, "Manage Messages" },
+    { 14, "Embed Links" },
+    { 15, "Attach Files" },
+    { 16, "Read Message History" },
+    { 17, "Mention @everyone, @here, and All Roles" },
+    { 18, "Use External Emoji" },
+    { 6, "Add Reactions" },
+    { 31, "Use Application Commands" },
+    { 34, "Manage Threads" },
+    { 35, "Create Public Threads" },
+    { 36, "Create Private Threads" },
+    { 37, "Use External Stickers" },
+    { 38, "Send Messages in Threads" },
+    { 46, "Send Voice Messages" },
+    { 49, "Create Polls" },
+    { 51, "Pin Messages" },
+    { 52, "Bypass Slowmode" },
+    { 53, "Manage Official Messages" },
+    { 20, "Connect" },
+    { 21, "Speak" },
+    { 22, "Mute Members" },
+    { 23, "Deafen Members" },
+    { 24, "Move Members" },
+    { 25, "Use Voice Activity" },
+    { 8, "Priority Speaker" },
+    { 9, "Video" },
+    { 42, "Use Soundboard" },
+    { 45, "Use External Sounds" },
+    { 48, "Set Voice Channel Status" },
+    { 32, "Request to Speak" },
+    { 33, "Manage Events" },
+    { 44, "Create Events" },
 };
 
-QStringList permissionNames(quint64 bits, bool onChannel)
+std::vector<std::string> permissionNames(uint64_t bits, bool onChannel)
 {
-    QStringList names;
+    std::vector<std::string> names;
     for (const PermissionName &permission : PermissionNames) {
-        if (!(bits & (quint64(1) << permission.bit)))
+        if (!(bits & (uint64_t(1) << permission.bit)))
             continue;
         if (onChannel && permission.bit == 4)
-            names.append(tr("Manage Channel"));
+            names.push_back(std::string("Manage Channel"));
         else if (onChannel && permission.bit == 10)
-            names.append(tr("View Channel"));
+            names.push_back(std::string("View Channel"));
         else
-            names.append(tr(permission.name));
+            names.push_back(tr(permission.name));
     }
     return names;
 }
 
-QString channelTypeName(qint64 type)
+std::string channelTypeName(int64_t type)
 {
     switch (type) {
     case 0:
-        return tr("Text Channel");
+        return std::string("Text Channel");
     case 1:
-        return tr("Direct Message");
+        return std::string("Direct Message");
     case 2:
-        return tr("Voice Channel");
+        return std::string("Voice Channel");
     case 3:
-        return tr("Group DM");
+        return std::string("Group DM");
     case 4:
-        return tr("Category");
+        return std::string("Category");
     case 5:
-        return tr("Announcement Channel");
+        return std::string("Announcement Channel");
     case 6:
-        return tr("Store Channel");
+        return std::string("Store Channel");
     case 13:
-        return tr("Stage Channel");
+        return std::string("Stage Channel");
     case 15:
-        return tr("Forum Channel");
+        return std::string("Forum Channel");
     case 16:
-        return tr("Media Channel");
+        return std::string("Media Channel");
     }
-    return QString::number(type);
+    return std::to_string(type);
 }
 
-bool isTextLikeChannelType(qint64 type)
+bool isTextLikeChannelType(int64_t type)
 {
     switch (type) {
     case 0:
@@ -314,36 +300,36 @@ bool isTextLikeChannelType(qint64 type)
     return false;
 }
 
-QString inviteMaxAgeText(qint64 seconds)
+std::string inviteMaxAgeText(int64_t seconds)
 {
     switch (seconds) {
     case 0:
-        return tr("Never");
+        return std::string("Never");
     case 1800:
-        return tr("30 minutes");
+        return std::string("30 minutes");
     case 3600:
-        return tr("1 hour");
+        return std::string("1 hour");
     case 21600:
-        return tr("6 hours");
+        return std::string("6 hours");
     case 43200:
-        return tr("12 hours");
+        return std::string("12 hours");
     case 86400:
-        return tr("1 day");
+        return std::string("1 day");
     case 604800:
-        return tr("7 days");
+        return std::string("7 days");
     case 1209600:
-        return tr("14 days");
+        return std::string("14 days");
     case 2592000:
-        return tr("30 days");
+        return std::string("30 days");
     case 5184000:
-        return tr("60 days");
+        return std::string("60 days");
     }
-    return QString::number(seconds);
+    return std::to_string(seconds);
 }
 
-QString localeName(const QString &code)
+std::string localeName(const std::string &code)
 {
-    static const QHash<QString, QString> names = {
+    static const std::unordered_map<std::string, std::string> names = {
         { "en-US", "English, US" },
         { "en-GB", "English, UK" },
         { "zh-CN", "中文" },
@@ -376,77 +362,77 @@ QString localeName(const QString &code)
         { "vi", "Tiếng Việt" },
         { "hi", "हिंदी" },
     };
-    const auto found = names.constFind(code);
-    return found != names.constEnd() ? found.value() : code;
+    const auto found = names.find(code);
+    return found != names.end() ? found->second : code;
 }
 
-QString autoModTriggerName(qint64 type)
+std::string autoModTriggerName(int64_t type)
 {
     switch (type) {
     case 1:
-        return tr("Block Custom Words");
+        return std::string("Block Custom Words");
     case 3:
-        return tr("Block Suspected Spam Content");
+        return std::string("Block Suspected Spam Content");
     case 4:
-        return tr("Block Commonly Flagged Words");
+        return std::string("Block Commonly Flagged Words");
     case 5:
-        return tr("Block Mention Spam");
+        return std::string("Block Mention Spam");
     case 6:
-        return tr("Block Words in Member Profile Names");
+        return std::string("Block Words in Member Profile Names");
     }
-    return tr("Unknown");
+    return std::string("Unknown");
 }
 
-QString autoModEventName(qint64 type)
+std::string autoModEventName(int64_t type)
 {
     switch (type) {
     case 1:
-        return tr("Message Send");
+        return std::string("Message Send");
     case 2:
-        return tr("Member join or update");
+        return std::string("Member join or update");
     }
-    return tr("Unknown");
+    return std::string("Unknown");
 }
 
-QString autoModActionName(qint64 type)
+std::string autoModActionName(int64_t type)
 {
     switch (type) {
     case 1:
-        return tr("Block message");
+        return std::string("Block message");
     case 2:
-        return tr("Send alert");
+        return std::string("Send alert");
     case 3:
-        return tr("Timeout user");
+        return std::string("Timeout user");
     case 4:
-        return tr("Block member interactions");
+        return std::string("Block member interactions");
     }
-    return tr("Unknown");
+    return std::string("Unknown");
 }
 
-QString quotedList(const QJsonValue &value)
+std::string quotedList(const nlohmann::json &value)
 {
-    QStringList quoted;
-    for (const QJsonValue &item : value.toArray())
-        quoted.append(QStringLiteral("'%1'").arg(item.toString()));
-    return quoted.join(QStringLiteral(", "));
+    std::vector<std::string> quoted;
+    for (const nlohmann::json &item : value)
+        quoted.push_back(std::format("'{0}'", text(item)));
+    return join(quoted, std::string(", "));
 }
 
-QString integrationPlatform(const QString &type)
+std::string integrationPlatform(const std::string &type)
 {
-    if (type == QLatin1String("twitch"))
-        return QStringLiteral("Twitch");
-    if (type == QLatin1String("youtube"))
-        return QStringLiteral("YouTube");
-    if (type == QLatin1String("discord"))
-        return QStringLiteral("Discord");
-    return tr("Unknown Integration");
+    if (type == std::string_view("twitch"))
+        return std::string("Twitch");
+    if (type == std::string_view("youtube"))
+        return std::string("YouTube");
+    if (type == std::string_view("discord"))
+        return std::string("Discord");
+    return std::string("Unknown Integration");
 }
 
-QString tagText(const QJsonObject &tag)
+std::string tagText(const nlohmann::json &tag)
 {
-    const QString emoji = tag.value("emoji_name").toString();
-    const QString name = tag.value("name").toString();
-    return emoji.isEmpty() ? name : emoji + QLatin1Char(' ') + name;
+    const std::string emoji = text(jsonMember(tag, "emoji_name"));
+    const std::string name = text(jsonMember(tag, "name"));
+    return emoji.empty() ? name : emoji + char(' ') + name;
 }
 
 } // namespace
@@ -643,13 +629,13 @@ bool AuditLogFormatter::neverMerged(Action action)
     }
 }
 
-QList<AuditLogFormatter::Row> AuditLogFormatter::addPage(const Discord::AuditLog &page)
+std::vector<AuditLogFormatter::Row> AuditLogFormatter::addPage(const Discord::AuditLog &page)
 {
     for (const Discord::User &user : page.users)
-        users.insert(user.id.get(), user);
-    auto index = [](QHash<Core::Snowflake, QJsonObject> &into, const QJsonArray &items) {
-        for (const QJsonValue &item : items)
-            into.insert(snowflakeOf(item.toObject().value("id")), item.toObject());
+        users.insert_or_assign(user.id.get(), user);
+    auto index = [](std::unordered_map<Core::Snowflake, nlohmann::json> &into, const nlohmann::json &items) {
+        for (const nlohmann::json &item : items)
+            into.insert_or_assign(snowflakeOf(jsonMember(item, "id")), item);
     };
     index(integrations, page.integrations);
     index(webhooks, page.webhooks);
@@ -658,7 +644,7 @@ QList<AuditLogFormatter::Row> AuditLogFormatter::addPage(const Discord::AuditLog
     index(threads, page.threads);
     index(applicationCommands, page.applicationCommands);
 
-    QList<Entry> entries;
+    std::vector<Entry> entries;
     for (auto it = page.entries.crbegin(); it != page.entries.crend(); ++it) {
         const Discord::AuditLogEntry &raw = *it;
         Entry entry;
@@ -671,45 +657,45 @@ QList<AuditLogFormatter::Row> AuditLogFormatter::addPage(const Discord::AuditLog
         entry.targetId = raw.targetId.hasValue() ? raw.targetId.get() : Core::Snowflake();
         entry.time = entry.id.toDateTime();
 
-        if (raw.reason.hasValue() && !raw.reason->isEmpty())
-            entry.changes.append({ QStringLiteral("reason"), QJsonValue(), raw.reason.get() });
+        if (raw.reason.hasValue() && !raw.reason->empty())
+            entry.changes.push_back({ std::string("reason"), nlohmann::json(), raw.reason.get() });
         for (const Discord::AuditLogChange &change : raw.changes)
-            entry.changes.append({ change.key, change.oldValue, change.newValue });
+            entry.changes.push_back({ change.key, change.oldValue, change.newValue });
         if (entry.action == Action::MEMBER_PRUNE)
-            entry.changes.append({ QStringLiteral("prune_delete_days"), QJsonValue(),
-                                   raw.options.contains("delete_member_days") ? raw.options.value("delete_member_days")
-                                                                              : QJsonValue(1) });
+            entry.changes.push_back({ std::string("prune_delete_days"), nlohmann::json(),
+                                   raw.options.contains("delete_member_days") ? jsonMember(raw.options, "delete_member_days")
+                                                                              : nlohmann::json(1) });
         if (entry.action == Action::AUTO_MODERATION_BLOCK_MESSAGE && raw.options.contains("auto_moderation_rule_name"))
-            entry.changes.append({ QStringLiteral("triggered_rule_name"), QJsonValue(), raw.options.value("auto_moderation_rule_name") });
+            entry.changes.push_back({ std::string("triggered_rule_name"), nlohmann::json(), jsonMember(raw.options, "auto_moderation_rule_name") });
         if (entry.action == Action::VOICE_CHANNEL_STATUS_CREATE && raw.options.contains("status"))
-            entry.changes.append({ QStringLiteral("status"), QJsonValue(), raw.options.value("status") });
-        entries.append(entry);
+            entry.changes.push_back({ std::string("status"), nlohmann::json(), jsonMember(raw.options, "status") });
+        entries.push_back(entry);
     }
 
-    QList<QList<Entry>> groups;
+    std::vector<std::vector<Entry>> groups;
     for (const Entry &entry : entries) {
-        if (!groups.isEmpty()) {
-            const Entry &first = groups.last().first();
+        if (!groups.empty()) {
+            const Entry &first = groups.back().front();
             const bool mergeable = first.action == entry.action &&
                                    first.targetId == entry.targetId &&
                                    first.userId == entry.userId &&
                                    first.raw.options == entry.raw.options &&
-                                   first.time.secsTo(entry.time) < MergeWindowSecs &&
-                                   groups.last().size() <= MaxMerges &&
+                                   first.time.secondsUntil(entry.time) < MergeWindowSecs &&
+                                   groups.back().size() <= MaxMerges &&
                                    entry.target != Target::Invite &&
                                    !neverMerged(entry.action);
             if (mergeable) {
-                groups.last().append(entry);
+                groups.back().push_back(entry);
                 continue;
             }
         }
         rememberDeletedName(entry);
-        groups.append({ entry });
+        groups.push_back({ entry });
     }
 
-    QList<Row> rows;
+    std::vector<Row> rows;
     for (auto it = groups.crbegin(); it != groups.crend(); ++it) {
-        const Entry &first = it->first();
+        const Entry &first = it->front();
         const bool keptWithoutTarget = first.action == Action::MEMBER_PRUNE ||
                                        first.action == Action::MEMBER_DISCONNECT ||
                                        first.action == Action::MEMBER_MOVE ||
@@ -717,9 +703,9 @@ QList<AuditLogFormatter::Row> AuditLogFormatter::addPage(const Discord::AuditLog
                                        first.action == Action::CREATOR_MONETIZATION_TERMS_ACCEPTED;
         if (first.target == Target::Unknown)
             continue;
-        if (targetName(first).isEmpty() && !keptWithoutTarget)
+        if (targetName(first).empty() && !keptWithoutTarget)
             continue;
-        rows.append(format(*it));
+        rows.push_back(format(*it));
     }
     return rows;
 }
@@ -729,42 +715,42 @@ void AuditLogFormatter::rememberDeletedName(const Entry &entry)
     if (entry.category != Category::Delete || !entry.targetId.isValid())
         return;
 
-    QString name;
+    std::string name;
     bool textLike = false;
     for (const Change &change : entry.changes) {
-        if ((change.key == QLatin1String("name") || change.key == QLatin1String("title")) && name.isEmpty())
-            name = change.oldValue.toString();
-        if (change.key == QLatin1String("type"))
+        if ((change.key == std::string_view("name") || change.key == std::string_view("title")) && name.empty())
+            name = text(change.oldValue);
+        if (change.key == std::string_view("type"))
             textLike = isTextLikeChannelType(number(change.oldValue));
     }
-    if (name.isEmpty())
+    if (name.empty())
         return;
     if ((entry.target == Target::Channel || entry.target == Target::ChannelOverwrite) && textLike)
-        name.prepend(QLatin1Char('#'));
-    deletedNames.insert(qMakePair(int(entry.target), entry.targetId), name);
+        name.insert(name.begin(), '#');
+    deletedNames.insert_or_assign(std::make_pair(int(entry.target), entry.targetId), name);
 }
 
 std::optional<Discord::User> AuditLogFormatter::user(Core::Snowflake userId) const
 {
-    const auto known = users.constFind(userId);
-    if (known != users.constEnd())
-        return known.value();
+    const auto known = users.find(userId);
+    if (known != users.end())
+        return known->second;
     return instance ? instance->users()->getUser(userId) : std::nullopt;
 }
 
-QString AuditLogFormatter::userTag(Core::Snowflake userId) const
+std::string AuditLogFormatter::userTag(Core::Snowflake userId) const
 {
     const auto found = user(userId);
-    return found ? found->tag() : QString::number(quint64(userId));
+    return found ? found->tag() : std::to_string(uint64_t(userId));
 }
 
-QString AuditLogFormatter::channelName(Core::Snowflake channelId) const
+std::string AuditLogFormatter::channelName(Core::Snowflake channelId) const
 {
     const auto channel = instance ? instance->getChannel(channelId) : std::nullopt;
     if (!channel || !channel->name.hasValue())
-        return QString::number(quint64(channelId));
+        return std::to_string(uint64_t(channelId));
 
-    const QString name = channel->name.get();
+    const std::string name = channel->name.get();
     switch (channel->type.valueOr(Discord::ChannelType::GUILD_TEXT)) {
     case Discord::ChannelType::GUILD_VOICE:
     case Discord::ChannelType::GUILD_STAGE_VOICE:
@@ -773,13 +759,13 @@ QString AuditLogFormatter::channelName(Core::Snowflake channelId) const
     case Discord::ChannelType::NEWS_THREAD:
     case Discord::ChannelType::PUBLIC_THREAD:
     case Discord::ChannelType::PRIVATE_THREAD:
-        return QStringLiteral("\"%1\"").arg(name);
+        return std::format("\"{0}\"", name);
     default:
-        return QLatin1Char('#') + name;
+        return char('#') + name;
     }
 }
 
-QString AuditLogFormatter::roleName(Core::Snowflake roleId) const
+std::string AuditLogFormatter::roleName(Core::Snowflake roleId) const
 {
     if (instance)
         for (const Discord::Role &role : instance->getRolesForGuild(guildId))
@@ -788,40 +774,40 @@ QString AuditLogFormatter::roleName(Core::Snowflake roleId) const
     return {};
 }
 
-QString AuditLogFormatter::authorName(const Entry &entry) const
+std::string AuditLogFormatter::authorName(const Entry &entry) const
 {
     if (entry.userId.isValid()) {
         if (const auto found = user(entry.userId))
             return found->tag();
     }
     if (entry.raw.options.contains("integration_type"))
-        return integrationPlatform(entry.raw.options.value("integration_type").toString());
-    return tr("Unknown User");
+        return integrationPlatform(text(jsonMember(entry.raw.options, "integration_type")));
+    return std::string("Unknown User");
 }
 
-QString AuditLogFormatter::targetName(const Entry &entry) const
+std::string AuditLogFormatter::targetName(const Entry &entry) const
 {
     const Core::Snowflake id = entry.targetId;
-    auto changedValue = [&entry](const char *key) -> QString {
+    auto changedValue = [&entry](const char *key) -> std::string {
         for (const Change &change : entry.changes)
-            if (change.key == QLatin1String(key))
+            if (change.key == std::string_view(key))
                 return text(truthy(change.newValue) ? change.newValue : change.oldValue);
         return {};
     };
-    auto lookedUp = [&id](const QHash<Core::Snowflake, QJsonObject> &lookup, const char *field) -> QString {
-        const auto found = lookup.constFind(id);
-        return found != lookup.constEnd() ? found->value(field).toString() : QString();
+    auto lookedUp = [&id](const std::unordered_map<Core::Snowflake, nlohmann::json> &lookup, const char *field) -> std::string {
+        const auto found = lookup.find(id);
+        return found != lookup.end() ? text(jsonMember(found->second, field)) : std::string();
     };
-    auto fallback = [&](const QString &found, const char *key) -> QString {
-        if (!found.isEmpty())
+    auto fallback = [&](const std::string &found, const char *key) -> std::string {
+        if (!found.empty())
             return found;
-        const auto deleted = deletedNames.constFind(qMakePair(int(entry.target), id));
-        if (deleted != deletedNames.constEnd())
-            return deleted.value();
-        const QString changed = key ? changedValue(key) : QString();
-        if (!changed.isEmpty())
+        const auto deleted = deletedNames.find(std::make_pair(int(entry.target), id));
+        if (deleted != deletedNames.end())
+            return deleted->second;
+        const std::string changed = key ? changedValue(key) : std::string();
+        if (!changed.empty())
             return changed;
-        return id.isValid() ? QString::number(quint64(id)) : QString();
+        return id.isValid() ? std::to_string(uint64_t(id)) : std::string();
     };
 
     switch (entry.target) {
@@ -831,26 +817,26 @@ QString AuditLogFormatter::targetName(const Entry &entry) const
     case Target::Onboarding:
     case Target::MemberVerification: {
         const auto guild = instance ? instance->getGuild(guildId) : std::nullopt;
-        return guild ? guild->name.get() : QString();
+        return guild ? guild->name.get() : std::string();
     }
     case Target::Channel:
     case Target::ChannelOverwrite:
     case Target::VoiceChannelStatus: {
         const auto channel = instance && id.isValid() ? instance->getChannel(id) : std::nullopt;
-        return fallback(channel ? channelName(id) : QString(), entry.target == Target::VoiceChannelStatus ? "status" : "name");
+        return fallback(channel ? channelName(id) : std::string(), entry.target == Target::VoiceChannelStatus ? "status" : "name");
     }
     case Target::User: {
         const auto found = id.isValid() ? user(id) : std::nullopt;
-        return fallback(found ? found->tag() : QString(), "nick");
+        return fallback(found ? found->tag() : std::string(), "nick");
     }
     case Target::Role:
-        return fallback(id.isValid() ? roleName(id) : QString(), "name");
+        return fallback(id.isValid() ? roleName(id) : std::string(), "name");
     case Target::OnboardingPrompt: {
-        const QString title = changedValue("title");
-        return title.isEmpty() ? tr("[empty]") : title;
+        const std::string title = changedValue("title");
+        return title.empty() ? std::string("[empty]") : title;
     }
     case Target::Invite:
-        return fallback(QString(), "code");
+        return fallback(std::string(), "code");
     case Target::Integration:
         return fallback(lookedUp(integrations, "name"), "type");
     case Target::Webhook:
@@ -858,9 +844,9 @@ QString AuditLogFormatter::targetName(const Entry &entry) const
     case Target::Emoji:
     case Target::Sticker:
     case Target::Soundboard:
-        return fallback(QString(), "name");
+        return fallback(std::string(), "name");
     case Target::StageInstance:
-        return fallback(QString(), "topic");
+        return fallback(std::string(), "topic");
     case Target::ScheduledEvent:
     case Target::ScheduledEventException:
         return fallback(lookedUp(scheduledEvents, "name"), "name");
@@ -869,39 +855,39 @@ QString AuditLogFormatter::targetName(const Entry &entry) const
     case Target::AutoModerationRule:
         return fallback(lookedUp(autoModerationRules, "name"), "name");
     case Target::ApplicationCommand: {
-        const Core::Snowflake applicationId = snowflakeOf(entry.raw.options.value("application_id"));
+        const Core::Snowflake applicationId = snowflakeOf(jsonMember(entry.raw.options, "application_id"));
         if (id == applicationId) {
-            for (const QJsonObject &integration : integrations)
-                if (snowflakeOf(integration.value("application").toObject().value("id")) == applicationId)
-                    return integration.value("name").toString();
-            return QString::number(quint64(id));
+            for (const auto &[integrationId, integration] : integrations)
+                if (snowflakeOf(jsonMember(jsonMember(integration, "application"), "id")) == applicationId)
+                    return text(jsonMember(integration, "name"));
+            return std::to_string(uint64_t(id));
         }
-        const auto command = applicationCommands.constFind(id);
-        if (command == applicationCommands.constEnd())
-            return fallback(QString(), "name");
-        QString name = command->value("name_localized").toString();
-        if (name.isEmpty())
-            name = command->value("name").toString();
-        return command->value("type").toInt(1) == 1 ? QStringLiteral("/") + QChar(0x2060) + name : name;
+        const auto command = applicationCommands.find(id);
+        if (command == applicationCommands.end())
+            return fallback(std::string(), "name");
+        std::string name = text(jsonMember(command->second, "name_localized"));
+        if (name.empty())
+            name = text(jsonMember(command->second, "name"));
+        return command->second.value("type", 1) == 1 ? std::string("/\u2060") + name : name;
     }
     case Target::HomeSettings:
-        return tr("Server Guide");
+        return std::string("Server Guide");
     case Target::Unknown:
         break;
     }
     return {};
 }
 
-QString AuditLogFormatter::titleFor(const Entry &entry, const QString &target, const QString &count, const QString &channel, const QString &subtarget) const
+std::string AuditLogFormatter::titleFor(const Entry &entry, const std::string &target, const std::string &count, const std::string &channel, const std::string &subtarget) const
 {
-    const QString u = bold(authorName(entry));
-    const QString t = bold(target);
-    const QString c = bold(channel);
-    const qint64 n = count.toLongLong();
-    auto counted = [n](const char *one, const char *other) { return QStringLiteral("<b>%1</b>").arg(countText(n, one, other).toHtmlEscaped()); };
-    auto typeChange = [&entry]() -> std::optional<qint64> {
+    const std::string u = bold(authorName(entry));
+    const std::string t = bold(target);
+    const std::string c = bold(channel);
+    const int64_t n = number(count);
+    auto counted = [n](const char *one, const char *other) { return std::format("<b>{0}</b>", Platform::htmlEscape(countText(n, one, other))); };
+    auto typeChange = [&entry]() -> std::optional<int64_t> {
         for (const Change &change : entry.changes)
-            if (change.key == QLatin1String("type") && !isNull(change.newValue))
+            if (change.key == std::string_view("type") && !isNull(change.newValue))
                 return number(change.newValue);
         return std::nullopt;
     };
@@ -909,244 +895,239 @@ QString AuditLogFormatter::titleFor(const Entry &entry, const QString &target, c
     switch (entry.action) {
     case Action::GUILD_UPDATE:
     case Action::CHANNEL_UPDATE:
-        return tr("%1 made changes to %2").arg(u, t);
+        return std::format("{0} made changes to {1}", u, t);
     case Action::CHANNEL_CREATE:
         switch (typeChange().value_or(0)) {
         case 13:
-            return tr("%1 created a stage channel %2").arg(u, t);
+            return std::format("{0} created a stage channel {1}", u, t);
         case 2:
-            return tr("%1 created a voice channel %2").arg(u, t);
+            return std::format("{0} created a voice channel {1}", u, t);
         case 4:
-            return tr("%1 created a category %2").arg(u, t);
+            return std::format("{0} created a category {1}", u, t);
         case 15:
-            return tr("%1 created a forum channel %2").arg(u, t);
+            return std::format("{0} created a forum channel {1}", u, t);
         case 16:
-            return tr("%1 created a media channel %2").arg(u, t);
+            return std::format("{0} created a media channel {1}", u, t);
         case 5:
-            return tr("%1 created an announcement channel %2").arg(u, t);
+            return std::format("{0} created an announcement channel {1}", u, t);
         default:
-            return tr("%1 created a text channel %2").arg(u, t);
+            return std::format("{0} created a text channel {1}", u, t);
         }
     case Action::CHANNEL_DELETE:
-        return tr("%1 removed %2").arg(u, t);
+        return std::format("{0} removed {1}", u, t);
     case Action::CHANNEL_OVERWRITE_CREATE:
-        return tr("%1 created channel overrides for %2").arg(u, t);
+        return std::format("{0} created channel overrides for {1}", u, t);
     case Action::CHANNEL_OVERWRITE_UPDATE:
-        return tr("%1 updated channel overrides for %2").arg(u, t);
+        return std::format("{0} updated channel overrides for {1}", u, t);
     case Action::CHANNEL_OVERWRITE_DELETE:
-        return tr("%1 removed channel overrides for %2").arg(u, t);
+        return std::format("{0} removed channel overrides for {1}", u, t);
     case Action::MEMBER_KICK:
-        return tr("%1 kicked %2").arg(u, t);
+        return std::format("{0} kicked {1}", u, t);
     case Action::MEMBER_PRUNE:
-        return tr("%1 pruned %2").arg(u, counted(QT_TRANSLATE_NOOP("AuditLogFormatter", "a member"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 members")));
+        return std::format("{0} pruned {1}", u, counted("a member", "{0} members"));
     case Action::MEMBER_BAN_ADD:
-        return tr("%1 banned %2").arg(u, t);
+        return std::format("{0} banned {1}", u, t);
     case Action::MEMBER_BAN_REMOVE:
-        return tr("%1 removed the ban for %2").arg(u, t);
+        return std::format("{0} removed the ban for {1}", u, t);
     case Action::MEMBER_UPDATE:
-        return tr("%1 updated %2").arg(u, t);
+        return std::format("{0} updated {1}", u, t);
     case Action::MEMBER_ROLE_UPDATE:
-        return tr("%1 updated roles for %2").arg(u, t);
+        return std::format("{0} updated roles for {1}", u, t);
     case Action::MEMBER_MOVE:
-        return tr("%1 moved %2 to %3").arg(u, counted(QT_TRANSLATE_NOOP("AuditLogFormatter", "a user"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 users")), c);
+        return std::format("{0} moved {1} to {2}", u, counted("a user", "{0} users"), c);
     case Action::MEMBER_DISCONNECT:
-        return tr("%1 disconnected %2 from voice")
-                .arg(u, counted(QT_TRANSLATE_NOOP("AuditLogFormatter", "a user"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 users")));
+        return std::format("{0} disconnected {1} from voice", u, counted("a user", "{0} users"));
     case Action::BOT_ADD:
-        return tr("%1 added %2 to the server").arg(u, t);
+        return std::format("{0} added {1} to the server", u, t);
     case Action::ROLE_CREATE:
-        return tr("%1 created the role %2").arg(u, t);
+        return std::format("{0} created the role {1}", u, t);
     case Action::ROLE_UPDATE:
-        return tr("%1 updated the role %2").arg(u, t);
+        return std::format("{0} updated the role {1}", u, t);
     case Action::ROLE_DELETE:
-        return tr("%1 deleted the role %2").arg(u, t);
+        return std::format("{0} deleted the role {1}", u, t);
     case Action::INVITE_CREATE:
-        return tr("%1 created an invite %2").arg(u, t);
+        return std::format("{0} created an invite {1}", u, t);
     case Action::INVITE_UPDATE:
-        return tr("%1 updated an invite %2").arg(u, t);
+        return std::format("{0} updated an invite {1}", u, t);
     case Action::INVITE_DELETE:
-        return tr("%1 deleted an invite %2").arg(u, t);
+        return std::format("{0} deleted an invite {1}", u, t);
     case Action::WEBHOOK_CREATE:
-        return tr("%1 created the webhook %2").arg(u, t);
+        return std::format("{0} created the webhook {1}", u, t);
     case Action::WEBHOOK_UPDATE:
-        return tr("%1 updated the webhook %2").arg(u, t);
+        return std::format("{0} updated the webhook {1}", u, t);
     case Action::WEBHOOK_DELETE:
-        return tr("%1 deleted the webhook %2").arg(u, t);
+        return std::format("{0} deleted the webhook {1}", u, t);
     case Action::EMOJI_CREATE:
-        return tr("%1 created the emoji %2").arg(u, t);
+        return std::format("{0} created the emoji {1}", u, t);
     case Action::EMOJI_UPDATE:
-        return tr("%1 updated the emoji %2").arg(u, t);
+        return std::format("{0} updated the emoji {1}", u, t);
     case Action::EMOJI_DELETE:
-        return tr("%1 deleted the emoji %2").arg(u, t);
+        return std::format("{0} deleted the emoji {1}", u, t);
     case Action::STICKER_CREATE:
-        return tr("%1 created the sticker %2").arg(u, t);
+        return std::format("{0} created the sticker {1}", u, t);
     case Action::STICKER_UPDATE:
-        return tr("%1 updated the sticker %2").arg(u, t);
+        return std::format("{0} updated the sticker {1}", u, t);
     case Action::STICKER_DELETE:
-        return tr("%1 deleted the sticker %2").arg(u, t);
+        return std::format("{0} deleted the sticker {1}", u, t);
     case Action::MESSAGE_DELETE:
-        return tr("%1 deleted %2 by %3 in %4")
-                .arg(u, counted(QT_TRANSLATE_NOOP("AuditLogFormatter", "a message"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 messages")),
-                     t, c);
+        return std::format("{0} deleted {1} by {2} in {3}", u, counted("a message", "{0} messages"), t, c);
     case Action::MESSAGE_BULK_DELETE:
-        return tr("%1 deleted %2 in %3")
-                .arg(u, counted(QT_TRANSLATE_NOOP("AuditLogFormatter", "a message"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 messages")),
-                     t);
+        return std::format("{0} deleted {1} in {2}", u, counted("a message", "{0} messages"), t);
     case Action::MESSAGE_PIN:
-        return tr("%1 pinned a message by %2 in %3").arg(u, t, c);
+        return std::format("{0} pinned a message by {1} in {2}", u, t, c);
     case Action::MESSAGE_UNPIN:
-        return tr("%1 unpinned a message by %2 in %3").arg(u, t, c);
+        return std::format("{0} unpinned a message by {1} in {2}", u, t, c);
     case Action::INTEGRATION_CREATE:
-        return tr("%1 added an integration for %2").arg(u, t);
+        return std::format("{0} added an integration for {1}", u, t);
     case Action::INTEGRATION_UPDATE:
-        return tr("%1 updated the integration for %2").arg(u, t);
+        return std::format("{0} updated the integration for {1}", u, t);
     case Action::INTEGRATION_DELETE:
-        return tr("%1 deleted the integration for %2").arg(u, t);
+        return std::format("{0} deleted the integration for {1}", u, t);
     case Action::STAGE_INSTANCE_CREATE:
-        return tr("%1 started the stage for %2").arg(u, c);
+        return std::format("{0} started the stage for {1}", u, c);
     case Action::STAGE_INSTANCE_UPDATE:
-        return tr("%1 updated the stage for %2").arg(u, c);
+        return std::format("{0} updated the stage for {1}", u, c);
     case Action::STAGE_INSTANCE_DELETE:
         if (!entry.userId.isValid())
-            return tr("Discord ended the stage for %1 due to inactivity.").arg(c);
-        return tr("%1 ended the stage for %2").arg(u, c);
+            return std::format("Discord ended the stage for {0} due to inactivity.", c);
+        return std::format("{0} ended the stage for {1}", u, c);
     case Action::GUILD_SCHEDULED_EVENT_CREATE:
-        return tr("%1 scheduled the event %2").arg(u, t);
+        return std::format("{0} scheduled the event {1}", u, t);
     case Action::GUILD_SCHEDULED_EVENT_UPDATE:
-        return tr("%1 updated the scheduled event %2").arg(u, t);
+        return std::format("{0} updated the scheduled event {1}", u, t);
     case Action::GUILD_SCHEDULED_EVENT_DELETE:
-        return tr("%1 canceled the scheduled event %2").arg(u, t);
+        return std::format("{0} canceled the scheduled event {1}", u, t);
     case Action::GUILD_SCHEDULED_EVENT_EXCEPTION_CREATE:
     case Action::GUILD_SCHEDULED_EVENT_EXCEPTION_UPDATE:
-        return tr("%1 updated an event recurrence for %2 at %3").arg(u, t, bold(subtarget));
+        return std::format("{0} updated an event recurrence for {1} at {2}", u, t, bold(subtarget));
     case Action::GUILD_SCHEDULED_EVENT_EXCEPTION_DELETE:
-        return tr("%1 reset an event recurrence for %2 at %3").arg(u, t, bold(subtarget));
+        return std::format("{0} reset an event recurrence for {1} at {2}", u, t, bold(subtarget));
     case Action::THREAD_CREATE:
         switch (typeChange().value_or(11)) {
         case 12:
-            return tr("%1 created a private thread %2").arg(u, t);
+            return std::format("{0} created a private thread {1}", u, t);
         case 10:
-            return tr("%1 created an announcement thread %2").arg(u, t);
+            return std::format("{0} created an announcement thread {1}", u, t);
         default:
-            return tr("%1 created a thread %2").arg(u, t);
+            return std::format("{0} created a thread {1}", u, t);
         }
     case Action::THREAD_UPDATE:
-        return tr("%1 made changes to the thread %2").arg(u, t);
+        return std::format("{0} made changes to the thread {1}", u, t);
     case Action::THREAD_DELETE:
-        return tr("%1 deleted the thread %2").arg(u, t);
+        return std::format("{0} deleted the thread {1}", u, t);
     case Action::APPLICATION_COMMAND_PERMISSION_UPDATE:
-        return tr("%1 updated permissions for %2").arg(u, t);
+        return std::format("{0} updated permissions for {1}", u, t);
     case Action::AUTO_MODERATION_BLOCK_MESSAGE:
-        return tr("AutoMod blocked a message sent by %1 in %2").arg(t, c);
+        return std::format("AutoMod blocked a message sent by {0} in {1}", t, c);
     case Action::AUTO_MODERATION_FLAG_TO_CHANNEL:
-        if (entry.raw.options.value("auto_moderation_rule_trigger_type").toString() == QLatin1String("6"))
-            return tr("AutoMod flagged %1 for violating content in their user profile").arg(u);
-        return tr("AutoMod flagged a message sent by %1 in %2").arg(t, c);
+        if (text(jsonMember(entry.raw.options, "auto_moderation_rule_trigger_type")) == std::string_view("6"))
+            return std::format("AutoMod flagged {0} for violating content in their user profile", u);
+        return std::format("AutoMod flagged a message sent by {0} in {1}", t, c);
     case Action::AUTO_MODERATION_USER_COMMUNICATION_DISABLED:
-        return tr("AutoMod timed out %1 for a message posted in %2").arg(t, c);
+        return std::format("AutoMod timed out {0} for a message posted in {1}", t, c);
     case Action::AUTO_MODERATION_QUARANTINE_USER:
-        return tr("AutoMod quarantined %1 for violating content in their user profile").arg(u);
+        return std::format("AutoMod quarantined {0} for violating content in their user profile", u);
     case Action::CREATOR_MONETIZATION_REQUEST_CREATED:
-        return tr("%1 applied for monetization").arg(u);
+        return std::format("{0} applied for monetization", u);
     case Action::CREATOR_MONETIZATION_TERMS_ACCEPTED:
-        return tr("%1 accepted terms for monetization").arg(u);
+        return std::format("{0} accepted terms for monetization", u);
     case Action::AUTO_MODERATION_RULE_CREATE:
-        return tr("%1 created AutoMod rule %2").arg(u, t);
+        return std::format("{0} created AutoMod rule {1}", u, t);
     case Action::AUTO_MODERATION_RULE_UPDATE:
-        return tr("%1 updated AutoMod rule %2").arg(u, t);
+        return std::format("{0} updated AutoMod rule {1}", u, t);
     case Action::AUTO_MODERATION_RULE_DELETE:
-        return tr("%1 deleted AutoMod rule %2").arg(u, t);
+        return std::format("{0} deleted AutoMod rule {1}", u, t);
     case Action::ONBOARDING_PROMPT_CREATE:
-        return tr("%1 created a new customization question").arg(u);
+        return std::format("{0} created a new customization question", u);
     case Action::ONBOARDING_PROMPT_UPDATE:
-        return tr("%1 updated the customization question %2").arg(u, t);
+        return std::format("{0} updated the customization question {1}", u, t);
     case Action::ONBOARDING_PROMPT_DELETE:
-        return tr("%1 deleted the customization question %2").arg(u, t);
+        return std::format("{0} deleted the customization question {1}", u, t);
     case Action::ONBOARDING_CREATE:
-        return tr("%1 started onboarding for this server").arg(u);
+        return std::format("{0} started onboarding for this server", u);
     case Action::ONBOARDING_UPDATE:
-        return tr("%1 updated onboarding for this server").arg(u);
+        return std::format("{0} updated onboarding for this server", u);
     case Action::HOME_SETTINGS_CREATE:
-        return tr("%1 created the Server Guide for this server").arg(u);
+        return std::format("{0} created the Server Guide for this server", u);
     case Action::HOME_SETTINGS_UPDATE:
-        return tr("%1 updated the Server Guide for this server").arg(u);
+        return std::format("{0} updated the Server Guide for this server", u);
     case Action::GUILD_HOME_FEATURE_ITEM: {
         for (const Change &change : entry.changes) {
-            if (change.key != QLatin1String("entity_type"))
+            if (change.key != std::string_view("entity_type"))
                 continue;
-            if (change.newValue.toString() == QLatin1String("message"))
-                return tr("%1 featured a message on Home").arg(u);
-            if (change.newValue.toString() == QLatin1String("forum_post"))
-                return tr("%1 featured a forum post on Home").arg(u);
+            if (text(change.newValue) == std::string_view("message"))
+                return std::format("{0} featured a message on Home", u);
+            if (text(change.newValue) == std::string_view("forum_post"))
+                return std::format("{0} featured a forum post on Home", u);
         }
-        return tr("%1 featured something on Home").arg(u);
+        return std::format("{0} featured something on Home", u);
     }
     case Action::GUILD_HOME_REMOVE_ITEM:
-        return tr("%1 removed an item from Home").arg(u);
+        return std::format("{0} removed an item from Home", u);
     case Action::SOUNDBOARD_SOUND_CREATE:
-        return tr("%1 uploaded a Soundboard sound").arg(u);
+        return std::format("{0} uploaded a Soundboard sound", u);
     case Action::SOUNDBOARD_SOUND_UPDATE:
-        return tr("%1 updated a Soundboard sound").arg(u);
+        return std::format("{0} updated a Soundboard sound", u);
     case Action::SOUNDBOARD_SOUND_DELETE:
-        return tr("%1 deleted a Soundboard sound").arg(u);
+        return std::format("{0} deleted a Soundboard sound", u);
     case Action::VOICE_CHANNEL_STATUS_CREATE:
-        return tr("%1 set a Voice Channel Status in %2").arg(u, c);
+        return std::format("{0} set a Voice Channel Status in {1}", u, c);
     case Action::VOICE_CHANNEL_STATUS_DELETE:
-        return tr("%1 removed a Voice Channel Status in %2").arg(u, c);
+        return std::format("{0} removed a Voice Channel Status in {1}", u, c);
     case Action::GUILD_MEMBER_VERIFICATION_UPDATE:
-        return tr("%1 updated member application settings").arg(u);
+        return std::format("{0} updated member application settings", u);
     case Action::GUILD_PROFILE_UPDATE:
-        return tr("%1 updated server profile settings").arg(u);
+        return std::format("{0} updated server profile settings", u);
     case Action::GUILD_MIGRATE_PIN_PERMISSION:
-        return tr("%1 updated Pin Messages permission").arg(u);
+        return std::format("{0} updated Pin Messages permission", u);
     case Action::GUILD_MIGRATE_BYPASS_SLOWMODE_PERMISSION:
-        return tr("%1 updated Bypass Slowmode permission").arg(u);
+        return std::format("{0} updated Bypass Slowmode permission", u);
     case Action::HARMFUL_LINKS_BLOCKED_MESSAGE:
         break;
     }
     return {};
 }
 
-QList<AuditLogFormatter::Change> AuditLogFormatter::transform(const Entry &entry) const
+std::vector<AuditLogFormatter::Change> AuditLogFormatter::transform(const Entry &entry) const
 {
-    QList<Change> result;
+    std::vector<Change> result;
     const bool onChannel = entry.target == Target::Channel || entry.target == Target::ChannelOverwrite;
-    auto mapBoth = [](Change change, const std::function<QJsonValue(const QJsonValue &)> &map) {
+    auto mapBoth = [](Change change, const std::function<nlohmann::json(const nlohmann::json &)> &map) {
         if (!isNull(change.oldValue))
             change.oldValue = map(change.oldValue);
         if (!isNull(change.newValue))
             change.newValue = map(change.newValue);
         return change;
     };
-    auto channelValue = [this](const QJsonValue &value) { return QJsonValue(channelName(snowflakeOf(value))); };
+    auto channelValue = [this](const nlohmann::json &value) { return nlohmann::json(channelName(snowflakeOf(value))); };
     auto firstTagDifference = [](const Change &change) -> std::optional<Change> {
-        QHash<QString, QJsonObject> before;
-        for (const QJsonValue &tag : change.oldValue.toArray())
-            before.insert(tag.toObject().value("id").toString(), tag.toObject());
-        QSet<QString> after;
-        for (const QJsonValue &tag : change.newValue.toArray()) {
-            const QJsonObject added = tag.toObject();
-            const QString id = added.value("id").toString();
+        std::unordered_map<std::string, nlohmann::json> before;
+        for (const nlohmann::json &tag : change.oldValue)
+            before.insert_or_assign(text(jsonMember(tag, "id")), tag);
+        std::unordered_set<std::string> after;
+        for (const nlohmann::json &tag : change.newValue) {
+            const nlohmann::json added = tag;
+            const std::string id = text(jsonMember(added, "id"));
             after.insert(id);
-            const auto previous = before.constFind(id);
-            if (previous == before.constEnd())
-                return Change{ QStringLiteral("available_tag_add"), QJsonValue(), tagText(added) };
-            if (previous.value() != added)
-                return Change{ QStringLiteral("available_tag_edit"), tagText(previous.value()), tagText(added) };
+            const auto previous = before.find(id);
+            if (previous == before.end())
+                return Change{ std::string("available_tag_add"), nlohmann::json(), tagText(added) };
+            if (previous->second != added)
+                return Change{ std::string("available_tag_edit"), tagText(previous->second), tagText(added) };
         }
-        for (const QJsonValue &tag : change.oldValue.toArray())
-            if (!after.contains(tag.toObject().value("id").toString()))
-                return Change{ QStringLiteral("available_tag_delete"), QJsonValue(), tagText(tag.toObject()) };
+        for (const nlohmann::json &tag : change.oldValue)
+            if (!after.contains(text(jsonMember(tag, "id"))))
+                return Change{ std::string("available_tag_delete"), nlohmann::json(), tagText(tag) };
         return std::nullopt;
     };
 
     for (Change change : entry.changes) {
-        const QString &key = change.key;
+        const std::string &key = change.key;
 
-        if (entry.action == Action::APPLICATION_COMMAND_PERMISSION_UPDATE && key != QLatin1String("reason")) {
-            const QJsonObject permission = (isNull(change.oldValue) ? change.newValue : change.oldValue).toObject();
-            const Core::Snowflake id = snowflakeOf(permission.value("id"));
-            switch (permission.value("type").toInt()) {
+        if (entry.action == Action::APPLICATION_COMMAND_PERMISSION_UPDATE && key != std::string_view("reason")) {
+            const nlohmann::json permission = (isNull(change.oldValue) ? change.newValue : change.oldValue);
+            const Core::Snowflake id = snowflakeOf(jsonMember(permission, "id"));
+            switch (number(jsonMember(permission, "type"))) {
             case 1:
                 change.subtarget = roleName(id);
                 break;
@@ -1154,86 +1135,86 @@ QList<AuditLogFormatter::Change> AuditLogFormatter::transform(const Entry &entry
                 change.subtarget = userTag(id);
                 break;
             case 3:
-                change.subtarget = quint64(id) == quint64(guildId) - 1 ? tr("all channels") : channelName(id);
+                change.subtarget = uint64_t(id) == uint64_t(guildId) - 1 ? std::string("all channels") : channelName(id);
                 break;
             }
-            if (change.subtarget.isEmpty())
-                change.subtarget = QString::number(quint64(id));
-            result.append(change);
+            if (change.subtarget.empty())
+                change.subtarget = std::to_string(uint64_t(id));
+            result.push_back(change);
             continue;
         }
 
-        if (key == QLatin1String("owner_id")) {
-            result.append(mapBoth(change, [this](const QJsonValue &value) {
+        if (key == std::string_view("owner_id")) {
+            result.push_back(mapBoth(change, [this](const nlohmann::json &value) {
                 const auto owner = user(snowflakeOf(value));
-                return QJsonValue(owner ? owner->username.get() : QStringLiteral("???"));
+                return nlohmann::json(owner ? owner->username.get() : std::string("???"));
             }));
-        } else if (key == QLatin1String("channel_id") ||
-                   key == QLatin1String("afk_channel_id") ||
-                   key == QLatin1String("system_channel_id") ||
-                   key == QLatin1String("rules_channel_id") ||
-                   key == QLatin1String("public_updates_channel_id") ||
-                   key == QLatin1String("widget_channel_id")) {
-            result.append(mapBoth(change, channelValue));
-        } else if (key == QLatin1String("afk_timeout")) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(number(value) / 60); }));
-        } else if (key == QLatin1String("bitrate")) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(number(value) / 1000); }));
-        } else if (key == QLatin1String("color")) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(colorText(value)); }));
-        } else if (key == QLatin1String("max_age")) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(inviteMaxAgeText(number(value))); }));
-        } else if (key == QLatin1String("permissions") && entry.target == Target::Role) {
-            const quint64 before = bitsOf(change.oldValue);
-            const quint64 after = bitsOf(change.newValue);
-            const QStringList granted = permissionNames(after & ~before, false);
-            const QStringList denied = permissionNames(before & ~after, false);
-            if (!granted.isEmpty())
-                result.append({ QStringLiteral("allow"), QJsonValue(), QJsonValue(), QString(), granted });
-            if (!denied.isEmpty())
-                result.append({ QStringLiteral("deny"), QJsonValue(), QJsonValue(), QString(), denied });
-        } else if ((key == QLatin1String("allow") || key == QLatin1String("deny")) && onChannel) {
-            const quint64 before = bitsOf(change.oldValue);
-            const quint64 after = bitsOf(change.newValue);
-            const QStringList added = permissionNames(after & ~before, true);
-            const QStringList reset = permissionNames(before & ~after, true);
-            if (!added.isEmpty())
-                result.append({ key, QJsonValue(), QJsonValue(), QString(), added });
-            if (!reset.isEmpty())
-                result.append({ QStringLiteral("reset"), QJsonValue(), QJsonValue(), QString(), reset });
-        } else if (key == QLatin1String("flags")) {
-            const quint64 before = quint64(number(change.oldValue));
-            const quint64 after = quint64(number(change.newValue));
+        } else if (key == std::string_view("channel_id") ||
+                   key == std::string_view("afk_channel_id") ||
+                   key == std::string_view("system_channel_id") ||
+                   key == std::string_view("rules_channel_id") ||
+                   key == std::string_view("public_updates_channel_id") ||
+                   key == std::string_view("widget_channel_id")) {
+            result.push_back(mapBoth(change, channelValue));
+        } else if (key == std::string_view("afk_timeout")) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(number(value) / 60); }));
+        } else if (key == std::string_view("bitrate")) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(number(value) / 1000); }));
+        } else if (key == std::string_view("color")) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(colorText(value)); }));
+        } else if (key == std::string_view("max_age")) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(inviteMaxAgeText(number(value))); }));
+        } else if (key == std::string_view("permissions") && entry.target == Target::Role) {
+            const uint64_t before = bitsOf(change.oldValue);
+            const uint64_t after = bitsOf(change.newValue);
+            const std::vector<std::string> granted = permissionNames(after & ~before, false);
+            const std::vector<std::string> denied = permissionNames(before & ~after, false);
+            if (!granted.empty())
+                result.push_back({ std::string("allow"), nlohmann::json(), nlohmann::json(), std::string(), granted });
+            if (!denied.empty())
+                result.push_back({ std::string("deny"), nlohmann::json(), nlohmann::json(), std::string(), denied });
+        } else if ((key == std::string_view("allow") || key == std::string_view("deny")) && onChannel) {
+            const uint64_t before = bitsOf(change.oldValue);
+            const uint64_t after = bitsOf(change.newValue);
+            const std::vector<std::string> added = permissionNames(after & ~before, true);
+            const std::vector<std::string> reset = permissionNames(before & ~after, true);
+            if (!added.empty())
+                result.push_back({ key, nlohmann::json(), nlohmann::json(), std::string(), added });
+            if (!reset.empty())
+                result.push_back({ std::string("reset"), nlohmann::json(), nlohmann::json(), std::string(), reset });
+        } else if (key == std::string_view("flags")) {
+            const uint64_t before = uint64_t(number(change.oldValue));
+            const uint64_t after = uint64_t(number(change.newValue));
             if (entry.target == Target::Invite) {
                 if ((after & ~before) == 1)
-                    result.append({ key, QJsonValue(), QJsonValue(1) });
+                    result.push_back({ key, nlohmann::json(), nlohmann::json(1) });
                 continue;
             }
-            QStringList items;
-            const quint64 added = after & ~before;
-            const quint64 removed = before & ~after;
+            std::vector<std::string> items;
+            const uint64_t added = after & ~before;
+            const uint64_t removed = before & ~after;
             if (added & 1)
-                items.append(tr("Removed channel from Home"));
+                items.push_back(std::string("Removed channel from Home"));
             if (added & 2)
-                items.append(tr("Pinned"));
+                items.push_back(std::string("Pinned"));
             if (added & 4)
-                items.append(tr("Removed channel from Active Now"));
+                items.push_back(std::string("Removed channel from Active Now"));
             if (removed & 1)
-                items.append(tr("Added channel back to Home"));
+                items.push_back(std::string("Added channel back to Home"));
             if (removed & 2)
-                items.append(tr("Unpinned"));
+                items.push_back(std::string("Unpinned"));
             if (removed & 4)
-                items.append(tr("Added channel back to Active Now"));
+                items.push_back(std::string("Added channel back to Active Now"));
             if (added || removed)
-                result.append({ key, change.oldValue, change.newValue, QString(), items });
-        } else if (key == QLatin1String("preferred_locale")) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(localeName(value.toString())); }));
-        } else if (key == QLatin1String("video_quality_mode")) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(number(value) == 2 ? QStringLiteral("720p") : tr("Auto")); }));
-        } else if (key == QLatin1String("system_channel_flags")) {
-            const quint64 before = quint64(number(change.oldValue));
-            const quint64 after = quint64(number(change.newValue));
-            static const QPair<quint64, const char *> flagKeys[] = {
+                result.push_back({ key, change.oldValue, change.newValue, std::string(), items });
+        } else if (key == std::string_view("preferred_locale")) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(localeName(text(value))); }));
+        } else if (key == std::string_view("video_quality_mode")) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(number(value) == 2 ? std::string("720p") : std::string("Auto")); }));
+        } else if (key == std::string_view("system_channel_flags")) {
+            const uint64_t before = uint64_t(number(change.oldValue));
+            const uint64_t after = uint64_t(number(change.newValue));
+            static const std::pair<uint64_t, const char *> flagKeys[] = {
                 { 1, "join_notifications" },
                 { 2, "premium_subscriptions" },
                 { 4, "reminder_notifications" },
@@ -1241,89 +1222,89 @@ QList<AuditLogFormatter::Change> AuditLogFormatter::transform(const Entry &entry
             };
             for (const auto &flagKey : flagKeys)
                 if ((before & flagKey.first) != (after & flagKey.first))
-                    result.append({ QString::fromLatin1(flagKey.second), QJsonValue(!(before & flagKey.first)), QJsonValue(!(after & flagKey.first)) });
-        } else if (key == QLatin1String("actions") && entry.target == Target::AutoModerationRule) {
-            result.append(mapBoth(change, [](const QJsonValue &value) {
-                QStringList names;
-                for (const QJsonValue &action : value.toArray())
-                    names.append(autoModActionName(action.toObject().value("type").toInt()));
-                return QJsonValue(names.join(QStringLiteral(", ")));
+                    result.push_back({ std::string(flagKey.second), nlohmann::json(!(before & flagKey.first)), nlohmann::json(!(after & flagKey.first)) });
+        } else if (key == std::string_view("actions") && entry.target == Target::AutoModerationRule) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) {
+                std::vector<std::string> names;
+                for (const nlohmann::json &action : value)
+                    names.push_back(autoModActionName(number(jsonMember(action, "type"))));
+                return nlohmann::json(join(names, std::string(", ")));
             }));
-        } else if (key == QLatin1String("event_type") && entry.target == Target::AutoModerationRule) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(autoModEventName(number(value))); }));
-        } else if (key == QLatin1String("trigger_type") && entry.target == Target::AutoModerationRule) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(autoModTriggerName(number(value))); }));
-        } else if (key == QLatin1String("trigger_metadata")) {
-            result.append(mapBoth(change, [](const QJsonValue &value) {
-                const QJsonObject metadata = value.toObject();
-                if (metadata.value("keyword_filter").isArray())
-                    return QJsonValue(tr("keywords to %1").arg(quotedList(metadata.value("keyword_filter"))));
-                return QJsonValue(text(value));
+        } else if (key == std::string_view("event_type") && entry.target == Target::AutoModerationRule) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(autoModEventName(number(value))); }));
+        } else if (key == std::string_view("trigger_type") && entry.target == Target::AutoModerationRule) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(autoModTriggerName(number(value))); }));
+        } else if (key == std::string_view("trigger_metadata")) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) {
+                const nlohmann::json metadata = value;
+                if (jsonMember(metadata, "keyword_filter").is_array())
+                    return nlohmann::json(std::format("keywords to {0}", quotedList(jsonMember(metadata, "keyword_filter"))));
+                return nlohmann::json(text(value));
             }));
-        } else if (key.startsWith(QLatin1String("$add_")) || key.startsWith(QLatin1String("$remove_"))) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(quotedList(value)); }));
-        } else if (key == QLatin1String("exempt_channels") || key == QLatin1String("exempt_roles")) {
-            const bool channels = key == QLatin1String("exempt_channels");
-            result.append(mapBoth(change, [this, channels](const QJsonValue &value) {
-                QStringList names;
-                for (const QJsonValue &id : value.toArray()) {
-                    const QString name = channels ? (instance && instance->getChannel(snowflakeOf(id)) ? channelName(snowflakeOf(id)) : QString())
+        } else if (key.starts_with(std::string_view("$add_")) || key.starts_with(std::string_view("$remove_"))) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(quotedList(value)); }));
+        } else if (key == std::string_view("exempt_channels") || key == std::string_view("exempt_roles")) {
+            const bool channels = key == std::string_view("exempt_channels");
+            result.push_back(mapBoth(change, [this, channels](const nlohmann::json &value) {
+                std::vector<std::string> names;
+                for (const nlohmann::json &id : value) {
+                    const std::string name = channels ? (instance && instance->getChannel(snowflakeOf(id)) ? channelName(snowflakeOf(id)) : std::string())
                                                   : roleName(snowflakeOf(id));
-                    if (!name.isEmpty())
-                        names.append(name);
+                    if (!name.empty())
+                        names.push_back(name);
                 }
-                return QJsonValue(names.isEmpty() ? tr("None") : names.join(QStringLiteral(", ")));
+                return nlohmann::json(names.empty() ? std::string("None") : join(names, std::string(", ")));
             }));
-        } else if ((key == QLatin1String("$add") || key == QLatin1String("$remove")) && entry.target == Target::User) {
-            for (const QJsonValue &role : change.newValue.toArray())
-                change.items.append(role.toObject().value("name").toString());
-            result.append(change);
-        } else if (key == QLatin1String("role_ids") && entry.target == Target::Invite) {
-            for (const QJsonValue &roleId : change.newValue.toArray()) {
-                const QString name = roleName(snowflakeOf(roleId));
-                if (!name.isEmpty())
-                    change.items.append(name);
+        } else if ((key == std::string_view("$add") || key == std::string_view("$remove")) && entry.target == Target::User) {
+            for (const nlohmann::json &role : change.newValue)
+                change.items.push_back(text(jsonMember(role, "name")));
+            result.push_back(change);
+        } else if (key == std::string_view("role_ids") && entry.target == Target::Invite) {
+            for (const nlohmann::json &roleId : change.newValue) {
+                const std::string name = roleName(snowflakeOf(roleId));
+                if (!name.empty())
+                    change.items.push_back(name);
             }
-            result.append(change);
-        } else if (key == QLatin1String("available_tags")) {
+            result.push_back(change);
+        } else if (key == std::string_view("available_tags")) {
             if (const auto difference = firstTagDifference(change))
-                result.append(*difference);
-        } else if (key == QLatin1String("applied_tags")) {
-            QHash<Core::Snowflake, QString> tagNames;
-            const auto thread = threads.constFind(entry.targetId);
-            const Core::Snowflake forumId = thread != threads.constEnd() ? snowflakeOf(thread->value("parent_id")) : Core::Snowflake();
+                result.push_back(*difference);
+        } else if (key == std::string_view("applied_tags")) {
+            std::unordered_map<Core::Snowflake, std::string> tagNames;
+            const auto thread = threads.find(entry.targetId);
+            const Core::Snowflake forumId = thread != threads.end() ? snowflakeOf(jsonMember(thread->second, "parent_id")) : Core::Snowflake();
             if (const auto forum = instance && forumId.isValid() ? instance->getChannel(forumId) : std::nullopt; forum && forum->availableTags.hasValue())
                 for (const Discord::ForumTag &tag : forum->availableTags.get())
-                    tagNames.insert(tag.id.get(), tag.emojiName.hasValue() && !tag.emojiName->isEmpty()
-                                                          ? tag.emojiName.get() + QLatin1Char(' ') + tag.name.get()
+                    tagNames.insert_or_assign(tag.id.get(), tag.emojiName.hasValue() && !tag.emojiName->empty()
+                                                          ? tag.emojiName.get() + char(' ') + tag.name.get()
                                                           : tag.name.get());
-            auto nameOf = [&tagNames](const QJsonValue &id) {
-                const auto found = tagNames.constFind(snowflakeOf(id));
-                return found != tagNames.constEnd() ? found.value() : id.toString();
+            auto nameOf = [&tagNames](const nlohmann::json &id) {
+                const auto found = tagNames.find(snowflakeOf(id));
+                return found != tagNames.end() ? found->second : text(id);
             };
-            QSet<QString> before;
-            for (const QJsonValue &id : change.oldValue.toArray())
-                before.insert(id.toString());
-            QSet<QString> after;
-            for (const QJsonValue &id : change.newValue.toArray())
-                after.insert(id.toString());
-            for (const QJsonValue &id : change.newValue.toArray())
-                if (!before.contains(id.toString()))
-                    result.append({ QStringLiteral("available_tag_add"), QJsonValue(), nameOf(id) });
-            for (const QJsonValue &id : change.oldValue.toArray())
-                if (!after.contains(id.toString()))
-                    result.append({ QStringLiteral("available_tag_delete"), QJsonValue(), nameOf(id) });
-        } else if (key == QLatin1String("scheduled_start_time") || key == QLatin1String("scheduled_end_time")) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(longDateTime(value)); }));
-        } else if (key == QLatin1String("communication_disabled_until") && entry.action == Action::MEMBER_UPDATE) {
-            result.append(mapBoth(change, [](const QJsonValue &value) {
-                const QDateTime until = QDateTime::fromString(value.toString(), Qt::ISODateWithMs);
-                return until.isValid() ? QJsonValue(calendar(until)) : value;
+            std::unordered_set<std::string> before;
+            for (const nlohmann::json &id : change.oldValue)
+                before.insert(text(id));
+            std::unordered_set<std::string> after;
+            for (const nlohmann::json &id : change.newValue)
+                after.insert(text(id));
+            for (const nlohmann::json &id : change.newValue)
+                if (!before.contains(text(id)))
+                    result.push_back({ std::string("available_tag_add"), nlohmann::json(), nameOf(id) });
+            for (const nlohmann::json &id : change.oldValue)
+                if (!after.contains(text(id)))
+                    result.push_back({ std::string("available_tag_delete"), nlohmann::json(), nameOf(id) });
+        } else if (key == std::string_view("scheduled_start_time") || key == std::string_view("scheduled_end_time")) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(longDateTime(value)); }));
+        } else if (key == std::string_view("communication_disabled_until") && entry.action == Action::MEMBER_UPDATE) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) {
+                const Platform::DateTime until = Platform::DateTime::parse(text(value));
+                return until.valid() ? nlohmann::json(calendar(until)) : value;
             }));
-        } else if (key == QLatin1String("type") && onChannel) {
-            result.append(mapBoth(change, [](const QJsonValue &value) { return QJsonValue(channelTypeName(number(value))); }));
+        } else if (key == std::string_view("type") && onChannel) {
+            result.push_back(mapBoth(change, [](const nlohmann::json &value) { return nlohmann::json(channelTypeName(number(value))); }));
         } else {
-            result.append(change);
+            result.push_back(change);
         }
     }
     return result;
@@ -1331,19 +1312,19 @@ QList<AuditLogFormatter::Change> AuditLogFormatter::transform(const Entry &entry
 
 std::optional<AuditLogFormatter::Line> AuditLogFormatter::describe(const Entry &entry, const Change &change) const
 {
-    const QString &key = change.key;
-    const QJsonValue &oldValue = change.oldValue;
-    const QJsonValue &newValue = change.newValue;
+    const std::string &key = change.key;
+    const nlohmann::json &oldValue = change.oldValue;
+    const nlohmann::json &newValue = change.newValue;
     const bool hasOld = !isNull(oldValue);
     const bool hasNew = !isNull(newValue);
-    const QString oldText = bold(text(oldValue));
-    const QString newText = bold(text(newValue));
-    const qint64 count = change.items.isEmpty() && newValue.isArray() ? newValue.toArray().size() : change.items.size();
+    const std::string oldText = bold(text(oldValue));
+    const std::string newText = bold(text(newValue));
+    const int64_t count = change.items.empty() && newValue.is_array() ? newValue.size() : change.items.size();
 
-    auto line = [&change](const QString &html) { return std::optional<Line>(Line{ html, change.items }); };
-    auto createdOrChanged = [&](const QString &created, const QString &changed) { return line(hasOld ? changed : created); };
-    auto clearedOrSet = [&](const QString &cleared, const QString &set) { return line(hasNew ? set : cleared); };
-    auto changedSetCleared = [&](const QString &changed, const QString &set, const QString &cleared) -> std::optional<Line> {
+    auto line = [&change](const std::string &html) { return std::optional<Line>(Line{ html, change.items }); };
+    auto createdOrChanged = [&](const std::string &created, const std::string &changed) { return line(hasOld ? changed : created); };
+    auto clearedOrSet = [&](const std::string &cleared, const std::string &set) { return line(hasNew ? set : cleared); };
+    auto changedSetCleared = [&](const std::string &changed, const std::string &set, const std::string &cleared) -> std::optional<Line> {
         if (hasOld && hasNew)
             return line(changed);
         if (hasNew)
@@ -1352,28 +1333,28 @@ std::optional<AuditLogFormatter::Line> AuditLogFormatter::describe(const Entry &
             return line(cleared);
         return std::nullopt;
     };
-    auto onOff = [&](const QString &on, const QString &off) { return line(truthy(newValue) ? on : off); };
+    auto onOff = [&](const std::string &on, const std::string &off) { return line(truthy(newValue) ? on : off); };
     auto nameLines = [&](const char *created) {
-        return createdOrChanged(tr(created).arg(newText), tr("Changed the name from %1 to %2").arg(oldText, newText));
+        return createdOrChanged(std::vformat(created, std::make_format_args(newText)), std::format("Changed the name from {0} to {1}", oldText, newText));
     };
     auto slowmode = [&]() {
-        const qint64 seconds = number(newValue);
+        const int64_t seconds = number(newValue);
         if (seconds == 0)
-            return line(hasOld ? tr("Disabled slowmode") : tr("Set slowmode disabled"));
-        return line(tr("Set slowmode to %1").arg(QStringLiteral("<b>%1</b>").arg(countText(seconds, QT_TRANSLATE_NOOP("AuditLogFormatter", "1 second"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 seconds")))));
+            return line(hasOld ? std::string("Disabled slowmode") : std::string("Set slowmode disabled"));
+        return line(std::format("Set slowmode to {0}", std::format("<b>{0}</b>", countText(seconds, "1 second", "{0} seconds"))));
     };
     auto hideDuration = [&](const char *removed, const char *set, const char *changed) {
-        const qint64 minutes = number(newValue);
+        const int64_t minutes = number(newValue);
         if (minutes == 0)
             return line(tr(removed));
-        const QString duration = QStringLiteral("<b>%1</b>").arg(countText(minutes, QT_TRANSLATE_NOOP("AuditLogFormatter", "1 minute"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 minutes")));
-        return line(tr(hasOld ? changed : set).arg(duration));
+        const std::string duration = std::format("<b>{0}</b>", countText(minutes, "1 minute", "{0} minutes"));
+        return line(std::vformat(hasOld ? changed : set, std::make_format_args(duration)));
     };
 
-    if (key == QLatin1String("reason")) {
+    if (key == std::string_view("reason")) {
         if (entry.target == Target::GuildProfile)
             return std::nullopt;
-        return line(tr("With reason %1").arg(newText));
+        return line(std::format("With reason {0}", newText));
     }
 
     if (entry.category == Category::Delete &&
@@ -1384,221 +1365,220 @@ std::optional<AuditLogFormatter::Line> AuditLogFormatter::describe(const Entry &
 
     switch (entry.target) {
     case Target::Guild:
-        if (key == QLatin1String("name"))
-            return line(tr("Set the server name to %1").arg(newText));
-        if (key == QLatin1String("description"))
-            return clearedOrSet(tr("<b>Cleared</b> the server description"), tr("Set the server description to %1").arg(newText));
-        if (key == QLatin1String("icon_hash"))
-            return line(tr("Set the server icon"));
-        if (key == QLatin1String("splash_hash"))
-            return line(tr("Set the server invite background"));
-        if (key == QLatin1String("discovery_splash_hash"))
-            return line(tr("Set the Server Discovery background"));
-        if (key == QLatin1String("banner_hash"))
-            return clearedOrSet(tr("Removed the server banner"), tr("Set the server banner"));
-        if (key == QLatin1String("owner_id"))
-            return line(tr("Passed ownership to %1").arg(newText));
-        if (key == QLatin1String("region"))
-            return line(tr("Set the voice region to %1").arg(newText));
-        if (key == QLatin1String("preferred_locale"))
-            return line(tr("Set the preferred locale to %1").arg(newText));
-        if (key == QLatin1String("afk_channel_id"))
-            return clearedOrSet(tr("<b>Cleared</b> the inactive channel"), tr("Set the inactive channel to %1").arg(newText));
-        if (key == QLatin1String("afk_timeout"))
-            return line(tr("Set the inactive timeout to %1 minutes").arg(newText));
-        if (key == QLatin1String("system_channel_id"))
-            return clearedOrSet(tr("<b>Disabled</b> the welcome notification messages"), tr("Set the welcome notification channel to %1").arg(newText));
-        if (key == QLatin1String("rules_channel_id"))
-            return clearedOrSet(tr("<b>Cleared</b> the rules channel"), tr("Set the rules channel to %1").arg(newText));
-        if (key == QLatin1String("public_updates_channel_id"))
-            return clearedOrSet(tr("<b>Cleared</b> the Community Server updates channel"), tr("Set the Community Server updates channel to %1").arg(newText));
-        if (key == QLatin1String("mfa_level")) {
+        if (key == std::string_view("name"))
+            return line(std::format("Set the server name to {0}", newText));
+        if (key == std::string_view("description"))
+            return clearedOrSet(std::string("<b>Cleared</b> the server description"), std::format("Set the server description to {0}", newText));
+        if (key == std::string_view("icon_hash"))
+            return line(std::string("Set the server icon"));
+        if (key == std::string_view("splash_hash"))
+            return line(std::string("Set the server invite background"));
+        if (key == std::string_view("discovery_splash_hash"))
+            return line(std::string("Set the Server Discovery background"));
+        if (key == std::string_view("banner_hash"))
+            return clearedOrSet(std::string("Removed the server banner"), std::string("Set the server banner"));
+        if (key == std::string_view("owner_id"))
+            return line(std::format("Passed ownership to {0}", newText));
+        if (key == std::string_view("region"))
+            return line(std::format("Set the voice region to {0}", newText));
+        if (key == std::string_view("preferred_locale"))
+            return line(std::format("Set the preferred locale to {0}", newText));
+        if (key == std::string_view("afk_channel_id"))
+            return clearedOrSet(std::string("<b>Cleared</b> the inactive channel"), std::format("Set the inactive channel to {0}", newText));
+        if (key == std::string_view("afk_timeout"))
+            return line(std::format("Set the inactive timeout to {0} minutes", newText));
+        if (key == std::string_view("system_channel_id"))
+            return clearedOrSet(std::string("<b>Disabled</b> the welcome notification messages"), std::format("Set the welcome notification channel to {0}", newText));
+        if (key == std::string_view("rules_channel_id"))
+            return clearedOrSet(std::string("<b>Cleared</b> the rules channel"), std::format("Set the rules channel to {0}", newText));
+        if (key == std::string_view("public_updates_channel_id"))
+            return clearedOrSet(std::string("<b>Cleared</b> the Community Server updates channel"), std::format("Set the Community Server updates channel to {0}", newText));
+        if (key == std::string_view("mfa_level")) {
             if (!hasNew)
                 return std::nullopt;
-            return line(number(newValue) == 1 ? tr("<b>Enabled</b> two-factor authentication requirement")
-                                              : tr("<b>Disabled</b> two-factor authentication requirement"));
+            return line(number(newValue) == 1 ? std::string("<b>Enabled</b> two-factor authentication requirement")
+                                              : std::string("<b>Disabled</b> two-factor authentication requirement"));
         }
-        if (key == QLatin1String("widget_enabled"))
-            return onOff(tr("<b>Enabled</b> the widget"), tr("<b>Disabled</b> the widget"));
-        if (key == QLatin1String("widget_channel_id"))
-            return clearedOrSet(tr("<b>Removed</b> the widget channel"), tr("Set the widget channel to %1").arg(newText));
-        if (key == QLatin1String("verification_level")) {
+        if (key == std::string_view("widget_enabled"))
+            return onOff(std::string("<b>Enabled</b> the widget"), std::string("<b>Disabled</b> the widget"));
+        if (key == std::string_view("widget_channel_id"))
+            return clearedOrSet(std::string("<b>Removed</b> the widget channel"), std::format("Set the widget channel to {0}", newText));
+        if (key == std::string_view("verification_level")) {
             static const char *const levels[] = {
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "None"),
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "Low"),
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "Medium"),
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "High"),
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "Very High"),
+                "None",
+                "Low",
+                "Medium",
+                "High",
+                "Very High",
             };
-            const qint64 level = number(newValue);
+            const int64_t level = number(newValue);
             if (!hasNew || level < 0 || level > 4)
                 return std::nullopt;
-            return line(tr("Set the server verification level to %1").arg(bold(tr(levels[level]))));
+            return line(std::format("Set the server verification level to {0}", bold(tr(levels[level]))));
         }
-        if (key == QLatin1String("default_message_notifications")) {
+        if (key == std::string_view("default_message_notifications")) {
             if (!hasNew || number(newValue) > 1)
                 return std::nullopt;
-            return line(tr("Set the default message notification setting to %1").arg(bold(number(newValue) == 0 ? tr("All Messages") : tr("Only Mentions"))));
+            return line(std::format("Set the default message notification setting to {0}", bold(number(newValue) == 0 ? std::string("All Messages") : std::string("Only Mentions"))));
         }
-        if (key == QLatin1String("vanity_url_code"))
-            return clearedOrSet(tr("<b>Removed</b> the Custom Invite Link"), tr("Set the Custom Invite Link to %1").arg(newText));
-        if (key == QLatin1String("explicit_content_filter")) {
+        if (key == std::string_view("vanity_url_code"))
+            return clearedOrSet(std::string("<b>Removed</b> the Custom Invite Link"), std::format("Set the Custom Invite Link to {0}", newText));
+        if (key == std::string_view("explicit_content_filter")) {
             switch (hasNew ? number(newValue) : -1) {
             case 0:
-                return line(tr("<b>Disabled</b> the explicit content filter"));
+                return line(std::string("<b>Disabled</b> the explicit content filter"));
             case 1:
-                return line(tr("Set the explicit content filter to scan messages from %1").arg(bold(tr("members without a role"))));
+                return line(std::format("Set the explicit content filter to scan messages from {0}", bold(std::string("members without a role"))));
             case 2:
-                return line(tr("Set the explicit content filter to scan messages from %1").arg(bold(tr("all members"))));
+                return line(std::format("Set the explicit content filter to scan messages from {0}", bold(std::string("all members"))));
             }
             return std::nullopt;
         }
-        if (key == QLatin1String("premium_progress_bar_enabled"))
-            return onOff(tr("Turned <b>on</b> the Boost progress bar"), tr("Turned <b>off</b> the Boost progress bar"));
-        if (key == QLatin1String("triggered_rule_name"))
-            return line(tr("Detected by rule %1").arg(newText));
-        if (key == QLatin1String("join_notifications"))
-            return line(tr("Set system channel welcome messages to %1").arg(newText));
-        if (key == QLatin1String("premium_subscriptions"))
-            return line(tr("Set system channel boost notifications to %1").arg(newText));
-        if (key == QLatin1String("reminder_notifications"))
-            return line(tr("Set system channel server setup tips to %1").arg(newText));
-        if (key == QLatin1String("join_notification_replies"))
-            return line(tr("Set system channel welcome stickers to %1").arg(newText));
+        if (key == std::string_view("premium_progress_bar_enabled"))
+            return onOff(std::string("Turned <b>on</b> the Boost progress bar"), std::string("Turned <b>off</b> the Boost progress bar"));
+        if (key == std::string_view("triggered_rule_name"))
+            return line(std::format("Detected by rule {0}", newText));
+        if (key == std::string_view("join_notifications"))
+            return line(std::format("Set system channel welcome messages to {0}", newText));
+        if (key == std::string_view("premium_subscriptions"))
+            return line(std::format("Set system channel boost notifications to {0}", newText));
+        if (key == std::string_view("reminder_notifications"))
+            return line(std::format("Set system channel server setup tips to {0}", newText));
+        if (key == std::string_view("join_notification_replies"))
+            return line(std::format("Set system channel welcome stickers to {0}", newText));
         return std::nullopt;
 
     case Target::Channel:
     case Target::ChannelOverwrite:
-        if (key == QLatin1String("id") ||
-            key == QLatin1String("permission_overwrites") ||
-            (entry.target == Target::ChannelOverwrite && key == QLatin1String("type")))
+        if (key == std::string_view("id") ||
+            key == std::string_view("permission_overwrites") ||
+            (entry.target == Target::ChannelOverwrite && key == std::string_view("type")))
             return std::nullopt;
-        if (key == QLatin1String("name"))
-            return nameLines(QT_TRANSLATE_NOOP("AuditLogFormatter", "Set the name to %1"));
-        if (key == QLatin1String("position"))
-            return createdOrChanged(tr("In position %1").arg(newText), tr("Moved from %1 to %2").arg(oldText, newText));
-        if (key == QLatin1String("topic"))
-            return changedSetCleared(tr("Changed the topic to %1").arg(newText), tr("Set the topic to %1").arg(newText), tr("<b>Cleared</b> the topic"));
-        if (key == QLatin1String("bitrate"))
-            return createdOrChanged(tr("Set the bitrate to %1").arg(newText), tr("Changed the bitrate to %1").arg(newText));
-        if (key == QLatin1String("rtc_region"))
-            return changedSetCleared(tr("Changed the region override from %1 to %2").arg(oldText, newText),
-                                     tr("Set the region override to %1").arg(newText), tr("Removed the region override"));
-        if (key == QLatin1String("user_limit"))
-            return createdOrChanged(tr("Set the user limit to %1").arg(newText), tr("Changed the user limit to %1").arg(newText));
-        if (key == QLatin1String("rate_limit_per_user"))
+        if (key == std::string_view("name"))
+            return nameLines("Set the name to {0}");
+        if (key == std::string_view("position"))
+            return createdOrChanged(std::format("In position {0}", newText), std::format("Moved from {0} to {1}", oldText, newText));
+        if (key == std::string_view("topic"))
+            return changedSetCleared(std::format("Changed the topic to {0}", newText), std::format("Set the topic to {0}", newText), std::string("<b>Cleared</b> the topic"));
+        if (key == std::string_view("bitrate"))
+            return createdOrChanged(std::format("Set the bitrate to {0}", newText), std::format("Changed the bitrate to {0}", newText));
+        if (key == std::string_view("rtc_region"))
+            return changedSetCleared(std::format("Changed the region override from {0} to {1}", oldText, newText),
+                                     std::format("Set the region override to {0}", newText), std::string("Removed the region override"));
+        if (key == std::string_view("user_limit"))
+            return createdOrChanged(std::format("Set the user limit to {0}", newText), std::format("Changed the user limit to {0}", newText));
+        if (key == std::string_view("rate_limit_per_user"))
             return slowmode();
-        if (key == QLatin1String("reset") || key == QLatin1String("allow") || key == QLatin1String("deny")) {
-            const QString permissions = count == 1 ? tr("a permission") : tr("permissions");
-            QString subtarget = entry.raw.options.value("type").toString() == QLatin1String("1")
-                                        ? userTag(snowflakeOf(entry.raw.options.value("id")))
-                                        : entry.raw.options.value("role_name").toString();
-            if (key == QLatin1String("reset"))
-                return line(tr("<b>Reset</b> %1 for %2").arg(permissions, bold(subtarget)));
-            if (key == QLatin1String("allow"))
-                return line(tr("<b>Granted</b> %1 for %2").arg(permissions, bold(subtarget)));
-            return line(tr("<b>Denied</b> %1 for %2").arg(permissions, bold(subtarget)));
+        if (key == std::string_view("reset") || key == std::string_view("allow") || key == std::string_view("deny")) {
+            const std::string permissions = count == 1 ? std::string("a permission") : std::string("permissions");
+            std::string subtarget = text(jsonMember(entry.raw.options, "type")) == std::string_view("1")
+                                        ? userTag(snowflakeOf(jsonMember(entry.raw.options, "id")))
+                                        : text(jsonMember(entry.raw.options, "role_name"));
+            if (key == std::string_view("reset"))
+                return line(std::format("<b>Reset</b> {0} for {1}", permissions, bold(subtarget)));
+            if (key == std::string_view("allow"))
+                return line(std::format("<b>Granted</b> {0} for {1}", permissions, bold(subtarget)));
+            return line(std::format("<b>Denied</b> {0} for {1}", permissions, bold(subtarget)));
         }
-        if (key == QLatin1String("nsfw"))
-            return onOff(tr("Marked the channel as age-restricted"), tr("Unmarked the channel as age-restricted"));
-        if (key == QLatin1String("type"))
-            return createdOrChanged(tr("Set the type to %1").arg(newText), tr("Changed the type from %1 to %2").arg(oldText, newText));
-        if (key == QLatin1String("video_quality_mode"))
-            return line(tr("Set the video quality mode to %1").arg(newText));
-        if (key == QLatin1String("default_auto_archive_duration"))
-            return hideDuration(QT_TRANSLATE_NOOP("AuditLogFormatter", "Removed default hide duration"),
-                                QT_TRANSLATE_NOOP("AuditLogFormatter", "Set default hide duration to %1"),
-                                QT_TRANSLATE_NOOP("AuditLogFormatter", "Changed default hide duration to %1"));
-        if (key == QLatin1String("default_thread_rate_limit_per_user")) {
-            const QString seconds = QStringLiteral("<b>%1</b>").arg(countText(number(newValue), QT_TRANSLATE_NOOP("AuditLogFormatter", "1 second"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 seconds")));
-            return changedSetCleared(tr("Changed default thread slowmode to %1").arg(seconds),
-                                     tr("Set default thread slowmode to %1").arg(seconds), tr("Disabled default thread slowmode"));
+        if (key == std::string_view("nsfw"))
+            return onOff(std::string("Marked the channel as age-restricted"), std::string("Unmarked the channel as age-restricted"));
+        if (key == std::string_view("type"))
+            return createdOrChanged(std::format("Set the type to {0}", newText), std::format("Changed the type from {0} to {1}", oldText, newText));
+        if (key == std::string_view("video_quality_mode"))
+            return line(std::format("Set the video quality mode to {0}", newText));
+        if (key == std::string_view("default_auto_archive_duration"))
+            return hideDuration("Removed default hide duration",
+                                "Set default hide duration to {0}",
+                                "Changed default hide duration to {0}");
+        if (key == std::string_view("default_thread_rate_limit_per_user")) {
+            const std::string seconds = std::format("<b>{0}</b>", countText(number(newValue), "1 second", "{0} seconds"));
+            return changedSetCleared(std::format("Changed default thread slowmode to {0}", seconds),
+                                     std::format("Set default thread slowmode to {0}", seconds), std::string("Disabled default thread slowmode"));
         }
-        if (key == QLatin1String("flags"))
-            return line(tr("Changed channel settings"));
-        if (key == QLatin1String("available_tag_add"))
-            return line(tr("Added tag %1").arg(newText));
-        if (key == QLatin1String("available_tag_edit"))
-            return line(tr("Updated tag from %1 to %2").arg(oldText, newText));
-        if (key == QLatin1String("available_tag_delete"))
-            return line(tr("Deleted tag %1").arg(newText));
+        if (key == std::string_view("flags"))
+            return line(std::string("Changed channel settings"));
+        if (key == std::string_view("available_tag_add"))
+            return line(std::format("Added tag {0}", newText));
+        if (key == std::string_view("available_tag_edit"))
+            return line(std::format("Updated tag from {0} to {1}", oldText, newText));
+        if (key == std::string_view("available_tag_delete"))
+            return line(std::format("Deleted tag {0}", newText));
         return std::nullopt;
 
     case Target::User:
-        if (key == QLatin1String("nick"))
-            return changedSetCleared(tr("Changed their nickname from %1 to %2").arg(oldText, newText),
-                                     tr("Set their nickname to %1").arg(newText), tr("<b>Removed</b> their nickname of %1").arg(oldText));
-        if (key == QLatin1String("deaf"))
-            return onOff(tr("<b>Deafened</b> them"), tr("<b>Undeafened</b> them"));
-        if (key == QLatin1String("mute"))
-            return onOff(tr("<b>Muted</b> them"), tr("<b>Unmuted</b> them"));
-        if (key == QLatin1String("$remove"))
-            return line(tr("<b>Removed</b> %1").arg(count == 1 ? tr("a role") : tr("some roles")));
-        if (key == QLatin1String("$add"))
-            return line(tr("<b>Added</b> %1").arg(count == 1 ? tr("a role") : tr("some roles")));
-        if (key == QLatin1String("prune_delete_days"))
-            return line(tr("For %1 of inactivity")
-                                .arg(QStringLiteral("<b>%1</b>").arg(countText(number(newValue), QT_TRANSLATE_NOOP("AuditLogFormatter", "a day"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 days")))));
-        if (key == QLatin1String("communication_disabled_until")) {
+        if (key == std::string_view("nick"))
+            return changedSetCleared(std::format("Changed their nickname from {0} to {1}", oldText, newText),
+                                     std::format("Set their nickname to {0}", newText), std::format("<b>Removed</b> their nickname of {0}", oldText));
+        if (key == std::string_view("deaf"))
+            return onOff(std::string("<b>Deafened</b> them"), std::string("<b>Undeafened</b> them"));
+        if (key == std::string_view("mute"))
+            return onOff(std::string("<b>Muted</b> them"), std::string("<b>Unmuted</b> them"));
+        if (key == std::string_view("$remove"))
+            return line(std::format("<b>Removed</b> {0}", count == 1 ? std::string("a role") : std::string("some roles")));
+        if (key == std::string_view("$add"))
+            return line(std::format("<b>Added</b> {0}", count == 1 ? std::string("a role") : std::string("some roles")));
+        if (key == std::string_view("prune_delete_days"))
+            return line(std::format("For {0} of inactivity", std::format("<b>{0}</b>", countText(number(newValue), "a day", "{0} days"))));
+        if (key == std::string_view("communication_disabled_until")) {
             if (hasNew)
-                return line(tr("Set timeout for user until %1").arg(newText));
-            return hasOld ? line(tr("Removed timeout")) : std::nullopt;
+                return line(std::format("Set timeout for user until {0}", newText));
+            return hasOld ? line(std::string("Removed timeout")) : std::nullopt;
         }
-        if (key == QLatin1String("bypasses_verification"))
-            return onOff(tr("manually verified them"), tr("removed their manual verification"));
-        if (key == QLatin1String("triggered_rule_name"))
-            return line(tr("Detected by rule %1").arg(newText));
+        if (key == std::string_view("bypasses_verification"))
+            return onOff(std::string("manually verified them"), std::string("removed their manual verification"));
+        if (key == std::string_view("triggered_rule_name"))
+            return line(std::format("Detected by rule {0}", newText));
         return std::nullopt;
 
     case Target::Role:
-        if (key == QLatin1String("name"))
-            return nameLines(QT_TRANSLATE_NOOP("AuditLogFormatter", "With the name %1"));
-        if (key == QLatin1String("description"))
-            return createdOrChanged(tr("With the description %1").arg(newText), tr("Changed the description from %1 to %2").arg(oldText, newText));
-        if (key == QLatin1String("allow"))
-            return line(tr("<b>Granted</b> %1").arg(count == 1 ? tr("permission") : tr("permissions")));
-        if (key == QLatin1String("deny"))
-            return line(tr("<b>Denied</b> %1").arg(count == 1 ? tr("permission") : tr("permissions")));
-        if (key == QLatin1String("color")) {
-            if (newValue.toString() == QLatin1String("#000000"))
-                return line(tr("With no color"));
-            return line(tr("Set the color to %1").arg(newText + QLatin1Char(' ') + swatch(newValue.toString())));
+        if (key == std::string_view("name"))
+            return nameLines("With the name {0}");
+        if (key == std::string_view("description"))
+            return createdOrChanged(std::format("With the description {0}", newText), std::format("Changed the description from {0} to {1}", oldText, newText));
+        if (key == std::string_view("allow"))
+            return line(std::format("<b>Granted</b> {0}", count == 1 ? std::string("permission") : std::string("permissions")));
+        if (key == std::string_view("deny"))
+            return line(std::format("<b>Denied</b> {0}", count == 1 ? std::string("permission") : std::string("permissions")));
+        if (key == std::string_view("color")) {
+            if (text(newValue) == std::string_view("#000000"))
+                return line(std::string("With no color"));
+            return line(std::format("Set the color to {0}", newText + char(' ') + swatch(text(newValue))));
         }
-        if (key == QLatin1String("colors")) {
-            const QJsonObject colors = newValue.toObject();
-            if (isNull(colors.value("secondary_color")))
-                return line(tr("With no gradient"));
-            QStringList parts;
+        if (key == std::string_view("colors")) {
+            const nlohmann::json colors = newValue;
+            if (isNull(jsonMember(colors, "secondary_color")))
+                return line(std::string("With no gradient"));
+            std::vector<std::string> parts;
             for (const char *field : { "primary_color", "secondary_color", "tertiary_color" })
-                if (!isNull(colors.value(field)))
-                    parts.append(colorText(colors.value(field)) + QLatin1Char(' ') + swatch(colorText(colors.value(field))));
-            return line(tr("Set the gradient to [%1]").arg(parts.join(QStringLiteral(", "))));
+                if (!isNull(jsonMember(colors, field)))
+                    parts.push_back(colorText(jsonMember(colors, field)) + char(' ') + swatch(colorText(jsonMember(colors, field))));
+            return line(std::format("Set the gradient to [{0}]", join(parts, std::string(", "))));
         }
-        if (key == QLatin1String("hoist"))
-            return onOff(tr("Hoisted"), tr("Not hoisted"));
-        if (key == QLatin1String("mentionable"))
-            return onOff(tr("Mentionable"), tr("Not mentionable"));
-        if (key == QLatin1String("icon_hash"))
-            return line(tr("Set the icon"));
-        if (key == QLatin1String("unicode_emoji"))
-            return line(tr("Set the unicode emoji"));
+        if (key == std::string_view("hoist"))
+            return onOff(std::string("Hoisted"), std::string("Not hoisted"));
+        if (key == std::string_view("mentionable"))
+            return onOff(std::string("Mentionable"), std::string("Not mentionable"));
+        if (key == std::string_view("icon_hash"))
+            return line(std::string("Set the icon"));
+        if (key == std::string_view("unicode_emoji"))
+            return line(std::string("Set the unicode emoji"));
         return std::nullopt;
 
     case Target::Invite:
-        if (key == QLatin1String("code"))
-            return line(tr("With code %1").arg(newText));
-        if (key == QLatin1String("channel_id"))
-            return line(tr("For channel %1").arg(newText));
-        if (key == QLatin1String("max_uses"))
-            return line(number(newValue) == 0 ? tr("Which has <b>unlimited</b> uses") : tr("Which expires after %1 uses").arg(newText));
-        if (key == QLatin1String("max_age"))
-            return line(newValue.toString() == tr("Never") ? tr("Which <b>never</b> expires") : tr("Which expires after %1").arg(newText));
-        if (key == QLatin1String("temporary"))
-            return onOff(tr("With temporary <b>on</b>"), tr("With temporary <b>off</b>"));
-        if (key == QLatin1String("flags"))
-            return line(tr("Which is a <b>guest</b> invite"));
-        if (key == QLatin1String("role_ids")) {
-            Line roles{ tr("With %1").arg(count == 1 ? tr("<b>a role</b>") : tr("<b>some roles</b>")), {} };
+        if (key == std::string_view("code"))
+            return line(std::format("With code {0}", newText));
+        if (key == std::string_view("channel_id"))
+            return line(std::format("For channel {0}", newText));
+        if (key == std::string_view("max_uses"))
+            return line(number(newValue) == 0 ? std::string("Which has <b>unlimited</b> uses") : std::format("Which expires after {0} uses", newText));
+        if (key == std::string_view("max_age"))
+            return line(text(newValue) == std::string("Never") ? std::string("Which <b>never</b> expires") : std::format("Which expires after {0}", newText));
+        if (key == std::string_view("temporary"))
+            return onOff(std::string("With temporary <b>on</b>"), std::string("With temporary <b>off</b>"));
+        if (key == std::string_view("flags"))
+            return line(std::string("Which is a <b>guest</b> invite"));
+        if (key == std::string_view("role_ids")) {
+            Line roles{ std::format("With {0}", count == 1 ? std::string("<b>a role</b>") : std::string("<b>some roles</b>")), {} };
             if (entry.action == Action::INVITE_CREATE)
                 roles.items = change.items;
             return roles;
@@ -1606,247 +1586,246 @@ std::optional<AuditLogFormatter::Line> AuditLogFormatter::describe(const Entry &
         return std::nullopt;
 
     case Target::Webhook:
-        if (key == QLatin1String("channel_id"))
-            return createdOrChanged(tr("With channel %1").arg(newText), tr("Changed the channel to %1").arg(newText));
-        if (key == QLatin1String("name"))
-            return nameLines(QT_TRANSLATE_NOOP("AuditLogFormatter", "With name %1"));
-        if (key == QLatin1String("avatar_hash"))
-            return line(tr("Changed the avatar"));
+        if (key == std::string_view("channel_id"))
+            return createdOrChanged(std::format("With channel {0}", newText), std::format("Changed the channel to {0}", newText));
+        if (key == std::string_view("name"))
+            return nameLines("With name {0}");
+        if (key == std::string_view("avatar_hash"))
+            return line(std::string("Changed the avatar"));
         return std::nullopt;
 
     case Target::Emoji:
-        if (key == QLatin1String("name"))
-            return nameLines(QT_TRANSLATE_NOOP("AuditLogFormatter", "With the name %1"));
+        if (key == std::string_view("name"))
+            return nameLines("With the name {0}");
         return std::nullopt;
 
     case Target::Sticker:
-        if (key == QLatin1String("name"))
-            return nameLines(QT_TRANSLATE_NOOP("AuditLogFormatter", "With the name %1"));
-        if (key == QLatin1String("tags"))
-            return createdOrChanged(tr("With the tags %1").arg(newText), tr("Changed the tags from %1 to %2").arg(oldText, newText));
-        if (key == QLatin1String("description"))
-            return createdOrChanged(tr("With the description %1").arg(newText), tr("Changed the description from %1 to %2").arg(oldText, newText));
+        if (key == std::string_view("name"))
+            return nameLines("With the name {0}");
+        if (key == std::string_view("tags"))
+            return createdOrChanged(std::format("With the tags {0}", newText), std::format("Changed the tags from {0} to {1}", oldText, newText));
+        if (key == std::string_view("description"))
+            return createdOrChanged(std::format("With the description {0}", newText), std::format("Changed the description from {0} to {1}", oldText, newText));
         return std::nullopt;
 
     case Target::Integration:
-        if (key == QLatin1String("enable_emoticons"))
-            return onOff(tr("Enabled emoticons"), tr("Disabled custom emoticons"));
-        if (key == QLatin1String("expire_behavior")) {
+        if (key == std::string_view("enable_emoticons"))
+            return onOff(std::string("Enabled emoticons"), std::string("Disabled custom emoticons"));
+        if (key == std::string_view("expire_behavior")) {
             if (!hasNew || number(newValue) > 1)
                 return std::nullopt;
-            return line(tr("Set the expired sub behavior to %1").arg(bold(number(newValue) == 0 ? tr("Remove Role") : tr("Kick"))));
+            return line(std::format("Set the expired sub behavior to {0}", bold(number(newValue) == 0 ? std::string("Remove Role") : std::string("Kick"))));
         }
-        if (key == QLatin1String("expire_grace_period"))
-            return line(tr("Set the expire grace period to %1")
-                                .arg(QStringLiteral("<b>%1</b>").arg(countText(number(newValue), QT_TRANSLATE_NOOP("AuditLogFormatter", "a day"), QT_TRANSLATE_NOOP("AuditLogFormatter", "%1 days")))));
+        if (key == std::string_view("expire_grace_period"))
+            return line(std::format("Set the expire grace period to {0}", std::format("<b>{0}</b>", countText(number(newValue), "a day", "{0} days"))));
         return std::nullopt;
 
     case Target::StageInstance:
     case Target::ScheduledEvent:
-        if (key == QLatin1String("privacy_level")) {
+        if (key == std::string_view("privacy_level")) {
             switch (hasNew ? number(newValue) : 0) {
             case 1:
-                return line(tr("Set the privacy level to %1").arg(bold(tr("Public"))));
+                return line(std::format("Set the privacy level to {0}", bold(std::string("Public"))));
             case 2:
-                return line(tr("Set the privacy level to %1").arg(bold(tr("Closed"))));
+                return line(std::format("Set the privacy level to {0}", bold(std::string("Closed"))));
             }
             return std::nullopt;
         }
         if (entry.target == Target::StageInstance) {
-            if (key == QLatin1String("topic"))
-                return createdOrChanged(tr("Set the topic to %1").arg(newText), tr("Changed the topic to %1").arg(newText));
+            if (key == std::string_view("topic"))
+                return createdOrChanged(std::format("Set the topic to {0}", newText), std::format("Changed the topic to {0}", newText));
             return std::nullopt;
         }
-        if (key == QLatin1String("name"))
-            return line(tr("With the name %1").arg(newText));
-        if (key == QLatin1String("description"))
-            return line(tr("Set the description to %1").arg(newText));
-        if (key == QLatin1String("status")) {
+        if (key == std::string_view("name"))
+            return line(std::format("With the name {0}", newText));
+        if (key == std::string_view("description"))
+            return line(std::format("Set the description to {0}", newText));
+        if (key == std::string_view("status")) {
             static const char *const statuses[] = {
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "Scheduled"),
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "Active"),
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "Completed"),
-                QT_TRANSLATE_NOOP("AuditLogFormatter", "Canceled"),
+                "Scheduled",
+                "Active",
+                "Completed",
+                "Canceled",
             };
-            const qint64 status = number(newValue);
+            const int64_t status = number(newValue);
             if (!hasNew || status < 1 || status > 4)
                 return std::nullopt;
-            return line(tr("Set the status to %1").arg(bold(tr(statuses[status - 1]))));
+            return line(std::format("Set the status to {0}", bold(tr(statuses[status - 1]))));
         }
-        if (key == QLatin1String("entity_type")) {
+        if (key == std::string_view("entity_type")) {
             switch (hasNew ? number(newValue) : -1) {
             case 0:
-                return line(tr("Linked to <b>Nothing</b>"));
+                return line(std::string("Linked to <b>Nothing</b>"));
             case 1:
-                return line(tr("Linked with a <b>Stage</b>"));
+                return line(std::string("Linked with a <b>Stage</b>"));
             case 2:
-                return line(tr("Linked with a <b>Voice Channel</b>"));
+                return line(std::string("Linked with a <b>Voice Channel</b>"));
             case 3:
-                return line(tr("Linked <b>externally</b>"));
+                return line(std::string("Linked <b>externally</b>"));
             }
             return std::nullopt;
         }
-        if (key == QLatin1String("channel_id"))
-            return clearedOrSet(tr("Removed the channel"), tr("Set the channel to %1").arg(newText));
-        if (key == QLatin1String("location"))
-            return clearedOrSet(tr("Removed the location"), tr("Set the location to %1").arg(newText));
-        if (key == QLatin1String("image_hash"))
-            return clearedOrSet(tr("Removed the cover image"), tr("Set the cover image"));
+        if (key == std::string_view("channel_id"))
+            return clearedOrSet(std::string("Removed the channel"), std::format("Set the channel to {0}", newText));
+        if (key == std::string_view("location"))
+            return clearedOrSet(std::string("Removed the location"), std::format("Set the location to {0}", newText));
+        if (key == std::string_view("image_hash"))
+            return clearedOrSet(std::string("Removed the cover image"), std::string("Set the cover image"));
         return std::nullopt;
 
     case Target::ScheduledEventException:
-        if (key == QLatin1String("scheduled_start_time"))
-            return clearedOrSet(tr("Reset the start time"), tr("Set the start time to %1").arg(newText));
-        if (key == QLatin1String("scheduled_end_time"))
-            return clearedOrSet(tr("Reset the end time"), tr("Set the end time to %1").arg(newText));
-        if (key == QLatin1String("is_canceled")) {
+        if (key == std::string_view("scheduled_start_time"))
+            return clearedOrSet(std::string("Reset the start time"), std::format("Set the start time to {0}", newText));
+        if (key == std::string_view("scheduled_end_time"))
+            return clearedOrSet(std::string("Reset the end time"), std::format("Set the end time to {0}", newText));
+        if (key == std::string_view("is_canceled")) {
             if (!truthy(oldValue) && truthy(newValue))
-                return line(tr("Canceled this event"));
+                return line(std::string("Canceled this event"));
             if (truthy(oldValue) && hasNew && !truthy(newValue))
-                return line(tr("Restored this event"));
+                return line(std::string("Restored this event"));
         }
         return std::nullopt;
 
     case Target::Thread:
-        if (key == QLatin1String("id") || key == QLatin1String("type"))
+        if (key == std::string_view("id") || key == std::string_view("type"))
             return std::nullopt;
-        if (key == QLatin1String("name"))
-            return nameLines(QT_TRANSLATE_NOOP("AuditLogFormatter", "Set the name to %1"));
-        if (key == QLatin1String("archived"))
-            return onOff(tr("Closed the thread"), tr("Reopened the thread"));
-        if (key == QLatin1String("locked"))
-            return onOff(tr("Locked the thread, restricting it to only be opened by moderators"),
-                         tr("Unlocked the thread, allowing it to be opened by non-moderators"));
-        if (key == QLatin1String("invitable"))
-            return onOff(tr("Allowed non-moderators to add members to the thread"), tr("Disallowed non-moderators from adding members to the thread"));
-        if (key == QLatin1String("auto_archive_duration"))
-            return hideDuration(QT_TRANSLATE_NOOP("AuditLogFormatter", "Removed auto hide duration"),
-                                QT_TRANSLATE_NOOP("AuditLogFormatter", "Set auto hide duration to %1"),
-                                QT_TRANSLATE_NOOP("AuditLogFormatter", "Changed auto hide duration to %1"));
-        if (key == QLatin1String("rate_limit_per_user"))
+        if (key == std::string_view("name"))
+            return nameLines("Set the name to {0}");
+        if (key == std::string_view("archived"))
+            return onOff(std::string("Closed the thread"), std::string("Reopened the thread"));
+        if (key == std::string_view("locked"))
+            return onOff(std::string("Locked the thread, restricting it to only be opened by moderators"),
+                         std::string("Unlocked the thread, allowing it to be opened by non-moderators"));
+        if (key == std::string_view("invitable"))
+            return onOff(std::string("Allowed non-moderators to add members to the thread"), std::string("Disallowed non-moderators from adding members to the thread"));
+        if (key == std::string_view("auto_archive_duration"))
+            return hideDuration("Removed auto hide duration",
+                                "Set auto hide duration to {0}",
+                                "Changed auto hide duration to {0}");
+        if (key == std::string_view("rate_limit_per_user"))
             return slowmode();
-        if (key == QLatin1String("flags")) {
-            Line flags{ tr("Updated thread properties"), {} };
+        if (key == std::string_view("flags")) {
+            Line flags{ std::string("Updated thread properties"), {} };
             if (entry.action == Action::THREAD_UPDATE)
                 flags.items = change.items;
             return flags;
         }
-        if (key == QLatin1String("available_tag_add"))
-            return line(tr("Added tag %1").arg(newText));
-        if (key == QLatin1String("available_tag_delete"))
-            return line(tr("Deleted tag %1").arg(newText));
+        if (key == std::string_view("available_tag_add"))
+            return line(std::format("Added tag {0}", newText));
+        if (key == std::string_view("available_tag_delete"))
+            return line(std::format("Deleted tag {0}", newText));
         return std::nullopt;
 
     case Target::ApplicationCommand: {
-        const QString subtarget = bold(change.subtarget);
+        const std::string subtarget = bold(change.subtarget);
         if (!hasNew)
-            return line(tr("<b>Removed override</b> for %1").arg(subtarget));
-        return line(newValue.toObject().value("permission").toBool() ? tr("<b>Granted</b> permission for %1").arg(subtarget)
-                                                                     : tr("<b>Denied</b> permission for %1").arg(subtarget));
+            return line(std::format("<b>Removed override</b> for {0}", subtarget));
+        return line(truthy(jsonMember(newValue, "permission")) ? std::format("<b>Granted</b> permission for {0}", subtarget)
+                                                                     : std::format("<b>Denied</b> permission for {0}", subtarget));
     }
 
     case Target::AutoModerationRule:
-        if (key == QLatin1String("name"))
-            return line(tr("Set the name to %1").arg(newText));
-        if (key == QLatin1String("trigger_type"))
-            return line(tr("Set the trigger type to %1").arg(newText));
-        if (key == QLatin1String("event_type"))
-            return line(tr("Set the event type to %1").arg(newText));
-        if (key == QLatin1String("actions"))
-            return line(tr("Set actions to %1").arg(newText));
-        if (key == QLatin1String("enabled"))
-            return line((hasNew ? newValue : oldValue).toBool() ? tr("Enabled rule") : tr("Disabled rule"));
-        if (key == QLatin1String("exempt_roles"))
-            return line(tr("Set exempt roles to %1").arg(newText));
-        if (key == QLatin1String("exempt_channels"))
-            return line(tr("Set exempt channels to %1").arg(newText));
-        if (key == QLatin1String("trigger_metadata"))
-            return line(tr("Set trigger metadata %1").arg(newText));
-        if (key == QLatin1String("$add_keyword_filter"))
-            return line(tr("added keywords %1").arg(newText));
-        if (key == QLatin1String("$remove_keyword_filter"))
-            return line(tr("removed keywords %1").arg(newText));
-        if (key == QLatin1String("$add_regex_patterns"))
-            return line(tr("added regex patterns %1").arg(newText));
-        if (key == QLatin1String("$remove_regex_patterns"))
-            return line(tr("removed regex patterns %1").arg(newText));
-        if (key == QLatin1String("$add_allow_list"))
-            return line(tr("added allow list keywords %1").arg(newText));
-        if (key == QLatin1String("$remove_allow_list"))
-            return line(tr("removed allow list keywords %1").arg(newText));
+        if (key == std::string_view("name"))
+            return line(std::format("Set the name to {0}", newText));
+        if (key == std::string_view("trigger_type"))
+            return line(std::format("Set the trigger type to {0}", newText));
+        if (key == std::string_view("event_type"))
+            return line(std::format("Set the event type to {0}", newText));
+        if (key == std::string_view("actions"))
+            return line(std::format("Set actions to {0}", newText));
+        if (key == std::string_view("enabled"))
+            return line(truthy((hasNew ? newValue : oldValue)) ? std::string("Enabled rule") : std::string("Disabled rule"));
+        if (key == std::string_view("exempt_roles"))
+            return line(std::format("Set exempt roles to {0}", newText));
+        if (key == std::string_view("exempt_channels"))
+            return line(std::format("Set exempt channels to {0}", newText));
+        if (key == std::string_view("trigger_metadata"))
+            return line(std::format("Set trigger metadata {0}", newText));
+        if (key == std::string_view("$add_keyword_filter"))
+            return line(std::format("added keywords {0}", newText));
+        if (key == std::string_view("$remove_keyword_filter"))
+            return line(std::format("removed keywords {0}", newText));
+        if (key == std::string_view("$add_regex_patterns"))
+            return line(std::format("added regex patterns {0}", newText));
+        if (key == std::string_view("$remove_regex_patterns"))
+            return line(std::format("removed regex patterns {0}", newText));
+        if (key == std::string_view("$add_allow_list"))
+            return line(std::format("added allow list keywords {0}", newText));
+        if (key == std::string_view("$remove_allow_list"))
+            return line(std::format("removed allow list keywords {0}", newText));
         return std::nullopt;
 
     case Target::Soundboard:
-        if (key == QLatin1String("name"))
-            return nameLines(QT_TRANSLATE_NOOP("AuditLogFormatter", "With the name %1"));
-        if (key == QLatin1String("volume"))
-            return createdOrChanged(tr("With the volume set to %1").arg(newText), tr("Changed the volume from %1 to %2").arg(oldText, newText));
-        if (key == QLatin1String("emoji_name") || key == QLatin1String("emoji_id"))
-            return changedSetCleared(tr("Changed the emoji from %1 to %2").arg(oldText, newText), tr("With the emoji %1").arg(newText),
-                                     tr("Removed the emoji %1").arg(oldText));
+        if (key == std::string_view("name"))
+            return nameLines("With the name {0}");
+        if (key == std::string_view("volume"))
+            return createdOrChanged(std::format("With the volume set to {0}", newText), std::format("Changed the volume from {0} to {1}", oldText, newText));
+        if (key == std::string_view("emoji_name") || key == std::string_view("emoji_id"))
+            return changedSetCleared(std::format("Changed the emoji from {0} to {1}", oldText, newText), std::format("With the emoji {0}", newText),
+                                     std::format("Removed the emoji {0}", oldText));
         return std::nullopt;
 
     case Target::VoiceChannelStatus:
-        if (key == QLatin1String("status"))
-            return line(tr("Set to %1").arg(newText));
+        if (key == std::string_view("status"))
+            return line(std::format("Set to {0}", newText));
         return std::nullopt;
 
     case Target::MemberVerification:
-        if (key == QLatin1String("verification_enabled"))
-            return line(newValue.toBool() ? tr("Enabled join settings") : tr("Disabled join settings"));
-        if (key == QLatin1String("manual_approval_enabled"))
-            return line(newValue.toBool() ? tr("Manual verification enabled") : tr("Manual verification disabled"));
+        if (key == std::string_view("verification_enabled"))
+            return line(truthy(newValue) ? std::string("Enabled join settings") : std::string("Disabled join settings"));
+        if (key == std::string_view("manual_approval_enabled"))
+            return line(truthy(newValue) ? std::string("Manual verification enabled") : std::string("Manual verification disabled"));
         return std::nullopt;
 
     case Target::GuildProfile:
-        if (key == QLatin1String("description"))
-            return line(tr("Updated server description"));
-        if (key == QLatin1String("brand_color_primary"))
-            return line(tr("Updated profile banner color"));
-        if (key == QLatin1String("custom_banner_hash"))
-            return line(tr("Updated profile banner"));
-        if (key == QLatin1String("traits"))
-            return line(tr("Updated profile traits"));
-        if (key == QLatin1String("game_application_ids"))
-            return line(tr("Updated profile games played"));
-        if (key == QLatin1String("visibility"))
-            return line(tr("Updated profile visibility"));
-        if (key == QLatin1String("server_tag"))
-            return clearedOrSet(tr("<b>Disabled</b> the server tag"), tr("Updated server tag to %1").arg(newText));
+        if (key == std::string_view("description"))
+            return line(std::string("Updated server description"));
+        if (key == std::string_view("brand_color_primary"))
+            return line(std::string("Updated profile banner color"));
+        if (key == std::string_view("custom_banner_hash"))
+            return line(std::string("Updated profile banner"));
+        if (key == std::string_view("traits"))
+            return line(std::string("Updated profile traits"));
+        if (key == std::string_view("game_application_ids"))
+            return line(std::string("Updated profile games played"));
+        if (key == std::string_view("visibility"))
+            return line(std::string("Updated profile visibility"));
+        if (key == std::string_view("server_tag"))
+            return clearedOrSet(std::string("<b>Disabled</b> the server tag"), std::format("Updated server tag to {0}", newText));
         return std::nullopt;
 
     case Target::OnboardingPrompt:
-        if (key == QLatin1String("title"))
-            return createdOrChanged(tr("Set the title to %1").arg(newText), tr("Changed the title from %1 to %2").arg(oldText, newText));
-        if (key == QLatin1String("description"))
-            return createdOrChanged(tr("Set the description to %1").arg(newText), tr("Changed the description from %1 to %2").arg(oldText, newText));
-        if (key == QLatin1String("options"))
-            return line(tr("Changed answers for customization question"));
-        if (key == QLatin1String("single_select"))
-            return onOff(tr("Set the customization question to single select"), tr("Set the customization question to multi select"));
-        if (key == QLatin1String("required"))
-            return onOff(tr("Set the customization question to required"), tr("Set the customization question to optional"));
+        if (key == std::string_view("title"))
+            return createdOrChanged(std::format("Set the title to {0}", newText), std::format("Changed the title from {0} to {1}", oldText, newText));
+        if (key == std::string_view("description"))
+            return createdOrChanged(std::format("Set the description to {0}", newText), std::format("Changed the description from {0} to {1}", oldText, newText));
+        if (key == std::string_view("options"))
+            return line(std::string("Changed answers for customization question"));
+        if (key == std::string_view("single_select"))
+            return onOff(std::string("Set the customization question to single select"), std::string("Set the customization question to multi select"));
+        if (key == std::string_view("required"))
+            return onOff(std::string("Set the customization question to required"), std::string("Set the customization question to optional"));
         return std::nullopt;
 
     case Target::Onboarding:
-        if (key == QLatin1String("default_channel_ids"))
-            return line(countText(count, QT_TRANSLATE_NOOP("AuditLogFormatter", "Set 1 default channel"),
-                                  QT_TRANSLATE_NOOP("AuditLogFormatter", "Set %1 default channels")));
-        if (key == QLatin1String("enable_default_channels"))
-            return onOff(tr("Set default channels to enabled"), tr("Set default channels to disabled"));
-        if (key == QLatin1String("enable_onboarding_prompts"))
-            return onOff(tr("Set customization questions to enabled"), tr("Set customization questions to disabled"));
-        if (key == QLatin1String("enabled"))
-            return onOff(tr("Enabled Onboarding"), tr("Disabled Onboarding"));
+        if (key == std::string_view("default_channel_ids"))
+            return line(countText(count, "Set 1 default channel",
+                                  "Set {0} default channels"));
+        if (key == std::string_view("enable_default_channels"))
+            return onOff(std::string("Set default channels to enabled"), std::string("Set default channels to disabled"));
+        if (key == std::string_view("enable_onboarding_prompts"))
+            return onOff(std::string("Set customization questions to enabled"), std::string("Set customization questions to disabled"));
+        if (key == std::string_view("enabled"))
+            return onOff(std::string("Enabled Onboarding"), std::string("Disabled Onboarding"));
         return std::nullopt;
 
     case Target::HomeSettings:
-        if (key == QLatin1String("welcome_message"))
-            return line(tr("Changed the welcome message"));
-        if (key == QLatin1String("new_member_actions"))
-            return line(tr("Changed the new member To Dos"));
-        if (key == QLatin1String("resource_channels"))
-            return line(tr("Changed resource channels"));
+        if (key == std::string_view("welcome_message"))
+            return line(std::string("Changed the welcome message"));
+        if (key == std::string_view("new_member_actions"))
+            return line(std::string("Changed the new member To Dos"));
+        if (key == std::string_view("resource_channels"))
+            return line(std::string("Changed resource channels"));
         return std::nullopt;
 
     case Target::GuildHome:
@@ -1856,114 +1835,114 @@ std::optional<AuditLogFormatter::Line> AuditLogFormatter::describe(const Entry &
     return std::nullopt;
 }
 
-AuditLogFormatter::Row AuditLogFormatter::format(const QList<Entry> &merged)
+AuditLogFormatter::Row AuditLogFormatter::format(const std::vector<Entry> &merged)
 {
-    const Entry &first = merged.first();
-    const QJsonObject &options = first.raw.options;
+    const Entry &first = merged.front();
+    const nlohmann::json &options = first.raw.options;
 
-    QString count = options.value("count").toVariant().toString();
-    const QString removed = options.value("members_removed").toVariant().toString();
-    if (!removed.isEmpty() && removed != QLatin1String("0"))
+    std::string count = text(jsonMember(options, "count"));
+    const std::string removed = text(jsonMember(options, "members_removed"));
+    if (!removed.empty() && removed != std::string_view("0"))
         count = removed;
 
-    const Core::Snowflake channelId = snowflakeOf(options.value("channel_id"));
-    const QString channel = channelId.isValid() ? channelName(channelId) : QString();
+    const Core::Snowflake channelId = snowflakeOf(jsonMember(options, "channel_id"));
+    const std::string channel = channelId.isValid() ? channelName(channelId) : std::string();
 
-    QString subtarget;
-    const Core::Snowflake exceptionId = snowflakeOf(options.value("event_exception_id"));
+    std::string subtarget;
+    const Core::Snowflake exceptionId = snowflakeOf(jsonMember(options, "event_exception_id"));
     if (first.target == Target::ScheduledEventException && exceptionId.isValid())
-        subtarget = QLocale::system().toString(exceptionId.toDateTime().toLocalTime().date(), QStringLiteral("MMMM d, yyyy"));
+        subtarget = exceptionId.toDateTime().format("%B %d, %Y");
 
     Row row;
     row.action = first.action;
     row.userId = first.userId;
     row.category = first.category;
     row.start = first.time;
-    row.end = merged.last().time;
+    row.end = merged.back().time;
     row.titleHtml = titleFor(first, targetName(first), count, channel, subtarget);
     for (const Entry &entry : merged)
         for (const Change &change : transform(entry))
             if (const auto line = describe(entry, change))
-                row.lines.append(*line);
+                row.lines.push_back(*line);
     return row;
 }
 
-QString AuditLogFormatter::timeText(const QDateTime &start, const QDateTime &end)
+std::string AuditLogFormatter::timeText(const Platform::DateTime &start, const Platform::DateTime &end)
 {
-    const QString startText = calendar(start);
-    const QString endText = calendar(end);
-    return startText == endText ? startText : startText + QStringLiteral("—") + endText;
+    const std::string startText = calendar(start);
+    const std::string endText = calendar(end);
+    return startText == endText ? startText : startText + std::string("—") + endText;
 }
 
-QList<QPair<Discord::AuditLogAction, QString>> AuditLogFormatter::actionFilters()
+std::vector<std::pair<Discord::AuditLogAction, std::string>> AuditLogFormatter::actionFilters()
 {
     return {
-        { Action::GUILD_UPDATE, tr("Update Server") },
-        { Action::CHANNEL_CREATE, tr("Create Channel") },
-        { Action::CHANNEL_UPDATE, tr("Update Channel") },
-        { Action::CHANNEL_DELETE, tr("Delete Channel") },
-        { Action::CHANNEL_OVERWRITE_CREATE, tr("Create Channel Permissions") },
-        { Action::CHANNEL_OVERWRITE_UPDATE, tr("Update Channel Permissions") },
-        { Action::CHANNEL_OVERWRITE_DELETE, tr("Delete Channel Permissions") },
-        { Action::MEMBER_KICK, tr("Kick Member") },
-        { Action::MEMBER_PRUNE, tr("Prune Members") },
-        { Action::MEMBER_BAN_ADD, tr("Ban Member") },
-        { Action::MEMBER_BAN_REMOVE, tr("Unban Member") },
-        { Action::MEMBER_UPDATE, tr("Update Member") },
-        { Action::MEMBER_ROLE_UPDATE, tr("Update Member Roles") },
-        { Action::MEMBER_MOVE, tr("Move Member") },
-        { Action::MEMBER_DISCONNECT, tr("Disconnect Member") },
-        { Action::BOT_ADD, tr("Add Bot") },
-        { Action::THREAD_CREATE, tr("Create Thread") },
-        { Action::THREAD_UPDATE, tr("Update Thread") },
-        { Action::THREAD_DELETE, tr("Delete Thread") },
-        { Action::ROLE_CREATE, tr("Create Role") },
-        { Action::ROLE_UPDATE, tr("Update Role") },
-        { Action::ROLE_DELETE, tr("Delete Role") },
-        { Action::ONBOARDING_PROMPT_CREATE, tr("Create Customization Question") },
-        { Action::ONBOARDING_PROMPT_UPDATE, tr("Update Customization Question") },
-        { Action::ONBOARDING_PROMPT_DELETE, tr("Delete Customization Question") },
-        { Action::ONBOARDING_CREATE, tr("Create Onboarding") },
-        { Action::ONBOARDING_UPDATE, tr("Update Onboarding") },
-        { Action::HOME_SETTINGS_CREATE, tr("Create Server Guide") },
-        { Action::HOME_SETTINGS_UPDATE, tr("Update Server Guide") },
-        { Action::INVITE_CREATE, tr("Create Invite") },
-        { Action::INVITE_UPDATE, tr("Update Invite") },
-        { Action::INVITE_DELETE, tr("Delete Invite") },
-        { Action::WEBHOOK_CREATE, tr("Create Webhook") },
-        { Action::WEBHOOK_UPDATE, tr("Update Webhook") },
-        { Action::WEBHOOK_DELETE, tr("Delete Webhook") },
-        { Action::EMOJI_CREATE, tr("Create Emoji") },
-        { Action::EMOJI_UPDATE, tr("Update Emoji") },
-        { Action::EMOJI_DELETE, tr("Delete Emoji") },
-        { Action::MESSAGE_DELETE, tr("Delete Messages") },
-        { Action::MESSAGE_BULK_DELETE, tr("Bulk Delete Messages") },
-        { Action::MESSAGE_PIN, tr("Pin Message") },
-        { Action::MESSAGE_UNPIN, tr("Unpin Message") },
-        { Action::INTEGRATION_CREATE, tr("Create Integration") },
-        { Action::INTEGRATION_UPDATE, tr("Update Integration") },
-        { Action::INTEGRATION_DELETE, tr("Delete Integration") },
-        { Action::STICKER_CREATE, tr("Create Sticker") },
-        { Action::STICKER_UPDATE, tr("Update Sticker") },
-        { Action::STICKER_DELETE, tr("Delete Sticker") },
-        { Action::STAGE_INSTANCE_CREATE, tr("Start Stage") },
-        { Action::STAGE_INSTANCE_UPDATE, tr("Update Stage") },
-        { Action::STAGE_INSTANCE_DELETE, tr("End Stage") },
-        { Action::GUILD_SCHEDULED_EVENT_CREATE, tr("Create Event") },
-        { Action::GUILD_SCHEDULED_EVENT_UPDATE, tr("Update Event") },
-        { Action::GUILD_SCHEDULED_EVENT_DELETE, tr("Cancel Event") },
-        { Action::APPLICATION_COMMAND_PERMISSION_UPDATE, tr("Update Command Permissions") },
-        { Action::AUTO_MODERATION_BLOCK_MESSAGE, tr("AutoMod Block Message") },
-        { Action::AUTO_MODERATION_RULE_CREATE, tr("Create AutoMod Rule") },
-        { Action::AUTO_MODERATION_RULE_UPDATE, tr("Update AutoMod Rule") },
-        { Action::AUTO_MODERATION_RULE_DELETE, tr("Delete AutoMod Rule") },
-        { Action::GUILD_HOME_FEATURE_ITEM, tr("Feature Item on Home") },
-        { Action::GUILD_HOME_REMOVE_ITEM, tr("Remove Item from Home") },
-        { Action::SOUNDBOARD_SOUND_CREATE, tr("Create Soundboard Sound") },
-        { Action::SOUNDBOARD_SOUND_UPDATE, tr("Update Soundboard Sound") },
-        { Action::SOUNDBOARD_SOUND_DELETE, tr("Delete Soundboard Sound") },
-        { Action::VOICE_CHANNEL_STATUS_CREATE, tr("Create Voice Channel Status") },
-        { Action::VOICE_CHANNEL_STATUS_DELETE, tr("Delete Voice Channel Status") },
+        { Action::GUILD_UPDATE, std::string("Update Server") },
+        { Action::CHANNEL_CREATE, std::string("Create Channel") },
+        { Action::CHANNEL_UPDATE, std::string("Update Channel") },
+        { Action::CHANNEL_DELETE, std::string("Delete Channel") },
+        { Action::CHANNEL_OVERWRITE_CREATE, std::string("Create Channel Permissions") },
+        { Action::CHANNEL_OVERWRITE_UPDATE, std::string("Update Channel Permissions") },
+        { Action::CHANNEL_OVERWRITE_DELETE, std::string("Delete Channel Permissions") },
+        { Action::MEMBER_KICK, std::string("Kick Member") },
+        { Action::MEMBER_PRUNE, std::string("Prune Members") },
+        { Action::MEMBER_BAN_ADD, std::string("Ban Member") },
+        { Action::MEMBER_BAN_REMOVE, std::string("Unban Member") },
+        { Action::MEMBER_UPDATE, std::string("Update Member") },
+        { Action::MEMBER_ROLE_UPDATE, std::string("Update Member Roles") },
+        { Action::MEMBER_MOVE, std::string("Move Member") },
+        { Action::MEMBER_DISCONNECT, std::string("Disconnect Member") },
+        { Action::BOT_ADD, std::string("Add Bot") },
+        { Action::THREAD_CREATE, std::string("Create Thread") },
+        { Action::THREAD_UPDATE, std::string("Update Thread") },
+        { Action::THREAD_DELETE, std::string("Delete Thread") },
+        { Action::ROLE_CREATE, std::string("Create Role") },
+        { Action::ROLE_UPDATE, std::string("Update Role") },
+        { Action::ROLE_DELETE, std::string("Delete Role") },
+        { Action::ONBOARDING_PROMPT_CREATE, std::string("Create Customization Question") },
+        { Action::ONBOARDING_PROMPT_UPDATE, std::string("Update Customization Question") },
+        { Action::ONBOARDING_PROMPT_DELETE, std::string("Delete Customization Question") },
+        { Action::ONBOARDING_CREATE, std::string("Create Onboarding") },
+        { Action::ONBOARDING_UPDATE, std::string("Update Onboarding") },
+        { Action::HOME_SETTINGS_CREATE, std::string("Create Server Guide") },
+        { Action::HOME_SETTINGS_UPDATE, std::string("Update Server Guide") },
+        { Action::INVITE_CREATE, std::string("Create Invite") },
+        { Action::INVITE_UPDATE, std::string("Update Invite") },
+        { Action::INVITE_DELETE, std::string("Delete Invite") },
+        { Action::WEBHOOK_CREATE, std::string("Create Webhook") },
+        { Action::WEBHOOK_UPDATE, std::string("Update Webhook") },
+        { Action::WEBHOOK_DELETE, std::string("Delete Webhook") },
+        { Action::EMOJI_CREATE, std::string("Create Emoji") },
+        { Action::EMOJI_UPDATE, std::string("Update Emoji") },
+        { Action::EMOJI_DELETE, std::string("Delete Emoji") },
+        { Action::MESSAGE_DELETE, std::string("Delete Messages") },
+        { Action::MESSAGE_BULK_DELETE, std::string("Bulk Delete Messages") },
+        { Action::MESSAGE_PIN, std::string("Pin Message") },
+        { Action::MESSAGE_UNPIN, std::string("Unpin Message") },
+        { Action::INTEGRATION_CREATE, std::string("Create Integration") },
+        { Action::INTEGRATION_UPDATE, std::string("Update Integration") },
+        { Action::INTEGRATION_DELETE, std::string("Delete Integration") },
+        { Action::STICKER_CREATE, std::string("Create Sticker") },
+        { Action::STICKER_UPDATE, std::string("Update Sticker") },
+        { Action::STICKER_DELETE, std::string("Delete Sticker") },
+        { Action::STAGE_INSTANCE_CREATE, std::string("Start Stage") },
+        { Action::STAGE_INSTANCE_UPDATE, std::string("Update Stage") },
+        { Action::STAGE_INSTANCE_DELETE, std::string("End Stage") },
+        { Action::GUILD_SCHEDULED_EVENT_CREATE, std::string("Create Event") },
+        { Action::GUILD_SCHEDULED_EVENT_UPDATE, std::string("Update Event") },
+        { Action::GUILD_SCHEDULED_EVENT_DELETE, std::string("Cancel Event") },
+        { Action::APPLICATION_COMMAND_PERMISSION_UPDATE, std::string("Update Command Permissions") },
+        { Action::AUTO_MODERATION_BLOCK_MESSAGE, std::string("AutoMod Block Message") },
+        { Action::AUTO_MODERATION_RULE_CREATE, std::string("Create AutoMod Rule") },
+        { Action::AUTO_MODERATION_RULE_UPDATE, std::string("Update AutoMod Rule") },
+        { Action::AUTO_MODERATION_RULE_DELETE, std::string("Delete AutoMod Rule") },
+        { Action::GUILD_HOME_FEATURE_ITEM, std::string("Feature Item on Home") },
+        { Action::GUILD_HOME_REMOVE_ITEM, std::string("Remove Item from Home") },
+        { Action::SOUNDBOARD_SOUND_CREATE, std::string("Create Soundboard Sound") },
+        { Action::SOUNDBOARD_SOUND_UPDATE, std::string("Update Soundboard Sound") },
+        { Action::SOUNDBOARD_SOUND_DELETE, std::string("Delete Soundboard Sound") },
+        { Action::VOICE_CHANNEL_STATUS_CREATE, std::string("Create Voice Channel Status") },
+        { Action::VOICE_CHANNEL_STATUS_DELETE, std::string("Delete Voice Channel Status") },
     };
 }
 

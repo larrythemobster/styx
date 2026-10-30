@@ -1,93 +1,54 @@
 #pragma once
 
-#include <QDateTime>
-#include <QHash>
-#include <QJsonObject>
-#include <QList>
-#include <QPair>
-#include <QPointer>
-#include <QString>
-#include <QStringList>
-
-#include <optional>
-
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
+#include "Platform/Trackable.hpp"
+#include <map>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
-namespace Styx {
-namespace Core {
-class ClientInstance;
-} // namespace Core
-namespace UI {
-
-class AuditLogFormatter
-{
+namespace Styx::Core { class ClientInstance; }
+namespace Styx::UI {
+class AuditLogFormatter {
 public:
-    enum class Category {
-        Other,
-        Create,
-        Update,
-        Delete,
-    };
-
-    struct Line
-    {
-        QString html;
-        QStringList items;
-    };
-
-    struct Row
-    {
+    enum class Category { Other, Create, Update, Delete };
+    struct Line { std::string html; std::vector<std::string> items; };
+    struct Row {
         Discord::AuditLogAction action;
         Core::Snowflake userId;
-        QString titleHtml;
-        QDateTime start;
-        QDateTime end;
+        std::string titleHtml;
+        Platform::DateTime start, end;
         Category category = Category::Other;
-        QList<Line> lines;
+        std::vector<Line> lines;
     };
-
     AuditLogFormatter(Core::ClientInstance *instance, Core::Snowflake guildId);
-
-    [[nodiscard]] QList<Row> addPage(const Discord::AuditLog &page);
-
-    [[nodiscard]] std::optional<Discord::User> user(Core::Snowflake userId) const;
-
-    [[nodiscard]] static QString timeText(const QDateTime &start, const QDateTime &end);
-    [[nodiscard]] static QList<QPair<Discord::AuditLogAction, QString>> actionFilters();
-
+    std::vector<Row> addPage(const Discord::AuditLog &page);
+    std::optional<Discord::User> user(Core::Snowflake userId) const;
+    static std::string timeText(const Platform::DateTime &start, const Platform::DateTime &end);
+    static std::vector<std::pair<Discord::AuditLogAction, std::string>> actionFilters();
 private:
     enum class Target;
     struct Change;
     struct Entry;
-
-    [[nodiscard]] static Target targetOf(Discord::AuditLogAction action);
-    [[nodiscard]] static Category categoryOf(Discord::AuditLogAction action);
-    [[nodiscard]] static bool neverMerged(Discord::AuditLogAction action);
-
+    static Target targetOf(Discord::AuditLogAction action);
+    static Category categoryOf(Discord::AuditLogAction action);
+    static bool neverMerged(Discord::AuditLogAction action);
     void rememberDeletedName(const Entry &entry);
-    [[nodiscard]] Row format(const QList<Entry> &merged);
-    [[nodiscard]] QString titleFor(const Entry &entry, const QString &target, const QString &count, const QString &channel, const QString &subtarget) const;
-    [[nodiscard]] QString targetName(const Entry &entry) const;
-    [[nodiscard]] QString authorName(const Entry &entry) const;
-    [[nodiscard]] QList<Change> transform(const Entry &entry) const;
-    [[nodiscard]] std::optional<Line> describe(const Entry &entry, const Change &change) const;
-    [[nodiscard]] QString channelName(Core::Snowflake channelId) const;
-    [[nodiscard]] QString roleName(Core::Snowflake roleId) const;
-    [[nodiscard]] QString userTag(Core::Snowflake userId) const;
-
-    QPointer<Core::ClientInstance> instance;
+    Row format(const std::vector<Entry> &merged);
+    std::string titleFor(const Entry &entry, const std::string &target, const std::string &count, const std::string &channel, const std::string &subtarget) const;
+    std::string targetName(const Entry &entry) const;
+    std::string authorName(const Entry &entry) const;
+    std::vector<Change> transform(const Entry &entry) const;
+    std::optional<Line> describe(const Entry &entry, const Change &change) const;
+    std::string channelName(Core::Snowflake channelId) const;
+    std::string roleName(Core::Snowflake roleId) const;
+    std::string userTag(Core::Snowflake userId) const;
+    Platform::Guard<Core::ClientInstance> instance;
     Core::Snowflake guildId;
-
-    QHash<Core::Snowflake, Discord::User> users;
-    QHash<Core::Snowflake, QJsonObject> integrations;
-    QHash<Core::Snowflake, QJsonObject> webhooks;
-    QHash<Core::Snowflake, QJsonObject> scheduledEvents;
-    QHash<Core::Snowflake, QJsonObject> autoModerationRules;
-    QHash<Core::Snowflake, QJsonObject> threads;
-    QHash<Core::Snowflake, QJsonObject> applicationCommands;
-    QHash<QPair<int, Core::Snowflake>, QString> deletedNames;
+    std::unordered_map<Core::Snowflake, Discord::User> users;
+    std::unordered_map<Core::Snowflake, nlohmann::json> integrations, webhooks, scheduledEvents, autoModerationRules, threads, applicationCommands;
+    std::map<std::pair<int, Core::Snowflake>, std::string> deletedNames;
 };
-
-} // namespace UI
-} // namespace Styx
+}

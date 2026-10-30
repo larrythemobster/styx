@@ -74,6 +74,9 @@ private:
     void loadBans();
 
     void saveChanges();
+    enum class ImageSlot { Icon, Banner, Splash };
+    void chooseImage(ImageSlot slot);
+    void uploadExpression(bool sticker);
     void reportError(const std::string &message);
     [[nodiscard]] bool canEditCurrentSection() const;
     [[nodiscard]] bool isCurrentRequest(Core::Snowflake guildId, std::uint64_t generation) const;

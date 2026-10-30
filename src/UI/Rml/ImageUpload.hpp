@@ -21,6 +21,5 @@ PreparedImage prepareCropped(const std::string &path, int maxWidth, int maxHeigh
 PreparedImage prepareRaw(const std::string &path, int64_t maxBytes);
 std::string dataUri(std::string_view bytes, std::string_view mimeType);
 std::string md5Hex(std::string_view bytes);
-std::string encodePng(const Platform::ImageBuffer &image);
 
 } // namespace Styx::UI::ImageUpload

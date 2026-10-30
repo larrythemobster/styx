@@ -16,10 +16,6 @@
 #include <avif/avif.h>
 #include <openssl/evp.h>
 
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#define STBI_WRITE_NO_STDIO
-#include <stb_image_write.h>
 
 namespace Styx::UI::ImageUpload {
 namespace {
@@ -172,17 +168,6 @@ std::string md5Hex(std::string_view bytes)
     return result;
 }
 
-std::string encodePng(const Platform::ImageBuffer &image)
-{
-    if (image.empty()) return {};
-    std::string result;
-    auto write = [](void *context, void *data, int size) {
-        static_cast<std::string *>(context)->append(static_cast<const char *>(data), static_cast<size_t>(size));
-    };
-    if (!stbi_write_png_to_func(write, &result, image.width, image.height, 4, image.pixels.data(), static_cast<int>(image.stride())))
-        return {};
-    return result;
-}
 
 PreparedImage prepareCropped(const std::string &path, int maxWidth, int maxHeight)
 {
@@ -228,7 +213,7 @@ PreparedImage prepareCropped(const std::string &path, int maxWidth, int maxHeigh
         cropped = Platform::Image::scale(cropped, std::max(1, static_cast<int>(std::round(width * scale))),
                                         std::max(1, static_cast<int>(std::round(height * scale))));
     }
-    const auto png = encodePng(cropped);
+    const auto png = Platform::Image::encodePng(cropped);
     if (png.empty()) prepared.error = "Unable to process image";
     else prepared.dataUri = dataUri(png, "image/png");
     return prepared;

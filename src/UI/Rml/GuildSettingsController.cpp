@@ -13,9 +13,13 @@
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Client.hpp"
 
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QDateTime>
+#include "Platform/Desktop.hpp"
+#include "Platform/Utf8.hpp"
+#include "Platform/Base64.hpp"
+#include <charconv>
+#include <cstring>
+#include <filesystem>
+#include <format>
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Element.h>
@@ -29,6 +33,14 @@ namespace UI {
 namespace Rml {
 
 namespace {
+template<class T = uint64_t> T number(std::string_view text, bool *ok = nullptr)
+{
+    T value = 0;
+    auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    const bool valid = parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
+    if (ok) *ok = valid;
+    return valid ? value : T{};
+}
 
 
 struct BrandColorPreset {
@@ -98,6 +110,7 @@ GuildSettingsController::GuildSettingsController(Shell &shell)
 
 GuildSettingsController::~GuildSettingsController()
 {
+    removeListeners();
     if (document) {
         document->Close();
         document = nullptr;
@@ -376,7 +389,7 @@ void GuildSettingsController::renderProfile(std::string &rml)
     } else {
         auto g = guild();
         const std::string name = g ? g->name.valueOr("?") : "?";
-        std::string initials = Platform::unicodeUpper(Platform::Utf8::left(name, 2));
+        std::string initials = Platform::unicodeUpper(Platform::truncateUtf8(name, 2));
         if (initials.empty())
             initials = "?";
         rml += "<div class=\"guild-icon-initials\">" + escape(initials) + "</div>";
@@ -410,7 +423,7 @@ void GuildSettingsController::renderProfile(std::string &rml)
     rml += "<div class=\"settings-label\">Server Brand Color</div>";
     rml += "<div class=\"brand-colors-row\">";
     for (const auto &preset : BrandColors) {
-        const bool active = equalsIgnoringCase(draftProfile.brandColor, preset.color);
+        const bool active = Platform::equalsIgnoreCaseAscii(draftProfile.brandColor, preset.color);
         rml += std::string("<div class=\"brand-color-swatch") + (active ? " active" : "") +
                "\" style=\"background-color:" + preset.color + ";\" data-action=\"select-brand-color\" data-color=\"" +
                preset.color + "\" title=\"" + preset.name + "\"></div>";
@@ -639,159 +652,152 @@ void GuildSettingsController::renderEmoji(std::string &rml)
 }
 
 // 5. Stickers
-void GuildSettingsController::renderStickers(QString &rml)
+void GuildSettingsController::renderStickers(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\" style=\"display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
-    rml += QStringLiteral("<span>Stickers</span>");
-    rml += QStringLiteral("<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-sticker-upload\">Upload Sticker</div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-section-title\" style=\"display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
+    rml += std::string("<span>Stickers</span>");
+    rml += std::string("<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-sticker-upload\">Upload Sticker</div>");
+    rml += std::string("</div>");
 
-    rml += QStringLiteral("<div class=\"slots-counter\">%1 / 5 Custom Sticker slots used</div>").arg(QString::number(stickers.size()));
+    rml += std::format("<div class=\"slots-counter\">{0} / 5 Custom Sticker slots used</div>", std::to_string(stickers.size()));
 
-    if (stickers.isEmpty()) {
-        rml += QStringLiteral("<div class=\"empty-state\"><div class=\"empty-state-title\">No Custom Stickers</div><div class=\"empty-state-desc\">Upload PNG, APNG, or Lottie sticker files under 512 KB to express yourself.</div></div>");
+    if (stickers.empty()) {
+        rml += std::string("<div class=\"empty-state\"><div class=\"empty-state-title\">No Custom Stickers</div><div class=\"empty-state-desc\">Upload PNG, APNG, or Lottie sticker files under 512 KB to express yourself.</div></div>");
         return;
     }
 
-    rml += QStringLiteral("<div class=\"guild-table\">");
-    rml += QStringLiteral("<div class=\"guild-table-header\"><div class=\"col-image\">Sticker</div><div class=\"col-name\">Name & Related Emoji</div><div class=\"col-uploader\">Description</div><div class=\"col-actions\">Actions</div></div>");
+    rml += std::string("<div class=\"guild-table\">");
+    rml += std::string("<div class=\"guild-table-header\"><div class=\"col-image\">Sticker</div><div class=\"col-name\">Name & Related Emoji</div><div class=\"col-uploader\">Description</div><div class=\"col-actions\">Actions</div></div>");
 
     for (const auto &st : stickers) {
-        rml += QStringLiteral("<div class=\"guild-table-row\">");
-        QUrl stUrl = Discord::Cdn::stickerStill(st.id.get(), st.formatType.valueOr(Discord::StickerFormatType::PNG), 64);
-        QString stSrc = shell.imageSource(stUrl, QSize(48, 48));
-        rml += QStringLiteral("<div class=\"col-image\"><img class=\"sticker-preview-img\" src=\"%1\"/></div>").arg(escape(stSrc));
-        rml += QStringLiteral("<div class=\"col-name\"><span style=\"font-weight:600; color:#f2f3f5;\">%1</span> <span style=\"color:#949ba4;\">(:%2:)</span></div>")
-                   .arg(escape(st.name.valueOr("sticker")), escape(st.tags.valueOr("")));
-        rml += QStringLiteral("<div class=\"col-uploader\">%1</div>").arg(escape(st.description.valueOr("")));
-        rml += QStringLiteral("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"delete-sticker\" data-id=\"%1\">Delete</div></div>")
-                   .arg(QString::number(quint64(st.id.get())));
-        rml += QStringLiteral("</div>");
+        rml += std::string("<div class=\"guild-table-row\">");
+        std::string stUrl = Discord::Cdn::stickerStill(st.id.get(), st.formatType.valueOr(Discord::StickerFormatType::PNG), 64);
+        std::string stSrc = shell.imageSource(stUrl, Platform::Size(48, 48));
+        rml += std::format("<div class=\"col-image\"><img class=\"sticker-preview-img\" src=\"{0}\"/></div>", escape(stSrc));
+        rml += std::format("<div class=\"col-name\"><span style=\"font-weight:600; color:#f2f3f5;\">{0}</span> <span style=\"color:#949ba4;\">(:{1}:)</span></div>", escape(st.name.valueOr("sticker")), escape(st.tags.valueOr("")));
+        rml += std::format("<div class=\"col-uploader\">{0}</div>", escape(st.description.valueOr("")));
+        rml += std::format("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"delete-sticker\" data-id=\"{0}\">Delete</div></div>", std::to_string(uint64_t(st.id.get())));
+        rml += std::string("</div>");
     }
-    rml += QStringLiteral("</div>");
+    rml += std::string("</div>");
 }
 
 // 6. Members
-void GuildSettingsController::renderMembers(QString &rml)
+void GuildSettingsController::renderMembers(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\" style=\"display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
-    rml += QStringLiteral("<span>Members (%1)</span>").arg(QString::number(members.size()));
-    rml += QStringLiteral("<div class=\"settings-btn settings-btn-danger\" data-action=\"prune-members\">Prune Members</div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-section-title\" style=\"display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
+    rml += std::format("<span>Members ({0})</span>", std::to_string(members.size()));
+    rml += std::string("<div class=\"settings-btn settings-btn-danger\" data-action=\"prune-members\">Prune Members</div>");
+    rml += std::string("</div>");
 
     // Search bar
-    rml += QStringLiteral("<div style=\"margin-bottom:16dp;\">");
-    rml += QStringLiteral("<input type=\"text\" class=\"settings-text-input\" id=\"member-search-input\" value=\"%1\" placeholder=\"Search Members by username or nickname…\" style=\"width:100%;\"/>")
-               .arg(escape(memberSearchQuery));
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div style=\"margin-bottom:16dp;\">");
+    rml += std::format("<input type=\"text\" class=\"settings-text-input\" id=\"member-search-input\" value=\"{0}\" placeholder=\"Search Members by username or nickname…\" style=\"width:100%;\"/>", escape(memberSearchQuery));
+    rml += std::string("</div>");
 
     auto *inst = instance();
 
-    rml += QStringLiteral("<div class=\"guild-table\">");
-    rml += QStringLiteral("<div class=\"guild-table-header\"><div style=\"width:48dp;\">User</div><div class=\"col-name\">Name</div><div class=\"col-channel\">Roles</div><div class=\"col-expires\">Joined</div><div class=\"col-actions\">Actions</div></div>");
+    rml += std::string("<div class=\"guild-table\">");
+    rml += std::string("<div class=\"guild-table-header\"><div style=\"width:48dp;\">User</div><div class=\"col-name\">Name</div><div class=\"col-channel\">Roles</div><div class=\"col-expires\">Joined</div><div class=\"col-actions\">Actions</div></div>");
 
     int shown = 0;
+    const auto search = Platform::caseFold(memberSearchQuery);
     for (const auto &m : members) {
         if (!m.user.hasValue())
             continue;
 
-        QString name = m.nick.hasValue() && !m.nick->isEmpty() ? m.nick.get() : m.user->username.valueOr("Member");
-        QString username = m.user->username.valueOr("");
+        std::string name = m.nick.hasValue() && !m.nick->empty() ? m.nick.get() : m.user->username.valueOr("Member");
+        std::string username = m.user->username.valueOr("");
 
-        if (!memberSearchQuery.isEmpty()) {
-            if (!name.contains(memberSearchQuery, Qt::CaseInsensitive) &&
-                !username.contains(memberSearchQuery, Qt::CaseInsensitive))
+        if (!memberSearchQuery.empty()) {
+            if (Platform::caseFold(name).find(search) == std::string::npos &&
+                Platform::caseFold(username).find(search) == std::string::npos)
                 continue;
         }
 
         shown++;
-        rml += QStringLiteral("<div class=\"guild-table-row\">");
+        rml += std::string("<div class=\"guild-table-row\">");
 
         // Avatar
-        QUrl avUrl = Discord::Cdn::userAvatar(m.user->id.get(), m.user->avatar.valueOr(""), 36);
-        QString avSrc = shell.imageSource(avUrl, QSize(36, 36));
-        rml += QStringLiteral("<div style=\"width:48dp;\"><img class=\"member-avatar-img\" src=\"%1\"/></div>").arg(escape(avSrc));
+        std::string avUrl = Discord::Cdn::userAvatar(m.user->id.get(), m.user->avatar.valueOr(""), 36);
+        std::string avSrc = shell.imageSource(avUrl, Platform::Size(36, 36));
+        rml += std::format("<div style=\"width:48dp;\"><img class=\"member-avatar-img\" src=\"{0}\"/></div>", escape(avSrc));
 
         // Name
-        rml += QStringLiteral("<div class=\"col-name\"><div class=\"member-name\">%1</div><div class=\"member-subtext\">@%2</div></div>")
-                   .arg(escape(name), escape(username));
+        rml += std::format("<div class=\"col-name\"><div class=\"member-name\">{0}</div><div class=\"member-subtext\">@{1}</div></div>", escape(name), escape(username));
 
         // Roles
-        rml += QStringLiteral("<div class=\"col-channel\"><div class=\"member-roles\">");
+        rml += std::string("<div class=\"col-channel\"><div class=\"member-roles\">");
         if (inst) {
-            auto roleIds = m.roles.valueOr(QList<Core::Snowflake>{});
+            auto roleIds = m.roles.valueOr(std::vector<Core::Snowflake>{});
             for (const auto &rId : roleIds) {
                 for (const auto &r : roles) {
                     if (r.id.get() == rId) {
-                        QString rColor = (r.color.valueOr(0) != 0) ? QStringLiteral("#%1").arg(r.color.valueOr(0), 6, 16, QLatin1Char('0')) : QStringLiteral("#949ba4");
-                        rml += QStringLiteral("<div class=\"role-badge\"><div class=\"role-badge-dot\" style=\"background-color:%1;\"></div>%2</div>")
-                                   .arg(rColor, escape(r.name.valueOr("role")));
+                        std::string rColor = (r.color.valueOr(0) != 0) ? std::format("#{:06X}", r.color.valueOr(0)) : std::string("#949ba4");
+                        rml += std::format("<div class=\"role-badge\"><div class=\"role-badge-dot\" style=\"background-color:{0};\"></div>{1}</div>", rColor, escape(r.name.valueOr("role")));
                         break;
                     }
                 }
             }
         }
-        rml += QStringLiteral("</div></div>");
+        rml += std::string("</div></div>");
 
         // Joined
-        QString joined = m.joinedAt.hasValue() ? m.joinedAt->toString(QStringLiteral("yyyy-MM-dd")) : QStringLiteral("—");
-        rml += QStringLiteral("<div class=\"col-expires\">%1</div>").arg(joined);
+        std::string joined = m.joinedAt.hasValue() ? m.joinedAt->format("%Y-%m-%d") : "—";
+        rml += std::format("<div class=\"col-expires\">{0}</div>", joined);
 
         // Actions: Kick, Ban
-        rml += QStringLiteral("<div class=\"col-actions\" style=\"display:flex; flex-direction:row; justify-content:flex-end;\">");
+        rml += std::string("<div class=\"col-actions\" style=\"display:flex; flex-direction:row; justify-content:flex-end;\">");
         auto target = MemberModeration::targetFor(inst, currentGuildId, m.user->id.get());
         if (target && MemberModeration::canKick(inst, *target)) {
-            rml += QStringLiteral("<div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:11dp; margin-right:4dp;\" data-action=\"kick-member\" data-id=\"%1\" data-name=\"%2\">Kick</div>")
-                       .arg(QString::number(quint64(m.user->id.get())), escape(username));
+            rml += std::format("<div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:11dp; margin-right:4dp;\" data-action=\"kick-member\" data-id=\"{0}\" data-name=\"{1}\">Kick</div>", std::to_string(uint64_t(m.user->id.get())), escape(username));
         }
         if (target && MemberModeration::canBan(inst, *target)) {
-            rml += QStringLiteral("<div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:11dp;\" data-action=\"ban-member\" data-id=\"%1\" data-name=\"%2\">Ban</div>")
-                       .arg(QString::number(quint64(m.user->id.get())), escape(username));
+            rml += std::format("<div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:11dp;\" data-action=\"ban-member\" data-id=\"{0}\" data-name=\"{1}\">Ban</div>", std::to_string(uint64_t(m.user->id.get())), escape(username));
         }
-        rml += QStringLiteral("</div>");
+        rml += std::string("</div>");
 
-        rml += QStringLiteral("</div>");
+        rml += std::string("</div>");
         if (shown >= 100)
             break;
     }
 
     if (shown == 0) {
-        rml += QStringLiteral("<div class=\"empty-state\"><div class=\"empty-state-title\">No Members Found</div></div>");
+        rml += std::string("<div class=\"empty-state\"><div class=\"empty-state-title\">No Members Found</div></div>");
     }
-    rml += QStringLiteral("</div>");
+    rml += std::string("</div>");
 }
 
 // 7. Roles
-void GuildSettingsController::renderRoles(QString &rml)
+void GuildSettingsController::renderRoles(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Roles</div>");
+    rml += std::string("<div class=\"settings-section-title\">Roles</div>");
 
-    rml += QStringLiteral("<div class=\"roles-container\">");
+    rml += std::string("<div class=\"roles-container\">");
 
     // Left List
-    rml += QStringLiteral("<div class=\"roles-list-pane\">");
-    rml += QStringLiteral("<div class=\"settings-btn settings-btn-primary\" style=\"margin-bottom:12dp; text-align:center;\" data-action=\"create-role\">+ Create Role</div>");
+    rml += std::string("<div class=\"roles-list-pane\">");
+    rml += std::string("<div class=\"settings-btn settings-btn-primary\" style=\"margin-bottom:12dp; text-align:center;\" data-action=\"create-role\">+ Create Role</div>");
 
-    if (roles.isEmpty() && instance())
+    if (roles.empty() && instance())
         roles = instance()->getRolesForGuild(currentGuildId);
 
-    if (!selectedRoleId.isValid() && !roles.isEmpty())
-        selectedRoleId = roles.first().id.get();
+    if (!selectedRoleId.isValid() && !roles.empty())
+        selectedRoleId = roles.front().id.get();
 
     for (const auto &role : roles) {
-        QString active = (role.id.get() == selectedRoleId) ? QStringLiteral(" active") : QString();
-        QString color = (role.color.valueOr(0) != 0) ? QStringLiteral("#%1").arg(role.color.valueOr(0), 6, 16, QLatin1Char('0')) : QStringLiteral("#949ba4");
+        std::string active = (role.id.get() == selectedRoleId) ? std::string(" active") : std::string();
+        std::string color = (role.color.valueOr(0) != 0) ? std::format("#{:06X}", role.color.valueOr(0)) : std::string("#949ba4");
 
-        rml += QStringLiteral("<div class=\"role-list-item%1\" data-action=\"select-role\" data-id=\"%2\">")
-                   .arg(active, QString::number(quint64(role.id.get())));
-        rml += QStringLiteral("<div class=\"role-item-dot\" style=\"background-color:%1;\"></div>").arg(color);
-        rml += QStringLiteral("<span style=\"overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\">%1</span>").arg(escape(role.name.valueOr("new role")));
-        rml += QStringLiteral("</div>");
+        rml += std::format("<div class=\"role-list-item{0}\" data-action=\"select-role\" data-id=\"{1}\">", active, std::to_string(uint64_t(role.id.get())));
+        rml += std::format("<div class=\"role-item-dot\" style=\"background-color:{0};\"></div>", color);
+        rml += std::format("<span style=\"overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\">{0}</span>", escape(role.name.valueOr("new role")));
+        rml += std::string("</div>");
     }
-    rml += QStringLiteral("</div>");
+    rml += std::string("</div>");
 
     // Right Editor
-    rml += QStringLiteral("<div class=\"role-editor-pane\">");
+    rml += std::string("<div class=\"role-editor-pane\">");
 
     RoleDraft activeDraft;
     if (dirtyRoleDrafts.contains(selectedRoleId))
@@ -813,152 +819,145 @@ void GuildSettingsController::renderRoles(QString &rml)
     }
 
     // Role tabs
-    rml += QStringLiteral("<div class=\"tabs-bar\">");
-    auto addTab = [&](RoleTab tab, const QString &label) {
-        QString act = (currentRoleTab == tab) ? QStringLiteral(" active") : QString();
-        rml += QStringLiteral("<div class=\"tab-btn%1\" data-action=\"select-role-tab\" data-tab=\"%2\">%3</div>")
-                   .arg(act, QString::number(static_cast<int>(tab)), label);
+    rml += std::string("<div class=\"tabs-bar\">");
+    auto addTab = [&](RoleTab tab, const std::string &label) {
+        std::string act = (currentRoleTab == tab) ? std::string(" active") : std::string();
+        rml += std::format("<div class=\"tab-btn{0}\" data-action=\"select-role-tab\" data-tab=\"{1}\">{2}</div>", act, std::to_string(static_cast<int>(tab)), label);
     };
     addTab(RoleTab::Display, "Display");
     addTab(RoleTab::Permissions, "Permissions");
     addTab(RoleTab::Members, "Manage Members");
-    rml += QStringLiteral("</div>");
+    rml += std::string("</div>");
 
     if (currentRoleTab == RoleTab::Display) {
-        rml += QStringLiteral("<div class=\"settings-row\">");
-        rml += QStringLiteral("<div class=\"settings-label\">Role Name</div>");
-        rml += QStringLiteral("<input type=\"text\" class=\"settings-text-input\" id=\"role-name-input\" value=\"%1\" style=\"width:100%;\"/>")
-                   .arg(escape(activeDraft.name));
-        rml += QStringLiteral("</div>");
+        rml += std::string("<div class=\"settings-row\">");
+        rml += std::string("<div class=\"settings-label\">Role Name</div>");
+        rml += std::format("<input type=\"text\" class=\"settings-text-input\" id=\"role-name-input\" value=\"{0}\" style=\"width:100%;\"/>", escape(activeDraft.name));
+        rml += std::string("</div>");
 
         // Role Color
-        rml += QStringLiteral("<div class=\"settings-row\">");
-        rml += QStringLiteral("<div class=\"settings-label\">Role Color</div>");
-        rml += QStringLiteral("<div class=\"brand-colors-row\">");
+        rml += std::string("<div class=\"settings-row\">");
+        rml += std::string("<div class=\"settings-label\">Role Color</div>");
+        rml += std::string("<div class=\"brand-colors-row\">");
         const int roleColors[] = { 0, 0x1abc9c, 0x2ecc71, 0x3498db, 0x9b59b6, 0xe91e63, 0xf1c40f, 0xe67e22, 0xe74c3c, 0x95a5a6 };
         for (int c : roleColors) {
-            QString cHex = (c != 0) ? QStringLiteral("#%1").arg(c, 6, 16, QLatin1Char('0')) : QStringLiteral("#4e5058");
-            QString act = (activeDraft.color == c) ? QStringLiteral(" active") : QString();
-            rml += QStringLiteral("<div class=\"brand-color-swatch%1\" style=\"background-color:%2;\" data-action=\"select-role-color\" data-color=\"%3\"></div>")
-                       .arg(act, cHex, QString::number(c));
+            std::string cHex = (c != 0) ? std::format("#{:06X}", c) : std::string("#4e5058");
+            std::string act = (activeDraft.color == c) ? std::string(" active") : std::string();
+            rml += std::format("<div class=\"brand-color-swatch{0}\" style=\"background-color:{1};\" data-action=\"select-role-color\" data-color=\"{2}\"></div>", act, cHex, std::to_string(c));
         }
-        rml += QStringLiteral("</div>");
-        rml += QStringLiteral("</div>");
+        rml += std::string("</div>");
+        rml += std::string("</div>");
 
         // Hoist & Mentionable
-        rml += QStringLiteral("<div class=\"settings-switch-row\">");
-        rml += QStringLiteral("<div class=\"settings-switch-text\"><div class=\"settings-switch-title\">Display role members separately from online members</div></div>");
-        QString hoistChk = activeDraft.hoist ? QStringLiteral(" checked") : QString();
-        rml += QStringLiteral("<div class=\"settings-switch%1\" data-action=\"toggle-role-hoist\"><div class=\"settings-switch-thumb\"></div></div>").arg(hoistChk);
-        rml += QStringLiteral("</div>");
+        rml += std::string("<div class=\"settings-switch-row\">");
+        rml += std::string("<div class=\"settings-switch-text\"><div class=\"settings-switch-title\">Display role members separately from online members</div></div>");
+        std::string hoistChk = activeDraft.hoist ? std::string(" checked") : std::string();
+        rml += std::format("<div class=\"settings-switch{0}\" data-action=\"toggle-role-hoist\"><div class=\"settings-switch-thumb\"></div></div>", hoistChk);
+        rml += std::string("</div>");
 
-        rml += QStringLiteral("<div class=\"settings-switch-row\">");
-        rml += QStringLiteral("<div class=\"settings-switch-text\"><div class=\"settings-switch-title\">Allow anyone to @mention this role</div></div>");
-        QString mentionChk = activeDraft.mentionable ? QStringLiteral(" checked") : QString();
-        rml += QStringLiteral("<div class=\"settings-switch%1\" data-action=\"toggle-role-mention\"><div class=\"settings-switch-thumb\"></div></div>").arg(mentionChk);
-        rml += QStringLiteral("</div>");
+        rml += std::string("<div class=\"settings-switch-row\">");
+        rml += std::string("<div class=\"settings-switch-text\"><div class=\"settings-switch-title\">Allow anyone to @mention this role</div></div>");
+        std::string mentionChk = activeDraft.mentionable ? std::string(" checked") : std::string();
+        rml += std::format("<div class=\"settings-switch{0}\" data-action=\"toggle-role-mention\"><div class=\"settings-switch-thumb\"></div></div>", mentionChk);
+        rml += std::string("</div>");
 
         // Delete Role
         if (selectedRoleId != currentGuildId) {
-            rml += QStringLiteral("<div style=\"margin-top:24dp; border-top:1dp #202024; padding-top:16dp;\">");
-            rml += QStringLiteral("<div class=\"settings-btn settings-btn-danger\" data-action=\"delete-role\" data-id=\"%1\">Delete Role</div>")
-                       .arg(QString::number(quint64(selectedRoleId)));
-            rml += QStringLiteral("</div>");
+            rml += std::string("<div style=\"margin-top:24dp; border-top:1dp #202024; padding-top:16dp;\">");
+            rml += std::format("<div class=\"settings-btn settings-btn-danger\" data-action=\"delete-role\" data-id=\"{0}\">Delete Role</div>", std::to_string(uint64_t(selectedRoleId)));
+            rml += std::string("</div>");
         }
     } else if (currentRoleTab == RoleTab::Permissions) {
-        rml += QStringLiteral("<div style=\"margin-bottom:16dp; display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
-        rml += QStringLiteral("<input type=\"text\" class=\"settings-text-input\" id=\"perm-search-input\" value=\"%1\" placeholder=\"Search Permissions…\" style=\"flex:1; margin-right:12dp;\"/>")
-                   .arg(escape(permissionSearchQuery));
-        rml += QStringLiteral("<div class=\"settings-btn settings-btn-secondary\" data-action=\"clear-perms\">Clear Permissions</div>");
-        rml += QStringLiteral("</div>");
+        rml += std::string("<div style=\"margin-bottom:16dp; display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
+        rml += std::format("<input type=\"text\" class=\"settings-text-input\" id=\"perm-search-input\" value=\"{0}\" placeholder=\"Search Permissions…\" style=\"flex:1; margin-right:12dp;\"/>", escape(permissionSearchQuery));
+        rml += std::string("<div class=\"settings-btn settings-btn-secondary\" data-action=\"clear-perms\">Clear Permissions</div>");
+        rml += std::string("</div>");
 
         const char *currentCategory = "";
+        const auto search = Platform::caseFold(permissionSearchQuery);
         for (const auto &p : AllPermissions) {
-            if (!permissionSearchQuery.isEmpty() &&
-                !QString::fromLatin1(p.name).contains(permissionSearchQuery, Qt::CaseInsensitive) &&
-                !QString::fromLatin1(p.desc).contains(permissionSearchQuery, Qt::CaseInsensitive))
+            if (!permissionSearchQuery.empty() &&
+                Platform::caseFold(p.name).find(search) == std::string::npos &&
+                Platform::caseFold(p.desc).find(search) == std::string::npos)
                 continue;
 
             if (strcmp(p.category, currentCategory) != 0) {
                 currentCategory = p.category;
-                rml += QStringLiteral("<div class=\"settings-subheading\">%1 Permissions</div>").arg(currentCategory);
+                rml += std::format("<div class=\"settings-subheading\">{0} Permissions</div>", currentCategory);
             }
 
             bool granted = (activeDraft.permissions & p.perm) == p.perm;
-            rml += QStringLiteral("<div class=\"settings-switch-row\">");
-            rml += QStringLiteral("<div class=\"settings-switch-text\"><div class=\"settings-switch-title\">%1</div><div class=\"settings-switch-desc\">%2</div></div>")
-                       .arg(p.name, p.desc);
-            QString chk = granted ? QStringLiteral(" checked") : QString();
-            rml += QStringLiteral("<div class=\"settings-switch%1\" data-action=\"toggle-perm\" data-perm=\"%2\"><div class=\"settings-switch-thumb\"></div></div>")
-                       .arg(chk, QString::number(static_cast<quint64>(p.perm)));
-            rml += QStringLiteral("</div>");
+            rml += std::string("<div class=\"settings-switch-row\">");
+            rml += std::format("<div class=\"settings-switch-text\"><div class=\"settings-switch-title\">{0}</div><div class=\"settings-switch-desc\">{1}</div></div>", p.name, p.desc);
+            std::string chk = granted ? std::string(" checked") : std::string();
+            rml += std::format("<div class=\"settings-switch{0}\" data-action=\"toggle-perm\" data-perm=\"{1}\"><div class=\"settings-switch-thumb\"></div></div>", chk, std::to_string(static_cast<uint64_t>(p.perm)));
+            rml += std::string("</div>");
         }
     } else {
-        rml += QStringLiteral("<div class=\"empty-state\"><div class=\"empty-state-title\">Role Members</div><div class=\"empty-state-desc\">Assigned to members from the Members tab.</div></div>");
+        rml += std::string("<div class=\"empty-state\"><div class=\"empty-state-title\">Role Members</div><div class=\"empty-state-desc\">Assigned to members from the Members tab.</div></div>");
     }
 
-    rml += QStringLiteral("</div>"); // role-editor-pane
-    rml += QStringLiteral("</div>"); // roles-container
+    rml += std::string("</div>"); // role-editor-pane
+    rml += std::string("</div>"); // roles-container
 }
 
 // 8. Invites
-void GuildSettingsController::renderInvites(QString &rml)
+void GuildSettingsController::renderInvites(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\" style=\"display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
-    rml += QStringLiteral("<span>Active Invites (%1)</span>").arg(QString::number(invites.size()));
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-section-title\" style=\"display:flex; flex-direction:row; justify-content:space-between; align-items:center;\">");
+    rml += std::format("<span>Active Invites ({0})</span>", std::to_string(invites.size()));
+    rml += std::string("</div>");
 
-    if (invites.isEmpty()) {
-        rml += QStringLiteral("<div class=\"empty-state\"><div class=\"empty-state-title\">No Active Invites</div><div class=\"empty-state-desc\">No one has created an instant invite for this server yet.</div></div>");
+    if (invites.empty()) {
+        rml += std::string("<div class=\"empty-state\"><div class=\"empty-state-title\">No Active Invites</div><div class=\"empty-state-desc\">No one has created an instant invite for this server yet.</div></div>");
         return;
     }
 
-    rml += QStringLiteral("<div class=\"guild-table\">");
-    rml += QStringLiteral("<div class=\"guild-table-header\"><div class=\"col-name\">Inviter</div><div class=\"col-name\">Invite Code</div><div class=\"col-channel\">Channel</div><div class=\"col-uses\">Uses</div><div class=\"col-expires\">Expires</div><div class=\"col-actions\">Actions</div></div>");
+    rml += std::string("<div class=\"guild-table\">");
+    rml += std::string("<div class=\"guild-table-header\"><div class=\"col-name\">Inviter</div><div class=\"col-name\">Invite Code</div><div class=\"col-channel\">Channel</div><div class=\"col-uses\">Uses</div><div class=\"col-expires\">Expires</div><div class=\"col-actions\">Actions</div></div>");
 
     for (const auto &inv : invites) {
-        rml += QStringLiteral("<div class=\"guild-table-row\">");
+        rml += std::string("<div class=\"guild-table-row\">");
 
-        QString inviterName = inv.inviter.hasValue() ? inv.inviter->username.valueOr("Unknown") : "System";
-        rml += QStringLiteral("<div class=\"col-name\" style=\"font-weight:600; color:#f2f3f5;\">%1</div>").arg(escape(inviterName));
-        rml += QStringLiteral("<div class=\"col-name\" style=\"color:#00a8fc;\">%1</div>").arg(escape(inv.code.valueOr("")));
-        QString chName = inv.channel.hasValue() ? inv.channel->name.valueOr("channel") : "—";
-        rml += QStringLiteral("<div class=\"col-channel\"># %1</div>").arg(escape(chName));
-        rml += QStringLiteral("<div class=\"col-uses\">%1</div>").arg(QString::number(inv.uses.valueOr(0)));
+        std::string inviterName = inv.inviter.hasValue() ? inv.inviter->username.valueOr("Unknown") : "System";
+        rml += std::format("<div class=\"col-name\" style=\"font-weight:600; color:#f2f3f5;\">{0}</div>", escape(inviterName));
+        rml += std::format("<div class=\"col-name\" style=\"color:#00a8fc;\">{0}</div>", escape(inv.code.valueOr("")));
+        std::string chName = inv.channel.hasValue() ? inv.channel->name.valueOr("channel") : "—";
+        rml += std::format("<div class=\"col-channel\"># {0}</div>", escape(chName));
+        rml += std::format("<div class=\"col-uses\">{0}</div>", std::to_string(inv.uses.valueOr(0)));
 
-        QString expText = "Never";
+        std::string expText = "Never";
         if (inv.maxAge.valueOr(0) > 0)
-            expText = QStringLiteral("%1s").arg(QString::number(inv.maxAge.valueOr(0)));
-        rml += QStringLiteral("<div class=\"col-expires\">%1</div>").arg(expText);
+            expText = std::format("{0}s", std::to_string(inv.maxAge.valueOr(0)));
+        rml += std::format("<div class=\"col-expires\">{0}</div>", expText);
 
-        rml += QStringLiteral("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"revoke-invite\" data-code=\"%1\">Revoke</div></div>")
-                   .arg(escape(inv.code.valueOr("")));
-        rml += QStringLiteral("</div>");
+        rml += std::format("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"revoke-invite\" data-code=\"{0}\">Revoke</div></div>", escape(inv.code.valueOr("")));
+        rml += std::string("</div>");
     }
-    rml += QStringLiteral("</div>");
+    rml += std::string("</div>");
 }
 
 // 9. Audit Log
-void GuildSettingsController::renderAuditLog(QString &rml)
+void GuildSettingsController::renderAuditLog(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Server Audit Log</div>");
+    rml += std::string("<div class=\"settings-section-title\">Server Audit Log</div>");
 
     // Filter bar
-    rml += QStringLiteral("<div style=\"display:flex; flex-direction:row; margin-bottom:16dp;\">");
-    rml += QStringLiteral("<div style=\"flex:1; margin-right:12dp;\">");
-    rml += QStringLiteral("<div class=\"settings-label\">Filter by Action</div>");
-    rml += QStringLiteral("<select class=\"settings-select\" id=\"select-audit-action\">");
-    rml += QStringLiteral("<option value=\"-1\"%1>All Actions</option>").arg(auditFilterAction == -1 ? QStringLiteral(" selected") : QString());
+    rml += std::string("<div style=\"display:flex; flex-direction:row; margin-bottom:16dp;\">");
+    rml += std::string("<div style=\"flex:1; margin-right:12dp;\">");
+    rml += std::string("<div class=\"settings-label\">Filter by Action</div>");
+    rml += std::string("<select class=\"settings-select\" id=\"select-audit-action\">");
+    rml += std::format("<option value=\"-1\"{0}>All Actions</option>", auditFilterAction == -1 ? std::string(" selected") : std::string());
     for (const auto &filter : AuditLogFormatter::actionFilters()) {
-        QString sel = (auditFilterAction == static_cast<int>(filter.first)) ? QStringLiteral(" selected") : QString();
-        rml += QStringLiteral("<option value=\"%1\"%2>%3</option>").arg(QString::number(static_cast<int>(filter.first)), sel, escape(filter.second));
+        std::string sel = (auditFilterAction == static_cast<int>(filter.first)) ? std::string(" selected") : std::string();
+        rml += std::format("<option value=\"{0}\"{1}>{2}</option>", std::to_string(static_cast<int>(filter.first)), sel, escape(filter.second));
     }
-    rml += QStringLiteral("</select>");
-    rml += QStringLiteral("</div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("</select>");
+    rml += std::string("</div>");
+    rml += std::string("</div>");
 
-    if (auditRows.isEmpty()) {
-        rml += QStringLiteral("<div class=\"empty-state\"><div class=\"empty-state-title\">No Audit Logs</div><div class=\"empty-state-desc\">No logged administrative actions found for this server.</div></div>");
+    if (auditRows.empty()) {
+        rml += std::string("<div class=\"empty-state\"><div class=\"empty-state-title\">No Audit Logs</div><div class=\"empty-state-desc\">No logged administrative actions found for this server.</div></div>");
         return;
     }
 
@@ -970,77 +969,74 @@ void GuildSettingsController::renderAuditLog(QString &rml)
         }
 
         bool isExpanded = expandedAuditRows.contains(idx);
-        rml += QStringLiteral("<div class=\"audit-log-card\" data-action=\"toggle-audit-row\" data-idx=\"%1\" style=\"cursor:pointer;\">")
-                   .arg(QString::number(idx));
+        rml += std::format("<div class=\"audit-log-card\" data-action=\"toggle-audit-row\" data-idx=\"{0}\" style=\"cursor:pointer;\">", std::to_string(idx));
 
-        rml += QStringLiteral("<div class=\"audit-log-header\">");
-        rml += QStringLiteral("<div class=\"audit-log-title\">%1</div>").arg(row.titleHtml);
-        rml += QStringLiteral("<div class=\"audit-log-time\">%1</div>").arg(AuditLogFormatter::timeText(row.start, row.end));
-        rml += QStringLiteral("</div>");
+        rml += std::string("<div class=\"audit-log-header\">");
+        rml += std::format("<div class=\"audit-log-title\">{0}</div>", row.titleHtml);
+        rml += std::format("<div class=\"audit-log-time\">{0}</div>", AuditLogFormatter::timeText(row.start, row.end));
+        rml += std::string("</div>");
 
-        if (isExpanded && !row.lines.isEmpty()) {
-            rml += QStringLiteral("<div class=\"audit-log-details\">");
+        if (isExpanded && !row.lines.empty()) {
+            rml += std::string("<div class=\"audit-log-details\">");
             for (const auto &line : row.lines) {
-                rml += QStringLiteral("<div class=\"audit-change-line\">%1</div>").arg(line.html);
+                rml += std::format("<div class=\"audit-change-line\">{0}</div>", line.html);
             }
-            rml += QStringLiteral("</div>");
+            rml += std::string("</div>");
         }
 
-        rml += QStringLiteral("</div>");
+        rml += std::string("</div>");
         idx++;
     }
 }
 
 // 10. Bans
-void GuildSettingsController::renderBans(QString &rml)
+void GuildSettingsController::renderBans(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\">Bans (%1)</div>").arg(QString::number(bans.size()));
+    const auto search = Platform::caseFold(banSearchQuery);
+    rml += std::format("<div class=\"settings-section-title\">Bans ({0})</div>", std::to_string(bans.size()));
 
-    rml += QStringLiteral("<div style=\"margin-bottom:16dp;\">");
-    rml += QStringLiteral("<input type=\"text\" class=\"settings-text-input\" id=\"ban-search-input\" value=\"%1\" placeholder=\"Search bans by username or ID…\" style=\"width:100%;\"/>")
-               .arg(escape(banSearchQuery));
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div style=\"margin-bottom:16dp;\">");
+    rml += std::format("<input type=\"text\" class=\"settings-text-input\" id=\"ban-search-input\" value=\"{0}\" placeholder=\"Search bans by username or ID…\" style=\"width:100%;\"/>", escape(banSearchQuery));
+    rml += std::string("</div>");
 
-    if (bans.isEmpty()) {
-        rml += QStringLiteral("<div class=\"empty-state\"><div class=\"empty-state-title\">No Bans</div><div class=\"empty-state-desc\">No members are currently banned from this server.</div></div>");
+    if (bans.empty()) {
+        rml += std::string("<div class=\"empty-state\"><div class=\"empty-state-title\">No Bans</div><div class=\"empty-state-desc\">No members are currently banned from this server.</div></div>");
         return;
     }
 
-    rml += QStringLiteral("<div class=\"guild-table\">");
-    rml += QStringLiteral("<div class=\"guild-table-header\"><div class=\"col-name\">User</div><div class=\"col-uploader\">Reason</div><div class=\"col-actions\">Actions</div></div>");
+    rml += std::string("<div class=\"guild-table\">");
+    rml += std::string("<div class=\"guild-table-header\"><div class=\"col-name\">User</div><div class=\"col-uploader\">Reason</div><div class=\"col-actions\">Actions</div></div>");
 
     for (const auto &b : bans) {
         if (!b.user.hasValue())
             continue;
 
-        QString userTag = b.user->username.valueOr("Banned User");
-        QString reason = b.reason.valueOr("No reason provided.");
+        std::string userTag = b.user->username.valueOr("Banned User");
+        std::string reason = b.reason.valueOr("No reason provided.");
 
-        if (!banSearchQuery.isEmpty() &&
-            !userTag.contains(banSearchQuery, Qt::CaseInsensitive) &&
-            !QString::number(quint64(b.user->id.get())).contains(banSearchQuery))
+        if (!banSearchQuery.empty() &&
+            Platform::caseFold(userTag).find(search) == std::string::npos &&
+            b.user->id.get().toString().find(banSearchQuery) == std::string::npos)
             continue;
 
-        rml += QStringLiteral("<div class=\"guild-table-row\">");
-        rml += QStringLiteral("<div class=\"col-name\"><span style=\"font-weight:600; color:#f2f3f5;\">%1</span> <span style=\"color:#949ba4;\">(ID: %2)</span></div>")
-                   .arg(escape(userTag), QString::number(quint64(b.user->id.get())));
-        rml += QStringLiteral("<div class=\"col-uploader\">%1</div>").arg(escape(reason));
-        rml += QStringLiteral("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-secondary\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"revoke-ban\" data-id=\"%1\" data-name=\"%2\">Revoke Ban</div></div>")
-                   .arg(QString::number(quint64(b.user->id.get())), escape(userTag));
-        rml += QStringLiteral("</div>");
+        rml += std::string("<div class=\"guild-table-row\">");
+        rml += std::format("<div class=\"col-name\"><span style=\"font-weight:600; color:#f2f3f5;\">{0}</span> <span style=\"color:#949ba4;\">(ID: {1})</span></div>", escape(userTag), std::to_string(uint64_t(b.user->id.get())));
+        rml += std::format("<div class=\"col-uploader\">{0}</div>", escape(reason));
+        rml += std::format("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-secondary\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"revoke-ban\" data-id=\"{0}\" data-name=\"{1}\">Revoke Ban</div></div>", std::to_string(uint64_t(b.user->id.get())), escape(userTag));
+        rml += std::string("</div>");
     }
-    rml += QStringLiteral("</div>");
+    rml += std::string("</div>");
 }
 
 // 11. Delete Server
-void GuildSettingsController::renderDeleteServer(QString &rml)
+void GuildSettingsController::renderDeleteServer(std::string &rml)
 {
-    rml += QStringLiteral("<div class=\"settings-section-title\" style=\"color:#f23f43;\">Delete Server</div>");
-    rml += QStringLiteral("<div class=\"settings-card danger-card\">");
-    rml += QStringLiteral("<div style=\"font-size:15dp; font-weight:bold; color:#f23f43; margin-bottom:8dp;\">Are you sure you want to delete this server?</div>");
-    rml += QStringLiteral("<div class=\"settings-description\" style=\"color:#dbdee1;\">Deleting this server is permanent and cannot be undone. All channels, messages, roles, and members will be immediately removed.</div>");
-    rml += QStringLiteral("<div class=\"settings-btn settings-btn-danger\" style=\"margin-top:12dp;\" data-action=\"delete-server\">Delete Server</div>");
-    rml += QStringLiteral("</div>");
+    rml += std::string("<div class=\"settings-section-title\" style=\"color:#f23f43;\">Delete Server</div>");
+    rml += std::string("<div class=\"settings-card danger-card\">");
+    rml += std::string("<div style=\"font-size:15dp; font-weight:bold; color:#f23f43; margin-bottom:8dp;\">Are you sure you want to delete this server?</div>");
+    rml += std::string("<div class=\"settings-description\" style=\"color:#dbdee1;\">Deleting this server is permanent and cannot be undone. All channels, messages, roles, and members will be immediately removed.</div>");
+    rml += std::string("<div class=\"settings-btn settings-btn-danger\" style=\"margin-top:12dp;\" data-action=\"delete-server\">Delete Server</div>");
+    rml += std::string("</div>");
 }
 
 // Data loaders
@@ -1102,14 +1098,18 @@ void GuildSettingsController::loadProfile()
 
     auto *inst = instance();
     if (inst && inst->discord()) {
-        QPointer<GuildSettingsController> self(this);
-        inst->discord()->fetchGuildProfile(currentGuildId, [self](const Core::Result<Discord::GuildProfileEdit> &res) {
-            if (!self || !res.success())
+        Platform::Guard<GuildSettingsController> self(this);
+        const auto guildId = currentGuildId;
+        const auto generation = requestGeneration;
+        inst->discord()->fetchGuildProfile(currentGuildId, [self, guildId, generation](const Core::Result<Discord::GuildProfileEdit> &res) {
+            if (!self || !self->isCurrentRequest(guildId, generation))
                 return;
+            if (!res.success()) { self->reportError(res.error); return; }
             self->savedProfile.name = res.value->name;
             self->savedProfile.description = res.value->description;
-            self->savedProfile.brandColor = res.value->brandColorPrimary.toString();
-            self->savedProfile.isPrivate = (res.value->visibility.toInt() != 1);
+            self->savedGuildProfile = *res.value;
+            self->savedProfile.brandColor = res.value->brandColorPrimary.is_string() ? res.value->brandColorPrimary.get<std::string>() : "#5865f2";
+            self->savedProfile.isPrivate = !res.value->visibility.is_number_integer() || res.value->visibility.get<int>() != 1;
             for (int i = 0; i < 6 && i < res.value->traits.size(); ++i)
                 self->savedProfile.traits[i] = res.value->traits[i].label;
 
@@ -1161,10 +1161,13 @@ void GuildSettingsController::loadEmoji()
     auto *inst = instance();
     if (!inst || !inst->discord())
         return;
-    QPointer<GuildSettingsController> self(this);
-    inst->discord()->fetchGuildEmojis(currentGuildId, [self](const Core::Result<QList<Discord::Emoji>> &res) {
-        if (!self || !res.success())
+    Platform::Guard<GuildSettingsController> self(this);
+    const auto guildId = currentGuildId;
+    const auto generation = requestGeneration;
+    inst->discord()->fetchGuildEmojis(currentGuildId, [self, guildId, generation](const Core::Result<std::vector<Discord::Emoji>> &res) {
+        if (!self || !self->isCurrentRequest(guildId, generation))
             return;
+        if (!res.success()) { self->reportError(res.error); return; }
         self->emojis = *res.value;
         self->emojisLoaded = true;
         if (self->currentSection == GuildSettingsSection::Emoji)
@@ -1177,10 +1180,13 @@ void GuildSettingsController::loadStickers()
     auto *inst = instance();
     if (!inst || !inst->discord())
         return;
-    QPointer<GuildSettingsController> self(this);
-    inst->discord()->fetchGuildStickers(currentGuildId, [self](const Core::Result<QList<Discord::Sticker>> &res) {
-        if (!self || !res.success())
+    Platform::Guard<GuildSettingsController> self(this);
+    const auto guildId = currentGuildId;
+    const auto generation = requestGeneration;
+    inst->discord()->fetchGuildStickers(currentGuildId, [self, guildId, generation](const Core::Result<std::vector<Discord::Sticker>> &res) {
+        if (!self || !self->isCurrentRequest(guildId, generation))
             return;
+        if (!res.success()) { self->reportError(res.error); return; }
         self->stickers = *res.value;
         self->stickersLoaded = true;
         if (self->currentSection == GuildSettingsSection::Stickers)
@@ -1195,15 +1201,18 @@ void GuildSettingsController::loadMembers()
         return;
     Discord::MemberSearchQuery query;
     query.limit = 100;
-    QPointer<GuildSettingsController> self(this);
-    inst->discord()->searchGuildMembers(currentGuildId, query, [self](const Core::Result<Discord::Client::MemberSearchPage> &res) {
-        if (!self || !res.success())
+    Platform::Guard<GuildSettingsController> self(this);
+    const auto guildId = currentGuildId;
+    const auto generation = requestGeneration;
+    inst->discord()->searchGuildMembers(currentGuildId, query, [self, guildId, generation](const Core::Result<Discord::Client::MemberSearchPage> &res) {
+        if (!self || !self->isCurrentRequest(guildId, generation))
             return;
+        if (!res.success()) { self->reportError(res.error); return; }
         self->membersLoaded = true;
         self->members.clear();
         for (const auto &item : res.value->members) {
             if (item.member.hasValue())
-                self->members.append(item.member.get());
+                self->members.push_back(item.member.get());
         }
         if (self->currentSection == GuildSettingsSection::Members)
             self->render();
@@ -1226,10 +1235,15 @@ void GuildSettingsController::loadInvites()
     if (!inst || !inst->discord())
         return;
 
-    QPointer<GuildSettingsController> self(this);
-    inst->discord()->fetchGuildInvites(currentGuildId, [self](const Core::Result<QList<Discord::Invite>> &res) {
-        if (!self || !res.success())
+    Platform::Guard<GuildSettingsController> self(this);
+
+    const auto guildId = currentGuildId;
+
+    const auto generation = requestGeneration;
+    inst->discord()->fetchGuildInvites(currentGuildId, [self, guildId, generation](const Core::Result<std::vector<Discord::Invite>> &res) {
+        if (!self || !self->isCurrentRequest(guildId, generation))
             return;
+        if (!res.success()) { self->reportError(res.error); return; }
         self->invites = *res.value;
         self->invitesLoaded = true;
         if (self->currentSection == GuildSettingsSection::Invites)
@@ -1247,10 +1261,13 @@ void GuildSettingsController::loadAuditLog()
         auditFormatter = std::make_unique<AuditLogFormatter>(inst, currentGuildId);
 
     Discord::Client::AuditLogQuery query;
-    QPointer<GuildSettingsController> self(this);
-    inst->discord()->fetchAuditLog(currentGuildId, query, [self](const Core::Result<Discord::AuditLog> &res) {
-        if (!self || !res.success())
+    Platform::Guard<GuildSettingsController> self(this);
+    const auto guildId = currentGuildId;
+    const auto generation = requestGeneration;
+    inst->discord()->fetchAuditLog(currentGuildId, query, [self, guildId, generation](const Core::Result<Discord::AuditLog> &res) {
+        if (!self || !self->isCurrentRequest(guildId, generation))
             return;
+        if (!res.success()) { self->reportError(res.error); return; }
         self->auditRows = self->auditFormatter->addPage(*res.value);
         self->auditLogLoaded = true;
         if (self->currentSection == GuildSettingsSection::AuditLog)
@@ -1264,10 +1281,15 @@ void GuildSettingsController::loadBans()
     if (!inst || !inst->discord())
         return;
 
-    QPointer<GuildSettingsController> self(this);
-    inst->discord()->fetchBans(currentGuildId, Core::Snowflake::Invalid, [self](const Core::Result<QList<Discord::Ban>> &res) {
-        if (!self || !res.success())
+    Platform::Guard<GuildSettingsController> self(this);
+
+    const auto guildId = currentGuildId;
+
+    const auto generation = requestGeneration;
+    inst->discord()->fetchBans(currentGuildId, Core::Snowflake::Invalid, [self, guildId, generation](const Core::Result<std::vector<Discord::Ban>> &res) {
+        if (!self || !self->isCurrentRequest(guildId, generation))
             return;
+        if (!res.success()) { self->reportError(res.error); return; }
         self->bans = *res.value;
         self->bansLoaded = true;
         if (self->currentSection == GuildSettingsSection::Bans)
@@ -1281,7 +1303,7 @@ bool GuildSettingsController::hasUnsavedChanges() const
     case GuildSettingsSection::Profile:
         if (draftProfile.name != savedProfile.name ||
             draftProfile.description != savedProfile.description ||
-            !draftProfile.iconDataUri.isEmpty() ||
+            !draftProfile.iconDataUri.empty() ||
             draftProfile.iconRemoved != savedProfile.iconRemoved ||
             draftProfile.brandColor != savedProfile.brandColor ||
             draftProfile.isPrivate != savedProfile.isPrivate)
@@ -1303,13 +1325,13 @@ bool GuildSettingsController::hasUnsavedChanges() const
 
     case GuildSettingsSection::BoostPerks:
         return (draftBoost.progressBar != savedBoost.progressBar ||
-                !draftBoost.bannerUri.isEmpty() ||
+                !draftBoost.bannerUri.empty() ||
                 draftBoost.bannerRemoved != savedBoost.bannerRemoved ||
-                !draftBoost.splashUri.isEmpty() ||
+                !draftBoost.splashUri.empty() ||
                 draftBoost.splashRemoved != savedBoost.splashRemoved);
 
     case GuildSettingsSection::Roles:
-        return !dirtyRoleDrafts.isEmpty();
+        return !dirtyRoleDrafts.empty();
 
     default:
         return false;
@@ -1342,7 +1364,7 @@ void GuildSettingsController::updateUnsavedChangesBar()
 void GuildSettingsController::saveChanges()
 {
     if (!canEditCurrentSection()) {
-        reportError(tr("You do not have permission to change these settings."));
+        reportError(std::string("You do not have permission to change these settings."));
         return;
     }
     auto *inst = instance();
@@ -1350,7 +1372,7 @@ void GuildSettingsController::saveChanges()
         return;
     const auto guildId = currentGuildId;
     const auto generation = requestGeneration;
-    QPointer<GuildSettingsController> self(this);
+    Platform::Guard<GuildSettingsController> self(this);
     auto complete = [self, guildId, generation](const Core::Result<void> &result) {
         if (!self || !self->isCurrentRequest(guildId, generation))
             return;
@@ -1366,13 +1388,13 @@ void GuildSettingsController::saveChanges()
         Discord::GuildProfileEdit edit = savedGuildProfile;
         edit.name = draftProfile.name;
         edit.description = draftProfile.description;
-        edit.icon = draftProfile.iconRemoved ? QJsonValue(QJsonValue::Null)
-                                             : (draftProfile.iconDataUri.isEmpty() ? savedGuildProfile.icon : QJsonValue(draftProfile.iconDataUri));
-        edit.brandColorPrimary = QJsonValue(draftProfile.brandColor);
-        edit.visibility = QJsonValue(draftProfile.isPrivate ? 2 : 1);
+        edit.icon = draftProfile.iconRemoved ? nlohmann::json(nullptr)
+                                             : (draftProfile.iconDataUri.empty() ? savedGuildProfile.icon : nlohmann::json(draftProfile.iconDataUri));
+        edit.brandColorPrimary = nlohmann::json(draftProfile.brandColor);
+        edit.visibility = nlohmann::json(draftProfile.isPrivate ? 2 : 1);
         edit.traits.clear();
         for (int i = 0; i < Discord::GuildProfileEdit::TraitSlots; ++i)
-            edit.traits.append({ draftProfile.traits[i], QJsonValue(), QJsonValue(), QJsonValue() });
+            edit.traits.push_back({ draftProfile.traits[i], nlohmann::json{}, nlohmann::json{}, nlohmann::json{} });
         inst->discord()->modifyGuildProfile(guildId, edit, [self, guildId, generation](const Core::Result<Discord::GuildProfileEdit> &result) {
             if (!self || !self->isCurrentRequest(guildId, generation))
                 return;
@@ -1399,19 +1421,19 @@ void GuildSettingsController::saveChanges()
             edit.afkTimeout = draftEngagement.afkTimeout;
         } else {
             edit.premiumProgressBarEnabled = draftBoost.progressBar;
-            edit.banner = draftBoost.bannerRemoved ? QString() : draftBoost.bannerUri;
-            edit.splash = draftBoost.splashRemoved ? QString() : draftBoost.splashUri;
+            edit.banner = draftBoost.bannerRemoved ? std::string() : draftBoost.bannerUri;
+            edit.splash = draftBoost.splashRemoved ? std::string() : draftBoost.splashUri;
         }
         inst->discord()->modifyGuild(guildId, edit, {}, complete);
     } else if (currentSection == GuildSettingsSection::Roles) {
-        for (auto it = dirtyRoleDrafts.cbegin(); it != dirtyRoleDrafts.cend(); ++it) {
+        for (const auto &[roleId, draft] : dirtyRoleDrafts) {
             Discord::RoleEdit edit;
-            edit.name = it->name;
-            edit.color = it->color;
-            edit.hoist = it->hoist;
-            edit.mentionable = it->mentionable;
-            edit.permissions = it->permissions;
-            inst->discord()->modifyRole(guildId, it.key(), edit, complete);
+            edit.name = draft.name;
+            edit.color = draft.color;
+            edit.hoist = draft.hoist;
+            edit.mentionable = draft.mentionable;
+            edit.permissions = draft.permissions;
+            inst->discord()->modifyRole(guildId, roleId, edit, complete);
         }
     }
 }
@@ -1447,131 +1469,104 @@ void GuildSettingsController::handleClick(::Rml::Element *target, ::Rml::Event &
     if (!actionEl)
         return;
 
-    QString action = attribute(actionEl, "data-action");
+    std::string action = attribute(actionEl, "data-action");
 
-    if (action != QLatin1String("close") && action != QLatin1String("nav-section") &&
-        action != QLatin1String("toggle-audit-row") && !canEditCurrentSection()) {
-        reportError(tr("You do not have permission to change these settings."));
+    if (action != "close" && action != "nav-section" &&
+        action != "toggle-audit-row" && !canEditCurrentSection()) {
+        reportError(std::string("You do not have permission to change these settings."));
         return;
     }
 
-    if (action == QLatin1String("close")) {
+    if (action == "close") {
         event.StopPropagation();
         close();
-    } else if (action == QLatin1String("nav-section")) {
+    } else if (action == "nav-section") {
         event.StopPropagation();
         bool ok = false;
-        int secInt = attribute(actionEl, "data-section").toInt(&ok);
+        int secInt = number<int>(attribute(actionEl, "data-section"), &ok);
         if (ok)
             setSection(static_cast<GuildSettingsSection>(secInt));
-    } else if (action == QLatin1String("reset-changes")) {
+    } else if (action == "reset-changes") {
         event.StopPropagation();
         discardChanges();
         renderContent();
         requestRender(100);
-    } else if (action == QLatin1String("save-changes")) {
+    } else if (action == "save-changes") {
         event.StopPropagation();
         saveChanges();
     }
     // Profile Actions
-    else if (action == QLatin1String("choose-icon")) {
+    else if (action == "choose-icon") {
         event.StopPropagation();
-        QString path = QFileDialog::getOpenFileName(nullptr, tr("Change Server Icon"), QString(), ImageUpload::fileFilter());
-        if (!path.isEmpty()) {
-            auto prep = ImageUpload::prepareCropped(path, 1024, 1024);
-            if (!prep.dataUri.isEmpty()) {
-                draftProfile.iconDataUri = prep.dataUri;
-                draftProfile.iconRemoved = false;
-                renderContent();
-                updateUnsavedChangesBar();
-            }
-        }
-    } else if (action == QLatin1String("remove-icon")) {
+        chooseImage(ImageSlot::Icon);
+    } else if (action == "remove-icon") {
         event.StopPropagation();
         draftProfile.iconDataUri.clear();
         draftProfile.iconRemoved = true;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("select-brand-color")) {
+    } else if (action == "select-brand-color") {
         event.StopPropagation();
         draftProfile.brandColor = attribute(actionEl, "data-color");
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("toggle-private")) {
+    } else if (action == "toggle-private") {
         event.StopPropagation();
         draftProfile.isPrivate = !draftProfile.isPrivate;
         renderContent();
         updateUnsavedChangesBar();
     }
     // Engagement Actions
-    else if (action == QLatin1String("toggle-flag-join")) {
+    else if (action == "toggle-flag-join") {
         event.StopPropagation();
         draftEngagement.suppressJoin = !draftEngagement.suppressJoin;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("toggle-flag-boost")) {
+    } else if (action == "toggle-flag-boost") {
         event.StopPropagation();
         draftEngagement.suppressBoost = !draftEngagement.suppressBoost;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("toggle-flag-tips")) {
+    } else if (action == "toggle-flag-tips") {
         event.StopPropagation();
         draftEngagement.suppressTips = !draftEngagement.suppressTips;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("toggle-flag-prompt")) {
+    } else if (action == "toggle-flag-prompt") {
         event.StopPropagation();
         draftEngagement.suppressPrompt = !draftEngagement.suppressPrompt;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("select-notif-all")) {
+    } else if (action == "select-notif-all") {
         event.StopPropagation();
         draftEngagement.defaultNotifications = Discord::MessageNotificationLevel::ALL_MESSAGES;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("select-notif-mentions")) {
+    } else if (action == "select-notif-mentions") {
         event.StopPropagation();
         draftEngagement.defaultNotifications = Discord::MessageNotificationLevel::ONLY_MENTIONS;
         renderContent();
         updateUnsavedChangesBar();
     }
     // Boost Actions
-    else if (action == QLatin1String("toggle-progress-bar")) {
+    else if (action == "toggle-progress-bar") {
         event.StopPropagation();
         draftBoost.progressBar = !draftBoost.progressBar;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("choose-banner")) {
+    } else if (action == "choose-banner") {
         event.StopPropagation();
-        QString path = QFileDialog::getOpenFileName(nullptr, tr("Upload Banner"), QString(), ImageUpload::fileFilter());
-        if (!path.isEmpty()) {
-            auto prep = ImageUpload::prepareCropped(path, 960, 540);
-            if (!prep.dataUri.isEmpty()) {
-                draftBoost.bannerUri = prep.dataUri;
-                draftBoost.bannerRemoved = false;
-                renderContent();
-                updateUnsavedChangesBar();
-            }
-        }
-    } else if (action == QLatin1String("remove-banner")) {
+        chooseImage(ImageSlot::Banner);
+    } else if (action == "remove-banner") {
         event.StopPropagation();
         draftBoost.bannerUri.clear();
         draftBoost.bannerRemoved = true;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("choose-splash")) {
+    } else if (action == "choose-splash") {
         event.StopPropagation();
-        QString path = QFileDialog::getOpenFileName(nullptr, tr("Upload Splash"), QString(), ImageUpload::fileFilter());
-        if (!path.isEmpty()) {
-            auto prep = ImageUpload::prepareCropped(path, 1920, 1080);
-            if (!prep.dataUri.isEmpty()) {
-                draftBoost.splashUri = prep.dataUri;
-                draftBoost.splashRemoved = false;
-                renderContent();
-                updateUnsavedChangesBar();
-            }
-        }
-    } else if (action == QLatin1String("remove-splash")) {
+        chooseImage(ImageSlot::Splash);
+    } else if (action == "remove-splash") {
         event.StopPropagation();
         draftBoost.splashUri.clear();
         draftBoost.splashRemoved = true;
@@ -1579,111 +1574,93 @@ void GuildSettingsController::handleClick(::Rml::Element *target, ::Rml::Event &
         updateUnsavedChangesBar();
     }
     // Emoji & Stickers
-    else if (action == QLatin1String("choose-emoji-upload")) {
+    else if (action == "choose-emoji-upload") {
         event.StopPropagation();
-        const QString path = QFileDialog::getOpenFileName(nullptr, tr("Upload Emoji"), {}, ImageUpload::fileFilter());
-        const auto image = ImageUpload::prepareRaw(path, 256 * 1024);
-        if (path.isEmpty())
-            return;
-        if (image.dataUri.isEmpty()) { reportError(image.error); return; }
-        const auto guildId = currentGuildId;
-        QPointer<GuildSettingsController> self(this);
-        instance()->discord()->createGuildEmoji(guildId, QFileInfo(path).baseName(), image.dataUri, image.originalMd5,
-            [self, guildId](const Core::Result<Discord::Emoji> &result) {
-                if (!self || self->currentGuildId != guildId) return;
-                if (!result.success()) { self->reportError(result.error); return; }
-                self->loadEmoji();
-            });
-    } else if (action == QLatin1String("delete-emoji")) {
+        uploadExpression(false);
+    } else if (action == "delete-emoji") {
         event.StopPropagation();
-        const auto emojiId = Core::Snowflake(attribute(actionEl, "data-id").toULongLong());
-        showConfirmModal(shell, tr("Delete Emoji"), tr("Are you sure you want to delete this emoji?"), tr("Delete"),
+        const auto emojiId = Core::Snowflake(number(attribute(actionEl, "data-id")));
+        showConfirmModal(shell, std::string("Delete Emoji"), std::string("Are you sure you want to delete this emoji?"), std::string("Delete"),
             [this, emojiId]() { if (auto *inst = instance()) inst->discord()->deleteGuildEmoji(currentGuildId, emojiId, [this](const Core::Result<void> &r) { if (!r.success()) reportError(r.error); else loadEmoji(); }); }, nullptr, true);
-    } else if (action == QLatin1String("choose-sticker-upload")) {
+    } else if (action == "choose-sticker-upload") {
         event.StopPropagation();
-        const QString path = QFileDialog::getOpenFileName(nullptr, tr("Upload Sticker"), {}, ImageUpload::fileFilter());
-        if (path.isEmpty()) return;
-        const auto image = ImageUpload::prepareRaw(path, 512 * 1024);
-        if (image.dataUri.isEmpty()) { reportError(image.error); return; }
-        Discord::FileUpload file{ QFileInfo(path).fileName(), QByteArray::fromBase64(image.dataUri.section(',', 1).toLatin1()), QStringLiteral("image/png"), {} };
-        instance()->discord()->createGuildSticker(currentGuildId, QFileInfo(path).baseName(), QStringLiteral("sticker"), {}, file, image.originalMd5,
-            [this](const Core::Result<Discord::Sticker> &r) { if (!r.success()) reportError(r.error); else loadStickers(); });
-    } else if (action == QLatin1String("delete-sticker")) {
+        uploadExpression(true);
+    } else if (action == "delete-sticker") {
         event.StopPropagation();
-        const auto stickerId = Core::Snowflake(attribute(actionEl, "data-id").toULongLong());
-        showConfirmModal(shell, tr("Delete Sticker"), tr("Are you sure you want to delete this sticker?"), tr("Delete"),
+        const auto stickerId = Core::Snowflake(number(attribute(actionEl, "data-id")));
+        showConfirmModal(shell, std::string("Delete Sticker"), std::string("Are you sure you want to delete this sticker?"), std::string("Delete"),
             [this, stickerId]() { if (auto *inst = instance()) inst->discord()->deleteGuildSticker(currentGuildId, stickerId, [this](const Core::Result<void> &r) { if (!r.success()) reportError(r.error); else loadStickers(); }); }, nullptr, true);
     }
     // Members Actions
-    else if (action == QLatin1String("kick-member") || action == QLatin1String("ban-member")) {
+    else if (action == "kick-member" || action == "ban-member") {
         event.StopPropagation();
-        const bool ban = action == QLatin1String("ban-member");
-        const auto userId = Core::Snowflake(attribute(actionEl, "data-id").toULongLong());
-        const QString name = attribute(actionEl, "data-name");
-        showConfirmModal(shell, ban ? tr("Ban Member") : tr("Kick Member"),
-            ban ? tr("Are you sure you want to ban <b>@%1</b> from the server?").arg(name) : tr("Are you sure you want to kick <b>@%1</b> from the server?").arg(name),
-            ban ? tr("Ban") : tr("Kick"), [this, ban, userId]() {
+        const bool ban = action == "ban-member";
+        const auto userId = Core::Snowflake(number(attribute(actionEl, "data-id")));
+        const std::string name = attribute(actionEl, "data-name");
+        showConfirmModal(shell, ban ? std::string("Ban Member") : std::string("Kick Member"),
+            ban ? std::format("Are you sure you want to ban <b>@{0}</b> from the server?", name) : std::format("Are you sure you want to kick <b>@{0}</b> from the server?", name),
+            ban ? std::string("Ban") : std::string("Kick"), [this, ban, userId]() {
                 if (auto *inst = instance()) {
                     auto done = [this](const Core::Result<void> &r) { if (!r.success()) reportError(r.error); else loadMembers(); };
                     if (ban) inst->discord()->banMember(currentGuildId, userId, 0, {}, done);
                     else inst->discord()->kickMember(currentGuildId, userId, {}, done);
                 }
             }, nullptr, true);
-    } else if (action == QLatin1String("prune-members")) {
+    } else if (action == "prune-members") {
         event.StopPropagation();
-        showConfirmModal(shell, tr("Prune Members"), tr("Pruning will kick members who have not been seen in over 7 days and have no roles. Continue?"), tr("Prune"),
+        showConfirmModal(shell, std::string("Prune Members"), std::string("Pruning will kick members who have not been seen in over 7 days and have no roles. Continue?"), std::string("Prune"),
             [this]() { if (auto *inst = instance()) inst->discord()->pruneMembers(currentGuildId, 7, {}, [this](const Core::Result<void> &r) { if (!r.success()) reportError(r.error); else loadMembers(); }); }, nullptr, true);
     }
     // Roles Actions
-    else if (action == QLatin1String("select-role")) {
+    else if (action == "select-role") {
         event.StopPropagation();
-        selectedRoleId = Core::Snowflake(attribute(actionEl, "data-id").toULongLong());
+        selectedRoleId = Core::Snowflake(number(attribute(actionEl, "data-id")));
         renderContent();
-    } else if (action == QLatin1String("select-role-tab")) {
+    } else if (action == "select-role-tab") {
         event.StopPropagation();
-        currentRoleTab = static_cast<RoleTab>(attribute(actionEl, "data-tab").toInt());
+        currentRoleTab = static_cast<RoleTab>(number<int>(attribute(actionEl, "data-tab")));
         renderContent();
-    } else if (action == QLatin1String("create-role")) {
+    } else if (action == "create-role") {
         event.StopPropagation();
         if (auto *inst = instance())
             inst->discord()->createRole(currentGuildId, [this](const Core::Result<Discord::Role> &r) { if (!r.success()) reportError(r.error); else { roles = instance()->getRolesForGuild(currentGuildId); selectedRoleId = r.value->id.get(); render(); } });
-    } else if (action == QLatin1String("delete-role")) {
+    } else if (action == "delete-role") {
         event.StopPropagation();
         const auto roleId = selectedRoleId;
-        showConfirmModal(shell, tr("Delete Role"), tr("Are you sure you want to delete this role? This action cannot be undone."), tr("Delete"),
+        showConfirmModal(shell, std::string("Delete Role"), std::string("Are you sure you want to delete this role? This action cannot be undone."), std::string("Delete"),
             [this, roleId]() { if (auto *inst = instance()) inst->discord()->deleteRole(currentGuildId, roleId, [this](const Core::Result<void> &r) { if (!r.success()) reportError(r.error); else { loadRoles(); render(); } }); }, nullptr, true);
-    } else if (action == QLatin1String("select-role-color")) {
+    } else if (action == "select-role-color") {
         event.StopPropagation();
-        int c = attribute(actionEl, "data-color").toInt();
+        int c = number<int>(attribute(actionEl, "data-color"));
         RoleDraft d = dirtyRoleDrafts.contains(selectedRoleId) ? dirtyRoleDrafts[selectedRoleId] : savedRoleDrafts[selectedRoleId];
         d.color = c;
         dirtyRoleDrafts[selectedRoleId] = d;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("toggle-role-hoist")) {
+    } else if (action == "toggle-role-hoist") {
         event.StopPropagation();
         RoleDraft d = dirtyRoleDrafts.contains(selectedRoleId) ? dirtyRoleDrafts[selectedRoleId] : savedRoleDrafts[selectedRoleId];
         d.hoist = !d.hoist;
         dirtyRoleDrafts[selectedRoleId] = d;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("toggle-role-mention")) {
+    } else if (action == "toggle-role-mention") {
         event.StopPropagation();
         RoleDraft d = dirtyRoleDrafts.contains(selectedRoleId) ? dirtyRoleDrafts[selectedRoleId] : savedRoleDrafts[selectedRoleId];
         d.mentionable = !d.mentionable;
         dirtyRoleDrafts[selectedRoleId] = d;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("toggle-perm")) {
+    } else if (action == "toggle-perm") {
         event.StopPropagation();
-        quint64 pVal = attribute(actionEl, "data-perm").toULongLong();
+        uint64_t pVal = number(attribute(actionEl, "data-perm"));
         Discord::Permission perm = static_cast<Discord::Permission>(pVal);
         RoleDraft d = dirtyRoleDrafts.contains(selectedRoleId) ? dirtyRoleDrafts[selectedRoleId] : savedRoleDrafts[selectedRoleId];
         d.permissions.setFlag(perm, !d.permissions.testFlag(perm));
         dirtyRoleDrafts[selectedRoleId] = d;
         renderContent();
         updateUnsavedChangesBar();
-    } else if (action == QLatin1String("clear-perms")) {
+    } else if (action == "clear-perms") {
         event.StopPropagation();
         RoleDraft d = dirtyRoleDrafts.contains(selectedRoleId) ? dirtyRoleDrafts[selectedRoleId] : savedRoleDrafts[selectedRoleId];
         d.permissions = Discord::NO_PERMISSIONS;
@@ -1692,35 +1669,35 @@ void GuildSettingsController::handleClick(::Rml::Element *target, ::Rml::Event &
         updateUnsavedChangesBar();
     }
     // Invites
-    else if (action == QLatin1String("revoke-invite")) {
+    else if (action == "revoke-invite") {
         event.StopPropagation();
-        const QString code = attribute(actionEl, "data-code");
-        showConfirmModal(shell, tr("Revoke Invite"), tr("Are you sure you want to revoke invite <b>%1</b>?").arg(code), tr("Revoke"),
+        const std::string code = attribute(actionEl, "data-code");
+        showConfirmModal(shell, std::string("Revoke Invite"), std::format("Are you sure you want to revoke invite <b>{0}</b>?", code), std::string("Revoke"),
             [this, code]() { if (auto *inst = instance()) inst->discord()->revokeInvite(code, [this](const Core::Result<void> &r) { if (!r.success()) reportError(r.error); else loadInvites(); }); }, nullptr, true);
     }
     // Audit Log
-    else if (action == QLatin1String("toggle-audit-row")) {
+    else if (action == "toggle-audit-row") {
         event.StopPropagation();
-        int idx = attribute(actionEl, "data-idx").toInt();
+        int idx = number<int>(attribute(actionEl, "data-idx"));
         if (expandedAuditRows.contains(idx))
-            expandedAuditRows.remove(idx);
+            expandedAuditRows.erase(idx);
         else
             expandedAuditRows.insert(idx);
         renderContent();
     }
     // Bans
-    else if (action == QLatin1String("revoke-ban")) {
+    else if (action == "revoke-ban") {
         event.StopPropagation();
-        const auto userId = Core::Snowflake(attribute(actionEl, "data-id").toULongLong());
-        const QString name = attribute(actionEl, "data-name");
-        showConfirmModal(shell, tr("Revoke Ban"), tr("Are you sure you want to revoke the ban for <b>%1</b>?").arg(name), tr("Revoke Ban"),
+        const auto userId = Core::Snowflake(number(attribute(actionEl, "data-id")));
+        const std::string name = attribute(actionEl, "data-name");
+        showConfirmModal(shell, std::string("Revoke Ban"), std::format("Are you sure you want to revoke the ban for <b>{0}</b>?", name), std::string("Revoke Ban"),
             [this, userId]() { if (auto *inst = instance()) inst->discord()->unbanMember(currentGuildId, userId, [this](const Core::Result<void> &r) { if (!r.success()) reportError(r.error); else loadBans(); }); }, nullptr, false);
     }
     // Delete Server
-    else if (action == QLatin1String("delete-server")) {
+    else if (action == "delete-server") {
         event.StopPropagation();
-        const QString gName = guild() ? guild()->name.valueOr("this server") : tr("this server");
-        showConfirmModal(shell, tr("Delete '%1'").arg(gName), tr("Are you sure you want to delete <b>%1</b>? This action cannot be undone.").arg(gName), tr("Delete Server"),
+        const std::string gName = guild() ? guild()->name.valueOr("this server") : std::string("this server");
+        showConfirmModal(shell, std::format("Delete '{0}'", gName), std::format("Are you sure you want to delete <b>{0}</b>? This action cannot be undone.", gName), std::string("Delete Server"),
             [this]() { if (auto *inst = instance()) inst->discord()->deleteGuild(currentGuildId, [this](const Core::Result<void> &r) { if (!r.success()) reportError(r.error); else close(); }); }, nullptr, true);
     }
 }
@@ -1730,50 +1707,50 @@ void GuildSettingsController::handleInput(::Rml::Element *target, ::Rml::Event &
     if (!target)
         return;
 
-    QString id = QString::fromStdString(target->GetId());
+    std::string id = std::string(target->GetId());
 
-    if (id == QLatin1String("profile-name-input")) {
+    if (id == "profile-name-input") {
         auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target);
         if (input) {
-            draftProfile.name = QString::fromStdString(input->GetValue());
+            draftProfile.name = std::string(input->GetValue());
             updateUnsavedChangesBar();
         }
-    } else if (id == QLatin1String("profile-desc-input")) {
+    } else if (id == "profile-desc-input") {
         if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target))
-            draftProfile.description = QString::fromStdString(input->GetValue());
+            draftProfile.description = std::string(input->GetValue());
         updateUnsavedChangesBar();
-    } else if (id.startsWith(QLatin1String("trait-input-"))) {
+    } else if (id.starts_with("trait-input-")) {
         auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target);
         if (input) {
-            int idx = attribute(target, "data-trait-idx").toInt();
+            int idx = number<int>(attribute(target, "data-trait-idx"));
             if (idx >= 0 && idx < 6) {
-                draftProfile.traits[idx] = QString::fromStdString(input->GetValue());
+                draftProfile.traits[idx] = std::string(input->GetValue());
                 updateUnsavedChangesBar();
             }
         }
-    } else if (id == QLatin1String("member-search-input")) {
+    } else if (id == "member-search-input") {
         auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target);
         if (input) {
-            memberSearchQuery = QString::fromStdString(input->GetValue());
+            memberSearchQuery = std::string(input->GetValue());
             renderContent();
         }
-    } else if (id == QLatin1String("perm-search-input")) {
+    } else if (id == "perm-search-input") {
         auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target);
         if (input) {
-            permissionSearchQuery = QString::fromStdString(input->GetValue());
+            permissionSearchQuery = std::string(input->GetValue());
             renderContent();
         }
-    } else if (id == QLatin1String("ban-search-input")) {
+    } else if (id == "ban-search-input") {
         auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target);
         if (input) {
-            banSearchQuery = QString::fromStdString(input->GetValue());
+            banSearchQuery = std::string(input->GetValue());
             renderContent();
         }
-    } else if (id == QLatin1String("role-name-input")) {
+    } else if (id == "role-name-input") {
         auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(target);
         if (input) {
             RoleDraft d = dirtyRoleDrafts.contains(selectedRoleId) ? dirtyRoleDrafts[selectedRoleId] : savedRoleDrafts[selectedRoleId];
-            d.name = QString::fromStdString(input->GetValue());
+            d.name = std::string(input->GetValue());
             dirtyRoleDrafts[selectedRoleId] = d;
             updateUnsavedChangesBar();
         }
@@ -1789,20 +1766,20 @@ void GuildSettingsController::handleChange(::Rml::Element *target, ::Rml::Event 
     if (!select)
         return;
 
-    QString id = QString::fromStdString(target->GetId());
-    QString val = QString::fromStdString(select->GetValue());
+    std::string id = std::string(target->GetId());
+    std::string val = std::string(select->GetValue());
 
-    if (id == QLatin1String("select-system-channel")) {
-        draftEngagement.systemChannelId = Core::Snowflake(val.toULongLong());
+    if (id == "select-system-channel") {
+        draftEngagement.systemChannelId = Core::Snowflake(number(val));
         updateUnsavedChangesBar();
-    } else if (id == QLatin1String("select-afk-channel")) {
-        draftEngagement.afkChannelId = Core::Snowflake(val.toULongLong());
+    } else if (id == "select-afk-channel") {
+        draftEngagement.afkChannelId = Core::Snowflake(number(val));
         updateUnsavedChangesBar();
-    } else if (id == QLatin1String("select-afk-timeout")) {
-        draftEngagement.afkTimeout = val.toInt();
+    } else if (id == "select-afk-timeout") {
+        draftEngagement.afkTimeout = number<int>(val);
         updateUnsavedChangesBar();
-    } else if (id == QLatin1String("select-audit-action")) {
-        auditFilterAction = val.toInt();
+    } else if (id == "select-audit-action") {
+        auditFilterAction = number<int>(val);
         renderContent();
     }
 }
@@ -1814,6 +1791,57 @@ void GuildSettingsController::handleKeyDown(::Rml::Event &event)
         event.StopPropagation();
         close();
     }
+}
+
+void GuildSettingsController::chooseImage(ImageSlot slot)
+{
+    const char *title = slot == ImageSlot::Icon ? "Change Server Icon" : slot == ImageSlot::Banner ? "Upload Banner" : "Upload Splash";
+    const Platform::Size bounds = slot == ImageSlot::Icon ? Platform::Size{1024, 1024} : slot == ImageSlot::Banner ? Platform::Size{960, 540} : Platform::Size{1920, 1080};
+    Platform::Guard<GuildSettingsController> self(this);
+    const auto guildId = currentGuildId;
+    const auto generation = requestGeneration;
+    Platform::Desktop::openFiles(title, {{"Images", "*.png;*.jpg;*.jpeg;*.gif;*.webp;*.avif;*.bmp;*.svg"}}, [self, guildId, generation, slot, bounds](std::vector<std::string> files) {
+        if (!self || files.empty() || !self->isCurrentRequest(guildId, generation)) return;
+        auto prepared = ImageUpload::prepareCropped(files.front(), bounds.width, bounds.height);
+        if (prepared.dataUri.empty()) { self->reportError(prepared.error); return; }
+        if (slot == ImageSlot::Icon) { self->draftProfile.iconDataUri = std::move(prepared.dataUri); self->draftProfile.iconRemoved = false; }
+        else if (slot == ImageSlot::Banner) { self->draftBoost.bannerUri = std::move(prepared.dataUri); self->draftBoost.bannerRemoved = false; }
+        else { self->draftBoost.splashUri = std::move(prepared.dataUri); self->draftBoost.splashRemoved = false; }
+        self->renderContent();
+        self->updateUnsavedChangesBar();
+        self->requestRender();
+    }, false);
+}
+
+void GuildSettingsController::uploadExpression(bool sticker)
+{
+    Platform::Guard<GuildSettingsController> self(this);
+    const auto guildId = currentGuildId;
+    const auto generation = requestGeneration;
+    Platform::Desktop::openFiles(sticker ? "Upload Sticker" : "Upload Emoji", {{"Images", "*.png;*.apng;*.gif;*.jpg;*.jpeg;*.webp;*.avif;*.json"}}, [self, guildId, generation, sticker](std::vector<std::string> files) {
+        if (!self || files.empty() || !self->isCurrentRequest(guildId, generation)) return;
+        auto *instance = self->instance();
+        if (!instance) return;
+        const auto prepared = ImageUpload::prepareRaw(files.front(), (sticker ? 512 : 256) * 1024);
+        if (prepared.dataUri.empty()) { self->reportError(prepared.error); return; }
+        const auto path = Platform::utf8Path(files.front());
+        const auto name = Platform::pathUtf8(path.stem());
+        auto complete = [self, guildId, generation, sticker](const auto &result) {
+            if (!self || !self->isCurrentRequest(guildId, generation)) return;
+            if (!result.success()) { self->reportError(result.error); return; }
+            if (sticker) self->loadStickers(); else self->loadEmoji();
+        };
+        if (!sticker) {
+            instance->discord()->createGuildEmoji(guildId, name, prepared.dataUri, prepared.originalMd5, complete);
+        } else {
+            const auto comma = prepared.dataUri.find(',');
+            const auto semicolon = prepared.dataUri.find(';');
+            const auto bytes = Platform::fromBase64(std::string_view(prepared.dataUri).substr(comma + 1));
+            if (!bytes) { self->reportError("Unable to process sticker"); return; }
+            Discord::FileUpload file{Platform::pathUtf8(path.filename()), std::string(reinterpret_cast<const char *>(bytes->data()), bytes->size()), prepared.dataUri.substr(5, semicolon - 5), {}};
+            instance->discord()->createGuildSticker(guildId, name, "sticker", {}, file, prepared.originalMd5, complete);
+        }
+    }, false);
 }
 
 } // namespace Rml
