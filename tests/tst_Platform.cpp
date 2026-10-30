@@ -966,6 +966,14 @@ TEST_CASE("Chat previews keep complete UTF8 characters and collapse Unicode whit
     REQUIRE(caseFold("Straße Σςσ Ä") == "strasse σσσ ä");
 }
 
+TEST_CASE("Unicode case conversion includes supplementary-plane characters", "[utf8]")
+{
+    const std::string upper = "\u00c9\u039b\u0416\U00010400";
+    const std::string lower = "\u00e9\u03bb\u0436\U00010428";
+    REQUIRE(Styx::Platform::unicodeLower(upper) == lower);
+    REQUIRE(Styx::Platform::unicodeUpper(lower) == upper);
+}
+
 TEST_CASE("Calendar day differences follow local dates rather than elapsed hours", "[platform]")
 {
     using Styx::Platform::DateTime;

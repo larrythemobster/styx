@@ -4,6 +4,7 @@
 
 #include <curl/curl.h>
 #include <openssl/rand.h>
+#include <utf8proc.h>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -39,6 +40,27 @@ std::filesystem::path utf8Path(std::string_view value)
     return std::filesystem::u8path(value.begin(), value.end());
 }
 namespace {
+template <auto Map>
+std::string changeCase(std::string_view text)
+{
+    std::string result;
+    result.reserve(text.size());
+    while (!text.empty()) {
+        utf8proc_int32_t point = 0;
+        auto consumed = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t *>(text.data()),
+                                        static_cast<utf8proc_ssize_t>(text.size()), &point);
+        if (consumed < 0) {
+            point = 0xFFFD;
+            consumed = 1;
+        }
+        utf8proc_uint8_t encoded[4];
+        const auto size = utf8proc_encode_char(Map(point), encoded);
+        result.append(reinterpret_cast<const char *>(encoded), static_cast<size_t>(size));
+        text.remove_prefix(static_cast<size_t>(consumed));
+    }
+    return result;
+}
+
 int hex(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -409,22 +431,10 @@ std::string fromCodepoints(const std::vector<char32_t> &values)
 }
 std::string unicodeLower(std::string_view text)
 {
-#ifdef _WIN32
-    std::wstring wide = toUtf16(text);
-    CharLowerBuffW(wide.data(), static_cast<DWORD>(wide.size()));
-    return fromUtf16(wide);
-#else
-    return toLowerAscii(text);
-#endif
+    return changeCase<utf8proc_tolower>(text);
 }
 std::string unicodeUpper(std::string_view text)
 {
-#ifdef _WIN32
-    std::wstring wide = toUtf16(text);
-    CharUpperBuffW(wide.data(), static_cast<DWORD>(wide.size()));
-    return fromUtf16(wide);
-#else
-    return toUpperAscii(text);
-#endif
+    return changeCase<utf8proc_toupper>(text);
 }
 } // namespace Styx::Platform
