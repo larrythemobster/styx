@@ -185,7 +185,7 @@ ClientInstance::ClientInstance(const AccountInfo &info,
         }
 
         detailsUpdated.publish(account);
-        ready.publish(ready);
+        this->ready.publish(ready);
     }));
 
     track(client->readySupplemental.connect([this](const Discord::ReadySupplemental &data) {

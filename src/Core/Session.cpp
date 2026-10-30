@@ -33,7 +33,7 @@ void Session::connectAccount(Snowflake accountId)
         clients.erase(it);
     }
     AccountInfo acc = repo.getAccount(accountId);
-    if (acc.id == 0) {
+    if (!acc.id.isValid()) {
         Core::log(Core::LogLevel::Warning, LogCore) << "Account not found: " << accountId.toString();
         return;
     }

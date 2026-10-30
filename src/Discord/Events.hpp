@@ -137,7 +137,7 @@ struct TypingStart : Core::JsonUtils::JsonObject
         get(obj, "guild_id", typingStart.guildId);
         get(obj, "user_id", typingStart.userId);
         get(obj, "member", typingStart.member);
-        typingStart.timestamp = Platform::DateTime::fromSecsSinceEpoch(obj["timestamp"].get<int64_t>());
+        typingStart.timestamp = Platform::DateTime::fromUnixMillis(obj["timestamp"].get<int64_t>() * 1000);
         return typingStart;
     }
 };

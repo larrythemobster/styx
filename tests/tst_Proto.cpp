@@ -15,7 +15,7 @@ using namespace Styx::Proto;
 
 namespace {
 
-std::string toHex(std::span<const uint8_t> data)
+template<class Bytes> std::string toHex(const Bytes &data)
 {
     std::ostringstream ss;
     ss << std::hex << std::setfill('0');
@@ -65,7 +65,7 @@ TEST_CASE("Proto: Frecency round trip", "[proto]")
 
     settings.dataVersion = 9;
 
-    std::vector<uint8_t> encoded = settings.toProtoPartial();
+    const auto encoded = settings.toProtoPartial();
     ProtoReader reader(encoded);
     FrecencyUserSettings decoded = FrecencyUserSettings::fromProto(reader);
 

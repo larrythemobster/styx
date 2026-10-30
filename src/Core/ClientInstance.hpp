@@ -11,7 +11,7 @@
 
 #include <functional>
 #include <memory>
-namespace Platform {
+namespace Styx::Platform {
 class Database;
 }
 #include "AccountInfo.hpp"

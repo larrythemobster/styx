@@ -148,7 +148,7 @@ std::string sdpLine(const std::string &sdp, std::string_view prefix)
     std::string line;
     while (std::getline(input, line)) {
         if (line.starts_with(prefix))
-            return Platform::trim(line);
+            return std::string(Platform::trim(line));
     }
     return {};
 }

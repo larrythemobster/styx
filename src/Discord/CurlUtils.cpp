@@ -136,7 +136,7 @@ int getBuildNumber()
 
 std::string getCertificatePath()
 {
-    const auto path = Platform::Paths::executablePath().parent_path() / "certs" / "cacert.pem";
+    const auto path = Platform::Resources::path("certs/cacert.pem");
     if (std::filesystem::exists(path))
         return path.string();
     Core::log(Core::LogLevel::Warning, LogNetwork) << "Certificate file not found at" << path.string();
