@@ -318,9 +318,8 @@ body#accounts-root
 
 .accounts-btn
 {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
+	display: inline-block;
+	text-align: center;
 	padding: 8dp 16dp;
 	border-radius: 4dp;
 	font-size: 13dp;

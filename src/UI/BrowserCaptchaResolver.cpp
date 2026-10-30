@@ -515,7 +515,7 @@ void BrowserCaptchaResolver::openBrowser()
     if (state != State::Waiting)
         return;
     proxyWarning = false;
-    if (Platform::openUrl(harnessUrl()))
+    if (Platform::Desktop::openUrl(harnessUrl()))
         updateModal("Waiting for you to finish in your browser...", true);
     else
         updateModal("Could not open the browser. Please try again.", true);

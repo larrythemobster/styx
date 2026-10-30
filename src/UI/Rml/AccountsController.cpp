@@ -15,6 +15,13 @@
 #include "UI/Accounts/AccountsModel.hpp"
 
 #include "qrcodegen.hpp"
+#include "Platform/Utf8.hpp"
+#include <charconv>
+#include <format>
+
+namespace {
+template<class T = int> T number(std::string_view text) { T value = 0; std::from_chars(text.data(), text.data() + text.size(), value); return value; }
+}
 
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
@@ -28,39 +35,26 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-AccountsController::AccountsController(Shell &shell, QObject *parent)
-    : Controller(shell, nullptr, parent)
+AccountsController::AccountsController(Shell &shell) : Controller(shell, nullptr)
 {
-    if (auto *sess = shell.session()) {
-        connect(sess, &Core::Session::connectFailed, this, [this](Core::Snowflake, const QString &reason) {
-            if (visible && modalDocument) {
-                if (auto *banner = modalDocument->GetElementById("accounts-status-banner")) {
-                    banner->SetInnerRML(QStringLiteral("Connection failed: %1").arg(escape(reason)).toUtf8().constData());
-                    banner->SetProperty("display", "block");
-                }
-            }
-        });
-    }
-
+    track(shell.session()->connectFailed.connect([this](Core::Snowflake, const std::string &reason) {
+        if (visible && modalDocument) if (auto *banner = modalDocument->GetElementById("accounts-status-banner")) {
+            banner->SetInnerRML("Connection failed: " + escape(reason));
+            banner->SetProperty("display", "block");
+            requestRender();
+        }
+    }));
     if (auto *model = shell.accounts()) {
-        connect(model, &QAbstractItemModel::dataChanged, this, [this]() {
-            if (visible && currentView == ViewMode::Accounts)
-                rebuildAccountsList();
-        });
-        connect(model, &QAbstractItemModel::rowsInserted, this, [this]() {
-            if (visible && currentView == ViewMode::Accounts)
-                rebuildAccountsList();
-        });
-        connect(model, &QAbstractItemModel::rowsRemoved, this, [this]() {
-            if (visible && currentView == ViewMode::Accounts)
-                rebuildAccountsList();
-        });
+        auto refresh = [this] { if (visible && currentView == ViewMode::Accounts) rebuildAccountsList(); };
+        track(model->changed.connect([refresh](int) { refresh(); }));
+        track(model->reset.connect(refresh));
     }
 }
 
 AccountsController::~AccountsController()
 {
     stopQrClient();
+    removeListeners();
     if (modalDocument) {
         modalDocument->Close();
         modalDocument = nullptr;
@@ -81,7 +75,7 @@ void AccountsController::ensureDocument()
 
     modalDocument = ctx->LoadDocument("accounts.rml");
     if (!modalDocument) {
-        qCWarning(LogUI) << "AccountsController: could not load accounts.rml";
+        Core::log(Core::LogLevel::Warning, LogUI) << "AccountsController: could not load accounts.rml";
         return;
     }
 
@@ -158,73 +152,73 @@ void AccountsController::setupEventListeners()
 
         // Check tab click
         if (auto *tabEl = closest(target, "data-tab")) {
-            const QString tabName = attribute(tabEl, "data-tab");
-            if (tabName == QLatin1String("password"))
+            const std::string tabName = attribute(tabEl, "data-tab");
+            if (tabName == std::string_view("password"))
                 switchLoginTab(LoginTab::Password);
-            else if (tabName == QLatin1String("qr"))
+            else if (tabName == std::string_view("qr"))
                 switchLoginTab(LoginTab::Qr);
-            else if (tabName == QLatin1String("token"))
+            else if (tabName == std::string_view("token"))
                 switchLoginTab(LoginTab::Token);
             return;
         }
 
         // Check action button click
         if (auto *actionEl = closest(target, "data-action")) {
-            const QString action = attribute(actionEl, "data-action");
-            const QString idStr = attribute(actionEl, "data-id");
-            const Core::Snowflake accountId(idStr.toULongLong());
+            const std::string action = attribute(actionEl, "data-action");
+            const std::string idStr = attribute(actionEl, "data-id");
+            const Core::Snowflake accountId(number<uint64_t>(idStr));
 
-            if (action == QLatin1String("close")) {
+            if (action == std::string_view("close")) {
                 hide();
-            } else if (action == QLatin1String("close-login")) {
+            } else if (action == std::string_view("close-login")) {
                 if (shell.accounts() && shell.accounts()->rowCount() > 0)
                     switchView(ViewMode::Accounts);
                 else
                     hide();
-            } else if (action == QLatin1String("back-to-accounts")) {
+            } else if (action == std::string_view("back-to-accounts")) {
                 switchView(ViewMode::Accounts);
-            } else if (action == QLatin1String("open-login")) {
+            } else if (action == std::string_view("open-login")) {
                 showLogin(LoginTab::Password);
-            } else if (action == QLatin1String("submit-login")) {
+            } else if (action == std::string_view("submit-login")) {
                 handleLoginSubmit();
-            } else if (action == QLatin1String("submit-token")) {
+            } else if (action == std::string_view("submit-token")) {
                 handleTokenSubmit();
-            } else if (action == QLatin1String("mfa-verify")) {
+            } else if (action == std::string_view("mfa-verify")) {
                 handleMfaVerify();
-            } else if (action == QLatin1String("mfa-back")) {
+            } else if (action == std::string_view("mfa-back")) {
                 if (modalDocument) {
                     if (auto *pf = modalDocument->GetElementById("password-form-view"))
                         pf->SetProperty("display", "block");
                     if (auto *mf = modalDocument->GetElementById("password-mfa-view"))
                         mf->SetProperty("display", "none");
                 }
-            } else if (action == QLatin1String("mfa-send-sms")) {
+            } else if (action == std::string_view("mfa-send-sms")) {
                 handleMfaSms();
-            } else if (action == QLatin1String("qr-refresh")) {
+            } else if (action == std::string_view("qr-refresh")) {
                 startQrClient();
-            } else if (action == QLatin1String("close-proxy-edit")) {
+            } else if (action == std::string_view("close-proxy-edit")) {
                 switchView(ViewMode::Accounts);
-            } else if (action == QLatin1String("save-proxy")) {
+            } else if (action == std::string_view("save-proxy")) {
                 handleSaveProxy();
-            } else if (action == QLatin1String("close-token-edit")) {
+            } else if (action == std::string_view("close-token-edit")) {
                 switchView(ViewMode::Accounts);
-            } else if (action == QLatin1String("save-token")) {
+            } else if (action == std::string_view("save-token")) {
                 handleSaveToken();
-            } else if (action == QLatin1String("connect")) {
+            } else if (action == std::string_view("connect")) {
                 handleConnect(accountId);
-            } else if (action == QLatin1String("disconnect")) {
+            } else if (action == std::string_view("disconnect")) {
                 handleDisconnect(accountId);
-            } else if (action == QLatin1String("toggle-autoconnect")) {
+            } else if (action == std::string_view("toggle-autoconnect")) {
                 handleToggleAutoConnect(accountId);
-            } else if (action == QLatin1String("open-proxy")) {
+            } else if (action == std::string_view("open-proxy")) {
                 openEditProxy(accountId);
-            } else if (action == QLatin1String("open-token")) {
+            } else if (action == std::string_view("open-token")) {
                 openSetToken(accountId);
-            } else if (action == QLatin1String("remove")) {
+            } else if (action == std::string_view("remove")) {
                 handleRemoveAccount(accountId);
-            } else if (action == QLatin1String("close-confirm-logout")) {
+            } else if (action == std::string_view("close-confirm-logout")) {
                 switchView(ViewMode::Accounts);
-            } else if (action == QLatin1String("do-logout")) {
+            } else if (action == std::string_view("do-logout")) {
                 if (activeTargetAccountId.isValid()) {
                     auto *m = shell.accounts();
                     if (m) {
@@ -329,10 +323,10 @@ void AccountsController::switchLoginTab(LoginTab tab)
         tabContainer->GetElementsByTagName(tabs, "div");
 
     for (auto *t : tabs) {
-        const QString tabAttr = attribute(t, "data-tab");
-        const bool active = (tab == LoginTab::Password && tabAttr == QLatin1String("password")) ||
-                            (tab == LoginTab::Qr && tabAttr == QLatin1String("qr")) ||
-                            (tab == LoginTab::Token && tabAttr == QLatin1String("token"));
+        const std::string tabAttr = attribute(t, "data-tab");
+        const bool active = (tab == LoginTab::Password && tabAttr == std::string_view("password")) ||
+                            (tab == LoginTab::Qr && tabAttr == std::string_view("qr")) ||
+                            (tab == LoginTab::Token && tabAttr == std::string_view("token"));
         t->SetClass("active", active);
     }
 
@@ -370,98 +364,41 @@ void AccountsController::clearErrors()
 
 void AccountsController::rebuildAccountsList()
 {
-    if (!modalDocument)
-        return;
+    if (!modalDocument) return;
     auto *container = modalDocument->GetElementById("accounts-list-container");
-    if (!container)
-        return;
-
     auto *model = shell.accounts();
-    if (!model) {
-        container->SetInnerRML("<div class=\"accounts-subtitle\">No accounts model available.</div>");
+    if (!container || !model) return;
+    if (model->allAccounts().empty()) {
+        container->SetInnerRML("<div style='text-align:center;padding:24dp 0'><div class='accounts-title' style='font-size:16dp;margin-bottom:6dp'>No Accounts Saved</div><div class='accounts-subtitle'>Add your Discord account below to get started.</div></div>");
         return;
     }
-
-    const auto &accounts = model->allAccounts();
-    if (accounts.isEmpty()) {
-        container->SetInnerRML(
-            "<div style=\"text-align: center; padding: 24dp 0;\">"
-            "<div class=\"accounts-title\" style=\"font-size: 16dp; margin-bottom: 6dp;\">No Accounts Saved</div>"
-            "<div class=\"accounts-subtitle\">Add your Discord account below to get started.</div>"
-            "</div>");
-        return;
+    std::string html;
+    for (const auto &account : model->allAccounts()) {
+        const auto id = account.id.toString();
+        bool connected = account.state == Core::ConnectionState::Connected;
+        bool connecting = account.state == Core::ConnectionState::Connecting;
+        const auto avatar = shell.imageSource(Discord::Cdn::userAvatar(account.id, account.avatar, 64), {44, 44});
+        const auto name = escape(account.displayName.empty() ? account.username : account.displayName);
+        const auto proxy = account.proxy.enabled() ? "Proxy: " + escape(account.proxy.toDisplayString()) : "Direct connection";
+        html += std::format(
+            "<div class='account-card{0}'><div class='account-card-main'><img class='account-avatar' src='{1}'/>"
+            "<div class='account-info'><div class='account-header-line'><span class='account-display-name'>{2}</span>"
+            "<span class='account-badge {3}'>{4}</span></div><div class='account-username'>@{5}</div>"
+            "<div class='account-proxy-tag'>{6}</div></div></div><div class='account-card-bottom'>"
+            "<div class='account-toggle-label' data-action='toggle-autoconnect' data-id='{7}'><span class='autoconnect-text'>Launch at startup</span>"
+            "<div class='accounts-switch{8}'><div class='accounts-switch-thumb'></div></div></div><div class='account-actions'>",
+            connected ? " active-account" : "", escape(avatar), name,
+            connected ? "badge-active" : connecting ? "badge-connecting" : "badge-offline",
+            connected ? "Active" : connecting ? "Connecting..." : "Offline",
+            escape(account.username), proxy, id, account.autoConnect ? " checked" : "");
+        html += std::format("<button class='accounts-btn accounts-btn-sm accounts-btn-{}' data-action='{}' data-id='{}'>{}</button>",
+            connected ? "secondary" : "primary", connected ? "disconnect" : "connect", id, connected ? "Disconnect" : "Switch");
+        html += std::format(
+            "<button class='accounts-btn accounts-btn-sm accounts-btn-secondary' data-action='open-proxy' data-id='{0}'>Proxy</button>"
+            "<button class='accounts-btn accounts-btn-sm accounts-btn-secondary' data-action='open-token' data-id='{0}'>Token</button>"
+            "<button class='accounts-btn accounts-btn-sm accounts-btn-danger' data-action='remove' data-id='{0}'>Log Out</button></div></div></div>", id);
     }
-
-    QString html;
-    for (const auto &acc : accounts) {
-        const QString idStr = QString::number(acc.id);
-        const bool isConnected = (acc.state == Core::ConnectionState::Connected);
-        const bool isConnecting = (acc.state == Core::ConnectionState::Connecting);
-
-        QString badgeClass;
-        QString badgeText;
-        if (isConnected) {
-            badgeClass = QStringLiteral("badge-active");
-            badgeText = QStringLiteral("Active");
-        } else if (isConnecting) {
-            badgeClass = QStringLiteral("badge-connecting");
-            badgeText = QStringLiteral("Connecting...");
-        } else {
-            badgeClass = QStringLiteral("badge-offline");
-            badgeText = QStringLiteral("Offline");
-        }
-
-        const QString cardClass = isConnected ? QStringLiteral("account-card active-account") : QStringLiteral("account-card");
-
-        const QUrl avatarUrl = Discord::Cdn::userAvatar(acc.id, acc.avatar, 64);
-        const QString avatarSrc = acc.avatar.isEmpty()
-            ? QStringLiteral(":/resources/placeholder.png")
-            : shell.imageSource(avatarUrl, QSize(44, 44));
-
-        const QString displayName = escape(acc.displayName.isEmpty() ? acc.username : acc.displayName);
-        const QString username = escape(acc.username);
-        const QString proxyText = acc.proxy.enabled() ? QStringLiteral("Proxy: %1").arg(escape(acc.proxy.toDisplayString())) : QStringLiteral("Direct connection");
-
-        const QString switchCheckClass = acc.autoConnect ? QStringLiteral(" checked") : QString();
-
-        html += QStringLiteral(
-            "<div class=\"%1\">"
-            "  <div class=\"account-card-main\">"
-            "    <img class=\"account-avatar\" src=\"%2\"/>"
-            "    <div class=\"account-info\">"
-            "      <div class=\"account-header-line\">"
-            "        <span class=\"account-display-name\">%3</span>"
-            "        <span class=\"account-badge %4\">%5</span>"
-            "      </div>"
-            "      <div class=\"account-username\">@%6</div>"
-            "      <div class=\"account-proxy-tag\">%7</div>"
-            "    </div>"
-            "  </div>"
-            "  <div class=\"account-card-bottom\">"
-            "    <div class=\"account-toggle-label\" data-action=\"toggle-autoconnect\" data-id=\"%8\">"
-            "      <span class=\"autoconnect-text\">Launch at startup</span>"
-            "      <div class=\"accounts-switch%9\"><div class=\"accounts-switch-thumb\"></div></div>"
-            "    </div>"
-            "    <div class=\"account-actions\">")
-            .arg(cardClass, avatarSrc, displayName, badgeClass, badgeText, username, proxyText, idStr, switchCheckClass);
-
-        if (isConnected) {
-            html += QStringLiteral("<button class=\"accounts-btn accounts-btn-sm accounts-btn-secondary\" data-action=\"disconnect\" data-id=\"%1\">Disconnect</button>").arg(idStr);
-        } else {
-            html += QStringLiteral("<button class=\"accounts-btn accounts-btn-sm accounts-btn-primary\" data-action=\"connect\" data-id=\"%1\">Switch</button>").arg(idStr);
-        }
-
-        html += QStringLiteral(
-            "      <button class=\"accounts-btn accounts-btn-sm accounts-btn-secondary\" data-action=\"open-proxy\" data-id=\"%1\">Proxy</button>"
-            "      <button class=\"accounts-btn accounts-btn-sm accounts-btn-secondary\" data-action=\"open-token\" data-id=\"%1\">Token</button>"
-            "      <button class=\"accounts-btn accounts-btn-sm accounts-btn-danger\" data-action=\"remove\" data-id=\"%1\">Log Out</button>"
-            "    </div>"
-            "  </div>"
-            "</div>")
-            .arg(idStr);
-    }
-
-    container->SetInnerRML(html.toUtf8().constData());
+    container->SetInnerRML(html);
     requestRender(100);
 }
 
@@ -476,6 +413,7 @@ void AccountsController::setLoginBusy(bool busy)
     if (auto *btn = modalDocument->GetElementById("btn-mfa-verify")) {
         btn->SetInnerRML(busy ? "Verifying..." : "Verify");
     }
+    requestRender(100);
 }
 
 void AccountsController::handleLoginSubmit()
@@ -491,10 +429,10 @@ void AccountsController::handleLoginSubmit()
     if (!emailInput || !passInput || !errLabel)
         return;
 
-    const QString email = QString::fromStdString(emailInput->GetValue()).trimmed();
-    const QString pass = QString::fromStdString(passInput->GetValue());
+    const std::string email(Platform::trim(emailInput->GetValue()));
+    const std::string pass = std::string(passInput->GetValue());
 
-    if (email.isEmpty() || pass.isEmpty()) {
+    if (email.empty() || pass.empty()) {
         errLabel->SetInnerRML("Enter your email or phone number, and your password.");
         errLabel->SetProperty("display", "block");
         return;
@@ -502,8 +440,8 @@ void AccountsController::handleLoginSubmit()
 
     Core::ProxyConfig proxy;
     if (proxyInput) {
-        const QString proxyStr = QString::fromStdString(proxyInput->GetValue()).trimmed();
-        if (!proxyStr.isEmpty()) {
+        const std::string proxyStr(Platform::trim(proxyInput->GetValue()));
+        if (!proxyStr.empty()) {
             auto parsed = Core::ProxyConfig::parse(proxyStr);
             if (!parsed) {
                 errLabel->SetInnerRML("Invalid proxy format. Enter scheme://[user:pass@]host:port (http, https, socks5).");
@@ -517,12 +455,9 @@ void AccountsController::handleLoginSubmit()
     errLabel->SetProperty("display", "none");
     setLoginBusy(true);
 
-    if (loginClient)
-        delete loginClient;
+    loginClient = std::make_unique<Discord::LoginClient>(proxy, shell.session()->getCaptchaResolver());
 
-    loginClient = new Discord::LoginClient(proxy, shell.session()->getCaptchaResolver(), this);
-
-    connect(loginClient, &Discord::LoginClient::smsSent, this, [this](bool ok) {
+    track((loginClient)->smsSent.connect([this](bool ok) {
         setLoginBusy(false);
         if (modalDocument) {
             if (auto *errEl = modalDocument->GetElementById("mfa-status-error")) {
@@ -530,99 +465,99 @@ void AccountsController::handleLoginSubmit()
                 errEl->SetProperty("display", "block");
             }
         }
-    });
+    }));
 
-    connect(loginClient, &Discord::LoginClient::mfaRequired, this, [this](const Discord::MfaChallenge &challenge) {
+    track((loginClient)->mfaRequired.connect([this](const Discord::MfaChallenge &challenge) {
         setLoginBusy(false);
         currentChallenge = challenge;
-
+    
         if (!modalDocument)
             return;
-
+    
         if (auto *pf = modalDocument->GetElementById("password-form-view"))
             pf->SetProperty("display", "none");
         if (auto *mf = modalDocument->GetElementById("password-mfa-view"))
             mf->SetProperty("display", "block");
-
+    
         if (auto *t = modalDocument->GetElementById("mfa-title-text")) {
             if (challenge.sms && !challenge.totp && !challenge.backup)
                 t->SetInnerRML("SMS Verification Code");
             else
                 t->SetInnerRML("Two-Factor Authentication");
         }
-
+    
         if (auto *sel = rmlui_dynamic_cast<::Rml::ElementFormControlSelect *>(modalDocument->GetElementById("mfa-method-select"))) {
             // Re-populate options
-            QString selHtml;
+            std::string selHtml;
             if (challenge.totp)
-                selHtml += QStringLiteral("<option value=\"%1\">Authenticator App</option>").arg(static_cast<int>(Discord::MfaMethod::Totp));
+                selHtml += std::format("<option value=\"{}\">Authenticator App</option>", static_cast<int>(Discord::MfaMethod::Totp));
             if (challenge.backup)
-                selHtml += QStringLiteral("<option value=\"%1\">Backup Code</option>").arg(static_cast<int>(Discord::MfaMethod::Backup));
+                selHtml += std::format("<option value=\"{}\">Backup Code</option>", static_cast<int>(Discord::MfaMethod::Backup));
             if (challenge.sms)
-                selHtml += QStringLiteral("<option value=\"%1\">Text Message (SMS)</option>").arg(static_cast<int>(Discord::MfaMethod::Sms));
-            sel->SetInnerRML(selHtml.toUtf8().constData());
+                selHtml += std::format("<option value=\"{}\">Text Message (SMS)</option>", static_cast<int>(Discord::MfaMethod::Sms));
+            sel->SetInnerRML(selHtml);
         }
-
+    
         if (auto *wrap = modalDocument->GetElementById("mfa-method-wrapper")) {
             int count = (challenge.totp ? 1 : 0) + (challenge.backup ? 1 : 0) + (challenge.sms ? 1 : 0);
             wrap->SetProperty("display", count > 1 ? "block" : "none");
         }
-
+    
         handleMfaMethodChanged();
-    });
+    }));
 
-    connect(loginClient, &Discord::LoginClient::authenticated, this, [this, proxy](const QString &token) {
+    track((loginClient)->authenticated.connect([this, proxy](const std::string &token) {
         setLoginBusy(false);
-        if (addAccountWithToken(token, QString(), proxy))
+        if (addAccountWithToken(token, std::string(), proxy))
             switchView(ViewMode::Accounts);
-    });
+    }));
 
-    connect(loginClient, &Discord::LoginClient::failed, this, [this](Discord::LoginError error) {
+    track((loginClient)->failed.connect([this](Discord::LoginError error) {
         setLoginBusy(false);
-        QString msg;
+        std::string msg;
         switch (error) {
         case Discord::LoginError::Network:
-            msg = QStringLiteral("Couldn't reach Discord. Check your network connection.");
+            msg = std::string("Couldn't reach Discord. Check your network connection.");
             break;
         case Discord::LoginError::InvalidCredentials:
-            msg = QStringLiteral("The email or password you entered is incorrect.");
+            msg = std::string("The email or password you entered is incorrect.");
             break;
         case Discord::LoginError::CaptchaRequired:
-            msg = QStringLiteral("Discord requested a captcha. Captcha solve was cancelled or failed.");
+            msg = std::string("Discord requested a captcha. Captcha solve was cancelled or failed.");
             break;
         case Discord::LoginError::InvalidMfaCode:
-            msg = QStringLiteral("The 2FA verification code didn't work. Check and try again.");
+            msg = std::string("The 2FA verification code didn't work. Check and try again.");
             break;
         case Discord::LoginError::TooManyRequests:
-            msg = QStringLiteral("Too many login attempts. Please wait a bit and try again.");
+            msg = std::string("Too many login attempts. Please wait a bit and try again.");
             break;
         case Discord::LoginError::AccountLocked:
-            msg = QStringLiteral("This account is disabled. Enable it on discord.com and try again.");
+            msg = std::string("This account is disabled. Enable it on discord.com and try again.");
             break;
         case Discord::LoginError::Suspended:
-            msg = QStringLiteral("This account has been suspended.");
+            msg = std::string("This account has been suspended.");
             break;
         case Discord::LoginError::RequiresVerification:
-            msg = QStringLiteral("Discord requires verification. Check your email or messages.");
+            msg = std::string("Discord requires verification. Check your email or messages.");
             break;
         case Discord::LoginError::PasskeyOnly:
-            msg = QStringLiteral("This account only allows passkeys. Use QR code or token login instead.");
+            msg = std::string("This account only allows passkeys. Use QR code or token login instead.");
             break;
         case Discord::LoginError::Unknown:
-            msg = QStringLiteral("Login failed. Please try again.");
+            msg = std::string("Login failed. Please try again.");
             break;
         }
-
+    
         if (modalDocument) {
             auto *pf = modalDocument->GetElementById("password-form-view");
             const bool inMfa = (pf && pf->GetProperty<::Rml::String>("display") == "none");
             auto *errEl = modalDocument->GetElementById(inMfa ? "mfa-status-error" : "login-status-error");
             if (errEl) {
-                errEl->SetInnerRML(escape(msg).toUtf8().constData());
+                errEl->SetInnerRML(escape(msg));
                 errEl->SetProperty("display", "block");
             }
         }
-    });
+    }));
 
     loginClient->login(email, pass);
 }
@@ -636,7 +571,7 @@ Discord::MfaMethod AccountsController::currentMfaMethod() const
     if (!sel)
         return Discord::MfaMethod::Totp;
 
-    const int val = QString::fromStdString(sel->GetValue()).toInt();
+    const int val = number(sel->GetValue());
     return static_cast<Discord::MfaMethod>(val);
 }
 
@@ -668,8 +603,8 @@ void AccountsController::handleMfaVerify()
     if (!codeEl)
         return;
 
-    const QString code = QString::fromStdString(codeEl->GetValue()).trimmed();
-    if (code.isEmpty()) {
+    const std::string code(Platform::trim(codeEl->GetValue()));
+    if (code.empty()) {
         if (errEl) {
             errEl->SetInnerRML("Enter your verification code.");
             errEl->SetProperty("display", "block");
@@ -691,8 +626,8 @@ void AccountsController::startQrClient()
     Core::ProxyConfig proxy;
     if (modalDocument) {
         if (auto *proxyEl = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(modalDocument->GetElementById("qr-proxy"))) {
-            const QString pStr = QString::fromStdString(proxyEl->GetValue()).trimmed();
-            if (!pStr.isEmpty()) {
+            const std::string pStr(Platform::trim(proxyEl->GetValue()));
+            if (!pStr.empty()) {
                 auto parsed = Core::ProxyConfig::parse(pStr);
                 if (!parsed) {
                     if (auto *status = modalDocument->GetElementById("qr-status-text"))
@@ -707,38 +642,40 @@ void AccountsController::startQrClient()
     }
 
     qrStarted = true;
-    qrClient = new Discord::RemoteAuthClient(proxy, shell.session()->getCaptchaResolver(), this);
+    qrClient = std::make_unique<Discord::RemoteAuthClient>(proxy, shell.session()->getCaptchaResolver());
+    track(qrClient->fingerprintReady.connect([this](const std::string &fingerprint) { renderQr(fingerprint); }));
 
-    connect(qrClient, &Discord::RemoteAuthClient::fingerprintReady, this, &AccountsController::renderQr);
-
-    connect(qrClient, &Discord::RemoteAuthClient::pendingTicket, this, [this](const QString &, const QString &name, const QString &) {
+    track((qrClient)->pendingTicket.connect([this](const std::string &, const std::string &name, const std::string &) {
         lastQrUsername = name;
         if (modalDocument) {
             if (auto *st = modalDocument->GetElementById("qr-status-text"))
-                st->SetInnerRML(QStringLiteral("Scan detected for %1! Please confirm on your mobile app.").arg(escape(name)).toUtf8().constData());
+                st->SetInnerRML("Scan detected for " + escape(name) + "! Please confirm on your mobile app.");
         }
-    });
+        requestRender(100);
+    }));
 
-    connect(qrClient, &Discord::RemoteAuthClient::authenticated, this, [this, proxy](const QString &token) {
-        const QString uname = lastQrUsername;
+    track((qrClient)->authenticated.connect([this, proxy](const std::string &token) {
+        const std::string uname = lastQrUsername;
         stopQrClient();
         if (addAccountWithToken(token, uname, proxy))
             switchView(ViewMode::Accounts);
-    });
+    }));
 
-    connect(qrClient, &Discord::RemoteAuthClient::failed, this, [this](Discord::RemoteAuthError) {
+    track((qrClient)->failed.connect([this](Discord::RemoteAuthError) {
         if (modalDocument) {
             if (auto *st = modalDocument->GetElementById("qr-status-text"))
                 st->SetInnerRML("QR authentication session expired or failed. Click 'Refresh QR Code' to try again.");
         }
-    });
+        requestRender(100);
+    }));
 
-    connect(qrClient, &Discord::RemoteAuthClient::canceled, this, [this]() {
+    track((qrClient)->canceled.connect([this]() {
         if (modalDocument) {
             if (auto *st = modalDocument->GetElementById("qr-status-text"))
                 st->SetInnerRML("Login was canceled on your phone.");
         }
-    });
+        requestRender(100);
+    }));
 
     qrClient->start();
 }
@@ -746,32 +683,31 @@ void AccountsController::startQrClient()
 void AccountsController::stopQrClient()
 {
     if (qrClient) {
-        qrClient->deleteLater();
-        qrClient = nullptr;
+        qrClient->stop();
+        auto *retired = qrClient.release();
+        Platform::Dispatcher::main().post([retired] { delete retired; });
     }
     qrStarted = false;
-    Runtime::instance().clearFrame(QStringLiteral("ra-qr"));
+    Runtime::instance().clearFrame(std::string("ra-qr"));
 }
 
-void AccountsController::renderQr(const QString &fingerprint)
+void AccountsController::renderQr(const std::string &fingerprint)
 {
-    const QString url = QStringLiteral("https://discord.com/ra/") + fingerprint;
+    const std::string url = "https://discord.com/ra/" + fingerprint;
     try {
-        const qrcodegen::QrCode qr = qrcodegen::QrCode::encodeText(url.toUtf8().constData(), qrcodegen::QrCode::Ecc::QUARTILE);
-        const int n = qr.getSize();
-        const int border = 4;
-        const int dim = n + border * 2;
-
-        QImage image(dim, dim, QImage::Format_RGB32);
-        image.fill(Qt::white);
-        for (int y = 0; y < n; ++y) {
-            for (int x = 0; x < n; ++x) {
-                if (qr.getModule(x, y))
-                    image.setPixel(x + border, y + border, qRgb(0, 0, 0));
+        const auto qr = qrcodegen::QrCode::encodeText(url.c_str(), qrcodegen::QrCode::Ecc::QUARTILE);
+        const int modules = qr.getSize();
+        constexpr int border = 4;
+        const int side = modules + border * 2;
+        Platform::ImageBuffer image{256, 256, 4, std::vector<uint8_t>(256 * 256 * 4, 255)};
+        for (int y = 0; y < 256; ++y) for (int x = 0; x < 256; ++x) {
+            const int mx = x * side / 256 - border, my = y * side / 256 - border;
+            if (mx >= 0 && my >= 0 && mx < modules && my < modules && qr.getModule(mx, my)) {
+                auto *pixel = image.pixels.data() + (y * 256 + x) * 4;
+                pixel[0] = pixel[1] = pixel[2] = 0;
             }
         }
-
-        Runtime::instance().setFrame(QStringLiteral("ra-qr"), image.scaled(256, 256, Qt::KeepAspectRatio, Qt::FastTransformation));
+        Runtime::instance().setFrame("ra-qr", image);
 
         if (modalDocument) {
             if (auto *st = modalDocument->GetElementById("qr-status-text"))
@@ -783,6 +719,7 @@ void AccountsController::renderQr(const QString &fingerprint)
             if (auto *st = modalDocument->GetElementById("qr-status-text"))
                 st->SetInnerRML("Failed to generate QR code.");
         }
+        requestRender(100);
     }
 }
 
@@ -798,8 +735,8 @@ void AccountsController::handleTokenSubmit()
     if (!tokenInput || !errLabel)
         return;
 
-    const QString token = QString::fromStdString(tokenInput->GetValue()).trimmed();
-    if (token.isEmpty()) {
+    const std::string token(Platform::trim(tokenInput->GetValue()));
+    if (token.empty()) {
         errLabel->SetInnerRML("Please enter a token.");
         errLabel->SetProperty("display", "block");
         return;
@@ -807,8 +744,8 @@ void AccountsController::handleTokenSubmit()
 
     Core::ProxyConfig proxy;
     if (proxyInput) {
-        const QString proxyStr = QString::fromStdString(proxyInput->GetValue()).trimmed();
-        if (!proxyStr.isEmpty()) {
+        const std::string proxyStr(Platform::trim(proxyInput->GetValue()));
+        if (!proxyStr.empty()) {
             auto parsed = Core::ProxyConfig::parse(proxyStr);
             if (!parsed) {
                 errLabel->SetInnerRML("Invalid proxy format. Enter scheme://[user:pass@]host:port (http, https, socks5).");
@@ -827,13 +764,13 @@ void AccountsController::handleTokenSubmit()
     }
 
     errLabel->SetProperty("display", "none");
-    if (addAccountWithToken(token, QString(), proxy))
+    if (addAccountWithToken(token, std::string(), proxy))
         switchView(ViewMode::Accounts);
 }
 
-bool AccountsController::addAccountWithToken(const QString &token, const QString &username, const Core::ProxyConfig &proxy)
+bool AccountsController::addAccountWithToken(const std::string &token, const std::string &username, const Core::ProxyConfig &proxy)
 {
-    auto fail = [this](const QString &message) {
+    auto fail = [this](const std::string &message) {
         if (modalDocument) {
             const char *errorId = currentTab == LoginTab::Token ? "token-status-error"
                                  : currentTab == LoginTab::Qr ? "qr-status-text" : "login-status-error";
@@ -843,7 +780,7 @@ bool AccountsController::addAccountWithToken(const QString &token, const QString
                     errorId = "mfa-status-error";
             }
             if (auto *error = modalDocument->GetElementById(errorId)) {
-                error->SetInnerRML(escape(message).toStdString());
+                error->SetInnerRML(escape(message));
                 error->SetProperty("display", "block");
             }
         }
@@ -851,22 +788,22 @@ bool AccountsController::addAccountWithToken(const QString &token, const QString
     };
     const Core::Snowflake userId = Core::TokenUtils::getIdAndCheckToken(token);
     if (!userId.isValid())
-        return fail(QStringLiteral("The login token does not contain a valid account ID."));
+        return fail(std::string("The login token does not contain a valid account ID."));
 
     Core::AccountInfo acc;
     acc.id = userId;
     acc.token = token;
-    acc.username = username.isEmpty() ? QStringLiteral("User") : username;
+    acc.username = username.empty() ? std::string("User") : username;
     acc.displayName = acc.username;
     acc.proxy = proxy;
 
     auto *model = shell.accounts();
     if (!model)
-        return fail(QStringLiteral("Account storage is unavailable."));
+        return fail(std::string("Account storage is unavailable."));
 
     const auto result = model->addAccount(acc);
     if (!result.success())
-        return fail(QStringLiteral("Failed to save account: %1").arg(result.error));
+        return fail("Failed to save account: " + result.error);
 
     // Connect if this was the very first account added
     if (model->rowCount() == 1) {
@@ -912,9 +849,9 @@ void AccountsController::handleRemoveAccount(Core::Snowflake accountId)
         return;
 
     const auto *acc = model->accountById(accountId);
-    const QString name = acc ? (acc->displayName.isEmpty() ? acc->username : acc->displayName) : QStringLiteral("this account");
+    const std::string name = acc ? (acc->displayName.empty() ? acc->username : acc->displayName) : std::string("this account");
     if (auto *desc = modalDocument->GetElementById("confirm-logout-desc"))
-        desc->SetInnerRML(QStringLiteral("Are you sure you want to log out of %1?").arg(escape(name)).toUtf8().constData());
+        desc->SetInnerRML("Are you sure you want to log out of " + escape(name) + "?");
 
     switchView(ViewMode::ConfirmLogout);
 }
@@ -931,12 +868,12 @@ void AccountsController::openEditProxy(Core::Snowflake accountId)
         return;
 
     if (auto *sub = modalDocument->GetElementById("edit-proxy-account-name")) {
-        const QString name = acc->displayName.isEmpty() ? acc->username : acc->displayName;
-        sub->SetInnerRML(QStringLiteral("Proxy for %1").arg(escape(name)).toUtf8().constData());
+        const std::string name = acc->displayName.empty() ? acc->username : acc->displayName;
+        sub->SetInnerRML("Proxy for " + escape(name));
     }
 
     if (auto *inp = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(modalDocument->GetElementById("edit-proxy-input"))) {
-        inp->SetValue(acc->proxy.toString().toStdString());
+        inp->SetValue(acc->proxy.toString());
     }
 
     if (auto *err = modalDocument->GetElementById("edit-proxy-error")) {
@@ -957,7 +894,7 @@ void AccountsController::handleSaveProxy()
     if (!inp)
         return;
 
-    const QString proxyStr = QString::fromStdString(inp->GetValue()).trimmed();
+    const std::string proxyStr(Platform::trim(inp->GetValue()));
     auto parsed = Core::ProxyConfig::parse(proxyStr);
     if (!parsed) {
         if (err) {
@@ -996,8 +933,8 @@ void AccountsController::openSetToken(Core::Snowflake accountId)
         return;
 
     if (auto *sub = modalDocument->GetElementById("set-token-account-name")) {
-        const QString name = acc->displayName.isEmpty() ? acc->username : acc->displayName;
-        sub->SetInnerRML(QStringLiteral("Update token for %1").arg(escape(name)).toUtf8().constData());
+        const std::string name = acc->displayName.empty() ? acc->username : acc->displayName;
+        sub->SetInnerRML("Update token for " + escape(name));
     }
 
     if (auto *inp = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(modalDocument->GetElementById("set-token-input"))) {
@@ -1022,8 +959,8 @@ void AccountsController::handleSaveToken()
     if (!inp)
         return;
 
-    const QString newToken = QString::fromStdString(inp->GetValue()).trimmed();
-    if (newToken.isEmpty()) {
+    const std::string newToken(Platform::trim(inp->GetValue()));
+    if (newToken.empty()) {
         if (err) {
             err->SetInnerRML("Please enter the new token.");
             err->SetProperty("display", "block");
@@ -1042,10 +979,7 @@ void AccountsController::handleSaveToken()
 
     if (tokenUserId != activeTargetAccountId) {
         if (err) {
-            err->SetInnerRML(QStringLiteral("This token belongs to user ID %1, but this account is %2.")
-                                 .arg(static_cast<quint64>(tokenUserId))
-                                 .arg(static_cast<quint64>(activeTargetAccountId))
-                                 .toUtf8().constData());
+            err->SetInnerRML("This token belongs to user ID " + tokenUserId.toString() + ", but this account is " + activeTargetAccountId.toString() + ".");
             err->SetProperty("display", "block");
         }
         return;
@@ -1054,7 +988,7 @@ void AccountsController::handleSaveToken()
     const auto saved = Core::TokenStore::saveToken(activeTargetAccountId, newToken);
     if (!saved.success()) {
         if (err) {
-            err->SetInnerRML(QStringLiteral("Failed to save token: %1").arg(escape(saved.error)).toUtf8().constData());
+            err->SetInnerRML("Failed to save token: " + escape(saved.error));
             err->SetProperty("display", "block");
         }
         return;

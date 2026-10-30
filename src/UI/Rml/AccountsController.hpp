@@ -6,8 +6,8 @@
 #include "Discord/LoginClient.hpp"
 #include "Discord/RemoteAuthClient.hpp"
 
-#include <QPointer>
-#include <QString>
+#include <memory>
+#include <string>
 
 namespace Rml {
 class ElementDocument;
@@ -22,7 +22,6 @@ namespace Rml {
 
 class AccountsController final : public Controller
 {
-    Q_OBJECT
 public:
     enum class LoginTab {
         Password,
@@ -30,7 +29,7 @@ public:
         Token
     };
 
-    explicit AccountsController(Shell &shell, QObject *parent = nullptr);
+    explicit AccountsController(Shell &shell);
     ~AccountsController() override;
 
     void showAccounts();
@@ -65,13 +64,13 @@ private:
     // QR actions
     void startQrClient();
     void stopQrClient();
-    void renderQr(const QString &fingerprint);
+    void renderQr(const std::string &fingerprint);
 
     // Token actions
     void handleTokenSubmit();
 
     // Account actions
-    bool addAccountWithToken(const QString &token, const QString &username, const Core::ProxyConfig &proxy);
+    bool addAccountWithToken(const std::string &token, const std::string &username, const Core::ProxyConfig &proxy);
     void handleConnect(Core::Snowflake accountId);
     void handleDisconnect(Core::Snowflake accountId);
     void handleToggleAutoConnect(Core::Snowflake accountId);
@@ -91,10 +90,10 @@ private:
     Core::Snowflake activeTargetAccountId;
     Discord::MfaChallenge currentChallenge;
 
-    QPointer<Discord::LoginClient> loginClient;
-    QPointer<Discord::RemoteAuthClient> qrClient;
+    std::unique_ptr<Discord::LoginClient> loginClient;
+    std::unique_ptr<Discord::RemoteAuthClient> qrClient;
     bool qrStarted = false;
-    QString lastQrUsername;
+    std::string lastQrUsername;
 };
 
 } // namespace Rml
