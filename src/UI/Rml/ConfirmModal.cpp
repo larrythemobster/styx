@@ -133,7 +133,7 @@ void ConfirmModalController::hide()
 
 void showConfirmModal(Shell &shell, const ConfirmOptions &options)
 {
-    if (auto *controller = shell.confirmModalController())
+    if (auto *controller = shell.confirmModal())
         controller->show(options);
 }
 

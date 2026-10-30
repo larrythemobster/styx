@@ -32,16 +32,12 @@
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/Input.h>
 
-#include <QClipboard>
-#include <QCursor>
-#include <QDate>
-#include <QDateTime>
-#include <QDesktopServices>
-#include <QFileDialog>
-
+#include "Platform/Desktop.hpp"
+#include "Platform/Utf8.hpp"
+#include <charconv>
+#include <filesystem>
+#include <format>
 #include <utility>
-#include <QFileInfo>
-#include <QGuiApplication>
 
 namespace Styx {
 namespace UI {
@@ -49,88 +45,83 @@ namespace Rml {
 
 namespace {
 
-QString formatTimestamp(const QDateTime &dt)
+template<class T = uint64_t> T parseNumber(std::string_view text)
 {
-    QDateTime local = dt.toLocalTime();
-    QDate date = local.date();
-    QDate today = QDate::currentDate();
-    QString timeStr = local.toString(QStringLiteral("h:mm AP"));
-
-    if (date == today) {
-        return QStringLiteral("Today at ") + timeStr;
-    } else if (date == today.addDays(-1)) {
-        return QStringLiteral("Yesterday at ") + timeStr;
-    } else {
-        return date.toString(QStringLiteral("MM/dd/yyyy")) + QStringLiteral(" ") + timeStr;
-    }
+    T value = 0;
+    std::from_chars(text.data(), text.data() + text.size(), value);
+    return value;
+}
+std::string formatGutterTimestamp(const Platform::DateTime &time)
+{
+    auto clock = time.format("%I:%M %p");
+    if (!clock.empty() && clock.front() == '0') clock.erase(0, 1);
+    return clock;
+}
+std::string formatTimestamp(const Platform::DateTime &time)
+{
+    const auto days = time.daysUntil(Platform::DateTime::now());
+    return (days == 0 ? "Today at " : days == 1 ? "Yesterday at " : time.format("%m/%d/%Y") + " ") + formatGutterTimestamp(time);
+}
+std::string formatDateSeparator(const Platform::DateTime &time) { return time.format("%B %d, %Y"); }
+std::string formatFileSize(int64_t bytes)
+{
+    if (bytes < 1024) return std::to_string(bytes) + " B";
+    if (bytes < 1024 * 1024) return std::format("{:.1f} KB", bytes / 1024.0);
+    return std::format("{:.2f} MB", bytes / (1024.0 * 1024.0));
+}
+Platform::Rect pickerAnchor()
+{
+    auto position = Platform::Desktop::cursorPosition();
+    return {position.x, position.y, 1, 1};
 }
 
-QString formatGutterTimestamp(const QDateTime &dt)
-{
-    return dt.toLocalTime().toString(QStringLiteral("h:mm AP"));
-}
-
-QString formatDateSeparator(const QDateTime &dt)
-{
-    return dt.toLocalTime().date().toString(QStringLiteral("MMMM d, yyyy"));
-}
-
-QString formatFileSize(qint64 bytes)
-{
-    if (bytes < 1024)
-        return QString::number(bytes) + QStringLiteral(" B");
-    if (bytes < 1024 * 1024)
-        return QString::number(bytes / 1024.0, 'f', 1) + QStringLiteral(" KB");
-    return QString::number(bytes / (1024.0 * 1024.0), 'f', 2) + QStringLiteral(" MB");
-}
-
-QString systemMessageIcon(Discord::MessageType type)
+std::string systemMessageIcon(Discord::MessageType type)
 {
     switch (type) {
     case Discord::MessageType::USER_JOIN:
     case Discord::MessageType::RECIPIENT_ADD:
-        return QStringLiteral("icon:arrow-right");
+        return std::string("icon:arrow-right");
     case Discord::MessageType::RECIPIENT_REMOVE:
-        return QStringLiteral("icon:arrow-left");
+        return std::string("icon:arrow-left");
     case Discord::MessageType::CALL:
-        return QStringLiteral("icon:phone");
+        return std::string("icon:phone");
     case Discord::MessageType::CHANNEL_PINNED_MESSAGE:
-        return QStringLiteral("icon:pin");
+        return std::string("icon:pin");
     case Discord::MessageType::PREMIUM_GUILD_SUBSCRIPTION:
     case Discord::MessageType::PREMIUM_GUILD_SUBSCRIPTION_TIER_1:
     case Discord::MessageType::PREMIUM_GUILD_SUBSCRIPTION_TIER_2:
     case Discord::MessageType::PREMIUM_GUILD_SUBSCRIPTION_TIER_3:
-        return QStringLiteral("icon:gem");
+        return std::string("icon:gem");
     case Discord::MessageType::THREAD_CREATED:
     case Discord::MessageType::THREAD_STARTER_MESSAGE:
-        return QStringLiteral("icon:messages-square");
+        return std::string("icon:messages-square");
     default:
-        return QStringLiteral("icon:message-circle");
+        return std::string("icon:message-circle");
     }
 }
 
-QString systemMessageClass(Discord::MessageType type)
+std::string systemMessageClass(Discord::MessageType type)
 {
     switch (type) {
     case Discord::MessageType::USER_JOIN:
     case Discord::MessageType::RECIPIENT_ADD:
-        return QStringLiteral("join");
+        return std::string("join");
     case Discord::MessageType::RECIPIENT_REMOVE:
-        return QStringLiteral("leave");
+        return std::string("leave");
     case Discord::MessageType::CALL:
-        return QStringLiteral("call");
+        return std::string("call");
     case Discord::MessageType::CHANNEL_PINNED_MESSAGE:
-        return QStringLiteral("pin");
+        return std::string("pin");
     case Discord::MessageType::PREMIUM_GUILD_SUBSCRIPTION:
     case Discord::MessageType::PREMIUM_GUILD_SUBSCRIPTION_TIER_1:
     case Discord::MessageType::PREMIUM_GUILD_SUBSCRIPTION_TIER_2:
     case Discord::MessageType::PREMIUM_GUILD_SUBSCRIPTION_TIER_3:
-        return QStringLiteral("boost");
+        return std::string("boost");
     case Discord::MessageType::THREAD_CREATED:
     case Discord::MessageType::THREAD_STARTER_MESSAGE:
-        return QStringLiteral("thread");
+        return std::string("thread");
     default:
-        return QStringLiteral("generic");
+        return std::string("generic");
     }
 }
 
@@ -189,9 +180,9 @@ void ChatController::setupEventListeners()
             // Check for direct href link
             ::Rml::Element *linkEl = closest(target, "href");
             if (linkEl) {
-                QString url = attribute(linkEl, "href");
-                if (url.startsWith(QStringLiteral("styx://channel/"))) {
-                    quint64 chId = url.mid(18).toULongLong();
+                std::string url = attribute(linkEl, "href");
+                if (url.starts_with(std::string("styx://channel/"))) {
+                    uint64_t chId = parseNumber(std::string_view(url).substr(15));
                     if (chId != 0)
                         shell.openChannel(currentAccountId, currentGuildId, Core::Snowflake(chId));
                     return;
@@ -205,10 +196,10 @@ void ChatController::setupEventListeners()
                 }
                 Rml::showConfirmModal(
                     shell,
-                    tr("External Link"),
-                    QString(tr("Are you sure you want to open <b>%1</b>?")).arg(url.toHtmlEscaped()),
-                    tr("Open Link"),
-                    [url]() { QDesktopServices::openUrl(QUrl(url)); },
+                    std::string("External Link"),
+                    "Are you sure you want to open <b>" + escape(url) + "</b>?",
+                    std::string("Open Link"),
+                    [url]() { Platform::Desktop::openUrl(url); },
                     nullptr,
                     false);
                 return;
@@ -216,61 +207,61 @@ void ChatController::setupEventListeners()
             return;
         }
 
-        QString action = attribute(actionEl, "data-action");
-        if (action == QStringLiteral("toggle-members")) {
+        std::string action = attribute(actionEl, "data-action");
+        if (action == std::string("toggle-members")) {
             shell.setMemberListVisible(!shell.isMemberListVisible());
             updateHeader();
-        } else if (action == QStringLiteral("open-threads")) {
+        } else if (action == std::string("open-threads")) {
             shell.openThreadBrowser(currentChannelId);
-        } else if (action == QStringLiteral("user-profile")) {
-            quint64 uid = attribute(actionEl, "data-user-id").toULongLong();
+        } else if (action == std::string("user-profile")) {
+            uint64_t uid = parseNumber(attribute(actionEl, "data-user-id"));
             if (uid != 0) {
-                QRectF anchorRect(actionEl->GetAbsoluteLeft(), actionEl->GetAbsoluteTop(), actionEl->GetClientWidth(), actionEl->GetClientHeight());
+                Platform::Rect anchorRect(actionEl->GetAbsoluteLeft(), actionEl->GetAbsoluteTop(), actionEl->GetClientWidth(), actionEl->GetClientHeight());
                 shell.showUserProfile(Core::Snowflake(uid), currentGuildId, anchorRect);
             }
-        } else if (action == QStringLiteral("jump-to-message")) {
-            quint64 mid = attribute(actionEl, "data-message-id").toULongLong();
+        } else if (action == std::string("jump-to-message")) {
+            uint64_t mid = parseNumber(attribute(actionEl, "data-message-id"));
             if (mid != 0)
                 shell.jumpToMessage(currentChannelId, Core::Snowflake(mid));
-        } else if (action == QStringLiteral("jump-to-present")) {
+        } else if (action == std::string("jump-to-present")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages())
                 instance->messages()->requestLoadChannel(currentChannelId);
-        } else if (action == QStringLiteral("open-image")) {
-            QString url = attribute(actionEl, "data-url");
-            if (!url.isEmpty()) {
-                QList<QUrl> gallery;
+        } else if (action == std::string("open-image")) {
+            std::string url = attribute(actionEl, "data-url");
+            if (!url.empty()) {
+                std::vector<std::string> gallery;
                 if (auto *msgEl = closest(actionEl, "data-message-id")) {
                     ::Rml::ElementList imgs;
                     msgEl->GetElementsByTagName(imgs, "img");
                     for (auto *img : imgs) {
-                        QString iUrl = attribute(img, "data-url");
-                        if (!iUrl.isEmpty() && !gallery.contains(QUrl(iUrl)))
-                            gallery.append(QUrl(iUrl));
+                        std::string iUrl = attribute(img, "data-url");
+                        if (!iUrl.empty() && std::find(gallery.begin(), gallery.end(), iUrl) == gallery.end())
+                            gallery.push_back(iUrl);
                     }
                 }
-                shell.openImage(QUrl(url), gallery);
+                shell.openImage(std::string(url), gallery);
             }
-        } else if (action == QStringLiteral("open-attachment")) {
-            QString url = attribute(actionEl, "data-url");
-            if (!url.isEmpty())
-                QDesktopServices::openUrl(QUrl(url));
-        } else if (action == QStringLiteral("reveal-attachment-spoiler")) {
-            quint64 attId = attribute(actionEl, "data-attachment-id").toULongLong();
+        } else if (action == std::string("open-attachment")) {
+            std::string url = attribute(actionEl, "data-url");
+            if (!url.empty())
+                Platform::Desktop::openUrl(url);
+        } else if (action == std::string("reveal-attachment-spoiler")) {
+            uint64_t attId = parseNumber(attribute(actionEl, "data-attachment-id"));
             if (attId != 0 && shell.chat())
                 shell.chat()->revealSpoiler(Core::Snowflake(attId));
-        } else if (action == QStringLiteral("reveal-text-spoiler")) {
+        } else if (action == std::string("reveal-text-spoiler")) {
             actionEl->SetClass("blurred", false);
             requestRender();
-        } else if (action == QStringLiteral("toggle-reaction")) {
+        } else if (action == std::string("toggle-reaction")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages()) {
-                quint64 mid = attribute(actionEl, "data-message-id").toULongLong();
-                quint64 eid = attribute(actionEl, "data-emoji-id").toULongLong();
-                QString ename = attribute(actionEl, "data-emoji-name");
-                bool animated = attribute(actionEl, "data-emoji-animated") == QStringLiteral("1");
-                bool me = attribute(actionEl, "data-me") == QStringLiteral("1");
-                bool isBurst = attribute(actionEl, "data-burst") == QStringLiteral("1");
+                uint64_t mid = parseNumber(attribute(actionEl, "data-message-id"));
+                uint64_t eid = parseNumber(attribute(actionEl, "data-emoji-id"));
+                std::string ename = attribute(actionEl, "data-emoji-name");
+                bool animated = attribute(actionEl, "data-emoji-animated") == std::string("1");
+                bool me = attribute(actionEl, "data-me") == std::string("1");
+                bool isBurst = attribute(actionEl, "data-burst") == std::string("1");
 
                 Discord::Emoji emoji = (eid != 0)
                                            ? Discord::Emoji::custom(Core::Snowflake(eid), ename, animated)
@@ -281,66 +272,63 @@ void ChatController::setupEventListeners()
                 else
                     instance->messages()->addReaction(currentChannelId, Core::Snowflake(mid), emoji, isBurst, Discord::Client::ReactionLocation::InlineButton);
             }
-        } else if (action == QStringLiteral("toolbar-react")) {
-            quint64 mid = attribute(actionEl, "data-message-id").toULongLong();
+        } else if (action == std::string("toolbar-react")) {
+            uint64_t mid = parseNumber(attribute(actionEl, "data-message-id"));
             if (mid != 0)
                 openReactionPickerForMessage(Core::Snowflake(mid));
-        } else if (action == QStringLiteral("toolbar-reply")) {
-            quint64 mid = attribute(actionEl, "data-message-id").toULongLong();
-            QString author = attribute(actionEl, "data-author");
-            setReplyTarget(Core::Snowflake(mid), author, QString());
-        } else if (action == QStringLiteral("toolbar-more")) {
-            quint64 mid = attribute(actionEl, "data-message-id").toULongLong();
+        } else if (action == std::string("toolbar-reply")) {
+            uint64_t mid = parseNumber(attribute(actionEl, "data-message-id"));
+            std::string author = attribute(actionEl, "data-author");
+            setReplyTarget(Core::Snowflake(mid), author, std::string());
+        } else if (action == std::string("toolbar-more")) {
+            uint64_t mid = parseNumber(attribute(actionEl, "data-message-id"));
             if (mid != 0)
                 showMessageContextMenu(Core::Snowflake(mid));
-        } else if (action == QStringLiteral("composer-reply-close")) {
+        } else if (action == std::string("composer-reply-close")) {
             clearReplyTarget();
             clearEditTarget();
-        } else if (action == QStringLiteral("composer-attach")) {
-            QStringList files = QFileDialog::getOpenFileNames(
-                &shell,
-                tr("Select Files"),
-                QString(),
-                tr("All Files (*.*)"));
-            if (!files.isEmpty()) {
-                for (const auto &filePath : files) {
-                    QFileInfo fi(filePath);
-                    Core::PendingAttachment att;
-                    att.filePath = filePath;
-                    att.filename = fi.fileName();
-                    att.size = fi.size();
-                    pendingAttachments.append(att);
+        } else if (action == std::string("composer-attach")) {
+            Platform::Guard<ChatController> self(this);
+            Platform::Desktop::openFiles("Select Files", {{"All Files", "*.*"}}, [self](std::vector<std::string> files) {
+                if (!self) return;
+                for (const auto &file : files) {
+                    auto path = Platform::utf8Path(file);
+                    Core::PendingAttachment attachment;
+                    attachment.filePath = file;
+                    attachment.filename = Platform::pathUtf8(path.filename());
+                    attachment.size = static_cast<int64_t>(std::filesystem::file_size(path));
+                    self->pendingAttachments.push_back(std::move(attachment));
                 }
-                updateComposer();
-            }
-        } else if (action == QStringLiteral("composer-emoji")) {
+                self->updateComposer();
+            });
+        } else if (action == std::string("composer-emoji")) {
             openEmojiPickerForComposer();
-        } else if (action == QStringLiteral("composer-remove-attachment")) {
-            int idx = attribute(actionEl, "data-index").toInt();
+        } else if (action == std::string("composer-remove-attachment")) {
+            int idx = parseNumber<int>(attribute(actionEl, "data-index"));
             if (idx >= 0 && idx < pendingAttachments.size()) {
-                pendingAttachments.removeAt(idx);
+                pendingAttachments.erase(pendingAttachments.begin() + idx);
                 updateComposer();
             }
-        } else if (action == QStringLiteral("channel-mention")) {
-            quint64 cid = attribute(actionEl, "data-channel-id").toULongLong();
+        } else if (action == std::string("channel-mention")) {
+            uint64_t cid = parseNumber(attribute(actionEl, "data-channel-id"));
             if (cid != 0)
                 shell.openChannel(currentAccountId, currentGuildId, Core::Snowflake(cid));
-        } else if (action == QStringLiteral("channel-link")) {
-            QString url = attribute(actionEl, "data-href");
+        } else if (action == std::string("channel-link")) {
+            std::string url = attribute(actionEl, "data-href");
             if (auto link = Discord::ChannelLink::parse(url)) {
                 if (link->messageId.isValid())
                     shell.jumpToMessage(link->channelId, link->messageId);
                 else
                     shell.openChannel(currentAccountId, link->guildId, link->channelId);
             }
-        } else if (action == QStringLiteral("link")) {
-            QString url = attribute(actionEl, "data-href");
+        } else if (action == std::string("link")) {
+            std::string url = attribute(actionEl, "data-href");
             Rml::showConfirmModal(
                 shell,
-                tr("External Link"),
-                QString(tr("Are you sure you want to open <b>%1</b>?")).arg(url.toHtmlEscaped()),
-                tr("Open Link"),
-                [url]() { QDesktopServices::openUrl(QUrl(url)); },
+                std::string("External Link"),
+                "Are you sure you want to open <b>" + escape(url) + "</b>?",
+                std::string("Open Link"),
+                [url]() { Platform::Desktop::openUrl(url); },
                 nullptr,
                 false);
         }
@@ -396,11 +384,11 @@ void ChatController::setupEventListeners()
                     if (!hasSendPermission)
                         return;
 
-                    QString text;
+                    std::string text;
                     if (textareaEl)
-                        text = QString::fromStdString(textareaEl->GetValue()).trimmed();
+                        text = Platform::trim(textareaEl->GetValue());
 
-                    if (text.isEmpty() && pendingAttachments.isEmpty())
+                    if (text.empty() && pendingAttachments.empty())
                         return;
 
                     if (editingMessageId.isValid()) {
@@ -426,28 +414,25 @@ void ChatController::setupEventListeners()
                 } else if (replyTargetId.isValid()) {
                     event.StopPropagation();
                     clearReplyTarget();
-                } else if (!pendingAttachments.isEmpty()) {
+                } else if (!pendingAttachments.empty()) {
                     event.StopPropagation();
                     pendingAttachments.clear();
                     updateComposer();
                 }
             } else if (key == ::Rml::Input::KI_UP) {
-                QString currentVal;
+                std::string currentVal;
                 if (textareaEl)
-                    currentVal = QString::fromStdString(textareaEl->GetValue());
-                if (currentVal.isEmpty() && hasSendPermission) {
+                    currentVal = std::string(textareaEl->GetValue());
+                if (currentVal.empty() && hasSendPermission) {
                     ChatModel *model = shell.chat();
                     Core::ClientInstance *instance = shell.currentInstance();
                     if (model && instance) {
                         Core::Snowflake selfId = instance->accountId();
                         for (int r = model->rowCount() - 1; r >= 0; --r) {
-                            QModelIndex idx = model->index(r, 0);
-                            if (Core::Snowflake(idx.data(ChatModel::UserIdRole).toULongLong()) == selfId &&
-                                !idx.data(ChatModel::IsSystemMessageRole).toBool()) {
-                                Core::Snowflake msgId(idx.data(ChatModel::MessageIdRole).toULongLong());
-                                QString body = idx.data(ChatModel::ContentRole).toString();
+                            const auto message = model->row(r);
+                            if (message.userId == selfId && !message.isSystemMessage) {
                                 event.StopPropagation();
-                                setEditTarget(msgId, body);
+                                setEditTarget(message.messageId, message.content);
                                 break;
                             }
                         }
@@ -668,153 +653,120 @@ void ChatController::checkAndLoadNewer()
     }
 }
 
-QString ChatController::buildMessageHtml(int row)
+std::string ChatController::buildMessageHtml(int row)
 {
     ChatModel *model = shell.chat();
     if (!model || row < 0 || row >= model->rowCount())
-        return QString();
+        return std::string();
 
-    QModelIndex idx = model->index(row, 0);
-    Core::Snowflake msgId(idx.data(ChatModel::MessageIdRole).toULongLong());
-    Core::Snowflake authorId(idx.data(ChatModel::UserIdRole).toULongLong());
-    QString authorName = idx.data(ChatModel::UsernameRole).toString();
-    QColor authorColor = idx.data(ChatModel::UsernameColorRole).value<QColor>();
-    QDateTime timestamp = idx.data(ChatModel::TimestampRole).toDateTime();
-    QVariant editedVal = idx.data(ChatModel::EditedTimestampRole);
-    bool isPending = idx.data(ChatModel::IsPendingRole).toBool();
-    bool isError = idx.data(ChatModel::IsErroredRole).toBool();
-    bool isSystem = idx.data(ChatModel::IsSystemMessageRole).toBool();
-    Discord::MessageType msgType = static_cast<Discord::MessageType>(idx.data(ChatModel::MessageTypeRole).toInt());
-    ReplyData reply = idx.data(ChatModel::ReplyDataRole).value<ReplyData>();
-    auto attachments = idx.data(ChatModel::AttachmentsRole).value<QList<AttachmentData>>();
-    auto embeds = idx.data(ChatModel::EmbedsRole).value<QList<EmbedData>>();
-    auto reactions = idx.data(ChatModel::ReactionsRole).value<QList<ReactionData>>();
-    auto stickers = idx.data(ChatModel::StickersRole).value<QList<StickerData>>();
-    QString rawContent = idx.data(ChatModel::ContentRole).toString();
+    const auto message = model->row(row);
+    const auto msgId = message.messageId;
+    const auto authorId = message.userId;
+    const auto &authorName = message.username;
+    const auto authorColor = message.usernameColor;
+    const auto timestamp = message.timestamp;
+    const auto editedVal = message.editedTimestamp;
+    const bool isPending = message.isPending, isError = message.isErrored, isSystem = message.isSystemMessage;
+    const auto msgType = message.messageType;
+    const auto &reply = message.replyData;
+    const auto &attachments = message.attachments;
+    const auto &embeds = message.embeds;
+    const auto &reactions = message.reactions;
+    const auto &stickers = message.stickers;
+    const auto &rawContent = message.content;
 
-    QString out;
+    std::string out;
 
     // Date separator check
-    bool showDateSep = idx.data(ChatModel::DateSeparatorRole).toBool();
+    bool showDateSep = message.dateSeparator;
     if (showDateSep) {
-        out += QStringLiteral(
-            "<div class=\"date-separator\">"
+        out += std::format("<div class=\"date-separator\">"
             "<span class=\"date-separator-line\"></span>"
-            "<span class=\"date-separator-text\">%1</span>"
+            "<span class=\"date-separator-text\">{0}</span>"
             "<span class=\"date-separator-line\"></span>"
-            "</div>"
-        ).arg(formatDateSeparator(timestamp));
+            "</div>", formatDateSeparator(timestamp));
     }
 
     if (isSystem) {
-        QString icon = systemMessageIcon(msgType);
-        QString cls = systemMessageClass(msgType);
-        QString content = rawContent.toHtmlEscaped();
-        out += QStringLiteral(
-            "<div class=\"system-message\">"
-            "<img class=\"system-icon %1\" src=\"%2\" />"
-            "<span class=\"system-text\"><strong>%3</strong> %4</span>"
-            "<span class=\"system-timestamp\">%5</span>"
-            "</div>"
-        ).arg(cls, icon, authorName.toHtmlEscaped(), content, formatGutterTimestamp(timestamp));
+        std::string icon = systemMessageIcon(msgType);
+        std::string cls = systemMessageClass(msgType);
+        std::string content = Platform::htmlEscape(rawContent);
+        out += std::format("<div class=\"system-message\">"
+            "<img class=\"system-icon {0}\" src=\"{1}\" />"
+            "<span class=\"system-text\"><strong>{2}</strong> {3}</span>"
+            "<span class=\"system-timestamp\">{4}</span>"
+            "</div>", cls, icon, Platform::htmlEscape(authorName), content, formatGutterTimestamp(timestamp));
         return out;
     }
 
-    // 7-minute Discord grouping rule
-    bool showHeader = true;
-    if (row > 0) {
-        QModelIndex prevIdx = model->index(row - 1, 0);
-        Core::Snowflake prevAuthorId(prevIdx.data(ChatModel::UserIdRole).toULongLong());
-        QDateTime prevTimestamp = prevIdx.data(ChatModel::TimestampRole).toDateTime();
-        bool prevSystem = prevIdx.data(ChatModel::IsSystemMessageRole).toBool();
-
-        if (!prevSystem &&
-            prevAuthorId == authorId &&
-            !showDateSep &&
-            reply.state == ReplyData::State::None &&
-            qAbs(prevTimestamp.secsTo(timestamp)) <= 7 * 60) {
-            showHeader = false;
-        }
-    }
+    const bool showHeader = message.showHeader;
 
     // Parse Markdown content and check for user mention
     RenderedMarkdown contentRendered = ChatMarkdown::toRml(rawContent, shell, currentAccountId, currentGuildId, currentChannelId);
     bool mentionsMe = contentRendered.mentionsUser;
 
-    QString rowClasses = QStringLiteral("message-row");
+    std::string rowClasses = std::string("message-row");
     if (showHeader)
-        rowClasses += QStringLiteral(" group-start");
+        rowClasses += std::string(" group-start");
     if (mentionsMe)
-        rowClasses += QStringLiteral(" mentions-me");
+        rowClasses += std::string(" mentions-me");
     if (isPending)
-        rowClasses += QStringLiteral(" message-pending");
+        rowClasses += std::string(" message-pending");
     if (isError)
-        rowClasses += QStringLiteral(" message-error");
+        rowClasses += std::string(" message-error");
 
-    out += QStringLiteral("<div class=\"%1\" data-message-id=\"%2\">").arg(rowClasses, QString::number(quint64(msgId)));
+    out += std::format("<div class=\"{0}\" data-message-id=\"{1}\">", rowClasses, std::to_string(uint64_t(msgId)));
 
     // Reply preview
     if (reply.state != ReplyData::State::None) {
         Core::ClientInstance *instance = shell.currentInstance();
-        QUrl refAvatarUrl;
+        std::string refAvatarUrl;
         if (instance && instance->users() && reply.authorId.isValid()) {
             auto refUser = instance->users()->getUser(reply.authorId);
             refAvatarUrl = refUser ? instance->users()->getAvatarUrl(*refUser, currentGuildId, 32) : Discord::Cdn::defaultUserAvatar(reply.authorId, 32);
         } else {
             refAvatarUrl = Discord::Cdn::defaultUserAvatar(reply.authorId, 32);
         }
-        QString refAvatarSrc = shell.imageSource(refAvatarUrl, QSize(16, 16));
-        QString replyColorStyle = reply.authorColor.isValid() ? QStringLiteral("style=\"color:%1;\"").arg(reply.authorColor.name()) : QString();
+        std::string refAvatarSrc = shell.imageSource(refAvatarUrl, Platform::Size(16, 16));
+        std::string replyColorStyle = reply.authorColor.valid ? std::format("style=\"color:{0};\"", reply.authorColor.css()) : std::string();
 
-        out += QStringLiteral(
-            "<div class=\"reply-bar-container\" data-action=\"jump-to-message\" data-message-id=\"%1\">"
+        out += std::format("<div class=\"reply-bar-container\" data-action=\"jump-to-message\" data-message-id=\"{0}\">"
             "<div class=\"reply-spine\"></div>"
-            "<div class=\"reply-avatar-clip\"><img class=\"reply-avatar\" src=\"%2\" /></div>"
-            "<span class=\"reply-author\" %3>%4</span>"
-            "<span class=\"reply-content\">%5</span>"
-            "</div>"
-        ).arg(QString::number(quint64(reply.referencedMessageId)),
-             refAvatarSrc.toHtmlEscaped(),
-             replyColorStyle,
-             reply.authorName.toHtmlEscaped(),
-             reply.contentSnippet.toHtmlEscaped());
+            "<div class=\"reply-avatar-clip\"><img class=\"reply-avatar\" src=\"{1}\" /></div>"
+            "<span class=\"reply-author\" {2}>{3}</span>"
+            "<span class=\"reply-content\">{4}</span>"
+            "</div>", std::to_string(uint64_t(reply.referencedMessageId)), Platform::htmlEscape(refAvatarSrc), replyColorStyle, Platform::htmlEscape(reply.authorName), Platform::htmlEscape(reply.contentSnippet));
     }
 
     // Header / Group start
     if (showHeader) {
         Core::ClientInstance *instance = shell.currentInstance();
-        QUrl avatarUrl;
+        std::string avatarUrl;
         if (instance && instance->users() && authorId.isValid()) {
             auto user = instance->users()->getUser(authorId);
             avatarUrl = user ? instance->users()->getAvatarUrl(*user, currentGuildId, 64) : Discord::Cdn::defaultUserAvatar(authorId, 64);
         } else {
             avatarUrl = Discord::Cdn::defaultUserAvatar(authorId, 64);
         }
-        QString avatarSrc = shell.imageSource(avatarUrl, QSize(40, 40));
-        QString authorColorStyle = authorColor.isValid() ? QStringLiteral("style=\"color:%1;\"").arg(authorColor.name()) : QString();
+        std::string avatarSrc = shell.imageSource(avatarUrl, Platform::Size(40, 40));
+        std::string authorColorStyle = authorColor.valid ? std::format("style=\"color:{0};\"", authorColor.css()) : std::string();
 
-        out += QStringLiteral(
-            "<div class=\"message-avatar-clip\" data-action=\"user-profile\" data-user-id=\"%2\"><img class=\"message-avatar\" src=\"%1\" /></div>"
+        out += std::format("<div class=\"message-avatar-clip\" data-action=\"user-profile\" data-user-id=\"{1}\"><img class=\"message-avatar\" src=\"{0}\" /></div>"
             "<div class=\"message-header\">"
-            "<span class=\"message-author\" %3 data-action=\"user-profile\" data-user-id=\"%2\">%4</span>"
-            "<span class=\"message-timestamp\">%5</span>"
-            "</div>"
-        ).arg(avatarSrc.toHtmlEscaped(),
-             QString::number(quint64(authorId)),
-             authorColorStyle,
-             authorName.toHtmlEscaped(),
-             formatTimestamp(timestamp));
+            "<span class=\"message-author\" {2} data-action=\"user-profile\" data-user-id=\"{1}\">{3}</span>"
+            "<span class=\"message-timestamp\">{4}</span>"
+            "</div>", Platform::htmlEscape(avatarSrc), std::to_string(uint64_t(authorId)), authorColorStyle, Platform::htmlEscape(authorName), formatTimestamp(timestamp));
     } else {
-        out += QStringLiteral("<span class=\"gutter-timestamp\">%1</span>").arg(formatGutterTimestamp(timestamp));
+        out += std::format("<span class=\"gutter-timestamp\">{0}</span>", formatGutterTimestamp(timestamp));
     }
 
     // Body content
-    out += QStringLiteral("<div class=\"message-body\">");
+    out += std::string("<div class=\"message-body\">");
     out += contentRendered.rml;
-    if (editedVal.isValid()) {
-        out += QStringLiteral("<span class=\"edited-marker\">(edited)</span>");
+    if (editedVal.valid()) {
+        out += std::string("<span class=\"edited-marker\">(edited)</span>");
     }
-    out += QStringLiteral("</div>");
+    out += std::string("</div>");
 
     // Attachments
     for (const auto &att : attachments) {
@@ -822,190 +774,157 @@ QString ChatController::buildMessageHtml(int row)
             if (att.isImage) {
                 bool isSpoiler = att.isSpoiler && model && !model->isSpoilerRevealed(att.id);
                 if (isSpoiler) {
-                    out += QStringLiteral(
-                        "<div class=\"attachment-spoiler-box\" data-action=\"reveal-attachment-spoiler\" data-attachment-id=\"%1\">"
+                    out += std::format("<div class=\"attachment-spoiler-box\" data-action=\"reveal-attachment-spoiler\" data-attachment-id=\"{0}\">"
                         "<span class=\"spoiler-pill\">SPOILER</span>"
-                        "</div>"
-                    ).arg(quint64(att.id));
+                        "</div>", uint64_t(att.id));
                 } else {
-                    QSize disp = att.displaySize;
-                    if (!disp.isValid())
-                        disp = QSize(400, 300);
-                    if (disp.width() > 400 || disp.height() > 300)
-                        disp = disp.scaled(400, 300, Qt::KeepAspectRatio);
+                    Platform::Size disp = att.displaySize;
+                    if (disp.empty())
+                        disp = Platform::Size(400, 300);
+                    if (disp.width > 400 || disp.height > 300)
+                        disp = Platform::fitWithin(disp, {400, 300});
 
-                    QString src = shell.imageSource(att.proxyUrl.isValid() ? att.proxyUrl : att.originalUrl, disp);
-                    out += QStringLiteral(
-                        "<div class=\"attachment-container\">"
-                        "<img class=\"attachment-image\" src=\"%1\" data-action=\"open-image\" data-url=\"%2\" style=\"width:%3dp; height:%4dp;\" />"
-                        "</div>"
-                    ).arg(src.toHtmlEscaped(),
-                         att.originalUrl.toString().toHtmlEscaped(),
-                         QString::number(disp.width()),
-                         QString::number(disp.height()));
+                    std::string src = shell.imageSource(!att.proxyUrl.empty() ? att.proxyUrl : att.originalUrl, disp);
+                    out += std::format("<div class=\"attachment-container\">"
+                        "<img class=\"attachment-image\" src=\"{0}\" data-action=\"open-image\" data-url=\"{1}\" style=\"width:{2}dp; height:{3}dp;\" />"
+                        "</div>", Platform::htmlEscape(src), Platform::htmlEscape(att.originalUrl), std::to_string(disp.width), std::to_string(disp.height));
                 }
             } else if (att.isVideo) {
-                out += QStringLiteral(
-                    "<div class=\"attachment-file-card\" data-action=\"open-attachment\" data-url=\"%1\">"
+                out += std::format("<div class=\"attachment-file-card\" data-action=\"open-attachment\" data-url=\"{0}\">"
                     "<img class=\"attachment-file-icon\" src=\"icon:image-play\" />"
                     "<div class=\"attachment-file-info\">"
-                    "<span class=\"attachment-filename\">%2</span>"
-                    "<span class=\"attachment-filesize\">%3</span>"
+                    "<span class=\"attachment-filename\">{1}</span>"
+                    "<span class=\"attachment-filesize\">{2}</span>"
                     "</div>"
-                    "</div>"
-                ).arg(att.originalUrl.toString().toHtmlEscaped(),
-                     att.filename.toHtmlEscaped(),
-                     formatFileSize(att.fileSizeBytes));
+                    "</div>", Platform::htmlEscape(att.originalUrl), Platform::htmlEscape(att.filename), formatFileSize(att.fileSizeBytes));
             }
         } else {
-            QString iconName = att.isAudio ? QStringLiteral("icon:file-audio") : QStringLiteral("icon:file-text");
-            out += QStringLiteral(
-                "<div class=\"attachment-file-card\" data-action=\"open-attachment\" data-url=\"%1\">"
-                "<img class=\"attachment-file-icon\" src=\"%2\" />"
+            std::string iconName = att.isAudio ? std::string("icon:file-audio") : std::string("icon:file-text");
+            out += std::format("<div class=\"attachment-file-card\" data-action=\"open-attachment\" data-url=\"{0}\">"
+                "<img class=\"attachment-file-icon\" src=\"{1}\" />"
                 "<div class=\"attachment-file-info\">"
-                "<span class=\"attachment-filename\">%3</span>"
-                "<span class=\"attachment-filesize\">%4</span>"
+                "<span class=\"attachment-filename\">{2}</span>"
+                "<span class=\"attachment-filesize\">{3}</span>"
                 "</div>"
-                "</div>"
-            ).arg(att.originalUrl.toString().toHtmlEscaped(),
-                 iconName,
-                 att.filename.toHtmlEscaped(),
-                 formatFileSize(att.fileSizeBytes));
+                "</div>", Platform::htmlEscape(att.originalUrl), iconName, Platform::htmlEscape(att.filename), formatFileSize(att.fileSizeBytes));
         }
     }
 
     // Embeds
     for (const auto &embed : embeds) {
-        QString borderStyle = QStringLiteral("border-left: 4dp %1;").arg(embed.color.isValid() ? embed.color.name() : QStringLiteral("#202225"));
-        out += QStringLiteral("<div class=\"embed-card\" style=\"%1\">").arg(borderStyle);
+        std::string borderStyle = std::format("border-left: 4dp {0};", embed.color.valid ? embed.color.css() : std::string("#202225"));
+        out += std::format("<div class=\"embed-card\" style=\"{0}\">", borderStyle);
 
-        if (!embed.authorName.isEmpty()) {
-            out += QStringLiteral("<div class=\"embed-author\">");
-            if (embed.authorIconUrl.isValid()) {
-                QString iconSrc = shell.imageSource(embed.authorIconUrl, QSize(24, 24));
-                out += QStringLiteral("<img class=\"embed-author-icon\" src=\"%1\" />").arg(iconSrc.toHtmlEscaped());
+        if (!embed.authorName.empty()) {
+            out += std::string("<div class=\"embed-author\">");
+            if (!embed.authorIconUrl.empty()) {
+                std::string iconSrc = shell.imageSource(embed.authorIconUrl, Platform::Size(24, 24));
+                out += std::format("<img class=\"embed-author-icon\" src=\"{0}\" />", Platform::htmlEscape(iconSrc));
             }
-            if (!embed.authorUrl.isEmpty()) {
-                out += QStringLiteral("<a href=\"%1\" class=\"chat-link\" data-action=\"link\" data-href=\"%1\">%2</a>")
-                    .arg(embed.authorUrl.toHtmlEscaped(), embed.authorName.toHtmlEscaped());
+            if (!embed.authorUrl.empty()) {
+                out += std::format("<a href=\"{0}\" class=\"chat-link\" data-action=\"link\" data-href=\"{0}\">{1}</a>", Platform::htmlEscape(embed.authorUrl), Platform::htmlEscape(embed.authorName));
             } else {
-                out += QStringLiteral("<span>%1</span>").arg(embed.authorName.toHtmlEscaped());
+                out += std::format("<span>{0}</span>", Platform::htmlEscape(embed.authorName));
             }
-            out += QStringLiteral("</div>");
+            out += std::string("</div>");
         }
 
-        if (!embed.title.isEmpty()) {
-            if (!embed.url.isEmpty()) {
-                out += QStringLiteral("<a href=\"%1\" class=\"embed-title\" data-action=\"link\" data-href=\"%1\">%2</a>")
-                    .arg(embed.url.toHtmlEscaped(), embed.title.toHtmlEscaped());
+        if (!embed.title.empty()) {
+            if (!embed.url.empty()) {
+                out += std::format("<a href=\"{0}\" class=\"embed-title\" data-action=\"link\" data-href=\"{0}\">{1}</a>", Platform::htmlEscape(embed.url), Platform::htmlEscape(embed.title));
             } else {
-                out += QStringLiteral("<div class=\"embed-title\">%1</div>").arg(embed.title.toHtmlEscaped());
+                out += std::format("<div class=\"embed-title\">{0}</div>", Platform::htmlEscape(embed.title));
             }
         }
 
-        if (!embed.description.isEmpty()) {
+        if (!embed.description.empty()) {
             RenderedMarkdown desc = ChatMarkdown::toRml(embed.description, shell, currentAccountId, currentGuildId, currentChannelId);
-            out += QStringLiteral("<div class=\"embed-description\">");
+            out += std::string("<div class=\"embed-description\">");
             out += desc.rml;
-            out += QStringLiteral("</div>");
+            out += std::string("</div>");
         }
 
-        if (!embed.fields.isEmpty()) {
-            out += QStringLiteral("<div class=\"embed-fields\">");
+        if (!embed.fields.empty()) {
+            out += std::string("<div class=\"embed-fields\">");
             for (const auto &field : embed.fields) {
-                out += QStringLiteral("<div class=\"embed-field%1\">").arg(field.isInline ? QString() : QStringLiteral(" non-inline"));
-                out += QStringLiteral("<div class=\"embed-field-name\">%1</div>").arg(field.name.toHtmlEscaped());
+                out += std::format("<div class=\"embed-field{0}\">", field.isInline ? std::string() : std::string(" non-inline"));
+                out += std::format("<div class=\"embed-field-name\">{0}</div>", Platform::htmlEscape(field.name));
                 RenderedMarkdown fval = ChatMarkdown::toRml(field.value, shell, currentAccountId, currentGuildId, currentChannelId);
-                out += QStringLiteral("<div class=\"embed-field-value\">");
+                out += std::string("<div class=\"embed-field-value\">");
                 out += fval.rml;
-                out += QStringLiteral("</div></div>");
+                out += std::string("</div></div>");
             }
-            out += QStringLiteral("</div>");
+            out += std::string("</div>");
         }
 
-        if (!embed.images.isEmpty() && embed.images.first().url.isValid()) {
-            const auto &eimg = embed.images.first();
-            QSize disp = eimg.displaySize;
-            if (!disp.isValid() || disp.width() > 400 || disp.height() > 300)
-                disp = disp.isValid() ? disp.scaled(400, 300, Qt::KeepAspectRatio) : QSize(400, 300);
-            QString imgSrc = shell.imageSource(eimg.url, disp);
-            out += QStringLiteral("<img class=\"embed-image\" src=\"%1\" data-action=\"open-image\" data-url=\"%2\" style=\"width:%3dp; height:%4dp;\" />")
-                .arg(imgSrc.toHtmlEscaped(), eimg.url.toString().toHtmlEscaped(), QString::number(disp.width()), QString::number(disp.height()));
-        } else if (embed.thumbnailUrl.isValid()) {
-            QSize disp = embed.thumbnailSize;
-            if (!disp.isValid() || disp.width() > 80 || disp.height() > 80)
-                disp = QSize(80, 80);
-            QString thumbSrc = shell.imageSource(embed.thumbnailUrl, disp);
-            out += QStringLiteral("<img class=\"embed-image\" src=\"%1\" data-action=\"open-image\" data-url=\"%2\" style=\"width:%3dp; height:%4dp;\" />")
-                .arg(thumbSrc.toHtmlEscaped(), embed.thumbnailUrl.toString().toHtmlEscaped(), QString::number(disp.width()), QString::number(disp.height()));
+        if (!embed.images.empty() && !embed.images.front().url.empty()) {
+            const auto &eimg = embed.images.front();
+            Platform::Size disp = eimg.displaySize;
+            if (disp.empty() || disp.width > 400 || disp.height > 300)
+                disp = !disp.empty() ? Platform::fitWithin(disp, {400, 300}) : Platform::Size(400, 300);
+            std::string imgSrc = shell.imageSource(eimg.url, disp);
+            out += std::format("<img class=\"embed-image\" src=\"{0}\" data-action=\"open-image\" data-url=\"{1}\" style=\"width:{2}dp; height:{3}dp;\" />", Platform::htmlEscape(imgSrc), Platform::htmlEscape(eimg.url), std::to_string(disp.width), std::to_string(disp.height));
+        } else if (!embed.thumbnailUrl.empty()) {
+            Platform::Size disp = embed.thumbnailSize;
+            if (disp.empty() || disp.width > 80 || disp.height > 80)
+                disp = Platform::Size(80, 80);
+            std::string thumbSrc = shell.imageSource(embed.thumbnailUrl, disp);
+            out += std::format("<img class=\"embed-image\" src=\"{0}\" data-action=\"open-image\" data-url=\"{1}\" style=\"width:{2}dp; height:{3}dp;\" />", Platform::htmlEscape(thumbSrc), Platform::htmlEscape(embed.thumbnailUrl), std::to_string(disp.width), std::to_string(disp.height));
         }
 
-        if (!embed.footerText.isEmpty()) {
-            out += QStringLiteral("<div class=\"embed-footer\">");
-            if (embed.footerIconUrl.isValid()) {
-                QString ficonSrc = shell.imageSource(embed.footerIconUrl, QSize(20, 20));
-                out += QStringLiteral("<img class=\"embed-footer-icon\" src=\"%1\" />").arg(ficonSrc.toHtmlEscaped());
+        if (!embed.footerText.empty()) {
+            out += std::string("<div class=\"embed-footer\">");
+            if (!embed.footerIconUrl.empty()) {
+                std::string ficonSrc = shell.imageSource(embed.footerIconUrl, Platform::Size(20, 20));
+                out += std::format("<img class=\"embed-footer-icon\" src=\"{0}\" />", Platform::htmlEscape(ficonSrc));
             }
-            out += QStringLiteral("<span>%1</span>").arg(embed.footerText.toHtmlEscaped());
-            out += QStringLiteral("</div>");
+            out += std::format("<span>{0}</span>", Platform::htmlEscape(embed.footerText));
+            out += std::string("</div>");
         }
 
-        out += QStringLiteral("</div>");
+        out += std::string("</div>");
     }
 
     // Stickers
     for (const auto &sticker : stickers) {
-        if (sticker.stillUrl.isValid() || sticker.animatedUrl.isValid()) {
-            QUrl sUrl = sticker.stillUrl.isValid() ? sticker.stillUrl : sticker.animatedUrl;
-            QString sSrc = shell.imageSource(sUrl, QSize(160, 160));
-            out += QStringLiteral("<img class=\"sticker-image\" src=\"%1\" title=\"%2\" alt=\"%2\" />")
-                .arg(sSrc.toHtmlEscaped(), sticker.name.toHtmlEscaped());
+        if (!sticker.stillUrl.empty() || !sticker.animatedUrl.empty()) {
+            std::string sUrl = !sticker.stillUrl.empty() ? sticker.stillUrl : sticker.animatedUrl;
+            std::string sSrc = shell.imageSource(sUrl, Platform::Size(160, 160));
+            out += std::format("<img class=\"sticker-image\" src=\"{0}\" title=\"{1}\" alt=\"{1}\" />", Platform::htmlEscape(sSrc), Platform::htmlEscape(sticker.name));
         }
     }
 
     // Reactions
-    if (!reactions.isEmpty()) {
-        out += QStringLiteral("<div class=\"reactions-container\">");
+    if (!reactions.empty()) {
+        out += std::string("<div class=\"reactions-container\">");
         for (const auto &rx : reactions) {
-            QString emojiContent;
+            std::string emojiContent;
             if (rx.emojiId.isValid()) {
-                QString eSrc = shell.imageSource(rx.emojiUrl, QSize(16, 16));
-                emojiContent = QStringLiteral("<img src=\"%1\" alt=\":%2:\" />").arg(eSrc.toHtmlEscaped(), rx.emojiName.toHtmlEscaped());
+                std::string eSrc = shell.imageSource(rx.emojiUrl, Platform::Size(16, 16));
+                emojiContent = std::format("<img src=\"{0}\" alt=\":{1}:\" />", Platform::htmlEscape(eSrc), Platform::htmlEscape(rx.emojiName));
             } else {
                 emojiContent = richText(rx.emojiName);
             }
-            out += QStringLiteral(
-                "<div class=\"reaction-pill%1\" data-action=\"toggle-reaction\" data-message-id=\"%2\" data-emoji-name=\"%3\" data-emoji-id=\"%4\" data-emoji-animated=\"%5\" data-me=\"%6\" data-burst=\"%7\">"
-                "%8"
-                "<span class=\"reaction-count\">%9</span>"
-                "</div>"
-            ).arg(rx.me ? QStringLiteral(" me") : QString(),
-                 QString::number(quint64(msgId)),
-                 rx.emojiName.toHtmlEscaped(),
-                 rx.emojiId.isValid() ? QString::number(quint64(rx.emojiId)) : QString(),
-                 rx.emojiAnimated ? QStringLiteral("1") : QStringLiteral("0"),
-                 rx.me ? QStringLiteral("1") : QStringLiteral("0"),
-                 rx.isBurst ? QStringLiteral("1") : QStringLiteral("0"),
-                 emojiContent,
-                 QString::number(rx.count));
+            out += std::format("<div class=\"reaction-pill{0}\" data-action=\"toggle-reaction\" data-message-id=\"{1}\" data-emoji-name=\"{2}\" data-emoji-id=\"{3}\" data-emoji-animated=\"{4}\" data-me=\"{5}\" data-burst=\"{6}\">"
+                "{7}"
+                "<span class=\"reaction-count\">{8}</span>"
+                "</div>", rx.me ? std::string(" me") : std::string(), std::to_string(uint64_t(msgId)), Platform::htmlEscape(rx.emojiName), rx.emojiId.isValid() ? std::to_string(uint64_t(rx.emojiId)) : std::string(), rx.emojiAnimated ? std::string("1") : std::string("0"), rx.me ? std::string("1") : std::string("0"), rx.isBurst ? std::string("1") : std::string("0"), emojiContent, std::to_string(rx.count));
         }
-        out += QStringLiteral("</div>");
+        out += std::string("</div>");
     }
 
     // Hover toolbar
-    out += QStringLiteral(
-        "<div class=\"message-toolbar\">"
-        "<div class=\"toolbar-button\" data-action=\"toolbar-react\" data-message-id=\"%1\" title=\"Add Reaction\"><img src=\"icon:smile-plus\" /></div>"
-        "<div class=\"toolbar-button\" data-action=\"toolbar-reply\" data-message-id=\"%1\" data-author=\"%2\" title=\"Reply\"><img src=\"icon:reply\" /></div>"
-        "<div class=\"toolbar-button\" data-action=\"toolbar-more\" data-message-id=\"%1\" title=\"More\"><img src=\"icon:ellipsis\" /></div>"
-        "</div>"
-    ).arg(QString::number(quint64(msgId)), authorName.toHtmlEscaped());
+    out += std::format("<div class=\"message-toolbar\">"
+        "<div class=\"toolbar-button\" data-action=\"toolbar-react\" data-message-id=\"{0}\" title=\"Add Reaction\"><img src=\"icon:smile-plus\" /></div>"
+        "<div class=\"toolbar-button\" data-action=\"toolbar-reply\" data-message-id=\"{0}\" data-author=\"{1}\" title=\"Reply\"><img src=\"icon:reply\" /></div>"
+        "<div class=\"toolbar-button\" data-action=\"toolbar-more\" data-message-id=\"{0}\" title=\"More\"><img src=\"icon:ellipsis\" /></div>"
+        "</div>", std::to_string(uint64_t(msgId)), Platform::htmlEscape(authorName));
 
-    out += QStringLiteral("</div>");
+    out += std::string("</div>");
     return out;
 }
 
-QString ChatController::conversationName() const
+std::string ChatController::conversationName() const
 {
     if (auto *tree = shell.channelTree()) {
         if (const auto *node = tree->findChannelTreeNode(currentChannelId, currentAccountId))
@@ -1013,7 +932,7 @@ QString ChatController::conversationName() const
     }
     if (auto *instance = shell.currentInstance()) {
         if (const auto channel = instance->getChannel(currentChannelId)) {
-            if (channel->name.hasValue() && !channel->name->isEmpty())
+            if (channel->name.hasValue() && !channel->name->empty())
                 return *channel->name;
         }
     }
@@ -1032,14 +951,14 @@ void ChatController::updateHeader()
 
     auto *instance = shell.currentInstance();
     const bool isDm = shell.location().isHome();
-    const QString name = conversationName();
-    QString leadingIcon;
-    QString presenceDot;
-    QString topicHtml;
+    const std::string name = conversationName();
+    std::string leadingIcon;
+    std::string presenceDot;
+    std::string topicHtml;
 
     if (isDm) {
         Core::Snowflake recipientId;
-        QString avatarHash;
+        std::string avatarHash;
         if (auto *tree = shell.channelTree()) {
             if (const auto *node = tree->findChannelTreeNode(currentChannelId, currentAccountId)) {
                 recipientId = node->dmRecipientId;
@@ -1048,55 +967,50 @@ void ChatController::updateHeader()
         }
         if (recipientId.isValid() && instance) {
             headerRecipientId = recipientId;
-            const QUrl avatar = avatarHash.isEmpty()
+            const std::string avatar = avatarHash.empty()
                 ? Discord::Cdn::defaultUserAvatar(recipientId)
                 : Discord::Cdn::userAvatar(recipientId, avatarHash, 32);
-            leadingIcon = QStringLiteral("<div class=\"header-avatar-clip\"><img src=\"%1\"/></div>")
-                .arg(shell.imageSource(avatar, QSize(24, 24)));
+            leadingIcon = std::format("<div class=\"header-avatar-clip\"><img src=\"{0}\"/></div>", shell.imageSource(avatar, Platform::Size(24, 24)));
             const auto badge = instance->presences()->badge(recipientId);
-            QString status = QStringLiteral("status-offline");
+            std::string status = std::string("status-offline");
             if (badge.streaming)
-                status = QStringLiteral("status-streaming");
+                status = std::string("status-streaming");
             else if (badge.status == Discord::StatusType::ONLINE)
-                status = QStringLiteral("status-online");
+                status = std::string("status-online");
             else if (badge.status == Discord::StatusType::IDLE)
-                status = QStringLiteral("status-idle");
+                status = std::string("status-idle");
             else if (badge.status == Discord::StatusType::DND)
-                status = QStringLiteral("status-dnd");
-            presenceDot = QStringLiteral("<span class=\"header-presence %1\"></span>").arg(status);
+                status = std::string("status-dnd");
+            presenceDot = std::format("<span class=\"header-presence {0}\"></span>", status);
         } else {
-            leadingIcon = QStringLiteral("<img class=\"header-icon\" src=\"icon:at-sign\"/>");
+            leadingIcon = std::string("<img class=\"header-icon\" src=\"icon:at-sign\"/>");
         }
     } else {
-        QString icon = QStringLiteral("icon:hash");
+        std::string icon = std::string("icon:hash");
         if (instance) {
             if (const auto channel = instance->getChannel(currentChannelId)) {
                 if (channel->isVoice())
-                    icon = QStringLiteral("icon:volume-2");
+                    icon = std::string("icon:volume-2");
                 else if (channel->type.valueOr(Discord::ChannelType::GUILD_TEXT) == Discord::ChannelType::GUILD_NEWS)
-                    icon = QStringLiteral("icon:megaphone");
-                if (channel->topic.hasValue() && !channel->topic->isEmpty()) {
-                    const auto topic = ChatMarkdown::toRml(channel->topic->simplified(), shell,
+                    icon = std::string("icon:megaphone");
+                if (channel->topic.hasValue() && !channel->topic->empty()) {
+                    const auto topic = ChatMarkdown::toRml(Platform::simplified(*channel->topic), shell,
                         currentAccountId, currentGuildId, currentChannelId);
-                    topicHtml = QStringLiteral("<span class=\"header-divider\"></span><div class=\"header-topic\">")
-                        + topic.rml + QStringLiteral("</div>");
+                    topicHtml = std::string("<span class=\"header-divider\"></span><div class=\"header-topic\">")
+                        + topic.rml + std::string("</div>");
                 }
             }
         }
-        leadingIcon = QStringLiteral("<img class=\"header-icon\" src=\"%1\"/>").arg(icon);
+        leadingIcon = std::format("<img class=\"header-icon\" src=\"{0}\"/>", icon);
     }
 
-    const QString threads = isDm ? QString() : QStringLiteral(
-        "<div class=\"header-btn\" data-action=\"open-threads\" title=\"Threads\"><img src=\"icon:messages-square\"/></div>");
-    const QString members = QStringLiteral(
-        "<div class=\"header-btn%1\" data-action=\"toggle-members\" title=\"%2\"><img src=\"icon:id-card\"/></div>")
-        .arg(shell.isMemberListVisible() ? QStringLiteral(" active") : QString(),
-             isDm ? QStringLiteral("Conversation profile") : QStringLiteral("Member list"));
-    const QString html = QStringLiteral("<div class=\"header-left\">") + leadingIcon
-        + QStringLiteral("<span class=\"header-title\">") + escape(name) + QStringLiteral("</span>")
-        + presenceDot + topicHtml + QStringLiteral("</div><div class=\"header-right\">")
-        + threads + members + QStringLiteral("</div>");
-    headerEl->SetInnerRML(html.toStdString());
+    const std::string threads = isDm ? std::string() : std::string("<div class=\"header-btn\" data-action=\"open-threads\" title=\"Threads\"><img src=\"icon:messages-square\"/></div>");
+    const std::string members = std::format("<div class=\"header-btn{0}\" data-action=\"toggle-members\" title=\"{1}\"><img src=\"icon:id-card\"/></div>", shell.isMemberListVisible() ? std::string(" active") : std::string(), isDm ? std::string("Conversation profile") : std::string("Member list"));
+    const std::string html = std::string("<div class=\"header-left\">") + leadingIcon
+        + std::string("<span class=\"header-title\">") + escape(name) + std::string("</span>")
+        + presenceDot + topicHtml + std::string("</div><div class=\"header-right\">")
+        + threads + members + std::string("</div>");
+    headerEl->SetInnerRML(html);
     requestRender();
 }
 
@@ -1105,36 +1019,32 @@ void ChatController::updateTyping()
     if (!typingEl)
         return;
 
-    auto typers = shell.typing() ? shell.typing()->getActiveTypers() : QList<Core::TyperInfo>();
-    if (typers.isEmpty()) {
+    auto typers = shell.typing() ? shell.typing()->getActiveTypers() : std::vector<Core::TyperInfo>();
+    if (typers.empty()) {
         typingEl->SetInnerRML("");
         requestRender();
         return;
     }
 
-    QString text;
+    std::string text;
     if (typers.size() == 1) {
-        text = QStringLiteral("<b>%1</b> is typing…").arg(typers[0].name.toHtmlEscaped());
+        text = std::format("<b>{0}</b> is typing…", Platform::htmlEscape(typers[0].name));
     } else if (typers.size() == 2) {
-        text = QStringLiteral("<b>%1</b> and <b>%2</b> are typing…")
-            .arg(typers[0].name.toHtmlEscaped(), typers[1].name.toHtmlEscaped());
+        text = std::format("<b>{0}</b> and <b>{1}</b> are typing…", Platform::htmlEscape(typers[0].name), Platform::htmlEscape(typers[1].name));
     } else if (typers.size() == 3) {
-        text = QStringLiteral("<b>%1</b>, <b>%2</b>, and <b>%3</b> are typing…")
-            .arg(typers[0].name.toHtmlEscaped(), typers[1].name.toHtmlEscaped(), typers[2].name.toHtmlEscaped());
+        text = std::format("<b>{0}</b>, <b>{1}</b>, and <b>{2}</b> are typing…", Platform::htmlEscape(typers[0].name), Platform::htmlEscape(typers[1].name), Platform::htmlEscape(typers[2].name));
     } else {
-        text = QStringLiteral("Several people are typing…");
+        text = std::string("Several people are typing…");
     }
 
-    QString html = QStringLiteral(
-        "<div class=\"typing-dots\">"
+    std::string html = std::format("<div class=\"typing-dots\">"
         "<span class=\"typing-dot\"></span>"
         "<span class=\"typing-dot\"></span>"
         "<span class=\"typing-dot\"></span>"
         "</div>"
-        "<span class=\"typing-text\">%1</span>"
-    ).arg(text);
+        "<span class=\"typing-text\">{0}</span>", text);
 
-    typingEl->SetInnerRML(html.toStdString());
+    typingEl->SetInnerRML(html);
     requestRender();
 }
 
@@ -1153,18 +1063,18 @@ void ChatController::updateComposer()
     Core::ClientInstance *instance = shell.currentInstance();
     hasSendPermission = instance != nullptr;
     channelRateLimit = 0;
-    QString placeholder = QStringLiteral("Message...");
+    std::string placeholder = std::string("Message...");
 
     if (instance) {
         auto ch = instance->getChannel(currentChannelId);
         bool isDm = shell.location().isHome();
-        const QString chName = conversationName();
+        const std::string chName = conversationName();
 
         if (isDm) {
-            placeholder = QStringLiteral("Message @") + chName;
+            placeholder = std::string("Message @") + chName;
             hasSendPermission = true;
         } else {
-            placeholder = QStringLiteral("Message #") + chName;
+            placeholder = std::string("Message #") + chName;
             Core::Snowflake permChannel = currentChannelId;
             Discord::Permission sendPerm = Discord::Permission::SEND_MESSAGES;
             if (ch && ch->isThread()) {
@@ -1185,71 +1095,56 @@ void ChatController::updateComposer()
     }
 
     if (!hasSendPermission)
-        placeholder = QStringLiteral("You do not have permission to send messages in this channel.");
+        placeholder = std::string("You do not have permission to send messages in this channel.");
 
     // Reply bar HTML
-    QString replyBarHtml;
+    std::string replyBarHtml;
     if (replyTargetId.isValid()) {
-        replyBarHtml = QStringLiteral(
-            "<div class=\"composer-reply-bar\">"
-            "<div class=\"composer-reply-text\">Replying to <strong>%1</strong> <span>%2</span></div>"
+        replyBarHtml = std::format("<div class=\"composer-reply-bar\">"
+            "<div class=\"composer-reply-text\">Replying to <strong>{0}</strong> <span>{1}</span></div>"
             "<img class=\"composer-reply-close\" src=\"icon:x\" data-action=\"composer-reply-close\" title=\"Cancel reply\" />"
-            "</div>"
-        ).arg(replyAuthorName.toHtmlEscaped(), replySnippet.toHtmlEscaped());
+            "</div>", Platform::htmlEscape(replyAuthorName), Platform::htmlEscape(replySnippet));
     } else if (editingMessageId.isValid()) {
-        replyBarHtml = QStringLiteral(
-            "<div class=\"composer-reply-bar\">"
+        replyBarHtml = std::string("<div class=\"composer-reply-bar\">"
             "<div class=\"composer-reply-text\">Editing message — <span>Escape to cancel</span></div>"
             "<img class=\"composer-reply-close\" src=\"icon:x\" data-action=\"composer-reply-close\" title=\"Cancel edit\" />"
-            "</div>"
-        );
+            "</div>");
     }
 
     // Attachments bar HTML
-    QString attachmentsHtml;
-    if (!pendingAttachments.isEmpty()) {
-        attachmentsHtml = QStringLiteral("<div class=\"composer-attachments-bar\">");
+    std::string attachmentsHtml;
+    if (!pendingAttachments.empty()) {
+        attachmentsHtml = std::string("<div class=\"composer-attachments-bar\">");
         for (int i = 0; i < pendingAttachments.size(); ++i) {
             const auto &att = pendingAttachments[i];
-            attachmentsHtml += QStringLiteral(
-                "<div class=\"composer-attachment-item\">"
-                "<span>%1 (%2)</span>"
-                "<img class=\"composer-attachment-remove\" src=\"icon:x\" data-action=\"composer-remove-attachment\" data-index=\"%3\" title=\"Remove\" />"
-                "</div>"
-            ).arg(att.filename.toHtmlEscaped(), formatFileSize(att.size), QString::number(i));
+            attachmentsHtml += std::format("<div class=\"composer-attachment-item\">"
+                "<span>{0} ({1})</span>"
+                "<img class=\"composer-attachment-remove\" src=\"icon:x\" data-action=\"composer-remove-attachment\" data-index=\"{2}\" title=\"Remove\" />"
+                "</div>", Platform::htmlEscape(att.filename), formatFileSize(att.size), std::to_string(i));
         }
-        attachmentsHtml += QStringLiteral("</div>");
+        attachmentsHtml += std::string("</div>");
     }
 
     // Slowmode notice HTML
-    QString slowmodeHtml;
+    std::string slowmodeHtml;
     if (channelRateLimit > 0) {
-        slowmodeHtml = QStringLiteral(
-            "<div class=\"slowmode-notice\"><img src=\"icon:clock\" style=\"width:14dp;height:14dp;image-color:#f0b232;\" /> Slowmode is active (%1s)</div>"
-        ).arg(channelRateLimit);
+        slowmodeHtml = std::format("<div class=\"slowmode-notice\"><img src=\"icon:clock\" style=\"width:14dp;height:14dp;image-color:#f0b232;\" /> Slowmode is active ({0}s)</div>", channelRateLimit);
     }
 
-    QString composerHtml = QStringLiteral(
-        "%1"
-        "%2"
+    std::string composerHtml = std::format("{0}"
+        "{1}"
         "<div class=\"composer-main-row\">"
         "<div class=\"composer-btn\" data-action=\"composer-attach\" title=\"Attach file\"><img src=\"icon:image\" /></div>"
         "<div class=\"composer-input-wrap\">"
-        "<span id=\"composer-placeholder\" class=\"composer-placeholder\">%4</span>"
-        "<textarea id=\"composer-input\" class=\"composer-textarea%3\" rows=\"1\"%5></textarea>"
+        "<span id=\"composer-placeholder\" class=\"composer-placeholder\">{3}</span>"
+        "<textarea id=\"composer-input\" class=\"composer-textarea{2}\" rows=\"1\"{4}></textarea>"
         "</div>"
         "<div class=\"composer-btn\" data-action=\"composer-emoji\" title=\"Select emoji\"><img src=\"icon:smile\" /></div>"
         "</div>"
-        "%6"
-    ).arg(replyBarHtml,
-         attachmentsHtml,
-         hasSendPermission ? QString() : QStringLiteral(" composer-disabled"),
-         placeholder.toHtmlEscaped(),
-         hasSendPermission ? QString() : QStringLiteral(" disabled"),
-         slowmodeHtml);
+        "{5}", replyBarHtml, attachmentsHtml, hasSendPermission ? std::string() : std::string(" composer-disabled"), Platform::htmlEscape(placeholder), hasSendPermission ? std::string() : std::string(" disabled"), slowmodeHtml);
 
     textareaEl = nullptr;
-    composerEl->SetInnerRML(composerHtml.toStdString());
+    composerEl->SetInnerRML(composerHtml);
     textareaEl = dynamic_cast<::Rml::ElementFormControlTextArea*>(composerEl->GetElementById("composer-input"));
     if (textareaEl) {
         textareaEl->SetValue(draft);
@@ -1293,7 +1188,7 @@ void ChatController::updateJumpBar()
     }
 }
 
-void ChatController::setReplyTarget(Core::Snowflake messageId, const QString &authorName, const QString &snippet)
+void ChatController::setReplyTarget(Core::Snowflake messageId, const std::string &authorName, const std::string &snippet)
 {
     replyTargetId = messageId;
     replyAuthorName = authorName;
@@ -1312,13 +1207,13 @@ void ChatController::clearReplyTarget()
     updateComposer();
 }
 
-void ChatController::setEditTarget(Core::Snowflake messageId, const QString &content)
+void ChatController::setEditTarget(Core::Snowflake messageId, const std::string &content)
 {
     editingMessageId = messageId;
     replyTargetId = Core::Snowflake::Invalid;
     updateComposer();
     if (textareaEl) {
-        textareaEl->SetValue(content.toStdString());
+        textareaEl->SetValue(content);
         updateComposerPlaceholder();
         textareaEl->Focus();
     }
@@ -1341,34 +1236,34 @@ void ChatController::showMessageContextMenu(Core::Snowflake messageId)
     if (row < 0)
         return;
 
-    QModelIndex idx = model->index(row, 0);
-    Core::Snowflake authorId(idx.data(ChatModel::UserIdRole).toULongLong());
-    QString content = idx.data(ChatModel::ContentRole).toString();
+    const auto message = model->row(row);
+    const auto authorId = message.userId;
+    const auto content = message.content;
     Core::ClientInstance *instance = shell.currentInstance();
     bool isSelf = (instance && authorId == instance->accountId());
 
     const auto accountId = currentAccountId;
     const auto channelId = currentChannelId;
     const auto guildId = currentGuildId;
-    QPointer<Core::ClientInstance> instanceGuard(instance);
-    const QString author = idx.data(ChatModel::UsernameRole).toString();
+    Platform::Guard<Core::ClientInstance> instanceGuard(instance);
+    const auto author = message.username;
     std::vector<MenuItem> menu;
-    menu.push_back({ tr("Add Reaction"), [this, accountId, channelId, messageId] {
-        shell.openExpressionPickerForReaction(accountId, channelId, messageId, QRect(QCursor::pos(), QSize(1, 1)));
+    menu.push_back({ std::string("Add Reaction"), [this, accountId, channelId, messageId] {
+        shell.openExpressionPickerForReaction(accountId, channelId, messageId, pickerAnchor());
     } });
-    menu.push_back({ tr("Reply"), [this, messageId, author, content, accountId, channelId] {
+    menu.push_back({ std::string("Reply"), [this, messageId, author, content, accountId, channelId] {
         if (currentAccountId == accountId && currentChannelId == channelId)
-            setReplyTarget(messageId, author, content.left(50));
+            setReplyTarget(messageId, author, Platform::truncateUtf8(content, 50));
     } });
     if (isSelf) {
-        menu.push_back({ tr("Edit Message"), [this, messageId, content, accountId, channelId] {
+        menu.push_back({ std::string("Edit Message"), [this, messageId, content, accountId, channelId] {
             if (currentAccountId == accountId && currentChannelId == channelId)
                 setEditTarget(messageId, content);
         } });
-        menu.push_back({ tr("Delete Message"), [this, messageId, instanceGuard, channelId] {
+        menu.push_back({ std::string("Delete Message"), [this, messageId, instanceGuard, channelId] {
             if (instanceGuard) {
-                showConfirmModal(shell, tr("Delete Message"),
-                    tr("Are you sure you want to delete this message?"), tr("Delete"),
+                showConfirmModal(shell, std::string("Delete Message"),
+                    std::string("Are you sure you want to delete this message?"), std::string("Delete"),
                     [instanceGuard, channelId, messageId] {
                         if (instanceGuard)
                             instanceGuard->discord()->deleteMessage(channelId, messageId);
@@ -1377,45 +1272,43 @@ void ChatController::showMessageContextMenu(Core::Snowflake messageId)
         }, true, true });
     }
     menu.push_back({ {}, {}, false, false, true });
-    menu.push_back({ tr("Copy Text"), [content] { QGuiApplication::clipboard()->setText(content); } });
-    menu.push_back({ tr("Copy Message Link"), [guildId, channelId, messageId] {
-        const QString guildPart = guildId.isValid() ? QString::number(quint64(guildId)) : QStringLiteral("@me");
-        QGuiApplication::clipboard()->setText(QStringLiteral("https://discord.com/channels/%1/%2/%3")
-            .arg(guildPart, QString::number(quint64(channelId)), QString::number(quint64(messageId))));
+    menu.push_back({ "Copy Text", [content] { Platform::Desktop::setClipboardText(content); } });
+    menu.push_back({ std::string("Copy Message Link"), [guildId, channelId, messageId] {
+        const std::string guildPart = guildId.isValid() ? std::to_string(uint64_t(guildId)) : std::string("@me");
+        Platform::Desktop::setClipboardText(std::format("https://discord.com/channels/{}/{}/{}", guildPart, channelId.toString(), messageId.toString()));
     } });
-    menu.push_back({ tr("Copy ID"), [messageId] {
-        QGuiApplication::clipboard()->setText(QString::number(quint64(messageId)));
+    menu.push_back({ std::string("Copy ID"), [messageId] {
+        Platform::Desktop::setClipboardText(messageId.toString());
     } });
     shell.showContextMenu(std::move(menu));
 }
 
 void ChatController::openReactionPickerForMessage(Core::Snowflake messageId)
 {
-    shell.openExpressionPickerForReaction(currentAccountId, currentChannelId, messageId, QRect(QCursor::pos(), QSize(1, 1)));
+    shell.openExpressionPickerForReaction(currentAccountId, currentChannelId, messageId, pickerAnchor());
 }
 
 void ChatController::openEmojiPickerForComposer()
 {
     if (auto *picker = shell.expressionPicker()) {
-        disconnect(picker, &ExpressionPickerController::emojiPicked, this, nullptr);
-        disconnect(picker, &ExpressionPickerController::gifPicked, this, nullptr);
-
-        connect(picker, &ExpressionPickerController::emojiPicked, this, [this](const Core::PickerEmoji &emoji, bool) {
+        emojiConnection.disconnect();
+        gifConnection.disconnect();
+        emojiConnection = picker->emojiPicked.connect([this](const Core::PickerEmoji &emoji, bool) {
             if (textareaEl) {
-                QString current = QString::fromStdString(textareaEl->GetValue());
-                QString toInsert = emoji.messageText();
-                textareaEl->SetValue((current + toInsert).toStdString());
+                std::string current = std::string(textareaEl->GetValue());
+                std::string toInsert = emoji.messageText();
+                textareaEl->SetValue((current + toInsert));
                 updateComposerPlaceholder();
                 textareaEl->Focus();
             }
         });
 
-        connect(picker, &ExpressionPickerController::gifPicked, this, [this](const QString &url) {
+        gifConnection = picker->gifPicked.connect([this](const std::string &url) {
             shell.sendMessage(url);
         });
     }
 
-    shell.openExpressionPickerForChat(currentAccountId, currentChannelId, QRect(QCursor::pos(), QSize(1, 1)));
+    shell.openExpressionPickerForChat(currentAccountId, currentChannelId, pickerAnchor());
 }
 
 } // namespace Rml

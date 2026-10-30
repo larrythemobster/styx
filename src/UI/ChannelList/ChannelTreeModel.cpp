@@ -1632,10 +1632,9 @@ void ChannelTreeModel::collectMarkableChannelIds(ChannelNode *node, std::vector<
         collectMarkableChannelIds(child.get(), out);
 }
 
-QList<Snowflake> ChannelTreeModel::getMarkableChannelIds(const QModelIndex &index)
+std::vector<Snowflake> ChannelTreeModel::getMarkableChannelIds(ChannelNode *node)
 {
-    QList<Snowflake> result;
-    ChannelNode *node = nodeFromIndex(index);
+    std::vector<Snowflake> result;
     if (node)
         collectMarkableChannelIds(node, result);
     return result;

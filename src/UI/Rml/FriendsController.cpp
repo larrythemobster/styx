@@ -52,7 +52,7 @@ FriendsController::FriendsController(Shell &shell, ::Rml::Element *root)
         if (this->shell.isFriendsOpen())
             scheduleRebuild();
     }));
-    track(shell.accountReady.connect([this]() {
+    track(shell.accountReady.connect([this](Core::Snowflake) {
             scheduleRebuild();
     }));
 

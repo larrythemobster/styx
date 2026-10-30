@@ -36,9 +36,9 @@ RailController::RailController(Shell &shell, ::Rml::Element *root)
         const auto kind = attribute(item, "data-kind");
         const auto accountId = parseId(attribute(item, "data-account-id"));
         const auto id = parseId(attribute(item, "data-id"));
-        if (kind == "home") shell.openHome(accountId);
-        else if (kind == "folder") { if (auto *rail = shell.rail()) rail->toggleFolder(accountId, id); }
-        else if (kind == "server") shell.openGuild(accountId, id);
+        if (kind == "home") this->shell.openHome(accountId);
+        else if (kind == "folder") { if (auto *rail = this->shell.rail()) rail->toggleFolder(accountId, id); }
+        else if (kind == "server") this->shell.openGuild(accountId, id);
     });
     listen("mousedown", [this](::Rml::Event &event) {
         if (event.GetParameter<int>("button", 0) != 1) return;
@@ -47,11 +47,11 @@ RailController::RailController(Shell &shell, ::Rml::Element *root)
         const auto kind = attribute(item, "data-kind");
         const auto accountId = parseId(attribute(item, "data-account-id"));
         const auto id = parseId(attribute(item, "data-id"));
-        if (kind == "server") shell.showContextMenuForGuild(accountId, id);
-        else if (kind == "home") shell.openAccounts();
+        if (kind == "server") this->shell.showContextMenuForGuild(accountId, id);
+        else if (kind == "home") this->shell.openAccounts();
     });
     track(shell.locationChanged.connect([this](const Location &loc) {
-        if (auto *rail = shell.rail()) {
+        if (auto *rail = this->shell.rail()) {
             if (loc.isHome()) rail->setSelected(ServerRailModel::Kind::AccountHome, loc.accountId, loc.accountId);
             else rail->setSelected(ServerRailModel::Kind::Server, loc.accountId, loc.guildId);
         }
