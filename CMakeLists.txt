@@ -405,12 +405,13 @@ if(BUILD_TESTS)
     styx_test(TestFavoriteGifs FavoriteGifTests tests/tst_FavoriteGifs.cpp
         src/Core/Gifs/FavoriteGifRules.cpp src/UI/Gifs/GifMasonryLayout.cpp
         src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
+    styx_test(TestClips ClipTests tests/tst_Clips.cpp
+        src/Core/Media/ClipDecoder.cpp src/Core/Media/ClipPlayer.cpp)
+    target_link_libraries(TestClips PRIVATE WebP::webpdemux)
     if(TARGET ffmpeg)
-        styx_test(TestClips ClipTests tests/tst_Clips.cpp
-            src/Core/Media/ClipDecoder.cpp src/Core/Media/ClipPlayer.cpp)
         styx_test(TestApng ApngTests tests/tst_Apng.cpp src/Core/ApngDecoder.cpp)
         foreach(target TestClips TestApng)
-            target_link_libraries(${target} PRIVATE ffmpeg WebP::webpdemux)
+            target_link_libraries(${target} PRIVATE ffmpeg)
             target_compile_definitions(${target} PRIVATE STYX_HAVE_FFMPEG)
         endforeach()
     endif()

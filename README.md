@@ -87,17 +87,20 @@ the executable.
 
 ### Tests
 
-After a `configure` build, run the renderer and menu regression tests from an
-MSVC prompt. Replace `build` with `BUILD_DIR` if you used an override:
+After a `configure` build, run the renderer, menu and animation regression tests
+from an MSVC prompt. Replace `build` with `BUILD_DIR` if you used an override:
 
 ```bat
-cmake --build build --target TestRmlRender
-ctest --test-dir build -R "^RmlRenderTests$" --output-on-failure
+cmake --build build --target TestRmlRender TestClips
+ctest --test-dir build -R "^(RmlRenderTests|ClipTests)$" --output-on-failure
 ```
 
-They need a desktop session with OpenGL 3.3. Coverage includes texture lifetimes,
-background document updates, menu selection, disabled actions, dismissal,
-nested navigation and viewport bounds.
+The renderer and menu tests need a desktop session with OpenGL 3.3. They cover
+texture lifetimes, background document updates, menu selection, disabled actions,
+dismissal, nested navigation and viewport bounds.
+
+`ClipTests` also checks GIF and animated WebP playback when `ENABLE_FFMPEG=OFF`.
+MP4 cases run when FFmpeg is enabled.
 
 ## Dependencies
 
