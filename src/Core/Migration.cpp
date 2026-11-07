@@ -73,9 +73,10 @@ void Migration::migrateSettingsAndData()
     const auto oldRoam = oldPath(newRoam);
     const auto newLocal = Platform::Paths::cacheDir();
     const auto oldLocal = oldPath(newLocal);
-    std::unordered_map<std::string, nlohmann::json> oldSettings;
 #ifdef _WIN32
-    oldSettings = Platform::Settings::importFromRegistry(L"Software\\ouwou\\Acheron");
+    auto oldSettings = Platform::Settings::importFromRegistry(L"Software\\ouwou\\Acheron");
+#else
+    std::unordered_map<std::string, nlohmann::json> oldSettings;
 #endif
     if (!fs::exists(oldRoam) && !fs::exists(oldLocal) && oldSettings.empty()) {
         writeMigrationMarker();
