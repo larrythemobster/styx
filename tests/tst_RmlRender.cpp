@@ -15,6 +15,7 @@
 #endif
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
+#include <SDL3/SDL_opengl_glext.h>
 
 #include <array>
 #include <string>
@@ -119,6 +120,52 @@ void prepare(View &view, int width, int height)
     REQUIRE(Runtime::instance().isInitialised());
     view.renderNow();
 }
+
+class RenderTarget {
+public:
+    explicit RenderTarget(View &owner) : view(owner)
+    {
+        view.makeCurrent();
+        const auto generate = reinterpret_cast<PFNGLGENFRAMEBUFFERSPROC>(SDL_GL_GetProcAddress("glGenFramebuffers"));
+        bind = reinterpret_cast<PFNGLBINDFRAMEBUFFERPROC>(SDL_GL_GetProcAddress("glBindFramebuffer"));
+        destroy = reinterpret_cast<PFNGLDELETEFRAMEBUFFERSPROC>(SDL_GL_GetProcAddress("glDeleteFramebuffers"));
+        const auto attach = reinterpret_cast<PFNGLFRAMEBUFFERTEXTURE2DPROC>(SDL_GL_GetProcAddress("glFramebufferTexture2D"));
+        const auto status = reinterpret_cast<PFNGLCHECKFRAMEBUFFERSTATUSPROC>(SDL_GL_GetProcAddress("glCheckFramebufferStatus"));
+        REQUIRE(generate);
+        REQUIRE(bind);
+        REQUIRE(destroy);
+        REQUIRE(attach);
+        REQUIRE(status);
+        const auto size = view.context()->GetDimensions();
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size.x, size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        generate(1, &framebuffer);
+        bind(GL_FRAMEBUFFER, framebuffer);
+        attach(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+        REQUIRE(status(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        view.doneCurrent();
+    }
+
+    ~RenderTarget() noexcept(false)
+    {
+        view.makeCurrent();
+        bind(GL_FRAMEBUFFER, 0);
+        destroy(1, &framebuffer);
+        glDeleteTextures(1, &texture);
+        view.doneCurrent();
+    }
+
+private:
+    View &view;
+    GLuint framebuffer = 0;
+    GLuint texture = 0;
+    PFNGLBINDFRAMEBUFFERPROC bind = nullptr;
+    PFNGLDELETEFRAMEBUFFERSPROC destroy = nullptr;
+};
 }
 
 TEST_CASE("Texture release waits for the owning OpenGL context", "[rml][render]")
@@ -204,6 +251,7 @@ TEST_CASE("Background document refresh keeps rendering", "[rml][render]")
 {
     View view("background-refresh");
     prepare(view, 320, 200);
+    RenderTarget target(view);
     auto *document = view.context()->LoadDocumentFromMemory(
         "<rml><head><style>body { margin: 0px; width: 100%; height: 100%; }"
         ".tile { display: inline-block; width: 12px; height: 12px; background-color: #556677; }"
@@ -229,7 +277,7 @@ TEST_CASE("Background document refresh keeps rendering", "[rml][render]")
         view.renderNow();
         view.makeCurrent();
         std::array<GLubyte, 4> actual{};
-        glReadBuffer(GL_FRONT);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
         const auto dimensions = view.context()->GetDimensions();
         glReadPixels(dimensions.x / 2, dimensions.y / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
         CHECK(actual[0] == expected[0]);

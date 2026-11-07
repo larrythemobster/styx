@@ -97,7 +97,8 @@ ctest --test-dir build -R "^(RmlRenderTests|ClipTests)$" --output-on-failure
 
 The renderer and menu tests need a desktop session with OpenGL 3.3. They cover
 texture lifetimes, background document updates, menu selection, disabled actions,
-dismissal, nested navigation and viewport bounds.
+dismissal, nested navigation and viewport bounds. The background-refresh test reads
+pixels from an owned framebuffer, independent of front-buffer behavior after a swap.
 
 `ClipTests` also checks GIF and animated WebP playback when `ENABLE_FFMPEG=OFF`.
 MP4 cases run when FFmpeg is enabled.
