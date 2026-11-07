@@ -106,15 +106,4 @@ std::unordered_map<std::string, nlohmann::json> Settings::importFromRegistry(con
 
 } // namespace Styx::Platform
 
-#else
-
-namespace Styx::Platform {
-
-std::unordered_map<std::string, nlohmann::json> Settings::importFromRegistry(const std::wstring &/*rootKey*/)
-{
-    return {};
-}
-
-} // namespace Styx::Platform
-
 #endif

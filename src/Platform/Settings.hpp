@@ -77,14 +77,15 @@ public:
     // Emitted whenever a setting changes: (key, newValue)
     Signal<std::string, nlohmann::json> changed;
 
+#ifdef _WIN32
     // One-time Win32 registry importer that reads all QSettings keys from
     // HKCU\Software\larrythemobster\Styx via Win32 registry API (no Qt).
-    // On non-Windows returns empty map.
     static std::unordered_map<std::string, nlohmann::json> importFromRegistry(
         const std::wstring &rootKey = L"Software\\larrythemobster\\Styx");
 
     // Reads registry keys and applies them to this Settings instance
     size_t importAndApplyRegistry(bool saveAfter = true);
+#endif
 
 private:
     mutable std::mutex m_mutex;

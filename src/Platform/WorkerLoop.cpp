@@ -10,6 +10,7 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "ole32.lib")
 using pollfd_t = WSAPOLLFD;
+using poll_count_t = ULONG;
 static inline int pollSockets(pollfd_t *fds, ULONG nfds, int timeout) {
     return WSAPoll(fds, nfds, timeout);
 }
@@ -28,6 +29,7 @@ static inline bool setNonBlocking(Styx::Platform::SocketHandle s) {
 #include <unistd.h>
 #include <fcntl.h>
 using pollfd_t = struct pollfd;
+using poll_count_t = nfds_t;
 static inline int pollSockets(pollfd_t *fds, nfds_t nfds, int timeout) {
     return ::poll(fds, nfds, timeout);
 }
@@ -39,6 +41,7 @@ static inline bool setNonBlocking(Styx::Platform::SocketHandle s) {
     return fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 #endif
+using native_socket_t = decltype(pollfd_t::fd);
 
 #include <algorithm>
 
@@ -135,7 +138,7 @@ void WorkerLoop::wake()
 {
     if (m_wakeSender != kInvalidSocketHandle) {
         char b = 1;
-        ::send(static_cast<SOCKET>(m_wakeSender), &b, 1, 0);
+        ::send(static_cast<native_socket_t>(m_wakeSender), &b, 1, 0);
     }
 }
 
@@ -143,7 +146,7 @@ void WorkerLoop::drainWakeSocket()
 {
     if (m_wakeReceiver != kInvalidSocketHandle) {
         char buf[256];
-        while (::recv(static_cast<SOCKET>(m_wakeReceiver), buf, sizeof(buf), 0) > 0) {}
+        while (::recv(static_cast<native_socket_t>(m_wakeReceiver), buf, sizeof(buf), 0) > 0) {}
     }
 }
 
@@ -329,14 +332,14 @@ void WorkerLoop::run()
             pollFds.clear();
             if (m_wakeReceiver != kInvalidSocketHandle) {
                 pollfd_t wakePfd{};
-                wakePfd.fd = static_cast<SOCKET>(m_wakeReceiver);
+                wakePfd.fd = static_cast<native_socket_t>(m_wakeReceiver);
                 wakePfd.events = POLLIN;
                 pollFds.push_back(wakePfd);
             }
 
             for (const auto &[fd, item] : m_watchedSockets) {
                 pollfd_t pfd{};
-                pfd.fd = static_cast<SOCKET>(fd);
+                pfd.fd = static_cast<native_socket_t>(fd);
                 pfd.events = 0;
                 if (hasFlag(item.mode, SocketMode::Read)) pfd.events |= POLLIN;
                 if (hasFlag(item.mode, SocketMode::Write)) pfd.events |= POLLOUT;
@@ -349,7 +352,7 @@ void WorkerLoop::run()
             continue;
         }
 
-        int res = pollSockets(pollFds.data(), static_cast<ULONG>(pollFds.size()), timeoutMs);
+        int res = pollSockets(pollFds.data(), static_cast<poll_count_t>(pollFds.size()), timeoutMs);
         if (res > 0) {
             size_t idx = 0;
             if (m_wakeReceiver != kInvalidSocketHandle) {

@@ -10,9 +10,12 @@ Namespace: `Styx::Platform`
 ### 1. Dispatcher (`Dispatcher.hpp`)
 Main-thread event loop dispatcher and timer scheduler.
 - Thread-safe non-blocking task queue (`post`, `drainTasks`).
-- Wake hook callback (`setWakeHook`) to wake host event loop (SDL / Win32 / Qt pump).
+- Wake hook callback (`setWakeHook`) to wake the SDL or Win32 host event loop.
 - High-resolution timers (`setTimer`, `cancelTimer`) with single-shot or repeating mode.
 - Host integration via `runPending()` and `nextTimeout()` for efficient loop sleeping.
+
+`WorkerLoop` runs queued tasks, timers and socket callbacks on a dedicated thread.
+It uses `WSAPoll` on Windows or `poll` on Unix, with a loopback UDP socket for wakeups.
 
 ### 2. Signal (`Signal.hpp`)
 Type-safe multicast signals and slots with RAII connection management.
@@ -26,13 +29,13 @@ Typed persistent configuration store backed by JSON (nlohmann-json).
 - Key-value accessors (`getBool`, `getInt`, `getString`, `getJson`, template `get`/`set`).
 - Atomic file writes via temporary file and atomic replace.
 - Change notifications through `Signal<std::string, nlohmann::json> changed`.
-- Built-in one-time Win32 registry importer (`importFromRegistry`) to read legacy QSettings from `HKCU\Software\larrythemobster\Styx` without Qt.
+- Windows-only registry importer (`importFromRegistry`) for legacy QSettings under `HKCU\Software\larrythemobster\Styx`. Other platforms retain JSON settings without a registry API.
 
 ### 4. SecureStore (`SecureStore.hpp`)
-Hardware-backed credential management.
-- Windows implementation uses Windows Credential Manager (`CredWriteW`, `CredReadW`, `CredDeleteW`) under `CRED_TYPE_GENERIC`.
-- Uses identical target-name formatting and attribute layout as legacy keychain storage on Windows so existing Styx account tokens are seamlessly readable.
-- Portable seam for other platforms.
+OS credential storage.
+- Windows uses Credential Manager (`CredWriteW`, `CredReadW`, `CredDeleteW`) under `CRED_TYPE_GENERIC`.
+- Linux uses Secret Service, or KWallet on KDE. macOS uses Keychain.
+- Legacy service/account identities are retained so existing credentials can be read.
 
 ### 5. Sqlite (`Sqlite.hpp`)
 Modern RAII wrapper for SQLite3 databases.

@@ -315,6 +315,7 @@ void Settings::clear()
     }
 }
 
+#ifdef _WIN32
 size_t Settings::importAndApplyRegistry(bool saveAfter)
 {
     auto imported = importFromRegistry();
@@ -329,5 +330,6 @@ size_t Settings::importAndApplyRegistry(bool saveAfter)
     }
     return imported.size();
 }
+#endif
 
 } // namespace Styx::Platform

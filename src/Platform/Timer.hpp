@@ -3,6 +3,7 @@
 #include "Dispatcher.hpp"
 #include <atomic>
 #include <memory>
+#include <utility>
 
 namespace Styx::Platform {
 

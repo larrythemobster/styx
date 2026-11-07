@@ -859,10 +859,10 @@ TEST_CASE("WorkerLoop - watchSocket readability", "[platform]")
     closeSock(rx);
 }
 
+#ifdef _WIN32
 TEST_CASE("WorkerLoop - COM MTA init hook", "[platform]")
 {
     using namespace Styx::Platform;
-#ifdef _WIN32
     std::atomic<bool> comInitialized{false};
     WorkerOptions opts;
     opts.name = "TestCom";
@@ -884,10 +884,8 @@ TEST_CASE("WorkerLoop - COM MTA init hook", "[platform]")
     }
 
     REQUIRE(comInitialized.load());
-#else
-    REQUIRE(true);
-#endif
 }
+#endif
 
 TEST_CASE("WorkerLoop - shutdown under load", "[platform]")
 {

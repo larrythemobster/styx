@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <fstream>
 #include <regex>
+#include <unordered_map>
+#include <nlohmann/json.hpp>
 
 namespace Styx::Core {
 namespace {
@@ -71,7 +73,10 @@ void Migration::migrateSettingsAndData()
     const auto oldRoam = oldPath(newRoam);
     const auto newLocal = Platform::Paths::cacheDir();
     const auto oldLocal = oldPath(newLocal);
-    auto oldSettings = Platform::Settings::importFromRegistry(L"Software\\ouwou\\Acheron");
+    std::unordered_map<std::string, nlohmann::json> oldSettings;
+#ifdef _WIN32
+    oldSettings = Platform::Settings::importFromRegistry(L"Software\\ouwou\\Acheron");
+#endif
     if (!fs::exists(oldRoam) && !fs::exists(oldLocal) && oldSettings.empty()) {
         writeMigrationMarker();
         return;
