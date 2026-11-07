@@ -176,7 +176,7 @@ void SettingsController::renderSidebar(std::string &rml)
     // Footer info
     rml += std::string("<div class=\"settings-sidebar-footer\">");
     rml += std::string("<div class=\"settings-app-version\">Styx v0.1.0</div>");
-    rml += std::string("<a class=\"settings-credit-link\" data-action=\"open-upstream\">Based on Acheron by ouwou</a>");
+    rml += std::string("<a class=\"settings-credit-link\" data-action=\"open-acheron\">Based on Acheron by ouwou</a>");
     rml += std::string("</div>"); // .settings-sidebar-footer
 
     rml += std::string("</div>"); // .settings-sidebar
@@ -876,7 +876,7 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         shell.closeSettings();
     } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
-    } else if (action == std::string("open-upstream")) {
+    } else if (action == std::string("open-acheron")) {
         Platform::Desktop::openUrl("https://github.com/ouwou/acheron");
     } else if (action == std::string("generate-theme")) {
         // Read seed color hex

@@ -1,25 +1,17 @@
 # Styx
 
-A native Discord client in C++ using SDL3 to host an RmlUi interface modelled
-on the official client. It also supports Go Live screen sharing.
-
-Styx is a fork of [Acheron](https://github.com/ouwou/acheron) by
-[ouwou](https://github.com/ouwou). Acheron provides the gateway, REST client,
-storage, markdown, voice with DAVE end-to-end encryption, multi-account
-support, and most of the client logic. This fork builds on that work, and
-Acheron deserves the credit for it. If you want the stable, cross-platform
-client, use upstream Acheron and
-[join its Discord](https://discord.gg/wkCU3vuzG5).
+A Discord client written in C++. The interface is built with RmlUi in an SDL3
+window and laid out like the official client. Styx supports voice calls with
+DAVE end-to-end encryption, multiple accounts and Go Live screen sharing.
 
 > [!WARNING]
 > Third-party Discord clients break Discord's Terms of Service. Your account
 > could be actioned for using one. Use Styx at your own risk.
 
-## What this fork adds
+## Features
 
-**RmlUi main window.** The main window is drawn with [RmlUi](https://github.com/mikke89/RmlUi)
-(HTML/CSS-style documents) using OpenGL 3.3 in an SDL3 window, in place of
-Acheron's Qt widget layout. It has:
+**Interface.** The main window is drawn with [RmlUi](https://github.com/mikke89/RmlUi)
+(HTML/CSS-style documents) using OpenGL 3.3 in an SDL3 window. It has:
 
 - a server rail with folders, unread and mention badges
 - channel and DM sidebars, a floating user panel and a member list
@@ -48,10 +40,6 @@ storage and startup error dialogs.
   encryption.
 - Can watch other people's streams in the call view.
 
-**Fixes.** Repaints triggered by timers and network events no longer free GPU
-resources without the window's OpenGL context current. The renderer queues
-them and frees them on the next frame.
-
 ## Status
 
 Styx is experimental and mainly tested on Windows 11. Go Live capture is
@@ -62,8 +50,8 @@ Ubuntu/WSL under Xvfb with software OpenGL, with `ENABLE_VOICE=OFF`,
 `ENABLE_RNNOISE=OFF` and `ENABLE_FFMPEG=OFF`. Linux voice and FFmpeg playback,
 and the native macOS UI, have not been verified.
 
-The executable is `styx.exe` on Windows or `styx` on Linux. It automatically
-migrates existing Acheron data on first launch.
+The executable is `styx.exe` on Windows or `styx` on Linux. If you used
+Acheron, Styx imports its settings, database and cache on first launch.
 
 ## Building on Windows
 
@@ -130,14 +118,20 @@ The Linux CI jobs install these build tools explicitly.
 
 ## Credits
 
-- [ouwou](https://github.com/ouwou) wrote [Acheron](https://github.com/ouwou/acheron),
-  which this fork is based on. Thanks also to Acheron's other contributors.
+- Styx started from the source of [Acheron](https://github.com/ouwou/acheron)
+  by [ouwou](https://github.com/ouwou), imported at commit
+  [`e5337a5`](https://github.com/ouwou/acheron/commit/e5337a5f3b2ca2978dbf48bbbe124e3a62926591).
+  Acheron wrote the gateway and REST clients, storage, markdown parsing, voice
+  with DAVE, multi-account support and much of the client logic. Go Live
+  viewing and the video engine were ported from Acheron's `video-streams`
+  branch (commit `71b4907`), and the ported source files say so. Thanks to
+  ouwou and Acheron's other contributors.
 - [RmlUi](https://github.com/mikke89/RmlUi) provides the UI library and the
   OpenGL 3 renderer adapted in `vendor/rmlui-backend`.
 - Icons come from [Lucide](https://lucide.dev).
 
 ## License
 
-GPL-3.0, the same as Acheron. See [LICENSE](LICENSE). Styx is a modified version
-of Acheron. The commit history keeps Acheron's original commits, and this
-fork's changes start after them.
+GPL-3.0. See [LICENSE](LICENSE). Styx is a modified version of Acheron, which
+is also GPL-3.0. The first commit in this repository is Acheron's source as of
+9 October 2026, and every change since then is in the commit history.

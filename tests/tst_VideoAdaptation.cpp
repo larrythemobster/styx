@@ -23,7 +23,7 @@ using Styx::Core::TileVisibility;
 using namespace Styx::Discord::Voice;
 
 // ============================================================================
-// Sink Wants & Tile Visibility (ported from upstream tests/tst_SinkWants.cpp)
+// Sink Wants & Tile Visibility (ported from Acheron's tests/tst_SinkWants.cpp)
 // ============================================================================
 
 namespace {
@@ -236,7 +236,7 @@ TEST_CASE("Coming back into view resets the wait", "[video-adaptation][sink-want
 }
 
 // ============================================================================
-// Decode Demand (ported from upstream tests/tst_DecodeDemand.cpp)
+// Decode Demand (ported from Acheron's tests/tst_DecodeDemand.cpp)
 // ============================================================================
 
 namespace {
@@ -347,7 +347,7 @@ TEST_CASE("Half of what is sent, not of the surface", "[video-adaptation][decode
 }
 
 // ============================================================================
-// Send Quality, Rate Controller, & Camera Plan (ported from upstream tests/tst_SendQuality.cpp)
+// Send Quality, Rate Controller, & Camera Plan (ported from Acheron's tests/tst_SendQuality.cpp)
 // ============================================================================
 
 namespace {

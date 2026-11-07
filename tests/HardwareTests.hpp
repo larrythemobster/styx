@@ -5,11 +5,8 @@
 
 inline bool hardwareTestsAreAskedFor()
 {
-    const char *styx = std::getenv("STYX_HARDWARE_TESTS");
-    if (styx && std::atoi(styx) > 0)
-        return true;
-    const char *acheron = std::getenv("ACHERON_HARDWARE_TESTS");
-    return acheron && std::atoi(acheron) > 0;
+    const char *value = std::getenv("STYX_HARDWARE_TESTS");
+    return value && std::atoi(value) > 0;
 }
 
 #define SKIP_UNLESS_HARDWARE_IS_ASKED_FOR() \
