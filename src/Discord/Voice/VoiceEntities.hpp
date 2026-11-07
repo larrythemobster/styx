@@ -184,7 +184,7 @@ struct Codec : Core::JsonUtils::JsonObject
 
 struct SelectProtocolData : Core::JsonUtils::JsonObject
 {
-    Field<std::string> protocol = "udp";
+    Field<std::string> protocol{"udp"};
     Field<std::string> address;
     Field<int> port;
     Field<std::string> mode;
