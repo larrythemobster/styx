@@ -18,11 +18,6 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-static std::string escape(const std::string &str)
-{
-    return Platform::htmlEscape(str);
-}
-
 ThreadBrowserController::ThreadBrowserController(Shell &shell)
     : Controller(shell, nullptr)
 {
@@ -82,7 +77,7 @@ void ThreadBrowserController::open(Core::ClientInstance *instance, Core::Snowfla
 
     if (auto *nameEl = threadsDocument->GetElementById("threads-channel-name")) {
         std::string display = channelName.empty() ? std::string{} : "#" + channelName;
-        nameEl->SetInnerRML(escape(display));
+        nameEl->SetInnerRML(Platform::htmlEscape(display));
     }
 
     render();
@@ -245,7 +240,7 @@ void ThreadBrowserController::render()
 
     if (emptyEl) {
         if (!error.empty()) {
-            emptyEl->SetInnerRML(escape(error));
+            emptyEl->SetInnerRML(Platform::htmlEscape(error));
             emptyEl->SetProperty("display", "block");
         } else if (isLoaded && threads.empty()) {
             emptyEl->SetInnerRML(isAct ? "No active threads" : "No archived threads");
@@ -280,7 +275,7 @@ void ThreadBrowserController::render()
             "    <span class=\"thread-item-name\">{}</span>"
             "    <span class=\"thread-item-meta\">{}</span>"
             "  </div>"
-            "</div>", threadId.toString(), icon, escape(name), escape(meta));
+            "</div>", threadId.toString(), icon, Platform::htmlEscape(name), Platform::htmlEscape(meta));
     }
 
     itemsEl->SetInnerRML(rml);

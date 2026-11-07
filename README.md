@@ -54,9 +54,15 @@ them and frees them on the next frame.
 
 ## Status
 
-Styx is experimental and mainly tested on Windows 11. The RmlUi window and Go
-Live are Windows-first. Upstream Acheron's Linux and macOS support has not been
-re-tested with the new UI. The executable is named `styx.exe` and automatically
+Styx is experimental and mainly tested on Windows 11. Go Live capture is
+Windows-only.
+
+The native SDL3/RmlUi build, login window and test suite have been verified on
+Ubuntu/WSL under Xvfb with software OpenGL, with `ENABLE_VOICE=OFF`,
+`ENABLE_RNNOISE=OFF` and `ENABLE_FFMPEG=OFF`. Linux voice and FFmpeg playback,
+and the native macOS UI, have not been verified.
+
+The executable is `styx.exe` on Windows or `styx` on Linux. It automatically
 migrates existing Acheron data on first launch.
 
 ## Building on Windows

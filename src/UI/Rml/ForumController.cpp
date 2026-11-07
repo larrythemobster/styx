@@ -24,11 +24,6 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-static std::string escape(const std::string &str)
-{
-    return Platform::htmlEscape(str);
-}
-
 ForumController::ForumController(Shell &shell)
     : Controller(shell, nullptr)
 {
@@ -217,7 +212,7 @@ void ForumController::updateHeader()
     }
 
     if (auto *titleEl = forumDocument->GetElementById("forum-title"))
-        titleEl->SetInnerRML(escape(name));
+        titleEl->SetInnerRML(Platform::htmlEscape(name));
 
     if (auto *topicEl = forumDocument->GetElementById("forum-topic")) {
         if (topic.empty()) {
@@ -226,7 +221,7 @@ void ForumController::updateHeader()
                 divEl->SetProperty("display", "none");
         } else {
             topicEl->SetProperty("display", "block");
-            topicEl->SetInnerRML(escape(topic));
+            topicEl->SetInnerRML(Platform::htmlEscape(topic));
             if (auto *divEl = forumDocument->GetElementById("forum-divider"))
                 divEl->SetProperty("display", "block");
         }
@@ -284,13 +279,13 @@ void ForumController::updateTags()
         if (tag.emojiId.hasValue() && tag.emojiId.get().isValid()) {
             auto emojiUrl = Discord::Cdn::emoji(tag.emojiId.get(), 20);
             iconPart = std::format("<img class=\"tag-emoji\" src=\"{}\"/>",
-                                   escape(shell.imageSource(emojiUrl, {14, 14})));
+                                   Platform::htmlEscape(shell.imageSource(emojiUrl, {14, 14})));
         } else if (tag.emojiName.hasValue() && !tag.emojiName->empty()) {
-            iconPart = std::format("<span class=\"tag-emoji\">{}</span>", escape(tag.emojiName.get()));
+            iconPart = std::format("<span class=\"tag-emoji\">{}</span>", Platform::htmlEscape(tag.emojiName.get()));
         }
 
         rml += std::format("<div class=\"forum-tag-chip{}\" data-action=\"filter-tag\" data-tag-id=\"{}\">{}{}</div>",
-                           isActive ? " active" : "", tagId.toString(), iconPart, escape(tag.name.get()));
+                           isActive ? " active" : "", tagId.toString(), iconPart, Platform::htmlEscape(tag.name.get()));
     }
 
     tagsBar->SetInnerRML(rml);
@@ -363,11 +358,11 @@ std::string ForumController::buildPostCardHtml(const Discord::Channel &post)
             if (it->emojiId.hasValue() && it->emojiId.get().isValid()) {
                 auto emojiUrl = Discord::Cdn::emoji(it->emojiId.get(), 20);
                 iconPart = std::format("<img class=\"tag-emoji\" src=\"{}\"/>",
-                                       escape(shell.imageSource(emojiUrl, {12, 12})));
+                                       Platform::htmlEscape(shell.imageSource(emojiUrl, {12, 12})));
             } else if (it->emojiName.hasValue() && !it->emojiName->empty()) {
-                iconPart = std::format("<span class=\"tag-emoji\">{}</span>", escape(it->emojiName.get()));
+                iconPart = std::format("<span class=\"tag-emoji\">{}</span>", Platform::htmlEscape(it->emojiName.get()));
             }
-            pills += std::format("<div class=\"forum-card-tag-pill\">{}{}</div>", iconPart, escape(it->name.get()));
+            pills += std::format("<div class=\"forum-card-tag-pill\">{}{}</div>", iconPart, Platform::htmlEscape(it->name.get()));
         }
         if (!pills.empty())
             tagsHtml = std::format("<div class=\"forum-card-tags-row\">{}</div>", pills);
@@ -422,7 +417,7 @@ std::string ForumController::buildPostCardHtml(const Discord::Channel &post)
 
     std::string avatarHtml;
     if (!avatarSrc.empty())
-        avatarHtml = std::format("<img class=\"forum-card-avatar\" src=\"{}\"/>", escape(avatarSrc));
+        avatarHtml = std::format("<img class=\"forum-card-avatar\" src=\"{}\"/>", Platform::htmlEscape(avatarSrc));
 
     const auto dt = post.effectiveLastMessageId().toDateTime();
     const std::string relTime = Core::TimeUtils::relativeTime(dt);
@@ -433,7 +428,7 @@ std::string ForumController::buildPostCardHtml(const Discord::Channel &post)
         const auto imgSrc = shell.imageSource(thumbUrl, {80, 80});
         thumbHtml = std::format("<div class=\"forum-card-thumbnail-container\">"
                                 "<img class=\"forum-card-thumbnail\" src=\"{}\"/>"
-                                "</div>", escape(imgSrc));
+                                "</div>", Platform::htmlEscape(imgSrc));
     }
 
     const std::string unreadDot = readState.unread ? "<div class=\"forum-card-unread-dot\"></div>" : "";
@@ -462,8 +457,8 @@ std::string ForumController::buildPostCardHtml(const Discord::Channel &post)
         "  </div>"
         "  {}"
         "</div>",
-        threadId.toString(), unreadDot, readState.unread ? " unread" : "", escape(title),
-        tagsHtml, escape(snippet), avatarHtml, authorStyle, escape(authorName), escape(relTime),
+        threadId.toString(), unreadDot, readState.unread ? " unread" : "", Platform::htmlEscape(title),
+        tagsHtml, Platform::htmlEscape(snippet), avatarHtml, authorStyle, Platform::htmlEscape(authorName), Platform::htmlEscape(relTime),
         replyCount, thumbHtml);
 }
 
