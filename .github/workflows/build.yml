@@ -207,7 +207,7 @@ jobs:
             libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev libwayland-dev \
             libasound2-dev libpulse-dev libdbus-1-dev xvfb xauth \
             dbus gnome-keyring libglib2.0-bin nasm \
-            autoconf automake libtool libtool-bin m4 gettext autopoint
+            autoconf automake libtool libtool-bin libltdl-dev m4 gettext autopoint
 
 
       - name: Bootstrap vcpkg
@@ -280,7 +280,12 @@ jobs:
             libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev libwayland-dev \
             libasound2-dev libpulse-dev libdbus-1-dev xvfb xauth \
             dbus gnome-keyring libglib2.0-bin nasm \
-            autoconf automake libtool libtool-bin m4 gettext autopoint
+            autoconf automake libtool libtool-bin libltdl-dev m4 gettext autopoint
+          # Styx uses <format>, which needs GCC 13; Jammy's default GCC 11 lacks it.
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get install -y gcc-13 g++-13
+          echo "CC=gcc-13" >> "$GITHUB_ENV"
+          echo "CXX=g++-13" >> "$GITHUB_ENV"
 
 
       - name: Bootstrap vcpkg
@@ -327,6 +332,7 @@ jobs:
           -DCURL_INCLUDE_DIR=${{ github.workspace }}/curl-impersonate/include
           -DCURL_LIBRARY=${{ github.workspace }}/curl-impersonate/libcurl-impersonate-local.a
           -DBUILD_TESTS=ON
+          -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
 
       - name: Build
         run: cmake --build build --parallel $(nproc)
@@ -442,7 +448,8 @@ jobs:
           -DBUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --parallel $(sysctl -n hw.logicalcpu)
+        # -k reports every compile error in one run instead of stopping at the first.
+        run: cmake --build build --parallel $(sysctl -n hw.logicalcpu) -- -k
 
       - name: Test
         run: ctest --test-dir build --output-on-failure

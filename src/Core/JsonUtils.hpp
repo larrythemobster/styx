@@ -67,7 +67,7 @@ public:
     template <class T> requires std::same_as<T, JsonObject>
     bool operator==(const T &) const { return true; }
 
-protected:
+    // Public so repositories can bind Field values; the JSON helpers below stay protected.
     template <class T, bool IsOptional = false, bool IsNullable = false>
     class Field
     {
@@ -106,6 +106,7 @@ protected:
         T value{};
     };
 
+protected:
     template <class T> static nlohmann::json toJsonValue(const T &value)
     {
         if constexpr (std::same_as<T, bool>) return value;

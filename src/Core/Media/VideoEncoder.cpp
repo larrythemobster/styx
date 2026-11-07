@@ -574,7 +574,7 @@ const char *const SEND_CODECS_OFF_KEY = "video/send_codecs_off";
 bool sendCodecAllowed(Discord::Voice::VideoCodec codec)
 {
     const auto off = Platform::Settings::instance().getJson(SEND_CODECS_OFF_KEY, nlohmann::json::array());
-    return !std::any_of(off.begin(), off.end(), [&codec](const auto &entry) { return entry.is_string() && entry.get<std::string>() == Discord::Voice::videoCodecName(codec); });
+    return !std::any_of(off.begin(), off.end(), [&codec](const nlohmann::json &entry) { return entry.is_string() && entry.get<std::string>() == Discord::Voice::videoCodecName(codec); });
 }
 
 void setSendCodecAllowed(Discord::Voice::VideoCodec codec, bool allowed)
