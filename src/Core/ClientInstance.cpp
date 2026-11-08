@@ -844,6 +844,28 @@ void ClientInstance::fetchThreadList(Snowflake channelId, bool archived, int off
     fetchThreadListAttempt(channelId, archived, offset, 0, std::move(callback));
 }
 
+void ClientInstance::searchMessages(Snowflake guildId, Snowflake channelId, const Discord::MessageSearchQuery &query,
+                                    Discord::Client::MessageSearchCallback callback)
+{
+    client->searchMessages(guildId, channelId, query,
+            [this, guard = Platform::Guard<ClientInstance>(this), guildId, callback = std::move(callback)](const Result<Discord::MessageSearchResult> &res) {
+                if (!guard) return;
+                if (res.success()) {
+                    std::vector<Discord::User> authors;
+                    authors.reserve(res.value->messages.size());
+                    for (const auto &message : res.value->messages)
+                        if (message.author.hasValue())
+                            authors.push_back(message.author.get());
+                    if (!authors.empty())
+                        userManager->saveUsers(authors);
+
+                    for (const auto &thread : res.value->threads)
+                        ingestThread(thread, guildId);
+                }
+                callback(res);
+            });
+}
+
 void ClientInstance::fetchThreadListAttempt(Snowflake channelId, bool archived, int offset, int attempt, const ThreadListPageCallback &callback)
 {
     static constexpr int kMaxRetries = 5;

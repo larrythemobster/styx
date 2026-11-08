@@ -104,6 +104,11 @@ public:
     using ThreadListPageCallback = std::function<void(const Result<ThreadListPage> &)>;
     void fetchThreadList(Snowflake channelId, bool archived, int offset, ThreadListPageCallback callback);
 
+    // Searches a server (guildId valid) or a DM. Result authors and threads are cached so the
+    // results panel can show names and open threads.
+    void searchMessages(Snowflake guildId, Snowflake channelId, const Discord::MessageSearchQuery &query,
+                        Discord::Client::MessageSearchCallback callback);
+
     [[nodiscard]] ConnectionState state() const;
 
     [[nodiscard]] Snowflake voiceChannelId() const;
