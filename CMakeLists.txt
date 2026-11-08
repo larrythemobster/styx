@@ -179,6 +179,7 @@ set(PROJECT_SOURCES
     src/Core/PermissionComputer.cpp
     src/Core/RoleHierarchy.cpp
     src/Core/ReadStateManager.cpp
+    src/Core/NotificationPolicy.cpp
     src/Core/MemberListManager.cpp
     src/Core/RelationshipManager.cpp
     src/Core/Presence/PresenceManager.cpp
@@ -375,6 +376,7 @@ if(BUILD_TESTS)
     target_include_directories(TestMarkdown PRIVATE vendor/emoji-segmenter)
     target_link_libraries(TestMarkdown PRIVATE PCRE2::8BIT utf8proc)
     styx_test(TestFrecency FrecencyTests tests/tst_Frecency.cpp src/Core/Emoji/FrecencyTracker.cpp)
+    styx_test(TestNotificationPolicy NotificationPolicyTests tests/tst_NotificationPolicy.cpp src/Core/NotificationPolicy.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)
     styx_test(TestOrderedJson OrderedJsonTests tests/tst_OrderedJson.cpp
