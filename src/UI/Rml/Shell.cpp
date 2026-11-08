@@ -20,6 +20,7 @@
 #include "SettingsController.hpp"
 #include "ThreadBrowserController.hpp"
 #include "SearchController.hpp"
+#include "SwitcherController.hpp"
 #include "ExpressionPickerController.hpp"
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
@@ -247,6 +248,7 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     imageViewerController = viewer.get(); controllers.push_back(std::move(viewer));
     auto picker = std::make_unique<Rml::ExpressionPickerController>(*this);
     expressionPickerController = picker.get(); controllers.push_back(std::move(picker));
+    controllers.push_back(std::make_unique<Rml::SwitcherController>(*this));
     accountsController = std::make_unique<Rml::AccountsController>(*this);
     if (accountsModel->rowCount() == 0) accountsController->showLogin();
     applyBodyClasses();

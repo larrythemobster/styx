@@ -1,0 +1,16 @@
+<rml>
+<head>
+    <title>Quick Switcher</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="switcher.rcss"/>
+</head>
+<body id="switcher-body">
+    <div class="switcher-backdrop" data-action="close"></div>
+    <div class="switcher-popover">
+        <input id="switcher-input" class="switcher-input" type="text" placeholder="Where would you like to go?"/>
+        <div id="switcher-results" class="switcher-results"></div>
+        <div class="switcher-hint">Start with # for channels, ! for voice, @ for people, * for servers</div>
+    </div>
+</body>
+</rml>
