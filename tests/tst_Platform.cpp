@@ -14,6 +14,12 @@
 #include "Platform/Base64.hpp"
 #include "Platform/Notifications.hpp"
 #include "HardwareTests.hpp"
+#if defined(__linux__)
+#include <gio/gio.h>
+#include <condition_variable>
+#include <mutex>
+#include <string>
+#endif
 
 #include <chrono>
 #include <filesystem>
@@ -1021,3 +1027,258 @@ TEST_CASE("Notifications: a toast reaches the desktop", "[notifications]")
     notification.body = "Desktop notifications work.";
     REQUIRE(show(notification, [] {}));
 }
+
+#if defined(__linux__)
+
+namespace {
+
+const char *const NOTIFICATIONS_XML =
+    "<node><interface name='org.freedesktop.Notifications'>"
+    "<method name='GetCapabilities'><arg type='as' direction='out'/></method>"
+    "<method name='Notify'>"
+    "<arg type='s' direction='in'/><arg type='u' direction='in'/><arg type='s' direction='in'/>"
+    "<arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='as' direction='in'/>"
+    "<arg type='a{sv}' direction='in'/><arg type='i' direction='in'/>"
+    "<arg type='u' direction='out'/></method>"
+    "<signal name='ActionInvoked'><arg type='u'/><arg type='s'/></signal>"
+    "<signal name='NotificationClosed'><arg type='u'/><arg type='u'/></signal>"
+    "</interface></node>";
+
+class FakeNotificationDaemon
+{
+public:
+    static constexpr std::uint32_t ID = 42;
+
+    std::mutex mutex;
+    std::string appName;
+    std::string appIcon;
+    std::string summary;
+    std::string body;
+    std::string desktopEntry;
+    std::string imagePath;
+    std::vector<std::string> actions;
+    int notifyCalls = 0;
+
+    ~FakeNotificationDaemon()
+    {
+        // A quit from this thread is lost if the loop hasn't started running yet, so it is
+        // queued on the daemon's own context instead.
+        if (owned)
+            g_main_context_invoke(context, [](gpointer quitting) {
+                g_main_loop_quit(static_cast<GMainLoop *>(quitting));
+                return G_SOURCE_REMOVE;
+            }, loop);
+        if (thread.joinable())
+            thread.join();
+        if (registration)
+            g_dbus_connection_unregister_object(connection, registration);
+        if (connection) {
+            g_dbus_connection_close_sync(connection, nullptr, nullptr);
+            g_object_unref(connection);
+        }
+        if (node)
+            g_dbus_node_info_unref(node);
+        if (loop)
+            g_main_loop_unref(loop);
+        if (context)
+            g_main_context_unref(context);
+    }
+
+    bool start()
+    {
+        context = g_main_context_new();
+        loop = g_main_loop_new(context, FALSE);
+
+        thread = std::thread([this] {
+            g_main_context_push_thread_default(context);
+
+            gchar *address = g_dbus_address_get_for_bus_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+            if (address) {
+                connection = g_dbus_connection_new_for_address_sync(
+                    address,
+                    static_cast<GDBusConnectionFlags>(G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT | G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION),
+                    nullptr,
+                    nullptr,
+                    nullptr);
+                g_free(address);
+            }
+
+            if (connection) {
+                node = g_dbus_node_info_new_for_xml(NOTIFICATIONS_XML, nullptr);
+                static const GDBusInterfaceVTable vtable{ &FakeNotificationDaemon::onMethodCall, nullptr, nullptr, {} };
+                registration = g_dbus_connection_register_object(
+                    connection,
+                    "/org/freedesktop/Notifications",
+                    node->interfaces[0],
+                    &vtable,
+                    this,
+                    nullptr,
+                    nullptr);
+
+                GVariant *reply = g_dbus_connection_call_sync(
+                    connection,
+                    "org.freedesktop.DBus",
+                    "/org/freedesktop/DBus",
+                    "org.freedesktop.DBus",
+                    "RequestName",
+                    g_variant_new("(su)", "org.freedesktop.Notifications", 4u),
+                    G_VARIANT_TYPE("(u)"),
+                    G_DBUS_CALL_FLAGS_NONE,
+                    -1,
+                    nullptr,
+                    nullptr);
+                if (reply) {
+                    guint32 result = 0;
+                    g_variant_get(reply, "(u)", &result);
+                    g_variant_unref(reply);
+                    owned = (result == 1);
+                }
+            }
+
+            {
+                std::lock_guard lock(readyMutex);
+                ready = true;
+            }
+            readyChanged.notify_all();
+
+            if (owned)
+                g_main_loop_run(loop);
+
+            g_main_context_pop_thread_default(context);
+        });
+
+        std::unique_lock lock(readyMutex);
+        readyChanged.wait(lock, [this] { return ready; });
+        return owned;
+    }
+
+    void emitActionInvoked(const char *action)
+    {
+        g_dbus_connection_emit_signal(
+            connection,
+            nullptr,
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "ActionInvoked",
+            g_variant_new("(us)", ID, action),
+            nullptr);
+        g_dbus_connection_flush_sync(connection, nullptr, nullptr);
+    }
+
+private:
+    static void onMethodCall(
+        GDBusConnection *,
+        const gchar *,
+        const gchar *,
+        const gchar *,
+        const gchar *method,
+        GVariant *parameters,
+        GDBusMethodInvocation *invocation,
+        gpointer data)
+    {
+        if (g_strcmp0(method, "GetCapabilities") == 0) {
+            GVariantBuilder builder;
+            g_variant_builder_init(&builder, G_VARIANT_TYPE("as"));
+            g_variant_builder_add(&builder, "s", "body");
+            g_variant_builder_add(&builder, "s", "body-markup");
+            g_variant_builder_add(&builder, "s", "actions");
+            g_dbus_method_invocation_return_value(invocation, g_variant_new("(as)", &builder));
+            return;
+        }
+
+        if (g_strcmp0(method, "Notify") == 0) {
+            auto *self = static_cast<FakeNotificationDaemon *>(data);
+            const char *name = nullptr, *icon = nullptr, *title = nullptr, *text = nullptr;
+            guint32 replaces = 0;
+            GVariantIter *actionIter = nullptr;
+            GVariant *hints = nullptr;
+            gint32 timeout = 0;
+            g_variant_get(parameters, "(&su&s&s&sas@a{sv}i)", &name, &replaces, &icon, &title, &text, &actionIter, &hints, &timeout);
+
+            {
+                std::lock_guard lock(self->mutex);
+                self->appName = name;
+                self->appIcon = icon;
+                self->summary = title;
+                self->body = text;
+
+                const char *action = nullptr;
+                while (g_variant_iter_loop(actionIter, "&s", &action))
+                    self->actions.emplace_back(action);
+
+                const char *value = nullptr;
+                if (g_variant_lookup(hints, "desktop-entry", "&s", &value))
+                    self->desktopEntry = value;
+                value = nullptr;
+                if (g_variant_lookup(hints, "image-path", "&s", &value))
+                    self->imagePath = value;
+
+                ++self->notifyCalls;
+            }
+
+            g_variant_iter_free(actionIter);
+            g_variant_unref(hints);
+            g_dbus_method_invocation_return_value(invocation, g_variant_new("(u)", ID));
+            return;
+        }
+
+        g_dbus_method_invocation_return_dbus_error(invocation, "org.freedesktop.DBus.Error.UnknownMethod", method);
+    }
+
+    GMainContext *context = nullptr;
+    GMainLoop *loop = nullptr;
+    GDBusConnection *connection = nullptr;
+    GDBusNodeInfo *node = nullptr;
+    guint registration = 0;
+    std::thread thread;
+    std::mutex readyMutex;
+    std::condition_variable readyChanged;
+    bool ready = false;
+    bool owned = false;
+};
+
+} // namespace
+
+TEST_CASE("Notifications: D-Bus notifications reach the daemon and report clicks", "[notifications]")
+{
+    if (!g_getenv("DBUS_SESSION_BUS_ADDRESS"))
+        SKIP("no D-Bus session bus");
+
+    FakeNotificationDaemon daemon;
+    if (!daemon.start())
+        SKIP("another notification daemon owns the name");
+
+    using namespace Styx::Platform::Notifications;
+    REQUIRE(available());
+
+    Notification notification;
+    notification.title = "Tom & Jerry";
+    notification.body = "<b>hi</b> & bye";
+    notification.image = std::filesystem::path("/tmp/styx avatar.png");
+
+    std::atomic<bool> clicked{false};
+    REQUIRE(show(notification, [&clicked] { clicked = true; }));
+
+    {
+        std::lock_guard lock(daemon.mutex);
+        REQUIRE(daemon.notifyCalls == 1);
+        REQUIRE(daemon.appName == "Styx");
+        REQUIRE(daemon.appIcon == "io.github.larrythemobster.styx");
+        REQUIRE(daemon.summary == "Tom & Jerry");
+        REQUIRE(daemon.body == "&lt;b&gt;hi&lt;/b&gt; &amp; bye");
+        REQUIRE(daemon.actions == std::vector<std::string>{"default", "Open"});
+        REQUIRE(daemon.desktopEntry == "io.github.larrythemobster.styx");
+        REQUIRE(daemon.imagePath == "/tmp/styx avatar.png");
+    }
+
+    daemon.emitActionInvoked("default");
+
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (!clicked && std::chrono::steady_clock::now() < deadline) {
+        Dispatcher::main().runPending();
+        std::this_thread::sleep_for(10ms);
+    }
+    REQUIRE(clicked);
+}
+
+#endif
