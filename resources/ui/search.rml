@@ -21,6 +21,7 @@
 		<div class="search-input-area">
 			<input id="search-input" class="search-input" type="text" placeholder="Search, e.g. from:name has:image"/>
 		</div>
+		<div id="search-suggestions" class="search-suggestions" style="display: none;"></div>
 		<div id="search-count" class="search-count" style="display: none;"></div>
 		<div id="search-status" class="search-status-msg" style="display: none;"></div>
 		<div id="search-results" class="search-results-list"></div>

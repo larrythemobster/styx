@@ -13,6 +13,7 @@
 #include "Platform/Utf8.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <format>
 #include <string>
@@ -100,7 +101,7 @@ void SearchController::open(Core::ClientInstance *instance, Core::Snowflake guil
         return;
 
     if (this->guildId != guildId || this->channelId != channelId) {
-        if (auto *inputEl = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(searchDocument->GetElementById("search-input")))
+        if (auto *inputEl = input())
             inputEl->SetValue("");
         clearResults();
     }
@@ -118,8 +119,10 @@ void SearchController::open(Core::ClientInstance *instance, Core::Snowflake guil
 
     render();
 
-    if (auto *inputEl = searchDocument->GetElementById("search-input"))
+    if (auto *inputEl = input())
         inputEl->Focus();
+
+    updateSuggestions();
 
     requestRender();
 }
@@ -132,9 +135,10 @@ void SearchController::close()
     visible = false;
     ++loadGeneration;
 
+    hideSuggestions();
+
     if (searchDocument)
         searchDocument->Hide();
-
     requestRender();
 }
 
@@ -171,18 +175,64 @@ void SearchController::setupEventListeners()
                 resultActivated.publish(chId, msgId);
                 close();
             }
+        } else if (action == "pick-suggestion") {
+            const std::string idxStr = attribute(actionEl, "data-index");
+            int idx = -1;
+            const auto [ptr, ec] = std::from_chars(idxStr.data(), idxStr.data() + idxStr.size(), idx);
+            if (ec == std::errc{} && ptr == idxStr.data() + idxStr.size())
+                acceptSuggestion(idx);
         }
     });
 
-    if (auto *inputEl = searchDocument->GetElementById("search-input")) {
+    if (auto *inputEl = input()) {
+        listen("change", [this](::Rml::Event &) {
+            updateSuggestions();
+        }, inputEl);
+
         listen("keydown", [this](::Rml::Event &event) {
             const int key = event.GetParameter<int>("key_identifier", 0);
-            if (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER) {
+            if (key == ::Rml::Input::KI_DOWN) {
+                if (!suggestions.empty()) {
+                    if (selectedSuggestion < 0 || selectedSuggestion + 1 >= static_cast<int>(suggestions.size()))
+                        selectedSuggestion = 0;
+                    else
+                        ++selectedSuggestion;
+                    renderSuggestions();
+                    event.StopPropagation();
+                    return;
+                }
+            } else if (key == ::Rml::Input::KI_UP) {
+                if (!suggestions.empty()) {
+                    if (selectedSuggestion <= 0 || selectedSuggestion >= static_cast<int>(suggestions.size()))
+                        selectedSuggestion = static_cast<int>(suggestions.size()) - 1;
+                    else
+                        --selectedSuggestion;
+                    renderSuggestions();
+                    event.StopPropagation();
+                    return;
+                }
+            } else if (key == ::Rml::Input::KI_TAB) {
+                if (!suggestions.empty()) {
+                    acceptSuggestion(selectedSuggestion >= 0 ? selectedSuggestion : 0);
+                    event.StopPropagation();
+                    return;
+                }
+            } else if (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER) {
                 event.StopPropagation();
-                submit();
+                if (selectedSuggestion >= 0)
+                    acceptSuggestion(selectedSuggestion);
+                else {
+                    hideSuggestions();
+                    submit();
+                }
+                return;
             } else if (key == ::Rml::Input::KI_ESCAPE) {
                 event.StopPropagation();
-                close();
+                if (!suggestions.empty())
+                    hideSuggestions();
+                else
+                    close();
+                return;
             }
         }, inputEl);
     }
@@ -193,11 +243,7 @@ void SearchController::submit()
     if (!searchDocument)
         return;
 
-    auto *inputEl = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(searchDocument->GetElementById("search-input"));
-    if (!inputEl)
-        return;
-
-    const std::string text = std::string(Platform::trim(inputEl->GetValue()));
+    const std::string text = std::string(Platform::trim(inputText()));
     if (text.empty()) {
         clearResults();
         render();
@@ -463,6 +509,86 @@ bool SearchController::canGoNext() const
     // Discord rejects offsets past 9975.
     const int nextOffset = (page + 1) * PAGE_SIZE;
     return nextOffset < totalResults && nextOffset <= 9975 && !loading;
+}
+
+void SearchController::updateSuggestions()
+{
+    suggestions = Core::searchSuggestions(inputText(), people(), channels());
+    selectedSuggestion = -1;
+    renderSuggestions();
+}
+
+void SearchController::acceptSuggestion(int index)
+{
+    auto *inputEl = input();
+    if (index < 0 || index >= static_cast<int>(suggestions.size()) || !inputEl)
+        return;
+
+    const std::string &replacement = suggestions[index].replacement;
+    inputEl->SetValue(replacement);
+    const int len = static_cast<int>(replacement.size());
+    inputEl->SetSelectionRange(len, len);
+    inputEl->Focus();
+
+    updateSuggestions();
+}
+
+void SearchController::hideSuggestions()
+{
+    suggestions.clear();
+    selectedSuggestion = -1;
+    renderSuggestions();
+}
+
+void SearchController::renderSuggestions()
+{
+    if (!searchDocument)
+        return;
+
+    auto *suggestionsEl = searchDocument->GetElementById("search-suggestions");
+    if (!suggestionsEl)
+        return;
+
+    if (suggestions.empty()) {
+        suggestionsEl->SetInnerRML("");
+        suggestionsEl->SetProperty("display", "none");
+        requestRender();
+        return;
+    }
+
+    std::string rows;
+    for (size_t i = 0; i < suggestions.size(); ++i) {
+        const auto &s = suggestions[i];
+        const bool isSelected = (static_cast<int>(i) == selectedSuggestion);
+        const std::string_view cls = isSelected ? "search-suggestion selected" : "search-suggestion";
+        std::string detailSpan;
+        if (!s.detail.empty())
+            detailSpan = std::format(R"(<span class="search-suggestion-detail">{}</span>)", Platform::htmlEscape(s.detail));
+
+        rows += std::format(
+            R"(<div class="{}" data-action="pick-suggestion" data-index="{}"><span class="search-suggestion-label">{}</span>{}</div>)",
+            cls,
+            i,
+            Platform::htmlEscape(s.label),
+            detailSpan);
+    }
+
+    suggestionsEl->SetInnerRML(rows);
+    suggestionsEl->SetProperty("display", "flex");
+    requestRender();
+}
+
+::Rml::ElementFormControlInput *SearchController::input() const
+{
+    if (!searchDocument)
+        return nullptr;
+    return rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(searchDocument->GetElementById("search-input"));
+}
+
+std::string SearchController::inputText() const
+{
+    auto *inputEl = input();
+    return inputEl ? inputEl->GetValue() : std::string();
 }
 
 } // namespace Rml

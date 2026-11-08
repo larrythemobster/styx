@@ -115,6 +115,43 @@ body#search-body {
 	border-color: #5865f2;
 }
 
+.search-suggestions {
+	display: flex;
+	flex-direction: column;
+	margin: 0 12dp 8dp;
+	background-color: #1e1f22;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	padding: 4dp 0;
+	max-height: 240dp;
+	overflow-y: auto;
+	flex-shrink: 0;
+}
+
+.search-suggestion {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding: 6dp 10dp;
+	cursor: pointer;
+}
+
+.search-suggestion:hover,
+.search-suggestion.selected {
+	background-color: #2b2d31;
+}
+
+.search-suggestion-label {
+	font-size: 14dp;
+	color: #f2f3f5;
+}
+
+.search-suggestion-detail {
+	font-size: 12dp;
+	color: #949ba4;
+	margin-left: 8dp;
+}
+
 .search-count {
 	padding: 12dp 16dp 4dp;
 	font-size: 12dp;
