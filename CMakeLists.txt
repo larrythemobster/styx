@@ -184,6 +184,7 @@ set(PROJECT_SOURCES
     src/Core/SearchSyntax.cpp
     src/Core/SearchQuery.cpp
     src/Core/SearchCompletion.cpp
+    src/Core/QuickSwitcher.cpp
     src/Core/Audio/Sounds.cpp
     src/Core/Audio/SoundPlayer.cpp
     src/Core/Audio/SoundMixer.cpp
@@ -390,6 +391,7 @@ if(BUILD_TESTS)
     styx_test(TestSearchSyntax SearchSyntaxTests tests/tst_SearchSyntax.cpp src/Core/SearchSyntax.cpp src/Core/Snowflake.cpp)
     styx_test(TestSearchQuery SearchQueryTests tests/tst_SearchQuery.cpp src/Core/SearchQuery.cpp src/Core/Snowflake.cpp)
     styx_test(TestSearchCompletion SearchCompletionTests tests/tst_SearchCompletion.cpp src/Core/SearchCompletion.cpp src/Core/Snowflake.cpp)
+    styx_test(TestQuickSwitcher QuickSwitcherTests tests/tst_QuickSwitcher.cpp src/Core/QuickSwitcher.cpp src/Core/Snowflake.cpp)
     styx_test(TestSounds SoundsTests tests/tst_Sounds.cpp src/Core/Audio/Sounds.cpp src/Core/Audio/SoundMixer.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)
