@@ -1,6 +1,7 @@
 #include "Client.hpp"
 
 #include "Core/Logging.hpp"
+#include "Platform/Dispatcher.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -10,6 +11,8 @@ namespace Styx::Discord {
 namespace {
 using Json = nlohmann::json;
 using Query = std::vector<std::pair<std::string, std::string>>;
+// How many times a search waits for Discord's index before giving up.
+constexpr int SEARCH_ATTEMPTS = 5;
 
 Json object(const std::string &body)
 {
@@ -215,6 +218,34 @@ void Client::searchThreads(Snowflake channelId, bool archived, int offset, Threa
             for (const auto &value : arrayField(obj, "members"))
                 result.members.push_back(ThreadMember::fromJson(value.is_object() ? value : Json::object()));
         });
+}
+
+void Client::searchMessages(Snowflake guildId, Snowflake channelId, const MessageSearchQuery &query, MessageSearchCallback callback)
+{
+    const bool server = guildId.isValid();
+    std::string endpoint = server ? "/guilds/" + guildId.toString() + "/messages/search" : "/channels/" + channelId.toString() + "/messages/search";
+    runMessageSearch(std::move(endpoint), searchParameters(query, server), SEARCH_ATTEMPTS, std::move(callback));
+}
+
+void Client::runMessageSearch(std::string endpoint, Query query, int attemptsLeft, MessageSearchCallback callback)
+{
+    Platform::Guard<Client> self(this);
+    httpClient->get(endpoint, query, [self, endpoint, query, attemptsLeft, callback = std::move(callback)](const HttpResponse &response) {
+        if (!self) return;
+        if (response.statusCode != 202 && !response.success) {
+            Core::log(Core::LogLevel::Warning, LogDiscord) << "Failed to search messages: " << response.error;
+            callback(Core::Result<MessageSearchResult>::makeError("Failed to search messages: " + response.error));
+            return;
+        }
+        auto result = parseSearchResponse(response.statusCode, response.body);
+        if (!result.indexNotReady || attemptsLeft <= 1) {
+            callback(Core::Result<MessageSearchResult>::makeOk(std::move(result)));
+            return;
+        }
+        Platform::Dispatcher::main().setTimer(static_cast<uint32_t>(result.retryAfterSeconds * 1000), false, [self, endpoint, query, attemptsLeft, callback] {
+            if (self) self->runMessageSearch(endpoint, query, attemptsLeft - 1, callback);
+        });
+    });
 }
 
 void Client::createForumThread(Snowflake forumId, const std::string &name, const std::vector<Snowflake> &appliedTags,

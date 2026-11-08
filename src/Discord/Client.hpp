@@ -24,6 +24,7 @@
 #include "Proto/UserSettings.hpp"
 
 #include "Gateway.hpp"
+#include "MessageSearch.hpp"
 #include "GuildRequests.hpp"
 #include "HttpClient.hpp"
 #include "ClientIdentity.hpp"
@@ -111,6 +112,11 @@ public:
     };
     using ThreadListCallback = std::function<void(const Core::Result<ThreadListResult> &)>;
     void searchThreads(Snowflake channelId, bool archived, int offset, ThreadListCallback callback);
+
+    using MessageSearchCallback = std::function<void(const Core::Result<MessageSearchResult> &)>;
+    // Searches a server when guildId is valid, otherwise the DM or group DM channelId. While
+    // Discord is still indexing, it retries a few times before reporting indexNotReady.
+    void searchMessages(Snowflake guildId, Snowflake channelId, const MessageSearchQuery &query, MessageSearchCallback callback);
 
     using RefreshedUrlsCallback = std::function<void(const Core::Result<std::unordered_map<std::string, std::string>> &)>;
     void refreshAttachmentUrls(const std::vector<std::string> &urls, RefreshedUrlsCallback callback);
@@ -372,6 +378,7 @@ private:
 
 private:
     void fetchMessages(Snowflake channelId, std::vector<std::pair<std::string, std::string>> query, int limit, MessagesCallback callback);
+    void runMessageSearch(std::string endpoint, std::vector<std::pair<std::string, std::string>> query, int attemptsLeft, MessageSearchCallback callback);
     void indexGuildMappings(const GatewayGuild &guild);
     void applyDiscordLocale();
     void updateActiveState();
