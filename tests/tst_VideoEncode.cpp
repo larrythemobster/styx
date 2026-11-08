@@ -984,7 +984,9 @@ constexpr int BLACK_AT_MOST = 40;
 constexpr double COLOUR_SURVIVES = 8;
 
 inline Yuv inYuv(const Rgb &c, bool bt709) { return inYuv(c.red, c.green, c.blue, bt709); }
+#ifdef _WIN32
 inline Yuv inYuv(COLORREF c, bool bt709) { return inYuv(GetRValue(c), GetGValue(c), GetBValue(c), bt709); }
+#endif
 
 inline AVFrame *quartersOnCard(AVBufferRef *device, FrameSize size)
 {
@@ -1024,6 +1026,7 @@ inline Yuv colourAt(const AVFrame *nv12, int x, int y)
     return { static_cast<double>(nv12->data[0][y * nv12->linesize[0] + x]), static_cast<double>(chroma[0]), static_cast<double>(chroma[1]) };
 }
 
+#ifdef _WIN32
 inline bool looksLike(const Yuv &seen, COLORREF colour)
 {
     constexpr double CLOSE = 16;
@@ -1035,6 +1038,7 @@ inline double offItsOwnCoefficients(const Decoded &decoded, const Yuv &seen, COL
     const bool named = decoded.colorspace == AVCOL_SPC_BT709 || decoded.colorspace == AVCOL_SPC_SMPTE170M || decoded.colorspace == AVCOL_SPC_BT470BG;
     return distance(seen, inYuv(colour, named ? decoded.colorspace == AVCOL_SPC_BT709 : decoded.height >= 720));
 }
+#endif
 
 template <typename Pred>
 bool tryUntil(Pred &&pred, int timeoutMs = 3000)
@@ -2409,6 +2413,7 @@ TEST_CASE("The pipeline shares the screen", "[video][encode]")
     }
 }
 
+#ifdef _WIN32
 TEST_CASE("A scaled screen is handed over as its encoder takes it", "[video][encode]")
 {
     SKIP_UNLESS_HARDWARE_IS_ASKED_FOR();
@@ -2494,6 +2499,7 @@ TEST_CASE("A scaled screen is handed over as its encoder takes it", "[video][enc
         }
     }
 }
+#endif
 
 TEST_CASE("A screen that is not there fails", "[video][encode]")
 {

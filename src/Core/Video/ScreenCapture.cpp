@@ -122,6 +122,15 @@ bool windowIsCovered(const std::vector<StackedWindow> &topDown, std::size_t targ
     return false;
 }
 
+namespace {
+
+FrameSize evenSize(FrameSize size)
+{
+    return { std::max(2, size.width & ~1), std::max(2, size.height & ~1) };
+}
+
+} // namespace
+
 #ifdef _WIN32
 
 namespace {
@@ -246,11 +255,6 @@ std::string describeError(int error)
     char text[AV_ERROR_MAX_STRING_SIZE] = {};
     av_strerror(error, text, sizeof(text));
     return text;
-}
-
-FrameSize evenSize(FrameSize size)
-{
-    return { std::max(2, size.width & ~1), std::max(2, size.height & ~1) };
 }
 
 CaptureRect fromNative(const RECT &rect)
@@ -1130,7 +1134,10 @@ struct ScreenCapture::Impl
     bool deliversChanges = true;
     std::string name;
 
-#ifdef _WIN32
+#ifndef _WIN32
+    // Named grabber, not linux: GCC predefines `linux` as a macro in GNU mode.
+    std::unique_ptr<LinuxGrabber> grabber;
+#else
     enum class Path {
         Duplication,
         GraphicsCapture,
@@ -1654,11 +1661,11 @@ void ScreenCapture::configure(const Request &request)
 #else
     impl->request = request;
     const auto method = request.method == CaptureMethod::Auto ? (X11Capture::usable() ? CaptureMethod::X11 : CaptureMethod::Portal) : request.method;
-    impl->linux = method == CaptureMethod::X11 ? X11Capture::open(request.sourceId, request.framerate) :
+    impl->grabber = method == CaptureMethod::X11 ? X11Capture::open(request.sourceId, request.framerate) :
         method == CaptureMethod::Portal ? PortalCapture::open(request.sourceId, request.framerate, request.keepOnCard) : nullptr;
-    if (impl->linux) {
-        impl->name = impl->linux->name();
-        impl->deliversChanges = impl->linux->deliversOnlyChanges();
+    if (impl->grabber) {
+        impl->name = impl->grabber->name();
+        impl->deliversChanges = impl->grabber->deliversOnlyChanges();
         return;
     }
     failureText = "No usable capture backend is available for this source.";
@@ -1695,9 +1702,9 @@ ScreenCapture::Status ScreenCapture::read(AVFrame *into)
     }
     return impl->readDuplication(into, picturesWanted, failureText);
 #else
-    if (!impl->linux)
+    if (!impl->grabber)
         return Status::Failed;
-    switch (impl->linux->grab(into, std::chrono::milliseconds(RETRY_INTERVAL_MS))) {
+    switch (impl->grabber->grab(into, std::chrono::milliseconds(RETRY_INTERVAL_MS))) {
     case LinuxGrabber::Result::Frame:
         return Status::Frame;
     case LinuxGrabber::Result::NoFrame:
@@ -1707,7 +1714,7 @@ ScreenCapture::Status ScreenCapture::read(AVFrame *into)
     case LinuxGrabber::Result::Closed:
         return Status::Closed;
     case LinuxGrabber::Result::Failed:
-        failureText = impl->linux->failure();
+        failureText = impl->grabber->failure();
         return Status::Failed;
     }
     return Status::Failed;

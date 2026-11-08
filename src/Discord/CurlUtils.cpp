@@ -238,7 +238,9 @@ curl_socket_t getActiveSocket(CURL *curl)
 void waitOnSocket(curl_socket_t sockfd, bool forWrite, long timeoutMs)
 {
     if (sockfd == CURL_SOCKET_BAD) return;
-    timeval timeout{timeoutMs / 1000, (timeoutMs % 1000) * 1000};
+    timeval timeout{};
+    timeout.tv_sec = static_cast<decltype(timeout.tv_sec)>(timeoutMs / 1000);
+    timeout.tv_usec = static_cast<decltype(timeout.tv_usec)>((timeoutMs % 1000) * 1000);
     fd_set fds;
     FD_ZERO(&fds);
     FD_SET(sockfd, &fds);

@@ -149,5 +149,5 @@ endif()
 
 message(FATAL_ERROR
     "ffmpeg headers were found at ${FFMPEG_INCLUDE_DIR} but these libraries were not: "
-    "${_ffmpeg_missing}. Video playback needs all of avcodec, avformat, avutil, swscale and "
-    "swresample. Configure with -DENABLE_FFMPEG=OFF to build without video support.")
+    "${_ffmpeg_missing}. Video playback needs all of ${FFMPEG_COMPONENTS}. "
+    "Configure with -DENABLE_FFMPEG=OFF to build without video support.")

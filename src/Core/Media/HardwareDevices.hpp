@@ -5,6 +5,7 @@ extern "C" {
 }
 #if defined(__unix__) && !defined(__APPLE__)
 #include <dlfcn.h>
+#include <initializer_list>
 #endif
 namespace Styx::Core::Media {
 [[nodiscard]] inline bool hardwareDeviceCanBeAskedFor(AVHWDeviceType type)
