@@ -1,0 +1,34 @@
+<rml>
+<head>
+	<title>Search</title>
+	<link type="text/rcss" href="base.rcss"/>
+	<link type="text/rcss" href="theme.rcss"/>
+	<link type="text/rcss" href="search.rcss"/>
+</head>
+<body id="search-body">
+	<div class="search-backdrop" data-action="close"></div>
+	<div class="search-popover">
+		<div class="search-popover-header">
+			<div class="search-header-title-box">
+				<img class="search-header-icon" src="icon:search"/>
+				<span class="search-header-title">Search</span>
+				<span id="search-scope" class="search-header-scope"></span>
+			</div>
+			<div class="search-close-btn" data-action="close">
+				<img src="icon:x"/>
+			</div>
+		</div>
+		<div class="search-input-area">
+			<input id="search-input" class="search-input" type="text" placeholder="Search, e.g. from:name has:image"/>
+		</div>
+		<div id="search-count" class="search-count" style="display: none;"></div>
+		<div id="search-status" class="search-status-msg" style="display: none;"></div>
+		<div id="search-results" class="search-results-list"></div>
+		<div id="search-pager" class="search-pager" style="display: none;">
+			<button id="search-prev" class="search-page-btn" data-action="prev-page">Previous</button>
+			<span id="search-page" class="search-page-label"></span>
+			<button id="search-next" class="search-page-btn" data-action="next-page">Next</button>
+		</div>
+	</div>
+</body>
+</rml>

@@ -213,6 +213,14 @@ void ChatController::setupEventListeners()
             updateHeader();
         } else if (action == std::string("open-threads")) {
             shell.openThreadBrowser(currentChannelId);
+        } else if (action == std::string("open-search")) {
+            std::string scope = conversationName();
+            if (!shell.location().isHome()) {
+                auto *instance = shell.currentInstance();
+                auto guild = instance ? instance->getGuild(currentGuildId) : std::nullopt;
+                scope = guild ? guild->name.valueOr(std::string()) : std::string();
+            }
+            shell.openSearch(currentChannelId, scope);
         } else if (action == std::string("user-profile")) {
             uint64_t uid = parseNumber(attribute(actionEl, "data-user-id"));
             if (uid != 0) {
@@ -1009,7 +1017,7 @@ void ChatController::updateHeader()
     const std::string html = std::string("<div class=\"header-left\">") + leadingIcon
         + std::string("<span class=\"header-title\">") + escape(name) + std::string("</span>")
         + presenceDot + topicHtml + std::string("</div><div class=\"header-right\">")
-        + threads + members + std::string("</div>");
+        + threads + members + std::string("<div class=\"header-btn\" data-action=\"open-search\" title=\"Search\"><img src=\"icon:search\"/></div></div>");
     headerEl->SetInnerRML(html);
     requestRender();
 }

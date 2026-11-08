@@ -27,6 +27,7 @@ class Database;
 #include "PermissionManager.hpp"
 #include "Storage/AccountRepository.hpp"
 #include "NotificationPolicy.hpp"
+#include "NotificationText.hpp"
 
 namespace Styx {
 namespace Core {
@@ -77,6 +78,8 @@ public:
 #endif
 
     [[nodiscard]] std::vector<Discord::Role> getRolesForGuild(Snowflake guildId);
+    // Names for user, channel and role ids found in message text, as members of guildId see them.
+    [[nodiscard]] MentionNames mentionNames(Snowflake guildId);
     [[nodiscard]] std::vector<Discord::Role> getMemberRolesSorted(Snowflake guildId, Snowflake userId);
     [[nodiscard]] std::optional<Discord::Guild> getGuild(Snowflake guildId);
     [[nodiscard]] std::optional<Discord::Channel> getChannel(Snowflake channelId);

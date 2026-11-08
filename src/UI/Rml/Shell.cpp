@@ -19,6 +19,7 @@
 #include "ImageViewerController.hpp"
 #include "SettingsController.hpp"
 #include "ThreadBrowserController.hpp"
+#include "SearchController.hpp"
 #include "ExpressionPickerController.hpp"
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
@@ -110,30 +111,12 @@ void showMessageNotification(Shell *shell, Core::ClientInstance *client, const D
             title = author;
     }
 
-    using Core::JsonUtils::detail::snowflake;
-    Core::MentionNames names;
-    names.user = [users, guildId](std::string_view userId) -> std::string {
-        const Snowflake id = snowflake(userId);
-        return id.isValid() ? users->getDisplayName(id, guildId) : std::string();
-    };
-    names.channel = [client](std::string_view channelId) -> std::string {
-        auto c = client->getChannel(snowflake(channelId));
-        return c ? c->name.valueOr(std::string()) : std::string();
-    };
-    names.role = [client, guildId](std::string_view roleId) -> std::string {
-        const Snowflake id = snowflake(roleId);
-        for (const auto &role : client->getRolesForGuild(guildId))
-            if (role.id.hasValue() && role.id.get() == id)
-                return role.name.valueOr(std::string());
-        return std::string();
-    };
-
     const int attachmentCount = msg.attachments.hasValue() ? static_cast<int>(msg.attachments.get().size()) : 0;
     const int stickerCount = msg.stickerItems.hasValue() ? static_cast<int>(msg.stickerItems.get().size()) : 0;
 
     Platform::Notifications::Notification notification;
     notification.title = std::move(title);
-    notification.body = Core::notificationText(msg.content.valueOr(std::string()), attachmentCount, stickerCount, names);
+    notification.body = Core::notificationText(msg.content.valueOr(std::string()), attachmentCount, stickerCount, client->mentionNames(guildId));
 
     if (msg.author.hasValue()) {
         const std::string avatar = users->getAvatarUrl(msg.author.get(), guildId, 64);
@@ -701,6 +684,17 @@ void Shell::openThreadBrowser(Snowflake channel)
     }
     auto data = instance->getChannel(channel);
     threadBrowserController->open(instance, channel, data ? data->name.valueOr(std::string{}) : std::string{});
+}
+void Shell::openSearch(Snowflake channel, const std::string &scopeName)
+{
+    if (!instance) return;
+    const Snowflake guild = current.isHome() ? Snowflake::Invalid : current.guildId;
+    if (!guild.isValid() && !channel.isValid()) return;
+    if (!searchController) {
+        searchController = std::make_unique<Rml::SearchController>(*this);
+        track(searchController->resultActivated.connect([this](Snowflake resultChannel, Snowflake message) { jumpToMessage(resultChannel, message); }));
+    }
+    searchController->open(instance, guild, channel, scopeName);
 }
 void Shell::showContextMenu(std::vector<Rml::MenuItem> items) { if (contextMenu) contextMenu->show(std::move(items), mapFromGlobal(Platform::Desktop::cursorPosition())); }
 void Shell::showContextMenuForUser(Snowflake userId, Snowflake guild)

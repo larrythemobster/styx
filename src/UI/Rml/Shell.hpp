@@ -35,6 +35,7 @@ class ImageViewerController;
 class GoLiveController;
 class ForumController;
 class ThreadBrowserController;
+class SearchController;
 class ExpressionPickerController;
 }
 struct Location {
@@ -110,6 +111,8 @@ public:
     void showContextMenuForChannel(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId);
     void openForum(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake forumId);
     void openThreadBrowser(Core::Snowflake channelId);
+    // Message search for the current server, or for the DM channelId at home.
+    void openSearch(Core::Snowflake channelId, const std::string &scopeName);
     void applyCloseToTray();
     // Shows the current mention count on the taskbar, or clears it when the setting is off.
     void refreshTaskbarBadge();
@@ -163,6 +166,7 @@ private:
     std::unique_ptr<Rml::GuildSettingsController> guildSettingsController;
     std::unique_ptr<Rml::ForumController> forumController;
     std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;
+    std::unique_ptr<Rml::SearchController> searchController;
 };
 }
 }

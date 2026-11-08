@@ -280,6 +280,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/ImageViewerController.cpp
     src/UI/Rml/ForumController.cpp
     src/UI/Rml/ThreadBrowserController.cpp
+    src/UI/Rml/SearchController.cpp
     src/UI/Rml/ExpressionPickerController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )

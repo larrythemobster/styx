@@ -1618,6 +1618,28 @@ std::vector<Discord::Role> ClientInstance::getRolesForGuild(Snowflake guildId)
     return roles;
 }
 
+MentionNames ClientInstance::mentionNames(Snowflake guildId)
+{
+    using JsonUtils::detail::snowflake;
+    MentionNames names;
+    names.user = [users = userManager.get(), guildId](std::string_view userId) -> std::string {
+        const Snowflake id = snowflake(userId);
+        return id.isValid() ? users->getDisplayName(id, guildId) : std::string();
+    };
+    names.channel = [this](std::string_view channelId) -> std::string {
+        auto channel = getChannel(snowflake(channelId));
+        return channel ? channel->name.valueOr(std::string()) : std::string();
+    };
+    names.role = [this, guildId](std::string_view roleId) -> std::string {
+        const Snowflake id = snowflake(roleId);
+        for (const auto &role : getRolesForGuild(guildId))
+            if (role.id.hasValue() && role.id.get() == id)
+                return role.name.valueOr(std::string());
+        return std::string();
+    };
+    return names;
+}
+
 std::vector<Discord::Role> ClientInstance::getMemberRolesSorted(Snowflake guildId, Snowflake userId)
 {
     auto memberRoleIds = userManager->getMemberRoles(guildId, userId);
