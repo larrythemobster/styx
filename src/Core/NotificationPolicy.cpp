@@ -2,6 +2,13 @@
 
 namespace Styx::Core {
 
+bool isMentioned(const NotificationFacts &facts)
+{
+    return facts.mentionsMe ||
+        (facts.mentionsEveryone && !facts.suppressEveryone) ||
+        (facts.mentionsMyRole && !facts.suppressRoles);
+}
+
 bool shouldNotify(const NotificationFacts &facts)
 {
     using Level = Discord::MessageNotificationLevel;
@@ -12,9 +19,7 @@ bool shouldNotify(const NotificationFacts &facts)
     if (facts.privateChannel)
         return true;
 
-    const bool mentioned = facts.mentionsMe ||
-        (facts.mentionsEveryone && !facts.suppressEveryone) ||
-        (facts.mentionsMyRole && !facts.suppressRoles);
+    const bool mentioned = isMentioned(facts);
 
     switch (facts.level) {
     case Level::NO_MESSAGES:

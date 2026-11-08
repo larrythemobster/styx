@@ -23,6 +23,7 @@
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
 #endif
+#include "Core/Audio/Sounds.hpp"
 #include "Core/ForumManager.hpp"
 #include "Core/ImageManager.hpp"
 #include "Core/Logging.hpp"
@@ -390,7 +391,10 @@ void Shell::setupPermanentConnections(ClientInstance *client)
     track(client->guildRoleUpdated.connect(rolesChanged));
     track(client->guildRoleDeleted.connect(rolesChanged));
     track(client->readStateChanged.connect([this, client](Snowflake channel) { channelTreeModel->updateReadState(channel, client->accountId()); }));
-    track(client->notificationRequested.connect([this, client](const Discord::Message &msg) { showMessageNotification(this, client, msg); }));
+    track(client->notificationRequested.connect([this, client](const Discord::Message &msg, bool mentioned) {
+        showMessageNotification(this, client, msg);
+        Core::Sounds::play(mentioned ? Core::Sounds::Sound::Mention : Core::Sounds::Sound::Message);
+    }));
     track(client->presences()->presencesChanged.connect([this, client](const std::vector<Snowflake> &users) { channelTreeModel->updatePresence(client->accountId(), users); }));
     track(client->forumBadgeChanged.connect([this, client](Snowflake id) { channelTreeModel->updateForumBadge(id, client->accountId()); }));
     track(client->forumJoinedPostsChanged.connect([this, client](Snowflake id) { channelTreeModel->updateForumThreads(id, client->accountId()); }));

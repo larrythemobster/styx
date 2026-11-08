@@ -130,6 +130,20 @@ TEST_CASE("Only mentions level", "[notifications]")
     REQUIRE(shouldNotify(mentionsMeSuppressed));
 }
 
+TEST_CASE("A notified message counts as a mention only when it mentions the user", "[notifications]")
+{
+    NotificationFacts plain = guildMessage(Level::ALL_MESSAGES);
+    REQUIRE(shouldNotify(plain));
+    REQUIRE_FALSE(isMentioned(plain));
+
+    NotificationFacts everyone = plain;
+    everyone.mentionsEveryone = true;
+    REQUIRE(isMentioned(everyone));
+    everyone.suppressEveryone = true;
+    REQUIRE(shouldNotify(everyone));
+    REQUIRE_FALSE(isMentioned(everyone));
+}
+
 static MentionNames sampleNames()
 {
     MentionNames names;

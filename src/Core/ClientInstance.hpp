@@ -139,8 +139,8 @@ public:
     Platform::Signal<Snowflake> forumJoinedPostsChanged;
     Platform::Signal<Snowflake> guildSettingsChanged;
     Platform::Signal<Snowflake, Snowflake> channelLastMessageUpdated;
-    // A new message that should raise a desktop notification.
-    Platform::Signal<const Discord::Message &> notificationRequested;
+    // A new message that should raise a desktop notification, and whether it mentions the user.
+    Platform::Signal<const Discord::Message &, bool> notificationRequested;
     Platform::Signal<Snowflake, Snowflake> voiceStateChanged;
     Platform::Signal<const AccountInfo &> authenticationFailed;
 

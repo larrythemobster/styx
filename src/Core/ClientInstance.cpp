@@ -1284,8 +1284,8 @@ void ClientInstance::onMessageCreated(const Discord::Message &msg)
     readStateManager->handleMessageCreated(channelId, messageId, fromSelf, isMention);
 
     channelLastMessageUpdated.publish(channelId, messageId);
-    if (shouldNotify(notificationFactsFor(msg)))
-        notificationRequested.publish(msg);
+    if (const auto facts = notificationFactsFor(msg); shouldNotify(facts))
+        notificationRequested.publish(msg, isMentioned(facts));
 }
 
 bool ClientInstance::isMessageMentioningMe(const Discord::Message &msg) const

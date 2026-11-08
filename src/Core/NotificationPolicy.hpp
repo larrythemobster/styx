@@ -27,6 +27,8 @@ struct NotificationFacts
     bool viewingChannel = false;
 };
 
+// Whether the message mentions the user, by name, role or @everyone, after suppression settings.
+[[nodiscard]] bool isMentioned(const NotificationFacts &facts);
 [[nodiscard]] bool shouldNotify(const NotificationFacts &facts);
 
 } // namespace Styx::Core
