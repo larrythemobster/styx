@@ -2518,10 +2518,14 @@ TEST_CASE("A screen that is not there fails", "[video][encode]")
     pipeline.start(settings);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+#ifdef _WIN32
+    // Windows keeps retrying a missing screen for GIVE_UP_AFTER_MS, since a display
+    // change briefly removes them. X11 reports a screen index that doesn't exist at once.
     if (screenCaptureAvailable()) {
         std::lock_guard lock(record.mutex);
         REQUIRE(record.failures.empty());
     }
+#endif
     REQUIRE(tryUntil([&] {
         std::lock_guard lock(record.mutex);
         return record.failures.size() == 1;

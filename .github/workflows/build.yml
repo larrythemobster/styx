@@ -530,7 +530,10 @@ jobs:
           key: vcpkg-bin-arm64-osx-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        # Styx has no macOS camera backend, and the camera pipeline tests assert
+        # real-time frame rates that the 3-core macOS runner can't sustain while
+        # encoding in software.
+        run: ctest --test-dir build --output-on-failure -E '^CameraCaptureTests$'
 
       - name: Prepare artifact
         run: |
