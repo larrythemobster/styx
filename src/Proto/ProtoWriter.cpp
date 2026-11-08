@@ -25,6 +25,15 @@ void ProtoWriter::writeVarint(uint32_t fieldNumber, uint64_t value)
     writeRawVarint(value);
 }
 
+void ProtoWriter::writeFixed64(uint32_t fieldNumber, uint64_t value)
+{
+    writeTag(fieldNumber, WireType::FIXED64);
+    for (size_t i = 0; i < 8; ++i) {
+        buffer.push_back(static_cast<char>(value & 0xFF));
+        value >>= 8;
+    }
+}
+
 void ProtoWriter::writeInt32(uint32_t fieldNumber, int32_t value)
 {
     // protobuf sign-extends negative int32 to 64 bits, giving a 10 byte varint

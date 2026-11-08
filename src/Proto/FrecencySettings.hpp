@@ -30,6 +30,14 @@ struct EmojiFrecency
     static EmojiFrecency fromProto(ProtoReader &reader);
 };
 
+// map<fixed64, FrecencyItem> guild_and_channels = 1, keyed by server, channel or DM id
+struct GuildAndChannelFrecency
+{
+    std::unordered_map<uint64_t, FrecencyItem> guildAndChannels;
+
+    static GuildAndChannelFrecency fromProto(ProtoReader &reader);
+};
+
 enum class GifType : uint8_t {
     None = 0,
     Image = 1,
@@ -69,6 +77,7 @@ struct FrecencyUserSettings
     std::optional<FavoriteGifs> favoriteGifs;
     std::optional<EmojiFrecency> emojiFrecency;
     std::optional<EmojiFrecency> emojiReactionFrecency;
+    std::optional<GuildAndChannelFrecency> guildAndChannelFrecency;
 
     static FrecencyUserSettings fromProto(ProtoReader &reader);
 

@@ -96,6 +96,54 @@ void readEmojiEntry(ProtoReader &reader, EmojiFrecency &frecency)
         frecency.emojis.insert_or_assign(std::move(key), std::move(item));
 }
 
+/*
+GuildAndChannelFrecency
+{
+    map<fixed64, FrecencyItem> guild_and_channels = 1;
+}
+*/
+std::string writeGuildAndChannelFrecency(const GuildAndChannelFrecency &frecency)
+{
+    ProtoWriter writer;
+    for (const auto &[key, item] : frecency.guildAndChannels) {
+        ProtoWriter entry;
+        entry.writeFixed64(1, key);
+        entry.writeBytes(2, writeFrecencyItem(item));
+        writer.writeBytes(1, entry.bytes());
+    }
+    return writer.takeBytes();
+}
+
+void readGuildAndChannelEntry(ProtoReader &reader, GuildAndChannelFrecency &frecency)
+{
+    std::optional<uint64_t> key;
+    FrecencyItem item;
+    Tag tag;
+
+    while (reader.readTag(tag)) {
+        if (tag.fieldNumber == 1 && tag.wireType == WireType::FIXED64) {
+            uint64_t keyValue = 0;
+            if (reader.readFixed64(keyValue))
+                key = keyValue;
+            continue;
+        }
+
+        if (tag.fieldNumber == 2 && tag.wireType == WireType::LENGTH_DELIMITED) {
+            std::span<const uint8_t> nested;
+            if (!reader.readLengthDelimited(nested))
+                break;
+            ProtoReader nestedReader(nested);
+            item = FrecencyItem::fromProto(nestedReader);
+            continue;
+        }
+
+        reader.skipField(tag.wireType);
+    }
+
+    if (key)
+        frecency.guildAndChannels.insert_or_assign(*key, std::move(item));
+}
+
 std::string writeFavoriteGif(const FavoriteGif &gif)
 {
     ProtoWriter writer;
@@ -265,6 +313,27 @@ EmojiFrecency EmojiFrecency::fromProto(ProtoReader &reader)
     return frecency;
 }
 
+GuildAndChannelFrecency GuildAndChannelFrecency::fromProto(ProtoReader &reader)
+{
+    GuildAndChannelFrecency frecency;
+    Tag tag;
+
+    while (reader.readTag(tag)) {
+        // map<fixed64, FrecencyItem> guild_and_channels = 1
+        if (tag.fieldNumber == 1 && tag.wireType == WireType::LENGTH_DELIMITED) {
+            std::span<const uint8_t> nested;
+            if (reader.readLengthDelimited(nested)) {
+                ProtoReader nestedReader(nested);
+                readGuildAndChannelEntry(nestedReader, frecency);
+            }
+        } else {
+            reader.skipField(tag.wireType);
+        }
+    }
+
+    return frecency;
+}
+
 FavoriteGifs FavoriteGifs::fromProto(std::span<const uint8_t> bytes)
 {
     FavoriteGifs favorites;
@@ -342,6 +411,10 @@ FrecencyUserSettings FrecencyUserSettings::fromProto(ProtoReader &reader)
         case 6:
             settings.emojiFrecency = EmojiFrecency::fromProto(nestedReader);
             break;
+        // GuildAndChannelFrecency guild_and_channel_frecency
+        case 12:
+            settings.guildAndChannelFrecency = GuildAndChannelFrecency::fromProto(nestedReader);
+            break;
         // EmojiFrecency emoji_reaction_frecency
         case 13:
             settings.emojiReactionFrecency = EmojiFrecency::fromProto(nestedReader);
@@ -361,6 +434,8 @@ std::string FrecencyUserSettings::toProtoPartial() const
         writer.writeBytes(2, favoriteGifs->toProto());
     if (emojiFrecency)
         writer.writeBytes(6, writeEmojiFrecency(*emojiFrecency));
+    if (guildAndChannelFrecency)
+        writer.writeBytes(12, writeGuildAndChannelFrecency(*guildAndChannelFrecency));
     if (emojiReactionFrecency)
         writer.writeBytes(13, writeEmojiFrecency(*emojiReactionFrecency));
     return writer.takeBytes();

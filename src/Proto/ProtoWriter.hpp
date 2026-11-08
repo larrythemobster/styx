@@ -16,6 +16,7 @@ class ProtoWriter
 {
 public:
     void writeVarint(uint32_t fieldNumber, uint64_t value);
+    void writeFixed64(uint32_t fieldNumber, uint64_t value);
     void writeInt32(uint32_t fieldNumber, int32_t value);
     void writeString(uint32_t fieldNumber, std::string_view value);
     void writeBytes(uint32_t fieldNumber, std::span<const uint8_t> value);

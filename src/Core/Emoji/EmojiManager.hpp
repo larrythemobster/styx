@@ -51,6 +51,12 @@ public:
     void trackMessageEmojis(const std::string &content);
     void trackReaction(const std::string &reactionEmoji);
 
+    // Servers, channels and DMs share the frecency settings sync with emoji: the official
+    // client keeps them in the same synced message.
+    void trackPlace(Snowflake placeId);
+    // Recent-use score for a server, channel or DM; 0 when never used.
+    [[nodiscard]] double placeFrecency(Snowflake placeId);
+
     // write back to settings-proto/2
     void savePendingUsage();
 
@@ -77,11 +83,17 @@ private:
         std::vector<std::string> normalizedNames;
     };
 
+    enum class UsageKind {
+        ChatEmoji,
+        ReactionEmoji,
+        Place
+    };
+
     struct PendingUsage
     {
         std::string key;
         uint64_t timestamp = 0;
-        bool reaction = false;
+        UsageKind kind = UsageKind::ChatEmoji;
     };
 
     // for querying emoji usability
@@ -106,7 +118,8 @@ private:
     void replayPendingUsages();
     void seedDefaultsIfEmpty();
 
-    void trackUsage(const std::string &key, bool reaction);
+    void trackUsage(const std::string &key, UsageKind kind);
+    void applyUsage(const PendingUsage &usage);
     void trackSurrogates(const std::string &content);
 
     void onSyncTimer();
@@ -138,6 +151,7 @@ private:
 
     FrecencyTracker chatTracker;
     FrecencyTracker reactionTracker;
+    FrecencyTracker placeTracker;
 
     std::vector<PendingUsage> pendingUsages;
     std::optional<uint32_t> dataVersion;

@@ -101,29 +101,58 @@ struct QueryMatcher
     }
 };
 
+FrecencyTracker::Entry toEntry(const Proto::FrecencyItem &item)
+{
+    FrecencyTracker::Entry entry;
+    entry.totalUses = item.totalUses;
+    entry.recentUses = item.recentUses;
+    entry.score = item.score;
+    return entry;
+}
+
+Proto::FrecencyItem toItem(const FrecencyTracker::Entry &entry)
+{
+    Proto::FrecencyItem item;
+    item.totalUses = entry.totalUses;
+    item.recentUses = entry.recentUses;
+    item.frecency = entry.frecency;
+    item.score = static_cast<int32_t>(entry.score);
+    return item;
+}
+
 std::unordered_map<std::string, FrecencyTracker::Entry> toHistory(const Proto::EmojiFrecency &frecency)
 {
     std::unordered_map<std::string, FrecencyTracker::Entry> history;
-    for (const auto &[key, val] : frecency.emojis) {
-        FrecencyTracker::Entry entry;
-        entry.totalUses = val.totalUses;
-        entry.recentUses = val.recentUses;
-        entry.score = val.score;
-        history.insert_or_assign(key, std::move(entry));
-    }
+    for (const auto &[key, val] : frecency.emojis)
+        history.insert_or_assign(key, toEntry(val));
+    return history;
+}
+
+std::unordered_map<std::string, FrecencyTracker::Entry> toHistory(const Proto::GuildAndChannelFrecency &frecency)
+{
+    std::unordered_map<std::string, FrecencyTracker::Entry> history;
+    for (const auto &[id, val] : frecency.guildAndChannels)
+        history.insert_or_assign(std::to_string(id), toEntry(val));
     return history;
 }
 
 Proto::EmojiFrecency toFrecency(const std::unordered_map<std::string, FrecencyTracker::Entry> &history)
 {
     Proto::EmojiFrecency frecency;
+    for (const auto &[key, entry] : history)
+        frecency.emojis.insert_or_assign(key, toItem(entry));
+    return frecency;
+}
+
+Proto::GuildAndChannelFrecency toPlaceFrecency(const std::unordered_map<std::string, FrecencyTracker::Entry> &history)
+{
+    Proto::GuildAndChannelFrecency frecency;
     for (const auto &[key, entry] : history) {
-        Proto::FrecencyItem item;
-        item.totalUses = entry.totalUses;
-        item.recentUses = entry.recentUses;
-        item.frecency = entry.frecency;
-        item.score = static_cast<int32_t>(entry.score);
-        frecency.emojis.insert_or_assign(key, std::move(item));
+        uint64_t id = 0;
+        const auto [ptr, ec] = std::from_chars(key.data(), key.data() + key.size(), id);
+        if (ec != std::errc{} || ptr != key.data() + key.size())
+            continue;
+        frecency.guildAndChannels.insert_or_assign(id, toItem(entry));
     }
     return frecency;
 }
@@ -134,9 +163,9 @@ EmojiManager::EmojiManager(Discord::Client *client, ClientInstance *instance)
     : client(client),
       instance(instance),
       chatTracker(FrecencyTracker::chatEmojiOptions()),
-      reactionTracker(FrecencyTracker::reactionEmojiOptions())
+      reactionTracker(FrecencyTracker::reactionEmojiOptions()),
+      placeTracker(FrecencyTracker::chatEmojiOptions())
 {
-
 }
 
 uint64_t EmojiManager::nowMs()
@@ -570,20 +599,34 @@ std::string EmojiManager::unicodeCategoryTitle(const std::string &categoryId)
     return categoryId;
 }
 
-void EmojiManager::trackUsage(const std::string &key, bool reaction)
+void EmojiManager::trackUsage(const std::string &key, UsageKind kind)
 {
     if (key.empty())
         return;
 
     const uint64_t timestamp = nowMs();
-    // a reaction counts towards both
-    if (reaction)
-        reactionTracker.track(key, timestamp);
-    chatTracker.track(key, timestamp);
+    applyUsage({ key, timestamp, kind });
 
     if (pendingUsages.size() >= MAX_PENDING_USAGES)
         pendingUsages.erase(pendingUsages.begin());
-    pendingUsages.push_back({ key, timestamp, reaction });
+    pendingUsages.push_back({ key, timestamp, kind });
+}
+
+void EmojiManager::applyUsage(const PendingUsage &usage)
+{
+    switch (usage.kind) {
+    case UsageKind::ChatEmoji:
+        chatTracker.track(usage.key, usage.timestamp);
+        break;
+    // a reaction counts towards both
+    case UsageKind::ReactionEmoji:
+        reactionTracker.track(usage.key, usage.timestamp);
+        chatTracker.track(usage.key, usage.timestamp);
+        break;
+    case UsageKind::Place:
+        placeTracker.track(usage.key, usage.timestamp);
+        break;
+    }
 }
 
 void EmojiManager::trackMessageEmojis(const std::string &content)
@@ -592,7 +635,7 @@ void EmojiManager::trackMessageEmojis(const std::string &content)
         return;
 
     for (std::sregex_iterator it(content.begin(), content.end(), customEmojiTagRe()), end; it != end; ++it)
-        trackUsage((*it)[2].str(), false);
+        trackUsage((*it)[2].str(), UsageKind::ChatEmoji);
 
     trackSurrogates(content);
 }
@@ -600,7 +643,7 @@ void EmojiManager::trackMessageEmojis(const std::string &content)
 void EmojiManager::trackSurrogates(const std::string &content)
 {
     for (const std::string &sequence : extractEmojiSequences(content))
-        trackUsage(unicodeKey(sequence), false);
+        trackUsage(unicodeKey(sequence), UsageKind::ChatEmoji);
 }
 
 // `reactionEmoji` is in REST form
@@ -608,9 +651,25 @@ void EmojiManager::trackReaction(const std::string &reactionEmoji)
 {
     const auto idSeparator = reactionEmoji.rfind(':');
     if (idSeparator == std::string::npos)
-        trackUsage(unicodeKey(reactionEmoji), true);
+        trackUsage(unicodeKey(reactionEmoji), UsageKind::ReactionEmoji);
     else
-        trackUsage(reactionEmoji.substr(idSeparator + 1), true);
+        trackUsage(reactionEmoji.substr(idSeparator + 1), UsageKind::ReactionEmoji);
+}
+
+void EmojiManager::trackPlace(Snowflake placeId)
+{
+    if (!placeId.isValid())
+        return;
+    trackUsage(placeId.toString(), UsageKind::Place);
+}
+
+double EmojiManager::placeFrecency(Snowflake placeId)
+{
+    placeTracker.refresh(nowMs());
+    const auto frecency = placeTracker.frecency(placeId.toString());
+    if (!frecency || *frecency < 0)
+        return 0;
+    return static_cast<double>(*frecency);
 }
 
 void EmojiManager::onReady()
@@ -641,7 +700,8 @@ void EmojiManager::fetchSettings()
 
         Core::log(Core::LogLevel::Info, LogCore) << "EmojiManager: loaded frecency for" << instance->accountId() << "-"
                         << chatTracker.usageHistory().size() << "chat,"
-                        << reactionTracker.usageHistory().size() << "reaction entries";
+                        << reactionTracker.usageHistory().size() << "reaction,"
+                        << placeTracker.usageHistory().size() << "place entries";
     });
 }
 
@@ -651,14 +711,14 @@ void EmojiManager::adoptSettings(const Proto::FrecencyUserSettings &settings, bo
         dataVersion = settings.dataVersion;
 
     auto apply = [partial](FrecencyTracker &tracker,
-                           const std::optional<Proto::EmojiFrecency> &frecency) {
+                           const std::optional<std::unordered_map<std::string, FrecencyTracker::Entry>> &frecency) {
         if (!frecency) {
             if (!partial)
                 tracker.reset();
             return;
         }
 
-        std::unordered_map<std::string, FrecencyTracker::Entry> history = toHistory(*frecency);
+        std::unordered_map<std::string, FrecencyTracker::Entry> history = *frecency;
         if (partial) {
             std::unordered_map<std::string, FrecencyTracker::Entry> merged = tracker.usageHistory();
             for (const auto &[key, entry] : history)
@@ -668,17 +728,15 @@ void EmojiManager::adoptSettings(const Proto::FrecencyUserSettings &settings, bo
         tracker.overwriteHistory(history);
     };
 
-    apply(chatTracker, settings.emojiFrecency);
-    apply(reactionTracker, settings.emojiReactionFrecency);
+    apply(chatTracker, settings.emojiFrecency ? std::optional(toHistory(*settings.emojiFrecency)) : std::nullopt);
+    apply(reactionTracker, settings.emojiReactionFrecency ? std::optional(toHistory(*settings.emojiReactionFrecency)) : std::nullopt);
+    apply(placeTracker, settings.guildAndChannelFrecency ? std::optional(toHistory(*settings.guildAndChannelFrecency)) : std::nullopt);
 }
 
 void EmojiManager::replayPendingUsages()
 {
-    for (const PendingUsage &usage : pendingUsages) {
-        if (usage.reaction)
-            reactionTracker.track(usage.key, usage.timestamp);
-        chatTracker.track(usage.key, usage.timestamp);
-    }
+    for (const PendingUsage &usage : pendingUsages)
+        applyUsage(usage);
 }
 
 void EmojiManager::seedDefaultsIfEmpty()
@@ -746,10 +804,12 @@ void EmojiManager::savePendingUsage()
     const uint64_t now = nowMs();
     chatTracker.compute(now);
     reactionTracker.compute(now);
+    placeTracker.compute(now);
 
     Proto::FrecencyUserSettings partial;
     partial.emojiFrecency = toFrecency(FrecencyTracker::capForPersistence(chatTracker.usageHistory(), PERSISTED_ENTRY_LIMIT));
     partial.emojiReactionFrecency = toFrecency(FrecencyTracker::capForPersistence(reactionTracker.usageHistory(), PERSISTED_ENTRY_LIMIT));
+    partial.guildAndChannelFrecency = toPlaceFrecency(FrecencyTracker::capForPersistence(placeTracker.usageHistory(), PERSISTED_ENTRY_LIMIT));
 
     std::vector<PendingUsage> inFlight;
     inFlight.swap(pendingUsages);
@@ -785,7 +845,7 @@ void EmojiManager::savePendingUsage()
                     replayPendingUsages();
                 }
 
-                Core::log(Core::LogLevel::Info, LogCore) << "EmojiManager: saved" << inFlight.size() << "emoji usages";
+                Core::log(Core::LogLevel::Info, LogCore) << "EmojiManager: saved" << inFlight.size() << "usages";
             });
 }
 

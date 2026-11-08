@@ -512,6 +512,7 @@ void Shell::openChannel(Snowflake account, Snowflake guild, Snowflake channel)
         channelTreeModel->showTemporaryThread(*data, account); node = channelTreeModel->findChannelTreeNode(channel, account);
     }
     if (!guild.isValid() && node) if (auto *server = ChannelTreeModel::findGuildNode(node)) guild = server->id;
+    if (auto *emojis = client->emojis()) { emojis->trackPlace(channel); emojis->trackPlace(guild); }
     auto *forum = node && node->type == ChannelNode::Type::Thread ? node->parent : node;
     if (forum && forum->type == ChannelNode::Type::Forum && (!node || node->type != ChannelNode::Type::Thread)) { openForum(account, guild, forum->id); return; }
     if (forumController) forumController->close();

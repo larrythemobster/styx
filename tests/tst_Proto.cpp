@@ -231,3 +231,116 @@ TEST_CASE("Proto: Favorite GIFs travel alone in a patch", "[proto]")
     REQUIRE(decoded.favoriteGifs->gifs.size() == 1);
     REQUIRE(!decoded.emojiFrecency.has_value());
 }
+
+TEST_CASE("Proto: Guild and channel frecency round trip", "[proto]")
+{
+    FrecencyItem guild;
+    guild.totalUses = 9;
+    guild.recentUses = { 1700000000000ULL, 1700000060000ULL, 1700000120000ULL };
+    guild.frecency = -15;
+    guild.score = 350;
+
+    FrecencyItem channel;
+    channel.totalUses = 4;
+    channel.recentUses = { 1700000180000ULL };
+    channel.frecency = 50;
+    channel.score = 120;
+
+    const uint64_t largeId = 1234567890123456789ULL;
+    const uint64_t smallId = 987654321ULL;
+
+    FrecencyUserSettings settings;
+    GuildAndChannelFrecency places;
+    places.guildAndChannels.insert_or_assign(largeId, guild);
+    places.guildAndChannels.insert_or_assign(smallId, channel);
+    settings.guildAndChannelFrecency = places;
+    settings.dataVersion = 7;
+
+    const auto encoded = settings.toProtoPartial();
+    ProtoReader reader(encoded);
+    FrecencyUserSettings decoded = FrecencyUserSettings::fromProto(reader);
+
+    REQUIRE_FALSE(decoded.dataVersion.has_value());
+    REQUIRE(decoded.guildAndChannelFrecency.has_value());
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.size() == 2);
+
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.contains(largeId));
+    const FrecencyItem &decodedGuild = decoded.guildAndChannelFrecency->guildAndChannels.at(largeId);
+    REQUIRE(decodedGuild.totalUses == 9u);
+    REQUIRE(decodedGuild.recentUses == guild.recentUses);
+    REQUIRE(decodedGuild.frecency == -15);
+    REQUIRE(decodedGuild.score == 350);
+
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.contains(smallId));
+    const FrecencyItem &decodedChannel = decoded.guildAndChannelFrecency->guildAndChannels.at(smallId);
+    REQUIRE(decodedChannel.totalUses == 4u);
+    REQUIRE(decodedChannel.recentUses == channel.recentUses);
+    REQUIRE(decodedChannel.frecency == 50);
+    REQUIRE(decodedChannel.score == 120);
+}
+
+TEST_CASE("Proto: Guild and channel frecency hand-built wire format", "[proto]")
+{
+    // A fixed64 field is its tag (field 1, wire type 1) and then eight little-endian bytes.
+    ProtoWriter key;
+    key.writeFixed64(1, 0x0102030405060708ULL);
+    REQUIRE(key.bytes() == std::string("\x09\x08\x07\x06\x05\x04\x03\x02\x01", 9));
+
+    const uint64_t id = 1234567890123456789ULL;
+
+    ProtoWriter item;
+    item.writeVarint(1, 3);
+
+    ProtoWriter entry;
+    entry.writeFixed64(1, id);
+    entry.writeBytes(2, item.bytes());
+
+    ProtoWriter field12;
+    field12.writeBytes(1, entry.bytes());
+
+    ProtoWriter root;
+    root.writeBytes(12, field12.bytes());
+
+    ProtoReader reader(root.bytes());
+    FrecencyUserSettings decoded = FrecencyUserSettings::fromProto(reader);
+
+    REQUIRE(decoded.guildAndChannelFrecency.has_value());
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.size() == 1);
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.contains(id));
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.at(id).totalUses == 3u);
+}
+
+TEST_CASE("Proto: Guild and channel frecency skips non-fixed64 key", "[proto]")
+{
+    const uint64_t validId = 1234567890123456789ULL;
+    const uint64_t skippedVarintId = 42ULL;
+
+    ProtoWriter item;
+    item.writeVarint(1, 3);
+
+    // Malformed entry: key is written as a varint instead of fixed64
+    ProtoWriter badEntry;
+    badEntry.writeVarint(1, skippedVarintId);
+    badEntry.writeBytes(2, item.bytes());
+
+    // Valid entry following the malformed one
+    ProtoWriter goodEntry;
+    goodEntry.writeFixed64(1, validId);
+    goodEntry.writeBytes(2, item.bytes());
+
+    ProtoWriter field12;
+    field12.writeBytes(1, badEntry.bytes());
+    field12.writeBytes(1, goodEntry.bytes());
+
+    ProtoWriter root;
+    root.writeBytes(12, field12.bytes());
+
+    ProtoReader reader(root.bytes());
+    FrecencyUserSettings decoded = FrecencyUserSettings::fromProto(reader);
+
+    REQUIRE(decoded.guildAndChannelFrecency.has_value());
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.size() == 1);
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.contains(validId));
+    REQUIRE_FALSE(decoded.guildAndChannelFrecency->guildAndChannels.contains(skippedVarintId));
+    REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.at(validId).totalUses == 3u);
+}
