@@ -12,6 +12,8 @@
 #include "Platform/WorkerLoop.hpp"
 #include "Platform/ThreadPool.hpp"
 #include "Platform/Base64.hpp"
+#include "Platform/Notifications.hpp"
+#include "HardwareTests.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -981,4 +983,41 @@ TEST_CASE("Calendar day differences follow local dates rather than elapsed hours
     REQUIRE(beforeMidnight.daysUntil(afterMidnight) == 1);
     REQUIRE(afterMidnight.daysUntil(beforeMidnight) == -1);
     REQUIRE(afterMidnight.daysUntil(afterMidnight.addSeconds(60)) == 0);
+}
+
+TEST_CASE("Notifications: toast XML escapes text and drops control characters", "[notifications]")
+{
+    using namespace Styx::Platform::Notifications;
+
+    Notification simple;
+    simple.title = "Tom & Jerry";
+    simple.body = "<b>hi</b> \"x\" 'y'";
+    REQUIRE(toastXml(simple) == "<toast><visual><binding template=\"ToastGeneric\"><text>Tom &amp; Jerry</text><text>&lt;b&gt;hi&lt;/b&gt; &quot;x&quot; &#39;y&#39;</text></binding></visual></toast>");
+
+    Notification controlChars;
+    controlChars.body = std::string("a") + "\x01" + "b" + "\x1F" + "c" + "\n" + "d" + "\t" + "e";
+    REQUIRE(toastXml(controlChars).find("<text>abc\nd\te</text>") != std::string::npos);
+
+    Notification nonAscii;
+    nonAscii.body = "héllo 👋";
+    REQUIRE(toastXml(nonAscii).find("<text>héllo 👋</text>") != std::string::npos);
+
+    Notification withImage;
+    withImage.image = std::filesystem::temp_directory_path() / "styx avatar.png";
+    const auto imageXml = toastXml(withImage);
+    REQUIRE(imageXml.find("<image placement=\"appLogoOverride\" hint-crop=\"circle\" src=\"file:///") != std::string::npos);
+    REQUIRE(imageXml.find("styx%20avatar.png\"/>") != std::string::npos);
+}
+
+TEST_CASE("Notifications: a toast reaches the desktop", "[notifications]")
+{
+    SKIP_UNLESS_HARDWARE_IS_ASKED_FOR();
+    using namespace Styx::Platform::Notifications;
+    if (!available())
+        SKIP("desktop notifications are unavailable or turned off for Styx");
+
+    Notification notification;
+    notification.title = "Styx test";
+    notification.body = "Desktop notifications work.";
+    REQUIRE(show(notification, [] {}));
 }

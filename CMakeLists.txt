@@ -535,6 +535,7 @@ set(PLATFORM_SOURCES
     src/Platform/Utf8.cpp
     src/Platform/Native.cpp
     src/Platform/Desktop.cpp
+    src/Platform/Notifications.cpp
     src/Platform/WorkerLoop.cpp
 )
 
@@ -544,11 +545,13 @@ if(WIN32)
         src/Platform/SecureStore_win.cpp
         src/Platform/Settings_win.cpp
         src/Platform/Utf8_win.cpp
+        src/Platform/Notifications_win.cpp
     )
 else()
     list(APPEND PLATFORM_SOURCES
         src/Platform/Paths_other.cpp
         src/Platform/Utf8_other.cpp
+        src/Platform/Notifications_other.cpp
     )
     if(APPLE)
         list(APPEND PLATFORM_SOURCES src/Platform/SecureStore_apple.cpp)
@@ -579,7 +582,7 @@ if(TARGET WebP::webp)
 endif()
 if(WIN32)
     target_compile_definitions(styx_platform PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(styx_platform PUBLIC ws2_32 PRIVATE advapi32 crypt32 ole32 shell32 comdlg32 user32)
+    target_link_libraries(styx_platform PUBLIC ws2_32 PRIVATE advapi32 crypt32 ole32 shell32 comdlg32 user32 windowsapp)
 elseif(APPLE)
     find_library(STYX_SECURITY_FRAMEWORK Security REQUIRED)
     find_library(STYX_COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
