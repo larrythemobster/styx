@@ -26,6 +26,7 @@ class Database;
 #include "UserManager.hpp"
 #include "PermissionManager.hpp"
 #include "Storage/AccountRepository.hpp"
+#include "NotificationPolicy.hpp"
 
 namespace Styx {
 namespace Core {
@@ -138,6 +139,8 @@ public:
     Platform::Signal<Snowflake> forumJoinedPostsChanged;
     Platform::Signal<Snowflake> guildSettingsChanged;
     Platform::Signal<Snowflake, Snowflake> channelLastMessageUpdated;
+    // A new message that should raise a desktop notification.
+    Platform::Signal<const Discord::Message &> notificationRequested;
     Platform::Signal<Snowflake, Snowflake> voiceStateChanged;
     Platform::Signal<const AccountInfo &> authenticationFailed;
 
@@ -178,6 +181,7 @@ private:
     void connectSelectedCall(bool force);
     void onHeartbeatSessionChanged(const Discord::HeartbeatSession &session);
     bool isMessageMentioningMe(const Discord::Message &msg) const;
+    [[nodiscard]] NotificationFacts notificationFactsFor(const Discord::Message &msg);
 
 private:
     bool runInCacheTransaction(const char *what, const std::function<void(Platform::Database &)> &op);

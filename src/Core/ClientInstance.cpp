@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include "Platform/Desktop.hpp"
 #include "Platform/Dispatcher.hpp"
 
 #include "Core/Logging.hpp"
@@ -1283,6 +1284,8 @@ void ClientInstance::onMessageCreated(const Discord::Message &msg)
     readStateManager->handleMessageCreated(channelId, messageId, fromSelf, isMention);
 
     channelLastMessageUpdated.publish(channelId, messageId);
+    if (shouldNotify(notificationFactsFor(msg)))
+        notificationRequested.publish(msg);
 }
 
 bool ClientInstance::isMessageMentioningMe(const Discord::Message &msg) const
@@ -1319,6 +1322,50 @@ bool ClientInstance::isMessageMentioningMe(const Discord::Message &msg) const
             return true;
 
     return false;
+}
+
+NotificationFacts ClientInstance::notificationFactsFor(const Discord::Message &msg)
+{
+    NotificationFacts facts;
+    const Snowflake channelId = msg.channelId.get();
+    const Snowflake authorId = msg.author.hasValue() ? msg.author->id.get() : Snowflake::Invalid;
+    facts.fromSelf = authorId == account.id;
+    facts.authorBlocked = authorId.isValid() && relationshipManager->isBlockedOrIgnored(authorId);
+    facts.viewingChannel = readStateManager->activeChannel() == channelId && Platform::Desktop::applicationActive();
+
+    if (msg.mentions.hasValue())
+        for (const auto &user : msg.mentions.get())
+            if (user.id.get() == account.id)
+                facts.mentionsMe = true;
+    facts.mentionsEveryone = msg.mentionEveryone.valueOr(false);
+
+    auto channel = getChannel(channelId);
+    // Message requests stay quiet until they're accepted, as in the official client.
+    const bool request = channel && channel->isMessageRequest.valueOr(false);
+    if (!msg.guildId.hasValue()) {
+        facts.privateChannel = true;
+        facts.muted = request || readStateManager->isChannelMuted(channelId);
+        return facts;
+    }
+
+    const Snowflake guildId = msg.guildId.get();
+    Snowflake parentId = channel ? channel->parentId.valueOr(Snowflake::Invalid) : Snowflake::Invalid;
+    Snowflake categoryId;
+    // A thread inherits from its parent channel and that channel's category.
+    if (channel && channel->isThread() && parentId.isValid())
+        if (auto parent = getChannel(parentId))
+            categoryId = parent->parentId.valueOr(Snowflake::Invalid);
+    facts.muted = request || readStateManager->isMutedThroughParents(channelId, parentId, categoryId, guildId);
+    facts.level = readStateManager->resolveMessageNotifications(guildId, channelId, parentId);
+    facts.suppressEveryone = readStateManager->isSuppressEveryone(guildId);
+    facts.suppressRoles = readStateManager->isSuppressRoles(guildId);
+
+    if (msg.mentionRoles.hasValue())
+        if (auto myRoles = userManager->getMemberRoles(guildId, account.id))
+            for (const auto &roleId : msg.mentionRoles.get())
+                if (std::find(myRoles->begin(), myRoles->end(), roleId) != myRoles->end())
+                    facts.mentionsMyRole = true;
+    return facts;
 }
 
 void ClientInstance::handleAckRequest(Snowflake channelId, Snowflake messageId)

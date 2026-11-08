@@ -53,6 +53,11 @@ public:
     bool isGuildMuted(Snowflake guildId) const;
     [[nodiscard]] bool isSuppressEveryone(Snowflake guildId) const;
     [[nodiscard]] bool isSuppressRoles(Snowflake guildId) const;
+    Discord::MessageNotificationLevel resolveMessageNotifications(Snowflake guildId,
+                                                                  Snowflake channelId,
+                                                                  Snowflake parentId) const;
+    [[nodiscard]] bool isMutedThroughParents(Snowflake channelId, Snowflake parentId, Snowflake categoryId, Snowflake guildId) const;
+    [[nodiscard]] Snowflake activeChannel() const { return activeChannelId; }
 
     [[nodiscard]] bool isForumPostUnread(Snowflake threadId, Snowflake lastMessageId, bool archived) const;
     // should it be in channel list
@@ -94,11 +99,7 @@ private:
 
     void rebuildChannelOverrideCache(Snowflake guildSettingsKey);
 
-    Discord::MessageNotificationLevel resolveMessageNotifications(Snowflake guildId,
-                                                                  Snowflake channelId,
-                                                                  Snowflake parentId) const;
     [[nodiscard]] bool unreadCountsForGuild(Snowflake guildId, Snowflake channelId, Snowflake parentId) const;
-    [[nodiscard]] bool isMutedThroughParents(Snowflake channelId, Snowflake parentId, Snowflake categoryId, Snowflake guildId) const;
     [[nodiscard]] bool canTrackUnreads(Snowflake channelId) const;
     [[nodiscard]] bool isOptInGuild(Snowflake guildId) const;
     [[nodiscard]] bool isChannelOptedIn(Snowflake channelId) const;

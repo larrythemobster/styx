@@ -1,6 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "Core/NotificationPolicy.hpp"
+#include "Core/NotificationText.hpp"
+
+#include <string>
+#include <string_view>
 
 using namespace Styx::Core;
 using Level = Styx::Discord::MessageNotificationLevel;
@@ -124,4 +128,71 @@ TEST_CASE("Only mentions level", "[notifications]")
     mentionsMeSuppressed.suppressEveryone = true;
     mentionsMeSuppressed.suppressRoles = true;
     REQUIRE(shouldNotify(mentionsMeSuppressed));
+}
+
+static MentionNames sampleNames()
+{
+    MentionNames names;
+    names.user = [](std::string_view id) { return id == "1" ? std::string("Ann") : std::string(); };
+    names.channel = [](std::string_view id) { return id == "2" ? std::string("general") : std::string(); };
+    names.role = [](std::string_view id) { return id == "3" ? std::string("Mods") : std::string(); };
+    return names;
+}
+
+TEST_CASE("Mentions are spelled out", "[notifications]")
+{
+    REQUIRE(notificationText("hi <@1> and <@!1>", 0, 0, sampleNames()) == "hi @Ann and @Ann");
+    REQUIRE(notificationText("<@&3> look", 0, 0, sampleNames()) == "@Mods look");
+    REQUIRE(notificationText("see <#2>", 0, 0, sampleNames()) == "see #general");
+    REQUIRE(notificationText("<@9> <@&9> <#9>", 0, 0, sampleNames()) == "@unknown-user @deleted-role #deleted-channel");
+}
+
+TEST_CASE("Malformed tags stay as typed", "[notifications]")
+{
+    REQUIRE(notificationText("a <@x> b", 0, 0, sampleNames()) == "a <@x> b");
+    REQUIRE(notificationText("<#12", 0, 0, sampleNames()) == "<#12");
+    REQUIRE(notificationText("1 < 2", 0, 0, sampleNames()) == "1 < 2");
+}
+
+TEST_CASE("Custom emoji and timestamps", "[notifications]")
+{
+    REQUIRE(notificationText("nice <:pog:123> <a:dance:45>", 0, 0, sampleNames()) == "nice :pog: :dance:");
+    REQUIRE(notificationText("at <t:1700000000:R>", 0, 0, sampleNames()) == "at 1700000000");
+}
+
+TEST_CASE("Spoilers are hidden", "[notifications]")
+{
+    REQUIRE(notificationText("it was ||the butler|| all along", 0, 0, sampleNames()) == "it was (spoiler) all along");
+    REQUIRE(notificationText("a || b", 0, 0, sampleNames()) == "a || b");
+}
+
+TEST_CASE("Markdown markers are removed but single stars kept", "[notifications]")
+{
+    REQUIRE(notificationText("**bold** __under__ ~~gone~~ `code`", 0, 0, sampleNames()) == "bold under gone code");
+    REQUIRE(notificationText("2*3 snake_case", 0, 0, sampleNames()) == "2*3 snake_case");
+}
+
+TEST_CASE("Empty text describes attachments and stickers", "[notifications]")
+{
+    REQUIRE(notificationText("", 1, 0, sampleNames()) == "Sent an attachment");
+    REQUIRE(notificationText("  ", 3, 0, sampleNames()) == "Sent 3 attachments");
+    REQUIRE(notificationText("", 0, 1, sampleNames()) == "Sent a sticker");
+    REQUIRE(notificationText("", 0, 0, sampleNames()) == "");
+    REQUIRE(notificationText("look", 2, 0, sampleNames()) == "look");
+}
+
+TEST_CASE("Long text is cut on a character boundary", "[notifications]")
+{
+    std::string text(199, 'a');
+    text += "\xC3\xA9";
+    text += "tail";
+    REQUIRE(notificationText(text, 0, 0, sampleNames()) == std::string(199, 'a') + "\xE2\x80\xA6");
+
+    std::string longText(300, 'a');
+    REQUIRE(notificationText(longText, 0, 0, sampleNames()) == std::string(200, 'a') + "\xE2\x80\xA6");
+}
+
+TEST_CASE("Missing lookups fall back like unknown names", "[notifications]")
+{
+    REQUIRE(notificationText("<@1>", 0, 0, MentionNames{}) == "@unknown-user");
 }

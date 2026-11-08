@@ -26,6 +26,7 @@
 #include "Core/ForumManager.hpp"
 #include "Core/ImageManager.hpp"
 #include "Core/Logging.hpp"
+#include "Core/NotificationText.hpp"
 #include "Core/PendingAttachment.hpp"
 #include "Core/PermissionManager.hpp"
 #include "Core/MemberListManager.hpp"
@@ -47,6 +48,7 @@
 #include "UI/TrayIcon.hpp"
 #include "Platform/Desktop.hpp"
 #include "Platform/Settings.hpp"
+#include "Platform/Notifications.hpp"
 #include "App.hpp"
 #ifdef STYX_HAVE_SCREENSHARE
 #include "GoLiveController.hpp"
@@ -54,6 +56,8 @@
 #include <RmlUi/Core/ElementDocument.h>
 #include <algorithm>
 #include <format>
+#include <filesystem>
+#include <system_error>
 
 namespace Styx::UI {
 using Core::Snowflake;
@@ -61,6 +65,97 @@ using Core::ClientInstance;
 namespace {
 Shell *primary = nullptr;
 std::string guildChannelKey(Snowflake account, Snowflake guild) { return account.toString() + ":" + guild.toString(); }
+
+void showMessageNotification(Shell *shell, Core::ClientInstance *client, const Discord::Message &msg)
+{
+    const Snowflake account = client->accountId();
+    const Snowflake channelId = msg.channelId.get();
+    const Snowflake guildId = msg.guildId.hasValue() ? msg.guildId.get() : Snowflake::Invalid;
+    const Snowflake messageId = msg.id.get();
+    auto *users = client->users();
+    const std::string author = msg.author.hasValue() ? users->getAuthorDisplayName(msg.author.get(), guildId) : std::string();
+    auto channel = client->getChannel(channelId);
+
+    std::string title;
+    if (channel && channel->type.hasValue() && channel->type.get() == Discord::ChannelType::GROUP_DM) {
+        std::string groupName;
+        if (channel->name.hasValue() && !channel->name.get().empty()) {
+            groupName = channel->name.get();
+        } else if (channel->recipients.hasValue()) {
+            for (const auto &user : channel->recipients.get()) {
+                const std::string name = users->getDisplayName(user.id.get());
+                if (name.empty())
+                    continue;
+                if (!groupName.empty())
+                    groupName += ", ";
+                groupName += name;
+            }
+        }
+        title = groupName.empty() ? author : author + " (" + groupName + ")";
+    } else if ((channel && channel->type.hasValue() && channel->type.get() == Discord::ChannelType::DM) || (!guildId.isValid() && !channel)) {
+        title = author;
+    } else {
+        const std::string channelName = channel ? channel->name.valueOr(std::string()) : std::string();
+        auto guild = guildId.isValid() ? client->getGuild(guildId) : std::nullopt;
+        const std::string guildName = (guild && guild->name.hasValue()) ? guild->name.get() : std::string();
+        if (!channelName.empty() && !guildName.empty())
+            title = author + " (#" + channelName + ", " + guildName + ")";
+        else if (!channelName.empty())
+            title = author + " (#" + channelName + ")";
+        else
+            title = author;
+    }
+
+    using Core::JsonUtils::detail::snowflake;
+    Core::MentionNames names;
+    names.user = [users, guildId](std::string_view userId) -> std::string {
+        const Snowflake id = snowflake(userId);
+        return id.isValid() ? users->getDisplayName(id, guildId) : std::string();
+    };
+    names.channel = [client](std::string_view channelId) -> std::string {
+        auto c = client->getChannel(snowflake(channelId));
+        return c ? c->name.valueOr(std::string()) : std::string();
+    };
+    names.role = [client, guildId](std::string_view roleId) -> std::string {
+        const Snowflake id = snowflake(roleId);
+        for (const auto &role : client->getRolesForGuild(guildId))
+            if (role.id.hasValue() && role.id.get() == id)
+                return role.name.valueOr(std::string());
+        return std::string();
+    };
+
+    const int attachmentCount = msg.attachments.hasValue() ? static_cast<int>(msg.attachments.get().size()) : 0;
+    const int stickerCount = msg.stickerItems.hasValue() ? static_cast<int>(msg.stickerItems.get().size()) : 0;
+
+    Platform::Notifications::Notification notification;
+    notification.title = std::move(title);
+    notification.body = Core::notificationText(msg.content.valueOr(std::string()), attachmentCount, stickerCount, names);
+
+    if (msg.author.hasValue()) {
+        const std::string avatar = users->getAvatarUrl(msg.author.get(), guildId, 64);
+        // Only an avatar that's already on disk: a notification can't wait for a download.
+        if (auto *images = shell->images(); images && images->isCached(avatar, {64, 64})) {
+            const std::string path = images->rawDownloadPath(avatar, {64, 64});
+            std::error_code ec;
+            if (!path.empty() && std::filesystem::exists(path, ec) && !ec)
+                notification.image = path;
+        }
+    }
+
+    Platform::Guard<Shell> guard(shell);
+    Platform::Notifications::show(notification, [guard, account, guildId, channelId, messageId] {
+        if (!guard)
+            return;
+        if (!guard->isMaximized())
+            guard->showNormal();
+        else
+            guard->show();
+        guard->raise();
+        guard->activateWindow();
+        guard->openChannel(account, guildId, channelId);
+        guard->jumpToMessage(channelId, messageId);
+    });
+}
 }
 Shell *Shell::primaryShell() { return primary; }
 Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
@@ -295,6 +390,7 @@ void Shell::setupPermanentConnections(ClientInstance *client)
     track(client->guildRoleUpdated.connect(rolesChanged));
     track(client->guildRoleDeleted.connect(rolesChanged));
     track(client->readStateChanged.connect([this, client](Snowflake channel) { channelTreeModel->updateReadState(channel, client->accountId()); }));
+    track(client->notificationRequested.connect([this, client](const Discord::Message &msg) { showMessageNotification(this, client, msg); }));
     track(client->presences()->presencesChanged.connect([this, client](const std::vector<Snowflake> &users) { channelTreeModel->updatePresence(client->accountId(), users); }));
     track(client->forumBadgeChanged.connect([this, client](Snowflake id) { channelTreeModel->updateForumBadge(id, client->accountId()); }));
     track(client->forumJoinedPostsChanged.connect([this, client](Snowflake id) { channelTreeModel->updateForumThreads(id, client->accountId()); }));
