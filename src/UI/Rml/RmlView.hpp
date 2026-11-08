@@ -48,6 +48,8 @@ public:
     void close();
     void raise();
     void activateWindow();
+    // Flashes the taskbar button until the window is focused.
+    void requestAttention();
     void showMaximized();
     void showFullScreen();
     void showNormal();

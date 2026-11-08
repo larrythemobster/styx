@@ -21,6 +21,10 @@ inline constexpr const char *GifMaxMb = "chat/gif_max_mb";
 inline constexpr const char *AnimationCacheMb = "chat/animation_cache_mb";
 inline constexpr const char *AnimationMaxMb = "chat/animation_max_mb";
 
+// Notifications
+inline constexpr const char *DesktopNotifications = "notifications/desktop";
+inline constexpr const char *FlashTaskbar = "notifications/flash_taskbar";
+
 // Theme / Appearance
 inline constexpr const char *ThemeUseSystemColors = "appearance/use_system_colors";
 
@@ -49,6 +53,10 @@ inline constexpr int GifMaxPlaying = 4;
 inline constexpr int GifMaxMb = 32;
 inline constexpr int AnimationCacheMb = 128;
 inline constexpr int AnimationMaxMb = 16;
+
+// Notifications
+inline constexpr bool DesktopNotifications = true;
+inline constexpr bool FlashTaskbar = true;
 
 // Theme
 inline constexpr bool ThemeUseSystemColors = false;

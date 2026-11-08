@@ -341,6 +341,7 @@ void View::hide() { SDL_HideWindow(nativeWindow); }
 void View::close() { if (closeRequested && !closeRequested()) return; closed = true; hide(); }
 void View::raise() { SDL_RaiseWindow(nativeWindow); }
 void View::activateWindow() { raise(); }
+void View::requestAttention() { SDL_FlashWindow(nativeWindow, SDL_FLASH_UNTIL_FOCUSED); }
 void View::showMaximized() { SDL_MaximizeWindow(nativeWindow); show(); }
 void View::showNormal() { SDL_SetWindowFullscreen(nativeWindow, false); SDL_RestoreWindow(nativeWindow); show(); }
 void View::showFullScreen() { require(SDL_SetWindowFullscreen(nativeWindow, true)); show(); }

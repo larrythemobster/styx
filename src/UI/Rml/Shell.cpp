@@ -51,6 +51,7 @@
 #include "Platform/Desktop.hpp"
 #include "Platform/Settings.hpp"
 #include "Platform/Notifications.hpp"
+#include "Core/SettingsKeys.hpp"
 #include "App.hpp"
 #ifdef STYX_HAVE_SCREENSHARE
 #include "GoLiveController.hpp"
@@ -396,7 +397,11 @@ void Shell::setupPermanentConnections(ClientInstance *client)
     track(client->guildRoleDeleted.connect(rolesChanged));
     track(client->readStateChanged.connect([this, client](Snowflake channel) { channelTreeModel->updateReadState(channel, client->accountId()); }));
     track(client->notificationRequested.connect([this, client](const Discord::Message &msg, bool mentioned) {
-        showMessageNotification(this, client, msg);
+        namespace Settings = Core::Settings;
+        if (Settings::getBool(Settings::Keys::DesktopNotifications, Settings::Defaults::DesktopNotifications))
+            showMessageNotification(this, client, msg);
+        if (!Platform::Desktop::applicationActive() && Settings::getBool(Settings::Keys::FlashTaskbar, Settings::Defaults::FlashTaskbar))
+            requestAttention();
         Core::Sounds::play(mentioned ? Core::Sounds::Sound::Mention : Core::Sounds::Sound::Message);
     }));
     track(client->presences()->presencesChanged.connect([this, client](const std::vector<Snowflake> &users) { channelTreeModel->updatePresence(client->accountId(), users); }));

@@ -4,6 +4,7 @@
 #include "RmlRuntime.hpp"
 
 #include "Core/AnimatedImageCache.hpp"
+#include "Core/Audio/Sounds.hpp"
 #include "Core/ClientInstance.hpp"
 #include "Core/Session.hpp"
 #include "Core/SettingsKeys.hpp"
@@ -17,6 +18,7 @@
 #include "Discord/Entities.hpp"
 
 #include "Platform/Desktop.hpp"
+#include "Platform/Notifications.hpp"
 #include <algorithm>
 #include <cmath>
 #include <random>
@@ -167,6 +169,7 @@ void SettingsController::renderSidebar(std::string &rml)
     rml += std::string("<div class=\"settings-group-header\">App Settings</div>");
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"appearance\">Appearance</div>", currentSection == Section::Appearance ? std::string(" active") : std::string());
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"chat\">Chat &amp; Accessibility</div>", currentSection == Section::Chat ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"notifications\">Notifications</div>", currentSection == Section::Notifications ? std::string(" active") : std::string());
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"voice-video\">Voice &amp; Video</div>", currentSection == Section::VoiceVideo ? std::string(" active") : std::string());
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"go-live\">Go Live</div>", currentSection == Section::GoLive ? std::string(" active") : std::string());
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"advanced\">Advanced</div>", currentSection == Section::Advanced ? std::string(" active") : std::string());
@@ -206,6 +209,9 @@ void SettingsController::renderContent(std::string &rml)
         break;
     case Section::Chat:
         renderChat(rml);
+        break;
+    case Section::Notifications:
+        renderNotifications(rml);
         break;
     case Section::VoiceVideo:
         renderVoiceVideo(rml);
@@ -467,6 +473,49 @@ void SettingsController::renderChat(std::string &rml)
     rml += std::string("</div>"); // .settings-card
 }
 
+void SettingsController::renderNotifications(std::string &rml)
+{
+    using Core::Sounds::Sound;
+    auto renderSwitch = [&rml](const std::string &key, bool checked, const std::string &title, const std::string &desc) {
+        rml += std::string("<div class=\"settings-switch-row\">");
+        rml += std::string("<div class=\"settings-switch-text\">");
+        rml += formatRml("<div class=\"settings-switch-title\">%1</div>", title);
+        rml += formatRml("<div class=\"settings-switch-desc\">%1</div>", desc);
+        rml += std::string("</div>");
+        rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", checked ? std::string(" checked") : std::string(), key);
+        rml += std::string("</div>");
+    };
+    auto renderSoundSwitch = [&renderSwitch](Sound sound, const std::string &title, const std::string &desc) {
+        const std::string key(Core::Sounds::settingKey(sound));
+        renderSwitch(key, getBool(key, true), title, desc);
+    };
+
+    rml += std::string("<div class=\"settings-section-title\">Notifications</div>");
+
+    rml += std::string("<div class=\"settings-card\">");
+    renderSwitch(Keys::DesktopNotifications, getBool(Keys::DesktopNotifications, Defaults::DesktopNotifications),
+                 "Desktop notifications",
+                 "Show a notification for new messages your server and channel settings allow, unless you're looking at that channel.");
+    if (!Platform::Notifications::available())
+        rml += std::string("<div class=\"settings-note\">This system isn't accepting notifications from Styx right now.</div>");
+    renderSwitch(Keys::FlashTaskbar, getBool(Keys::FlashTaskbar, Defaults::FlashTaskbar),
+                 "Flash the taskbar button",
+                 "Flash Styx's taskbar button when a notification arrives and the window isn't focused.");
+    rml += std::string("<div class=\"settings-button-group\">");
+    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"test-notification\">Send a test notification</button>");
+    rml += std::string("</div>");
+    rml += std::string("</div>"); // .settings-card
+
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">Sounds</div>");
+    renderSoundSwitch(Sound::Message, "Message", "A new message that notifies.");
+    renderSoundSwitch(Sound::Mention, "Mention", "A message that mentions you, your role or @everyone.");
+    renderSoundSwitch(Sound::Ring, "Incoming call", "Rings while someone is calling you in a DM.");
+    renderSoundSwitch(Sound::Join, "Voice join", "You or someone else joins your voice channel.");
+    renderSoundSwitch(Sound::Leave, "Voice leave", "You or someone else leaves your voice channel.");
+    rml += std::string("</div>"); // .settings-card
+}
+
 void SettingsController::renderVoiceVideo(std::string &rml)
 {
     rml += std::string("<div class=\"settings-section-title\">Voice &amp; Video</div>");
@@ -670,6 +719,8 @@ void SettingsController::setupEventListeners()
                 setSection(Section::Appearance);
             else if (sec == std::string("chat"))
                 setSection(Section::Chat);
+            else if (sec == std::string("notifications"))
+                setSection(Section::Notifications);
             else if (sec == std::string("voice-video"))
                 setSection(Section::VoiceVideo);
             else if (sec == std::string("go-live"))
@@ -878,6 +929,12 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         shell.openAccounts();
     } else if (action == std::string("open-acheron")) {
         Platform::Desktop::openUrl("https://github.com/ouwou/acheron");
+    } else if (action == std::string("test-notification")) {
+        Platform::Notifications::Notification notification;
+        notification.title = "Styx";
+        notification.body = "This is how notifications will look.";
+        Platform::Notifications::show(notification, {});
+        Core::Sounds::play(Core::Sounds::Sound::Message);
     } else if (action == std::string("generate-theme")) {
         // Read seed color hex
         if (regionRoot) {

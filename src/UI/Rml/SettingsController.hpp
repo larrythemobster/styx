@@ -19,6 +19,7 @@ public:
         MyAccount,
         Appearance,
         Chat,
+        Notifications,
         VoiceVideo,
         GoLive,
         Advanced,
@@ -42,6 +43,7 @@ private:
     void renderMyAccount(std::string &rml);
     void renderAppearance(std::string &rml);
     void renderChat(std::string &rml);
+    void renderNotifications(std::string &rml);
     void renderVoiceVideo(std::string &rml);
     void renderGoLive(std::string &rml);
     void renderAdvanced(std::string &rml);
