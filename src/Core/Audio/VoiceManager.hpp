@@ -110,6 +110,8 @@ public:
     Platform::Signal<bool> speakingChanged;
     Platform::Signal<> devicesChanged;
     Platform::Signal<Snowflake> participantJoined, participantLeft, participantUpdated;
+    // Someone else joined or left the user's channel while the user was in it.
+    Platform::Signal<Snowflake> someoneJoined, someoneLeft;
     Platform::Signal<Snowflake, bool> participantSpeakingChanged;
     Platform::Signal<Snowflake, Snowflake, bool> channelVoiceMemberChanged;
     Platform::Signal<Snowflake, Snowflake> participantVoiceStateChanged;

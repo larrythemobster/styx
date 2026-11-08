@@ -47,6 +47,7 @@
 #include "UI/BrowserCaptchaResolver.hpp"
 #include "UI/MemberList/MemberListModel.hpp"
 #include "UI/TrayIcon.hpp"
+#include "UI/CallSounds.hpp"
 #include "Platform/Desktop.hpp"
 #include "Platform/Settings.hpp"
 #include "Platform/Notifications.hpp"
@@ -206,8 +207,10 @@ Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
             if (instance && instance->accountId() == account->id) switchActiveInstance(nullptr);
             channelTreeModel->removeAccount(account->id);
             connectedInstances.erase(account->id);
+            callSounds->forget(account->id);
         }
     }));
+    callSounds = std::make_unique<CallSounds>();
     for (auto *client : session->getClients()) setupPermanentConnections(client);
     setWindowTitle("Styx");
     resize(1280, 800);
@@ -355,6 +358,7 @@ Snowflake Shell::firstReadableChannel(Snowflake account, Snowflake guild) const
 void Shell::setupPermanentConnections(ClientInstance *client)
 {
     if (!client || !connectedInstances.insert(client->accountId()).second) return;
+    callSounds->watch(client);
     track(client->guildCreated.connect([this, client](const Discord::GatewayGuild &guild) { channelTreeModel->addGuild(guild, client->accountId()); }));
     track(client->guildUpdated.connect([this, client](const Discord::Guild &guild) { channelTreeModel->updateGuild(guild, client->accountId()); }));
     track(client->guildRemoved.connect([this, client](Snowflake guild) { channelTreeModel->removeGuild(client->accountId(), guild); }));

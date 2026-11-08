@@ -18,4 +18,9 @@ inline constexpr int SAMPLE_RATE = 48000;
 // Plays a sound on the default output device if its setting is on. Call on the main thread.
 void play(Sound sound);
 
+// Repeats a sound until stopLoop, if its setting is on. Starting one that's already looping
+// does nothing. Call on the main thread.
+void startLoop(Sound sound);
+void stopLoop(Sound sound);
+
 } // namespace Styx::Core::Sounds

@@ -21,6 +21,7 @@ class ServerRailModel;
 class ChatModel;
 class MemberListModel;
 class TrayIcon;
+class CallSounds;
 class BrowserCaptchaResolver;
 enum class GuildSettingsSection;
 namespace MemberModeration { class Controller; }
@@ -155,6 +156,7 @@ private:
     std::unique_ptr<Rml::GoLiveController> goLiveController;
 #endif
     std::unique_ptr<TrayIcon> trayIcon;
+    std::unique_ptr<CallSounds> callSounds;
     std::unique_ptr<Rml::GuildSettingsController> guildSettingsController;
     std::unique_ptr<Rml::ForumController> forumController;
     std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;

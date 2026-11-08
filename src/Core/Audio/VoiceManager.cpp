@@ -195,6 +195,7 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
             if (audioPipeline && voiceLoop)
                 voiceLoop->post([p = audioPipeline, userId]() { p->removeUser(userId); });
             participantLeft.publish(userId);
+            someoneLeft.publish(userId);
         }
     } else {
         auto it = participants.find(userId);
@@ -211,9 +212,10 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
         p.suppress = state.suppress.get();
         p.streaming = state.selfStream.valueOr(false);
 
-        if (isNew)
+        if (isNew) {
             participantJoined.publish(userId);
-        else
+            someoneJoined.publish(userId);
+        } else
             participantUpdated.publish(userId);
     }
 }
@@ -573,6 +575,7 @@ void VoiceManager::connectToVoiceServer(const std::string &endpoint, const std::
             p.userId = userId;
             participants.emplace(userId, p);
             participantJoined.publish(userId);
+            someoneJoined.publish(userId);
         });
     }));
     track(voiceClient->clientDisconnected.connect([this, gen, alive](Snowflake userId) {
@@ -583,6 +586,7 @@ void VoiceManager::connectToVoiceServer(const std::string &endpoint, const std::
                 if (audioPipeline && voiceLoop)
                     voiceLoop->post([p = audioPipeline, userId]() { p->removeUser(userId); });
                 participantLeft.publish(userId);
+                someoneLeft.publish(userId);
             }
         });
     }));

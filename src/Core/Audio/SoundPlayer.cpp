@@ -2,6 +2,7 @@
 
 #ifdef STYX_HAVE_MINIAUDIO
 
+#include "SoundMixer.hpp"
 #include "Core/Audio/AudioBackends.hpp"
 #include "Core/Audio/Miniaudio.hpp"
 #include "Core/Logging.hpp"
@@ -26,12 +27,6 @@ constexpr auto REPEAT_GAP = std::chrono::milliseconds(250);
 constexpr auto IDLE_STOP = std::chrono::seconds(3);
 constexpr std::size_t SOUND_COUNT = 5;
 
-struct Voice
-{
-    std::shared_ptr<const std::vector<float>> samples;
-    std::size_t position = 0;
-};
-
 class SoundPlayer
 {
 public:
@@ -43,9 +38,12 @@ public:
     }
 
     void play(Sound sound);
+    void startLoop(Sound sound);
+    void stopLoop(Sound sound);
 
 private:
     SoundPlayer() = default;
+    std::shared_ptr<const std::vector<float>> samplesFor(Sound sound);
     bool ensureRunning();
     void stopIfIdle();
     void armIdleTimer();
@@ -64,6 +62,14 @@ private:
     Platform::TimerId idleTimer = 0;
 };
 
+std::shared_ptr<const std::vector<float>> SoundPlayer::samplesFor(Sound sound)
+{
+    const auto index = static_cast<std::size_t>(sound);
+    if (!cache[index])
+        cache[index] = std::make_shared<const std::vector<float>>(synthesize(sound));
+    return cache[index];
+}
+
 void SoundPlayer::play(Sound sound)
 {
     const auto index = static_cast<std::size_t>(sound);
@@ -72,20 +78,42 @@ void SoundPlayer::play(Sound sound)
         return;
     lastPlayed[index] = now;
 
-    if (!cache[index])
-        cache[index] = std::make_shared<const std::vector<float>>(synthesize(sound));
-
+    auto samples = samplesFor(sound);
     if (!ensureRunning())
         return;
 
     {
         std::lock_guard lock(mixMutex);
-        if (voices.size() >= MAX_VOICES)
-            voices.erase(voices.begin());
-        voices.push_back({cache[index], 0});
+        if (voices.size() >= MAX_VOICES) {
+            const auto oldest = std::find_if(voices.begin(), voices.end(), [](const Voice &voice) { return !voice.looping; });
+            if (oldest == voices.end())
+                return;
+            voices.erase(oldest);
+        }
+        voices.push_back({sound, std::move(samples), 0, false});
     }
 
     armIdleTimer();
+}
+
+void SoundPlayer::startLoop(Sound sound)
+{
+    auto samples = samplesFor(sound);
+    if (!ensureRunning())
+        return;
+    {
+        std::lock_guard lock(mixMutex);
+        if (std::any_of(voices.begin(), voices.end(), [sound](const Voice &voice) { return voice.looping && voice.sound == sound; }))
+            return;
+        voices.push_back({sound, std::move(samples), 0, true});
+    }
+    armIdleTimer();
+}
+
+void SoundPlayer::stopLoop(Sound sound)
+{
+    std::lock_guard lock(mixMutex);
+    voices.erase(std::remove_if(voices.begin(), voices.end(), [sound](const Voice &voice) { return voice.looping && voice.sound == sound; }), voices.end());
 }
 
 void SoundPlayer::armIdleTimer()
@@ -152,20 +180,8 @@ void SoundPlayer::onPlayback(ma_device *device, void *output, const void *, ma_u
 
 void SoundPlayer::mix(float *output, ma_uint32 frameCount)
 {
-    std::fill(output, output + frameCount, 0.0f);
     std::lock_guard lock(mixMutex);
-    for (auto &voice : voices) {
-        const auto &samples = *voice.samples;
-        const std::size_t count = std::min<std::size_t>(frameCount, samples.size() - voice.position);
-        for (std::size_t i = 0; i < count; ++i)
-            output[i] += samples[voice.position + i];
-        voice.position += count;
-    }
-    voices.erase(std::remove_if(voices.begin(), voices.end(), [](const Voice &voice) {
-        return voice.position >= voice.samples->size();
-    }), voices.end());
-    for (ma_uint32 i = 0; i < frameCount; ++i)
-        output[i] = std::clamp(output[i], -1.0f, 1.0f);
+    mixVoices(voices, output, frameCount);
 }
 
 } // namespace
@@ -177,6 +193,18 @@ void play(Sound sound)
     SoundPlayer::instance().play(sound);
 }
 
+void startLoop(Sound sound)
+{
+    if (!Platform::Settings::instance().getBool(settingKey(sound), true))
+        return;
+    SoundPlayer::instance().startLoop(sound);
+}
+
+void stopLoop(Sound sound)
+{
+    SoundPlayer::instance().stopLoop(sound);
+}
+
 } // namespace Styx::Core::Sounds
 
 #else
@@ -185,6 +213,8 @@ namespace Styx::Core::Sounds {
 
 // Built without an audio backend.
 void play(Sound) {}
+void startLoop(Sound) {}
+void stopLoop(Sound) {}
 
 } // namespace Styx::Core::Sounds
 
