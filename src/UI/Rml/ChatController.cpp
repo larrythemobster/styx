@@ -2,6 +2,7 @@
 #include "ChatMarkdown.hpp"
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
+#include "ShortcutController.hpp"
 
 #include "Core/ClientInstance.hpp"
 #include "Core/Emoji/PickerEmoji.hpp"
@@ -133,6 +134,8 @@ ChatController::ChatController(Shell &shell, ::Rml::Element *root)
     initElements();
     setupEventListeners();
     setupModelConnections();
+    if (auto *shortcuts = shell.shortcuts())
+        shortcuts->setHandler(ShortcutAction::Search, [this] { openSearch(); });
 
     currentChannelId = shell.location().channelId;
     currentGuildId = shell.location().guildId;
@@ -214,13 +217,7 @@ void ChatController::setupEventListeners()
         } else if (action == std::string("open-threads")) {
             shell.openThreadBrowser(currentChannelId);
         } else if (action == std::string("open-search")) {
-            std::string scope = conversationName();
-            if (!shell.location().isHome()) {
-                auto *instance = shell.currentInstance();
-                auto guild = instance ? instance->getGuild(currentGuildId) : std::nullopt;
-                scope = guild ? guild->name.valueOr(std::string()) : std::string();
-            }
-            shell.openSearch(currentChannelId, scope);
+            openSearch();
         } else if (action == std::string("user-profile")) {
             uint64_t uid = parseNumber(attribute(actionEl, "data-user-id"));
             if (uid != 0) {
@@ -930,6 +927,17 @@ std::string ChatController::buildMessageHtml(int row)
 
     out += std::string("</div>");
     return out;
+}
+
+void ChatController::openSearch()
+{
+    std::string scope = conversationName();
+    if (!shell.location().isHome()) {
+        auto *instance = shell.currentInstance();
+        auto guild = instance ? instance->getGuild(currentGuildId) : std::nullopt;
+        scope = guild ? guild->name.valueOr(std::string()) : std::string();
+    }
+    shell.openSearch(currentChannelId, scope);
 }
 
 std::string ChatController::conversationName() const

@@ -21,6 +21,7 @@
 #include "ThreadBrowserController.hpp"
 #include "SearchController.hpp"
 #include "SwitcherController.hpp"
+#include "ShortcutController.hpp"
 #include "ExpressionPickerController.hpp"
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
@@ -228,6 +229,8 @@ std::string Shell::imageSource(const std::string &url, Platform::Size size) cons
 void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
 {
     controllers.clear();
+    // A new document needs a new listener, and the old handlers point into the controllers just cleared.
+    shortcutController = std::make_unique<Rml::ShortcutController>(*this);
     auto region = [doc](const char *id) { return doc->GetElementById(id); };
     moderationController = std::make_unique<MemberModeration::Controller>(*this);
     controllers.push_back(std::make_unique<Rml::RailController>(*this, region("rail")));
@@ -248,7 +251,9 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     imageViewerController = viewer.get(); controllers.push_back(std::move(viewer));
     auto picker = std::make_unique<Rml::ExpressionPickerController>(*this);
     expressionPickerController = picker.get(); controllers.push_back(std::move(picker));
-    controllers.push_back(std::make_unique<Rml::SwitcherController>(*this));
+    auto switcher = std::make_unique<Rml::SwitcherController>(*this);
+    shortcutController->setHandler(Rml::ShortcutAction::QuickSwitcher, [s = switcher.get()] { s->isOpen() ? s->close() : s->open(); });
+    controllers.push_back(std::move(switcher));
     accountsController = std::make_unique<Rml::AccountsController>(*this);
     if (accountsModel->rowCount() == 0) accountsController->showLogin();
     applyBodyClasses();

@@ -284,6 +284,8 @@ set(PROJECT_SOURCES
     src/UI/Rml/ThreadBrowserController.cpp
     src/UI/Rml/SearchController.cpp
     src/UI/Rml/SwitcherController.cpp
+    src/UI/Rml/Shortcuts.cpp
+    src/UI/Rml/ShortcutController.cpp
     src/UI/Rml/ExpressionPickerController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )
@@ -393,6 +395,8 @@ if(BUILD_TESTS)
     styx_test(TestSearchQuery SearchQueryTests tests/tst_SearchQuery.cpp src/Core/SearchQuery.cpp src/Core/Snowflake.cpp)
     styx_test(TestSearchCompletion SearchCompletionTests tests/tst_SearchCompletion.cpp src/Core/SearchCompletion.cpp src/Core/Snowflake.cpp)
     styx_test(TestQuickSwitcher QuickSwitcherTests tests/tst_QuickSwitcher.cpp src/Core/QuickSwitcher.cpp src/Core/Snowflake.cpp)
+    styx_test(TestShortcuts ShortcutsTests tests/tst_Shortcuts.cpp src/UI/Rml/Shortcuts.cpp)
+    target_link_libraries(TestShortcuts PRIVATE RmlUi::RmlUi)
     styx_test(TestSounds SoundsTests tests/tst_Sounds.cpp src/Core/Audio/Sounds.cpp src/Core/Audio/SoundMixer.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)

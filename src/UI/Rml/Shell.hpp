@@ -37,6 +37,7 @@ class ForumController;
 class ThreadBrowserController;
 class SearchController;
 class ExpressionPickerController;
+class ShortcutController;
 }
 struct Location {
     Core::Snowflake accountId, guildId, channelId;
@@ -55,6 +56,8 @@ public:
     const Location &location() const { return current; }
     Rml::View *view() const { return const_cast<Shell *>(this); }
     ChannelTreeModel *channelTree() const { return channelTreeModel.get(); }
+    // In-app keyboard shortcuts; controllers register their handlers when they're created.
+    Rml::ShortcutController *shortcuts() const { return shortcutController.get(); }
     ChannelFilterProxyModel *channelFilter() const { return channelFilterProxy.get(); }
     ServerRailModel *rail() const { return serverRailModel.get(); }
     ChatModel *chat() const { return chatModel.get(); }
@@ -167,6 +170,8 @@ private:
     std::unique_ptr<Rml::ForumController> forumController;
     std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;
     std::unique_ptr<Rml::SearchController> searchController;
+    // Declared after the controllers so it, and the handlers pointing into them, goes first.
+    std::unique_ptr<Rml::ShortcutController> shortcutController;
 };
 }
 }

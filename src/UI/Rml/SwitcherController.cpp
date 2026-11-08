@@ -1,6 +1,7 @@
 #include "SwitcherController.hpp"
 
 #include "Shell.hpp"
+#include "ShortcutController.hpp"
 #include "RmlView.hpp"
 #include "Core/ClientInstance.hpp"
 #include "Core/Emoji/EmojiManager.hpp"
@@ -34,13 +35,6 @@ namespace Rml {
 
 namespace {
 
-bool isSwitcherShortcut(::Rml::Event &event)
-{
-    const int key = event.GetParameter<int>("key_identifier", 0);
-    const bool ctrl = (event.GetParameter<int>("ctrl_key", 0) != 0);
-    return ctrl && key == ::Rml::Input::KI_K;
-}
-
 std::string avatarImageSource(const Shell &shell, Core::Snowflake userId, const std::string &avatarHash)
 {
     const std::string url = !avatarHash.empty()
@@ -54,17 +48,6 @@ std::string avatarImageSource(const Shell &shell, Core::Snowflake userId, const 
 SwitcherController::SwitcherController(Shell &shell)
     : Controller(shell, nullptr)
 {
-    if (auto *doc = shell.document()) {
-        listen("keydown", [this](::Rml::Event &event) {
-            if (isSwitcherShortcut(event)) {
-                event.StopPropagation();
-                if (visible)
-                    close();
-                else
-                    open();
-            }
-        }, doc, true);
-    }
 }
 
 SwitcherController::~SwitcherController()
@@ -158,7 +141,8 @@ void SwitcherController::setupEventListeners()
         }, inputEl);
 
         listen("keydown", [this](::Rml::Event &event) {
-            if (isSwitcherShortcut(event)) {
+            // This document's keys never reach the main window's shortcut listener.
+            if (ShortcutController::actionFor(event) == ShortcutAction::QuickSwitcher) {
                 event.StopPropagation();
                 close();
                 return;

@@ -48,6 +48,8 @@ private:
 
     // Rendering regions
     void updateHeader();
+    // Message search for this server, or for this DM at home.
+    void openSearch();
     void updateTyping();
     void updateComposer();
     void updateComposerPlaceholder();

@@ -20,7 +20,6 @@ namespace Rml {
 class SwitcherController final : public Controller
 {
 public:
-    // Listens for Ctrl+K on the main document, before focused elements see it.
     explicit SwitcherController(Shell &shell);
     ~SwitcherController() override;
 
