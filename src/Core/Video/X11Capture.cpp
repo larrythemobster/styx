@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <unistd.h>
 extern "C" {
 #include <libavdevice/avdevice.h>

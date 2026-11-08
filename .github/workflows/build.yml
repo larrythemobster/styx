@@ -7,7 +7,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A newer push to the same branch makes an in-progress run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
+  # vcpkg stores each built package here as soon as it finishes, and the cache steps
+  # keep the directory even when the job fails, so a failed run never rebuilds
+  # dependencies that already compiled.
+  VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
   CURL_IMPERSONATE_VERSION: v2.0.0
   # BtbN keeps only the last couple of weeks of daily autobuilds plus one build per
   # month, so pin a month-end tag: a daily one gets deleted out from under us and
@@ -40,11 +49,18 @@ jobs:
           git -C vendor/vcpkg fetch --unshallow
           vendor/vcpkg/bootstrap-vcpkg.bat
 
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
         with:
-          path: build/vcpkg_installed
-          key: vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}
+          path: .vcpkg-cache
+          key: vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-bin-x64-windows-static-md-
+
+      - name: Prepare vcpkg binary cache
+        shell: bash
+        run: mkdir -p .vcpkg-cache
 
       - name: Install curl-impersonate
         shell: pwsh
@@ -85,6 +101,13 @@ jobs:
 
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Save vcpkg binary cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
 
       - name: Install software Mesa for tests
         uses: ssciwr/setup-mesa-dist-win@v3
@@ -130,11 +153,18 @@ jobs:
           git -C vendor/vcpkg fetch --unshallow
           vendor/vcpkg/bootstrap-vcpkg.bat
 
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
         with:
-          path: build/vcpkg_installed
-          key: vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}
+          path: .vcpkg-cache
+          key: vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-bin-x64-windows-static-md-
+
+      - name: Prepare vcpkg binary cache
+        shell: bash
+        run: mkdir -p .vcpkg-cache
 
       - name: Install curl-impersonate
         shell: pwsh
@@ -160,6 +190,13 @@ jobs:
 
       - name: Build
         run: cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Save vcpkg binary cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
 
       - name: Install software Mesa for tests
         uses: ssciwr/setup-mesa-dist-win@v3
@@ -216,11 +253,18 @@ jobs:
           git -C vendor/vcpkg fetch --unshallow
           vendor/vcpkg/bootstrap-vcpkg.sh
 
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
         with:
-          path: build/vcpkg_installed
-          key: vcpkg-x64-linux-${{ hashFiles('vcpkg.json') }}
+          path: .vcpkg-cache
+          key: vcpkg-bin-x64-linux-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bin-x64-linux-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-bin-x64-linux-
+
+      - name: Prepare vcpkg binary cache
+        shell: bash
+        run: mkdir -p .vcpkg-cache
 
       - name: Install curl-impersonate
         run: |
@@ -246,6 +290,13 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel $(nproc)
+
+      - name: Save vcpkg binary cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-bin-x64-linux-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
 
       - name: Test
         run: |
@@ -294,13 +345,18 @@ jobs:
           git -C vendor/vcpkg fetch --unshallow
           vendor/vcpkg/bootstrap-vcpkg.sh
 
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
         with:
-          path: build/vcpkg_installed
-          # Keyed separately from build-linux: its cache is built on
-          # ubuntu-latest and restoring it here would raise the glibc floor.
-          key: vcpkg-x64-linux-jammy-${{ hashFiles('vcpkg.json') }}
+          path: .vcpkg-cache
+          key: vcpkg-bin-x64-linux-jammy-gcc13-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bin-x64-linux-jammy-gcc13-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-bin-x64-linux-jammy-gcc13-
+
+      - name: Prepare vcpkg binary cache
+        shell: bash
+        run: mkdir -p .vcpkg-cache
 
       - name: Install curl-impersonate
         run: |
@@ -337,6 +393,13 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel $(nproc)
+
+      - name: Save vcpkg binary cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-bin-x64-linux-jammy-gcc13-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
 
       - name: Test
         env:
@@ -425,11 +488,18 @@ jobs:
           git -C vendor/vcpkg fetch --unshallow
           vendor/vcpkg/bootstrap-vcpkg.sh
 
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
         with:
-          path: build/vcpkg_installed
-          key: vcpkg-arm64-osx-${{ hashFiles('vcpkg.json') }}
+          path: .vcpkg-cache
+          key: vcpkg-bin-arm64-osx-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bin-arm64-osx-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-bin-arm64-osx-
+
+      - name: Prepare vcpkg binary cache
+        shell: bash
+        run: mkdir -p .vcpkg-cache
 
       - name: Install curl-impersonate
         run: |
@@ -451,6 +521,13 @@ jobs:
       - name: Build
         # -k reports every compile error in one run instead of stopping at the first.
         run: cmake --build build --parallel $(sysctl -n hw.logicalcpu) -- -k
+
+      - name: Save vcpkg binary cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-bin-arm64-osx-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
 
       - name: Test
         run: ctest --test-dir build --output-on-failure

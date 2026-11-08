@@ -42,6 +42,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using namespace Styx;
 using namespace Styx::Core;
