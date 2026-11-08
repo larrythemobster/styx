@@ -501,6 +501,9 @@ void SettingsController::renderNotifications(std::string &rml)
     renderSwitch(Keys::FlashTaskbar, getBool(Keys::FlashTaskbar, Defaults::FlashTaskbar),
                  "Flash the taskbar button",
                  "Flash Styx's taskbar button when a notification arrives and the window isn't focused.");
+    renderSwitch(Keys::TaskbarBadge, getBool(Keys::TaskbarBadge, Defaults::TaskbarBadge),
+                 "Show unread mentions on the taskbar",
+                 "Put your mention count on Styx's taskbar or dock icon.");
     rml += std::string("<div class=\"settings-button-group\">");
     rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"test-notification\">Send a test notification</button>");
     rml += std::string("</div>");
@@ -804,6 +807,8 @@ void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
     // Immediate action application
     if (key == std::string(Keys::CloseToTray)) {
         shell.applyCloseToTray();
+    } else if (key == std::string(Keys::TaskbarBadge)) {
+        shell.refreshTaskbarBadge();
     } else if (key == std::string(Keys::ThemeUseSystemColors)) {
         Core::Theme::Manager::instance().setUseSystemColors(nowChecked);
     }

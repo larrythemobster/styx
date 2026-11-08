@@ -51,6 +51,7 @@
 #include "Platform/Desktop.hpp"
 #include "Platform/Settings.hpp"
 #include "Platform/Notifications.hpp"
+#include "Platform/Badge.hpp"
 #include "Core/SettingsKeys.hpp"
 #include "App.hpp"
 #ifdef STYX_HAVE_SCREENSHARE
@@ -171,6 +172,7 @@ Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
     channelTreeModel = std::make_unique<ChannelTreeModel>(session);
     channelFilterProxy = std::make_unique<ChannelFilterProxyModel>(session);
     channelFilterProxy->setSourceModel(channelTreeModel.get());
+    track(channelTreeModel->totalMentionCountChanged.connect([this](int total, int) { mentionTotal = total; refreshTaskbarBadge(); }));
     accountsModel = std::make_unique<AccountsModel>(session);
     serverRailModel = std::make_unique<ServerRailModel>(session, channelTreeModel.get());
     typingTracker = std::make_unique<Core::TypingTracker>();
@@ -290,6 +292,12 @@ void Shell::applyCloseToTray()
     trayIcon->setToolTip(windowTitle());
     track(trayIcon->showWindowRequested.connect([this] { showFromTray(); }));
     track(trayIcon->quitRequested.connect([this] { quitFromTray(); }));
+}
+void Shell::refreshTaskbarBadge()
+{
+    namespace Settings = Core::Settings;
+    const bool shown = Settings::getBool(Settings::Keys::TaskbarBadge, Settings::Defaults::TaskbarBadge);
+    Platform::Badge::setCount(nativeHandle(), shown ? mentionTotal : 0);
 }
 void Shell::saveWindowState()
 {

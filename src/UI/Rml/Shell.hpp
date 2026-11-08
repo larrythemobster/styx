@@ -111,6 +111,8 @@ public:
     void openForum(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake forumId);
     void openThreadBrowser(Core::Snowflake channelId);
     void applyCloseToTray();
+    // Shows the current mention count on the taskbar, or clears it when the setting is off.
+    void refreshTaskbarBadge();
     Platform::Signal<const Location &> locationChanged;
     Platform::Signal<Core::ClientInstance *> instanceChanged;
     Platform::Signal<bool> callOpenChanged, memberListVisibleChanged, selfMuteChanged, selfDeafChanged, settingsOpenChanged;
@@ -147,6 +149,7 @@ private:
     Rml::ImageViewerController *imageViewerController = nullptr;
     Rml::ExpressionPickerController *expressionPickerController = nullptr;
     std::unordered_set<Core::Snowflake> connectedInstances;
+    int mentionTotal = 0;
     std::unordered_map<std::string, Core::Snowflake> lastViewedChannel;
     std::unordered_map<Core::Snowflake, Platform::Color> roleColorCache;
     Core::Snowflake roleColorGuild;

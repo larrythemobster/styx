@@ -24,6 +24,7 @@ inline constexpr const char *AnimationMaxMb = "chat/animation_max_mb";
 // Notifications
 inline constexpr const char *DesktopNotifications = "notifications/desktop";
 inline constexpr const char *FlashTaskbar = "notifications/flash_taskbar";
+inline constexpr const char *TaskbarBadge = "notifications/taskbar_badge";
 
 // Theme / Appearance
 inline constexpr const char *ThemeUseSystemColors = "appearance/use_system_colors";
@@ -57,6 +58,7 @@ inline constexpr int AnimationMaxMb = 16;
 // Notifications
 inline constexpr bool DesktopNotifications = true;
 inline constexpr bool FlashTaskbar = true;
+inline constexpr bool TaskbarBadge = true;
 
 // Theme
 inline constexpr bool ThemeUseSystemColors = false;

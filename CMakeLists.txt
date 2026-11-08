@@ -542,6 +542,7 @@ set(PLATFORM_SOURCES
     src/Platform/Native.cpp
     src/Platform/Desktop.cpp
     src/Platform/Notifications.cpp
+    src/Platform/Badge.cpp
     src/Platform/WorkerLoop.cpp
 )
 
@@ -552,6 +553,7 @@ if(WIN32)
         src/Platform/Settings_win.cpp
         src/Platform/Utf8_win.cpp
         src/Platform/Notifications_win.cpp
+        src/Platform/Badge_win.cpp
     )
 else()
     list(APPEND PLATFORM_SOURCES
@@ -559,9 +561,9 @@ else()
         src/Platform/Utf8_other.cpp
     )
     if(APPLE)
-        list(APPEND PLATFORM_SOURCES src/Platform/SecureStore_apple.cpp src/Platform/Notifications_other.cpp)
+        list(APPEND PLATFORM_SOURCES src/Platform/SecureStore_apple.cpp src/Platform/Notifications_other.cpp src/Platform/Badge_other.cpp)
     else()
-        list(APPEND PLATFORM_SOURCES src/Platform/SecureStore_secret.cpp src/Platform/Notifications_dbus.cpp)
+        list(APPEND PLATFORM_SOURCES src/Platform/SecureStore_secret.cpp src/Platform/Notifications_dbus.cpp src/Platform/Badge_dbus.cpp)
     endif()
 endif()
 
@@ -642,7 +644,7 @@ if(BUILD_TESTS AND Catch2_FOUND)
         target_compile_options(TestPlatform PRIVATE /utf-8)
     endif()
     if(TARGET PkgConfig::STYX_GIO)
-        # The D-Bus notification test runs a fake daemon with GDBus.
+        # The D-Bus notification and badge tests talk to the session bus with GDBus.
         target_link_libraries(TestPlatform PRIVATE PkgConfig::STYX_GIO)
     endif()
     add_test(NAME PlatformTests COMMAND TestPlatform)

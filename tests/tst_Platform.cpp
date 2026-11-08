@@ -13,6 +13,7 @@
 #include "Platform/ThreadPool.hpp"
 #include "Platform/Base64.hpp"
 #include "Platform/Notifications.hpp"
+#include "Platform/Badge.hpp"
 #include "HardwareTests.hpp"
 #if defined(__linux__)
 #include <gio/gio.h>
@@ -21,11 +22,13 @@
 #include <string>
 #endif
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <thread>
 #include <vector>
-#include <atomic>
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -1028,6 +1031,49 @@ TEST_CASE("Notifications: a toast reaches the desktop", "[notifications]")
     REQUIRE(show(notification, [] {}));
 }
 
+TEST_CASE("Badge labels cap at nine", "[badge]")
+{
+    namespace Badge = Styx::Platform::Badge;
+    REQUIRE(Badge::label(0) == "");
+    REQUIRE(Badge::label(-3) == "");
+    REQUIRE(Badge::label(1) == "1");
+    REQUIRE(Badge::label(9) == "9");
+    REQUIRE(Badge::label(10) == "9+");
+    REQUIRE(Badge::label(1000) == "9+");
+}
+
+TEST_CASE("Badge images are a red disc with white text", "[badge]")
+{
+    namespace Badge = Styx::Platform::Badge;
+
+    const auto empty = Badge::render("", 16);
+    REQUIRE(empty.size() == 256);
+    REQUIRE(empty[0] == 0);
+    REQUIRE(empty[15] == 0);
+    REQUIRE(empty[240] == 0);
+    REQUIRE(empty[255] == 0);
+    REQUIRE(empty[8 * 16 + 8] == 0xFFED4245u);
+    REQUIRE(std::find(empty.begin(), empty.end(), 0xFFFFFFFFu) == empty.end());
+
+    const auto eight = Badge::render("8", 16);
+    REQUIRE(std::find(eight.begin(), eight.end(), 0xFFFFFFFFu) != eight.end());
+    bool symmetric = true;
+    for (int y = 0; y < 16; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            if (eight[static_cast<std::size_t>(y) * 16 + x] != eight[static_cast<std::size_t>(y) * 16 + (15 - x)])
+                symmetric = false;
+        }
+    }
+    REQUIRE(symmetric);
+
+    const auto big = Badge::render("9+", 32);
+    REQUIRE(big.size() == 1024);
+    REQUIRE(big[0] == 0);
+    REQUIRE(big[31] == 0);
+    REQUIRE(big[992] == 0);
+    REQUIRE(big[1023] == 0);
+}
+
 #if defined(__linux__)
 
 namespace {
@@ -1237,6 +1283,110 @@ private:
     bool owned = false;
 };
 
+struct LauncherListener
+{
+    GMainContext *context = nullptr;
+    GDBusConnection *connection = nullptr;
+    guint subscription = 0;
+    std::string uri;
+    std::int64_t count = -1;
+    bool visible = true;
+    int updates = 0;
+
+    LauncherListener()
+    {
+        context = g_main_context_new();
+        g_main_context_push_thread_default(context);
+
+        gchar *address = g_dbus_address_get_for_bus_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+        if (address) {
+            connection = g_dbus_connection_new_for_address_sync(
+                address,
+                static_cast<GDBusConnectionFlags>(G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT | G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION),
+                nullptr,
+                nullptr,
+                nullptr);
+            g_free(address);
+        }
+
+        if (connection) {
+            subscription = g_dbus_connection_signal_subscribe(
+                connection,
+                nullptr,
+                "com.canonical.Unity.LauncherEntry",
+                "Update",
+                nullptr,
+                nullptr,
+                G_DBUS_SIGNAL_FLAGS_NONE,
+                &LauncherListener::onSignal,
+                this,
+                nullptr);
+            GVariant *id = g_dbus_connection_call_sync(
+                connection,
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "GetId",
+                nullptr,
+                nullptr,
+                G_DBUS_CALL_FLAGS_NONE,
+                -1,
+                nullptr,
+                nullptr);
+            if (id)
+                g_variant_unref(id);
+        }
+    }
+
+    ~LauncherListener()
+    {
+        if (subscription)
+            g_dbus_connection_signal_unsubscribe(connection, subscription);
+        if (connection) {
+            g_dbus_connection_close_sync(connection, nullptr, nullptr);
+            g_object_unref(connection);
+        }
+        g_main_context_pop_thread_default(context);
+        g_main_context_unref(context);
+    }
+
+    static void onSignal(GDBusConnection *,
+                         const gchar *,
+                         const gchar *,
+                         const gchar *,
+                         const gchar *,
+                         GVariant *parameters,
+                         gpointer data)
+    {
+        if (!g_variant_is_of_type(parameters, G_VARIANT_TYPE("(sa{sv})")))
+            return;
+
+        auto *self = static_cast<LauncherListener *>(data);
+        const char *name = nullptr;
+        GVariant *props = nullptr;
+        g_variant_get(parameters, "(&s@a{sv})", &name, &props);
+        self->uri = name;
+        gint64 value = -1;
+        g_variant_lookup(props, "count", "x", &value);
+        self->count = value;
+        gboolean shown = TRUE;
+        g_variant_lookup(props, "count-visible", "b", &shown);
+        self->visible = shown != FALSE;
+        ++self->updates;
+        g_variant_unref(props);
+    }
+
+    bool waitFor(int wanted)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + 3s;
+        while (updates < wanted && std::chrono::steady_clock::now() < deadline) {
+            g_main_context_iteration(context, FALSE);
+            std::this_thread::sleep_for(10ms);
+        }
+        return updates >= wanted;
+    }
+};
+
 } // namespace
 
 TEST_CASE("Notifications: D-Bus notifications reach the daemon and report clicks", "[notifications]")
@@ -1281,4 +1431,23 @@ TEST_CASE("Notifications: D-Bus notifications reach the daemon and report clicks
     REQUIRE(clicked);
 }
 
+TEST_CASE("Badge counts reach the launcher over D-Bus", "[badge]")
+{
+    if (!g_getenv("DBUS_SESSION_BUS_ADDRESS"))
+        SKIP("no D-Bus session bus");
+
+    LauncherListener listener;
+    REQUIRE(listener.connection);
+
+    Styx::Platform::Badge::setCount(nullptr, 3);
+    REQUIRE(listener.waitFor(1));
+    REQUIRE(listener.uri == "application://io.github.larrythemobster.styx.desktop");
+    REQUIRE(listener.count == 3);
+    REQUIRE(listener.visible);
+
+    Styx::Platform::Badge::setCount(nullptr, 0);
+    REQUIRE(listener.waitFor(2));
+    REQUIRE(listener.count == 0);
+    REQUIRE_FALSE(listener.visible);
+}
 #endif
