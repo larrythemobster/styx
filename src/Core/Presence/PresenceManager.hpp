@@ -37,6 +37,7 @@ public:
     void loadMergedPresences(const Discord::MergedPresences &merged,
                              const std::vector<Snowflake> &guildIdsInOrder);
     void applyProtoStatus(const Proto::PreloadedUserSettings &settings);
+    [[nodiscard]] Discord::StatusType selfStatus() const { return selfPresence.status; }
 
     [[nodiscard]] PresenceBadge badge(Snowflake userId, Snowflake guildId = {}) const;
     [[nodiscard]] std::vector<Discord::Activity> activities(Snowflake userId, Snowflake guildId = {}) const;

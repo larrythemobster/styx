@@ -52,7 +52,9 @@ void CallSounds::forget(Core::Snowflake accountId)
 
 void CallSounds::updateRing(Core::ClientInstance *client, Core::Snowflake channelId)
 {
-    const bool rung = client->calls()->isRinging(channelId, client->accountId()) && client->voiceChannelId() != channelId;
+    // Do Not Disturb silences incoming calls, as the official client does.
+    const bool rung = client->calls()->isRinging(channelId, client->accountId()) && client->voiceChannelId() != channelId &&
+                      client->presences()->selfStatus() != Discord::StatusType::DND;
     setRinging(client->accountId(), channelId, rung);
 }
 

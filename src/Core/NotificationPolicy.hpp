@@ -25,6 +25,8 @@ struct NotificationFacts
     bool suppressRoles = false;
     // The channel is open in the window and the window has focus.
     bool viewingChannel = false;
+    // The user's status is Do Not Disturb.
+    bool doNotDisturb = false;
 };
 
 // Whether the message mentions the user, by name, role or @everyone, after suppression settings.

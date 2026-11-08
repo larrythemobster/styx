@@ -1332,6 +1332,7 @@ NotificationFacts ClientInstance::notificationFactsFor(const Discord::Message &m
     facts.fromSelf = authorId == account.id;
     facts.authorBlocked = authorId.isValid() && relationshipManager->isBlockedOrIgnored(authorId);
     facts.viewingChannel = readStateManager->activeChannel() == channelId && Platform::Desktop::applicationActive();
+    facts.doNotDisturb = presenceManager->selfStatus() == Discord::StatusType::DND;
 
     if (msg.mentions.hasValue())
         for (const auto &user : msg.mentions.get())

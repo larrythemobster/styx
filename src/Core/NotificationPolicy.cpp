@@ -13,7 +13,7 @@ bool shouldNotify(const NotificationFacts &facts)
 {
     using Level = Discord::MessageNotificationLevel;
 
-    if (facts.fromSelf || facts.authorBlocked || facts.viewingChannel || facts.muted)
+    if (facts.fromSelf || facts.authorBlocked || facts.viewingChannel || facts.muted || facts.doNotDisturb)
         return false;
     // DMs and group DMs only have mute; the notification level is a server setting.
     if (facts.privateChannel)

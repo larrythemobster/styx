@@ -144,6 +144,21 @@ TEST_CASE("A notified message counts as a mention only when it mentions the user
     REQUIRE_FALSE(isMentioned(everyone));
 }
 
+TEST_CASE("Do Not Disturb silences everything, DMs and mentions included", "[notifications]")
+{
+    NotificationFacts dm;
+    dm.privateChannel = true;
+    dm.doNotDisturb = true;
+    REQUIRE_FALSE(shouldNotify(dm));
+
+    NotificationFacts mention = guildMessage(Level::ALL_MESSAGES);
+    mention.mentionsMe = true;
+    mention.doNotDisturb = true;
+    REQUIRE_FALSE(shouldNotify(mention));
+    mention.doNotDisturb = false;
+    REQUIRE(shouldNotify(mention));
+}
+
 static MentionNames sampleNames()
 {
     MentionNames names;
