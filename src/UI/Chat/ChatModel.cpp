@@ -118,15 +118,21 @@ ForwardOriginData ChatModel::forwardOrigin(const Discord::Message &message) cons
     return result;
 }
 int ChatModel::rowCount() const { return static_cast<int>(messages.size()); }
+const Discord::Message *ChatModel::messageAt(int index) const
+{
+    if (index < 0 || index >= rowCount()) return nullptr;
+    return &messages[index];
+}
 ChatRow ChatModel::row(int index) const
 {
     ChatRow result;
     if (index < 0 || index >= rowCount()) return result;
     const auto &message = messages[index];
     const auto &visible = message.contentMessage();
+    const bool isV2 = visible.flags.hasValue() && visible.flags->testFlag(Discord::MessageFlag::IS_COMPONENTS_V2);
     result.messageId = message.id;
     result.messageType = message.type.get();
-    result.content = visible.content.valueOr(std::string{});
+    result.content = isV2 ? std::string{} : visible.content.valueOr(std::string{});
     result.timestamp = message.timestamp.get();
     result.editedTimestamp = message.editedTimestamp.valueOr(Platform::DateTime{});
     result.isSystemMessage = isSystemMessageType(result.messageType);
@@ -145,24 +151,26 @@ ChatRow ChatModel::row(int index) const
     }
     if (auto it = sizeCache.find(message.id); it != sizeCache.end()) result.cachedSize = it->second;
     if (message.nonce.hasValue()) { result.isPending = pendingNonces.contains(message.nonce.get()); result.isErrored = erroredNonces.contains(message.nonce.get()); }
-    result.html = visible.hidesLinkBehindItsEmbed() ? std::string{} : visible.parsedContentCached;
-    if (result.messageType == Discord::MessageType::THREAD_CREATED) {
-        auto name = Platform::htmlEscape(message.content.valueOr(std::string{}));
-        auto id = message.messageReference.hasValue() ? message.messageReference->channelId.valueOr(Snowflake::Invalid) : Snowflake::Invalid;
-        if (!id.isValid() && message.flags.hasValue() && message.flags->testFlag(Discord::MessageFlag::HAS_THREAD)) id = message.id;
-        auto author = Platform::htmlEscape(result.username);
-        auto authorHtml = result.usernameColor.valid ? "<span style='color:" + result.usernameColor.css() + ";font-weight:600'>" + author + "</span>" : "<b>" + author + "</b>";
-        if (name.empty()) name = "a thread";
-        result.html = authorHtml + " started a thread: " + (id.isValid() ? "<a href='styx://channel/" + id.toString() + "'>" + name + "</a>" : "<b>" + name + "</b>");
-    } else if (result.messageType == Discord::MessageType::THREAD_STARTER_MESSAGE) {
-        result.html = message.referencedMessage ? (message.referencedMessage->parsedContentCached.empty() ? Platform::htmlEscape(message.referencedMessage->content.valueOr(std::string{})) : message.referencedMessage->parsedContentCached)
-            : "Sorry, we couldn't load the first message in this thread.";
-    } else {
-        if (message.flags.hasValue() && message.flags->testFlag(Discord::MessageFlag::HAS_THREAD)) result.html += (result.html.empty() ? "" : "<br/>") + std::string("<a href='styx://channel/") + message.id->toString() + "'>View Thread</a>";
-        if (result.isForwarded) result.html = "<i>Forwarded</i>" + (result.html.empty() ? std::string{} : "<br/>" + result.html);
+    if (!isV2) {
+        result.html = visible.hidesLinkBehindItsEmbed() ? std::string{} : visible.parsedContentCached;
+        if (result.messageType == Discord::MessageType::THREAD_CREATED) {
+            auto name = Platform::htmlEscape(message.content.valueOr(std::string{}));
+            auto id = message.messageReference.hasValue() ? message.messageReference->channelId.valueOr(Snowflake::Invalid) : Snowflake::Invalid;
+            if (!id.isValid() && message.flags.hasValue() && message.flags->testFlag(Discord::MessageFlag::HAS_THREAD)) id = message.id;
+            auto author = Platform::htmlEscape(result.username);
+            auto authorHtml = result.usernameColor.valid ? "<span style='color:" + result.usernameColor.css() + ";font-weight:600'>" + author + "</span>" : "<b>" + author + "</b>";
+            if (name.empty()) name = "a thread";
+            result.html = authorHtml + " started a thread: " + (id.isValid() ? "<a href='styx://channel/" + id.toString() + "'>" + name + "</a>" : "<b>" + name + "</b>");
+        } else if (result.messageType == Discord::MessageType::THREAD_STARTER_MESSAGE) {
+            result.html = message.referencedMessage ? (message.referencedMessage->parsedContentCached.empty() ? Platform::htmlEscape(message.referencedMessage->content.valueOr(std::string{})) : message.referencedMessage->parsedContentCached)
+                : "Sorry, we couldn't load the first message in this thread.";
+        } else {
+            if (message.flags.hasValue() && message.flags->testFlag(Discord::MessageFlag::HAS_THREAD)) result.html += (result.html.empty() ? "" : "<br/>") + std::string("<a href='styx://channel/") + message.id->toString() + "'>View Thread</a>";
+            if (result.isForwarded) result.html = "<i>Forwarded</i>" + (result.html.empty() ? std::string{} : "<br/>" + result.html);
+        }
     }
     auto fetch = [&](const std::string &url, Platform::Size size) { return suppressImageFetch ? imageManager->getIfCached(url, size) : imageManager->get(url, size, currentAccountId); };
-    if (visible.attachments.hasValue()) {
+    if (!isV2 && visible.attachments.hasValue()) {
         const std::vector<std::pair<int64_t, int64_t>> *progress = nullptr;
         if (message.nonce.hasValue()) if (auto it = uploadProgress.find(message.nonce.get()); it != uploadProgress.end()) progress = &it->second;
         for (const auto &attachment : visible.attachments.get()) {
@@ -191,7 +199,7 @@ ChatRow ChatModel::row(int index) const
             result.attachments.push_back(std::move(data));
         }
     }
-    if (visible.stickerItems.hasValue()) {
+    if (!isV2 && visible.stickerItems.hasValue()) {
         const Platform::Size size{StickerData::DisplayPx, StickerData::DisplayPx};
         int asset = Discord::Cdn::stickerAssetPx(StickerData::DisplayPx, Platform::primaryDevicePixelRatio());
         for (const auto &sticker : visible.stickerItems.get()) {
@@ -204,8 +212,8 @@ ChatRow ChatModel::row(int index) const
             result.stickers.push_back(std::move(data));
         }
     }
-    if (auto it = embedCache.find(message.id); it != embedCache.end()) result.embeds = it->second;
-    else if (visible.embeds.hasValue()) {
+    if (auto it = isV2 ? embedCache.end() : embedCache.find(message.id); it != embedCache.end()) result.embeds = it->second;
+    else if (!isV2 && visible.embeds.hasValue()) {
         std::unordered_map<std::string, size_t> merged;
         Core::Markdown::Parser parser;
         auto parse = [&](const std::string &text, bool links) {

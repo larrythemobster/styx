@@ -282,6 +282,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/UserPanelController.cpp
     src/UI/Rml/CustomStatusController.cpp
     src/UI/Rml/ChatController.cpp
+    src/UI/Rml/ComponentRenderer.cpp
     src/UI/Rml/MemberListController.cpp
     src/UI/Rml/FriendsController.cpp
     src/UI/Rml/SettingsController.cpp
@@ -448,8 +449,8 @@ if(BUILD_TESTS)
     styx_test(TestEmojiGrid EmojiGridTests tests/tst_EmojiGrid.cpp
         src/UI/Rml/EmojiGridModel.cpp src/Core/Snowflake.cpp)
     styx_test(TestCdnUrls CdnUrlTests tests/tst_CdnUrls.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
-    styx_test(TestRmlRender RmlRenderTests tests/tst_RmlRender.cpp
-        src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp
+    styx_test(TestRmlRender RmlRenderTests tests/tst_RmlRender.cpp tests/tst_MessageComponentRendering.cpp
+        src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp src/UI/Rml/ComponentRenderer.cpp
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)

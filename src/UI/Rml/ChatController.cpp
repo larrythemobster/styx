@@ -1,5 +1,6 @@
 #include "ChatController.hpp"
 #include "ChatMarkdown.hpp"
+#include "ComponentRenderer.hpp"
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
 #include "ShortcutController.hpp"
@@ -40,6 +41,7 @@
 #include <charconv>
 #include <filesystem>
 #include <format>
+#include <optional>
 #include <utility>
 
 namespace Styx {
@@ -293,6 +295,35 @@ void ChatController::setupEventListeners()
         } else if (action == std::string("reveal-text-spoiler")) {
             actionEl->SetClass("blurred", false);
             requestRender();
+        } else if (action == std::string("reveal-component-spoiler")) {
+            ::Rml::Element *msgEl = closest(actionEl, "data-message-id");
+            if (!msgEl)
+                return;
+            uint64_t rawMid = parseNumber(attribute(msgEl, "data-message-id"));
+            if (rawMid == 0)
+                return;
+            Core::Snowflake messageId(rawMid);
+            ChatModel *model = shell.chat();
+            if (!model)
+                return;
+            int row = model->rowForMessage(messageId);
+            if (row < 0)
+                return;
+            const Discord::Message *rawMsg = model->messageAt(row);
+            if (!rawMsg)
+                return;
+            const auto &visible = rawMsg->contentMessage();
+            std::string path = attribute(actionEl, "data-component-path");
+            if (path.empty())
+                return;
+            auto &state = revealedComponentSpoilers[messageId];
+            if (state.componentsJson != visible.componentsJson) {
+                state.componentsJson = visible.componentsJson;
+                state.paths.clear();
+            }
+            state.paths.insert(std::move(path));
+            onDataChanged(row, row);
+            requestRender();
         } else if (action == std::string("toggle-reaction")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages()) {
@@ -512,6 +543,7 @@ void ChatController::onLocationChanged(const Location &location)
 {
     if (currentChannelId != location.channelId)
         expandedBlockedRuns.clear();
+    revealedComponentSpoilers.clear();
     currentChannelId = location.channelId;
     currentGuildId = location.guildId;
     currentAccountId = location.accountId;
@@ -532,6 +564,7 @@ void ChatController::onLocationChanged(const Location &location)
 
 void ChatController::onInstanceChanged(Core::ClientInstance *instance)
 {
+    revealedComponentSpoilers.clear();
     for (auto &connection : instanceConnections)
         connection.disconnect();
     instanceConnections.clear();
@@ -617,6 +650,7 @@ void ChatController::onRowsRemoved(int first, int last)
     if (!messagesEl)
         return;
 
+    revealedComponentSpoilers.clear();
     for (int r = last; r >= first; --r) {
         if (r >= 0 && r < messagesEl->GetNumChildren())
             messagesEl->RemoveChild(messagesEl->GetChild(r));
@@ -642,6 +676,7 @@ void ChatController::onDataChanged(int first, int last)
 void ChatController::onModelReset()
 {
     expandedBlockedRuns.clear();
+    revealedComponentSpoilers.clear();
     loadingHistory = false;
     renderAllMessages();
 }
@@ -814,6 +849,57 @@ std::string ChatController::buildMessageHtml(int row)
     RenderedMarkdown contentRendered = ChatMarkdown::toRml(rawContent, shell, currentAccountId, currentGuildId, currentChannelId);
     bool mentionsMe = contentRendered.mentionsUser;
 
+    std::string componentsHtml;
+    const Discord::Message *rawMsg = model->messageAt(row);
+    bool isV2 = false;
+    if (rawMsg) {
+        const auto &visible = rawMsg->contentMessage();
+        isV2 = visible.flags.hasValue() && visible.flags->testFlag(Discord::MessageFlag::IS_COMPONENTS_V2);
+
+        const std::unordered_set<std::string> *revealedPaths = nullptr;
+        if (auto it = revealedComponentSpoilers.find(msgId); it != revealedComponentSpoilers.end()) {
+            if (it->second.componentsJson != visible.componentsJson) {
+                revealedComponentSpoilers.erase(it);
+            } else {
+                revealedPaths = &it->second.paths;
+            }
+        }
+
+        if (visible.components.hasValue() && !visible.components->empty()) {
+            ComponentRenderContext ctx;
+            ctx.markdown = [this, &mentionsMe](const std::string &raw) -> std::string {
+                auto rendered = ChatMarkdown::toRml(raw, shell, currentAccountId, currentGuildId, currentChannelId);
+                mentionsMe |= rendered.mentionsUser;
+                return std::move(rendered.rml);
+            };
+            ctx.imageSource = [this](const std::string &url, Platform::Size size) {
+                return shell.imageSource(url, size);
+            };
+            std::optional<std::vector<Discord::Role>> roles;
+            ctx.defaultLabel = [this, &roles](Core::Snowflake id, const std::string &type) -> std::string {
+                if (auto *instance = shell.currentInstance()) {
+                    if (type == "user") {
+                        if (auto name = instance->users()->getDisplayName(id, currentGuildId); !name.empty())
+                            return name;
+                    } else if (type == "channel") {
+                        if (auto channel = instance->getChannel(id); channel && channel->name.hasValue() && !channel->name->empty())
+                            return channel->name.get();
+                    } else if (type == "role" && currentGuildId.isValid()) {
+                        if (!roles)
+                            roles = instance->getRolesForGuild(currentGuildId);
+                        for (const auto &role : *roles)
+                            if (role.id.get() == id && role.name.hasValue() && !role.name->empty())
+                                return role.name.get();
+                    }
+                }
+                return id.toString();
+            };
+            ctx.fileSize = formatFileSize;
+            ctx.revealedSpoilers = revealedPaths;
+            componentsHtml = renderMessageComponents(*rawMsg, ctx);
+        }
+    }
+
     std::string rowClasses = std::string("message-row");
     if (showHeader)
         rowClasses += std::string(" group-start");
@@ -870,12 +956,15 @@ std::string ChatController::buildMessageHtml(int row)
     }
 
     // Body content
-    out += std::string("<div class=\"message-body\">");
-    out += contentRendered.rml;
-    if (editedVal.valid()) {
-        out += std::string("<span class=\"edited-marker\">(edited)</span>");
+    const bool showBody = !isV2 || !contentRendered.rml.empty() || editedVal.valid();
+    if (showBody) {
+        out += std::string("<div class=\"message-body\">");
+        out += contentRendered.rml;
+        if (editedVal.valid()) {
+            out += std::string("<span class=\"edited-marker\">(edited)</span>");
+        }
+        out += std::string("</div>");
     }
-    out += std::string("</div>");
 
     // Attachments
     for (const auto &att : attachments) {
@@ -992,6 +1081,11 @@ std::string ChatController::buildMessageHtml(int row)
         }
 
         out += std::string("</div>");
+    }
+
+    // Components
+    if (!componentsHtml.empty()) {
+        out += componentsHtml;
     }
 
     // Stickers

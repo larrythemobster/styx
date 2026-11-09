@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <regex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Core/Markdown/Parser.hpp"
@@ -64,8 +65,9 @@ public:
 
         Core::Markdown::Parser parser;
         Core::Markdown::ParseState state;
+        state.isInline = true;
         state.customState["channelId"] = static_cast<std::uint64_t>(channelId);
-        auto ast = parser.parse(processed, state);
+        auto ast = parser.parse(std::move(processed), std::move(state));
         auto rml = renderNodes(ast, shell, Core::Markdown::Parser::isEmojiOnly(ast), result.mentionsUser, currentUserId, guildId);
 
         for (const auto &[placeholder, inner] : spoilers) {

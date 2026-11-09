@@ -233,6 +233,8 @@ public:
 
     [[nodiscard]] int rowCount() const;
     [[nodiscard]] ChatRow row(int index) const;
+    // Borrowed until messages are updated, inserted, removed or reset.
+    [[nodiscard]] const Discord::Message *messageAt(int index) const;
     bool setCachedSize(int index, Platform::Size size);
 
     [[nodiscard]] Snowflake getOldestMessageId() const;

@@ -79,8 +79,11 @@ and the native macOS UI, have not been verified.
 
 Message parsing retains typed legacy and Components V2 trees, including replies
 and forwarded snapshots, through cache reloads. Partial updates preserve omitted
-components and clear them on an empty array. Component rendering is not yet
-supported.
+components and clear them on an empty array. Chat renders legacy action rows,
+buttons and select summaries, plus Components V2 text, sections, containers,
+galleries and files. Bot actions and selects are read-only. Link buttons use the
+external-link confirmation dialog; hidden component spoilers do not load media
+until revealed.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.

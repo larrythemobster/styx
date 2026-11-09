@@ -7,6 +7,7 @@
 #include "UI/Chat/BlockedRuns.hpp"
 
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include "Platform/Signal.hpp"
@@ -105,6 +106,12 @@ private:
     Core::Snowflake editingMessageId;
     std::vector<Core::PendingAttachment> pendingAttachments;
     std::unordered_set<Core::Snowflake> expandedBlockedRuns;
+
+    struct ComponentSpoilerState {
+        std::string componentsJson;
+        std::unordered_set<std::string> paths;
+    };
+    std::unordered_map<Core::Snowflake, ComponentSpoilerState> revealedComponentSpoilers;
 
     std::vector<Platform::Connection> instanceConnections;
     Platform::Connection emojiConnection;
