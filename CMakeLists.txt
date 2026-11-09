@@ -246,6 +246,7 @@ set(PROJECT_SOURCES
     src/Discord/Client.cpp
     src/Discord/ClientMessages.cpp
     src/Discord/MessageSearch.cpp
+    src/Discord/InviteLink.cpp
     src/Discord/ClientGuild.cpp
     src/Discord/ClientUploads.cpp
     src/Discord/Gateway.cpp
@@ -402,6 +403,7 @@ if(BUILD_TESTS)
     target_link_libraries(TestShortcuts PRIVATE RmlUi::RmlUi)
     styx_test(TestNavigation NavigationTests tests/tst_Navigation.cpp src/UI/ChannelList/Navigation.cpp src/Core/Snowflake.cpp)
     styx_test(TestBlockedRuns BlockedRunsTests tests/tst_BlockedRuns.cpp src/UI/Chat/BlockedRuns.cpp)
+    styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)
     styx_test(TestSounds SoundsTests tests/tst_Sounds.cpp src/Core/Audio/Sounds.cpp src/Core/Audio/SoundMixer.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)

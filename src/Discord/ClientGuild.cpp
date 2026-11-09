@@ -1,4 +1,5 @@
 #include "Client.hpp"
+#include "InviteLink.hpp"
 #include "ApiError.hpp"
 #include "Core/Logging.hpp"
 #include "Platform/Utf8.hpp"
@@ -161,6 +162,19 @@ void Client::createInvite(Snowflake channelId, int maxAgeSeconds, int maxUses, b
 void Client::revokeInvite(const std::string &code, ActionCallback callback) {
     Platform::Guard<Client> self(this); auto announced = [self, code, callback = std::move(callback)](const Core::Result<void> &result) { if (self && (result.success() || result.code == ApiError::UnknownInvite)) self->inviteRevoked.publish(code); if (callback) callback(result); };
     httpClient->delete_("/invites/" + Platform::urlEncode(code), actionHandler("Revoking an invite", std::move(announced)));
+}
+void Client::resolveInvite(const std::string &code, ResultCallback<InvitePreview> callback) {
+    httpClient->get("/invites/" + Platform::urlEncode(code), {{"with_counts", "true"}, {"with_expiration", "true"}}, valueHandler<InvitePreview>("Looking up an invite", std::move(callback), [](const Json &doc) { return parseInvitePreview(doc); }));
+}
+void Client::acceptInvite(const std::string &code, const std::string &location, ResultCallback<Snowflake> callback) {
+    RequestOptions options; options.context = ContextProperties::location(location);
+    httpClient->send(HttpClient::Method::POST, "/invites/" + Platform::urlEncode(code), Core::OrderedJson().toBytes(), options, valueHandler<Snowflake>("Joining a server", std::move(callback), [](const Json &doc) {
+        if (doc.is_object()) {
+            if (doc.contains("guild") && doc["guild"].is_object() && doc["guild"].contains("id") && doc["guild"]["id"].is_string()) return snowflake(doc["guild"]["id"].get<std::string>());
+            if (doc.contains("guild_id") && doc["guild_id"].is_string()) return snowflake(doc["guild_id"].get<std::string>());
+        }
+        return Snowflake::Invalid;
+    }));
 }
 void Client::setIncidentActions(Snowflake guildId, const Platform::DateTime &invitesDisabledUntil, const Platform::DateTime &dmsDisabledUntil, std::optional<int> lockdownHours, ActionCallback callback) {
     Core::OrderedJson body; body.insert("invites_disabled_until", timestamp(invitesDisabledUntil)).insert("dms_disabled_until", timestamp(dmsDisabledUntil)).insert("lockdown_duration_hours", lockdownHours ? Json(*lockdownHours) : Json()); httpClient->put(guildEndpoint(guildId, "/incident-actions"), body, actionHandler("Updating invite and DM pauses", std::move(callback)));

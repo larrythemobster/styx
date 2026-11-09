@@ -25,6 +25,7 @@
 
 #include "Gateway.hpp"
 #include "MessageSearch.hpp"
+#include "InviteLink.hpp"
 #include "GuildRequests.hpp"
 #include "HttpClient.hpp"
 #include "ClientIdentity.hpp"
@@ -251,6 +252,13 @@ public:
     void fetchGuildInvites(Snowflake guildId, ResultCallback<std::vector<Invite>> callback);
     void createInvite(Snowflake channelId, int maxAgeSeconds, int maxUses, bool temporary, ResultCallback<Invite> callback);
     void revokeInvite(const std::string &code, ActionCallback callback);
+    // Looks an invite up with member counts and expiry; fails with ApiError::UnknownInvite for
+    // a bad or expired code.
+    void resolveInvite(const std::string &code, ResultCallback<InvitePreview> callback);
+    // Joins the invite's server. location is the X-Context-Properties location the official client
+    // sends for where the invite was opened, e.g. "Markdown Link" or "Join Guild". The result is the
+    // server's id.
+    void acceptInvite(const std::string &code, const std::string &location, ResultCallback<Snowflake> callback);
     void setIncidentActions(Snowflake guildId, const Platform::DateTime &invitesDisabledUntil, const Platform::DateTime &dmsDisabledUntil,
                             std::optional<int> lockdownHours, ActionCallback callback);
 
