@@ -35,6 +35,9 @@ inline constexpr const char *VoiceInputDevice = "voice/input_device";
 inline constexpr const char *VoiceOutputDevice = "voice/output_device";
 inline constexpr const char *VoiceInputVolume = "voice/input_volume";
 inline constexpr const char *VoiceOutputVolume = "voice/output_volume";
+inline constexpr const char *VoiceInputMode = "voice/input_mode";
+inline constexpr const char *VoicePushToTalkKey = "voice/ptt_key";
+inline constexpr const char *VoicePushToTalkReleaseDelay = "voice/ptt_release_delay";
 
 // Stream / Go Live
 inline constexpr const char *StreamQuality = "stream/quality";
@@ -69,6 +72,10 @@ inline constexpr const char *VoiceInputDevice = "";
 inline constexpr const char *VoiceOutputDevice = "";
 inline constexpr int VoiceInputVolume = 100;
 inline constexpr int VoiceOutputVolume = 100;
+// "voice_activity" or "push_to_talk".
+inline constexpr const char *VoiceInputMode = "voice_activity";
+// Milliseconds, as in the official client's slider (0 to 2000, default 20).
+inline constexpr int VoicePushToTalkReleaseDelay = 20;
 
 // Stream
 inline constexpr const char *StreamQuality = "720p30";

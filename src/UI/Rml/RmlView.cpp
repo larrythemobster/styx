@@ -41,6 +41,7 @@ KI::KeyIdentifier mapKey(SDL_Keycode key)
     if (key >= SDLK_A && key <= SDLK_Z) return static_cast<KI::KeyIdentifier>(KI::KI_A + key - SDLK_A);
     if (key >= SDLK_0 && key <= SDLK_9) return static_cast<KI::KeyIdentifier>(KI::KI_0 + key - SDLK_0);
     if (key >= SDLK_F1 && key <= SDLK_F12) return static_cast<KI::KeyIdentifier>(KI::KI_F1 + key - SDLK_F1);
+    if (key >= SDLK_F13 && key <= SDLK_F24) return static_cast<KI::KeyIdentifier>(KI::KI_F13 + key - SDLK_F13);
     switch (key) {
     case SDLK_BACKSPACE: return KI::KI_BACK;
     case SDLK_TAB: return KI::KI_TAB;
@@ -272,7 +273,10 @@ void View::handleEvent(const SDL_Event &event)
 {
     if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) { close(); return; }
     if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) Platform::Desktop::setApplicationActive(true);
-    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) Platform::Desktop::setApplicationActive(SDL_GetKeyboardFocus() != nullptr);
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+        Platform::Desktop::setApplicationActive(SDL_GetKeyboardFocus() != nullptr);
+        focusLost.publish();
+    }
     if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) updateDimensions();
     if (!rmlContext) return;
     switch (event.type) {
@@ -296,8 +300,18 @@ void View::handleEvent(const SDL_Event &event)
         break;
     }
     case SDL_EVENT_WINDOW_MOUSE_LEAVE: rmlContext->ProcessMouseLeave(); break;
-    case SDL_EVENT_KEY_DOWN: rmlContext->ProcessKeyDown(mapKey(event.key.key), modifiers(event.key.mod)); break;
-    case SDL_EVENT_KEY_UP: rmlContext->ProcessKeyUp(mapKey(event.key.key), modifiers(event.key.mod)); break;
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP: {
+        const auto key = mapKey(event.key.key);
+        const auto mods = modifiers(event.key.mod);
+        const bool down = event.type == SDL_EVENT_KEY_DOWN;
+        keyChanged.publish(key, mods, down);
+        if (down)
+            rmlContext->ProcessKeyDown(key, mods);
+        else
+            rmlContext->ProcessKeyUp(key, mods);
+        break;
+    }
     case SDL_EVENT_TEXT_INPUT: rmlContext->ProcessTextInput(event.text.text); break;
     default: break;
     }

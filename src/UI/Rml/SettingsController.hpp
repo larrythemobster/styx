@@ -54,6 +54,10 @@ private:
     void handleSliderChange(::Rml::Element *sliderEl);
     void handleSelectChange(::Rml::Element *selectEl);
     void handleAction(const std::string &action, ::Rml::Element *target);
+    void stopRecordingPttKey();
+    // Stores the recorded push-to-talk binding and applies it.
+    void recordPttKey(int key, int rmlModifiers);
+    void applyPushToTalk();
 
     Section currentSection = Section::MyAccount;
     Platform::Timer rebuildTimer;
@@ -61,6 +65,7 @@ private:
     Platform::Color themeSeedColor;
     int themeSchemeIndex = 0;
     bool themeDarkMode = true;
+    bool recordingPttKey = false;
 };
 
 } // namespace Rml

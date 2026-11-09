@@ -13,6 +13,7 @@
 #include <opus.h>
 
 #include "Core/Snowflake.hpp"
+#include "Core/Audio/TransmitGate.hpp"
 
 
 namespace Styx {
@@ -56,6 +57,8 @@ public:
     void setInputGain(float gain);
     void setOutputVolume(float volume);
     void setVadThreshold(float threshold);
+    void setPushToTalk(bool enabled, int releaseDelayMs);
+    void setPushToTalkHeld(bool held);
     void setNoiseSuppressionEnabled(bool enabled);
     void setUseRnnoiseVad(bool enabled);
 
@@ -95,10 +98,8 @@ private:
     std::unordered_map<Snowflake, float> userVolumes;
 
     bool deafened = false;
-    bool isSpeaking = false;
+    TransmitGate gate;
     float vadThreshold = 100.0f;
-    int vadHoldoffFrames = 25;
-    int vadHoldoffCounter = 0;
 
     bool noiseSuppressionEnabled = true;
 #ifdef STYX_HAVE_RNNOISE

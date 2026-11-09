@@ -1,7 +1,10 @@
 #include "SettingsController.hpp"
 
 #include "Shell.hpp"
+#include "ShortcutController.hpp"
+#include "Shortcuts.hpp"
 #include "RmlRuntime.hpp"
+#include "UI/PushToTalk.hpp"
 
 #include "Core/AnimatedImageCache.hpp"
 #include "Core/Audio/Sounds.hpp"
@@ -117,6 +120,7 @@ void SettingsController::onSettingsOpenChanged(bool open)
         regionRoot->SetClass("open", true);
         requestRender(200);
     } else {
+        stopRecordingPttKey();
         regionRoot->SetClass("open", false);
         hideTransitionTimer.start(std::chrono::milliseconds(160), false, [this] {
             if (!shell.isSettingsOpen() && regionRoot)
@@ -130,6 +134,7 @@ void SettingsController::setSection(Section section)
 {
     if (currentSection == section)
         return;
+    stopRecordingPttKey();
     currentSection = section;
     render();
     requestRender(100);
@@ -616,6 +621,59 @@ void SettingsController::renderVoiceVideo(std::string &rml)
 #endif
     rml += std::string("</div>"); // .settings-card (Voice Settings)
 
+    // Input Mode card
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">Input Mode</div>");
+    const std::string inputMode = getString(Keys::VoiceInputMode, Defaults::VoiceInputMode);
+
+    auto renderInputModeRadio = [&](const std::string &val, const std::string &title) {
+        const bool active = (inputMode == val);
+        rml += formatRml("<div class=\"settings-radio-card%1\" data-setting=\"%2\" data-value=\"%3\" tabindex=\"0\">", active ? std::string(" active") : std::string(), Keys::VoiceInputMode, val);
+        rml += std::string("<div class=\"settings-radio-indicator\"></div>");
+        rml += std::string("<div class=\"settings-radio-info\">");
+        rml += formatRml("<div class=\"settings-radio-title\">%1</div>", title);
+        rml += std::string("</div></div>");
+    };
+
+    renderInputModeRadio(std::string("voice_activity"), std::string("Voice Activity"));
+    renderInputModeRadio(std::string("push_to_talk"), std::string("Push to Talk"));
+
+    if (inputMode == std::string("push_to_talk")) {
+        rml += std::string("<div class=\"settings-label\">Shortcut</div>");
+        const auto binding = keyBindingFromJson(get(Keys::VoicePushToTalkKey));
+        std::string label;
+        if (recordingPttKey) {
+            label = "Press a key…";
+        } else {
+            label = keyBindingLabel(binding);
+            if (label.empty())
+                label = "No Keybind Set";
+        }
+        const std::string btnClass = recordingPttKey ? "settings-btn settings-btn-danger" : "settings-btn settings-btn-secondary";
+        const std::string btnText = recordingPttKey ? "Stop Recording" : "Record Keybind";
+
+        rml += std::string("<div class=\"settings-keybind\" id=\"ptt-keybind\">");
+        rml += formatRml("<span class=\"settings-keybind-label\">%1</span>", Rml::escape(label));
+        rml += formatRml("<button class=\"%1\" data-action=\"record-ptt-key\">%2</button>", btnClass, btnText);
+        rml += std::string("</div>");
+
+        rml += std::string("<div class=\"settings-description\">Push to talk works while Styx is the focused window.</div>");
+
+        const int pttDelay = getInt(Keys::VoicePushToTalkReleaseDelay, Defaults::VoicePushToTalkReleaseDelay);
+        rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
+        rml += std::string("<div class=\"settings-slider-header\">");
+        rml += std::string("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Push to Talk Release Delay</span>");
+        rml += std::string("<span class=\"settings-slider-val\" id=\"val-ptt-release-delay\">") + std::to_string(pttDelay) + std::string("ms</span>");
+        rml += std::string("</div>");
+        rml += std::string("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"2000\" step=\"20\" value=\"")
+               + std::to_string(pttDelay)
+               + std::string("\" data-setting=\"") + std::string(Keys::VoicePushToTalkReleaseDelay)
+               + std::string("\" data-display=\"val-ptt-release-delay\" data-unit=\"ms\"/>");
+        rml += std::string("</div>"); // .settings-slider-wrap
+    }
+
+    rml += std::string("</div>"); // .settings-card
+
     // Advanced Subheading & Audio Backend card
     rml += std::string("<div class=\"settings-subheading\">Advanced</div>");
     rml += std::string("<div class=\"settings-card\">");
@@ -769,7 +827,26 @@ void SettingsController::setupEventListeners()
         }
     }, regionRoot);
 
+    listen("keyup", [this](::Rml::Event &event) {
+        const int key = event.GetParameter<int>("key_identifier", 0);
+        if (recordingPttKey && isModifierKey(key))
+            recordPttKey(key, ShortcutController::eventModifiers(event));
+    }, regionRoot);
+
     listen("keydown", [this](::Rml::Event &event) {
+        if (recordingPttKey) {
+            const int key = event.GetParameter<int>("key_identifier", 0);
+            if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE) {
+                stopRecordingPttKey();
+                render();
+                requestRender(100);
+            } else if (!isModifierKey(key)) {
+                recordPttKey(key, ShortcutController::eventModifiers(event));
+            }
+            event.StopPropagation();
+            return;
+        }
+
         const int key = event.GetParameter("key_identifier", 0);
         if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE) {
             shell.closeSettings();
@@ -834,6 +911,11 @@ void SettingsController::handleRadioClick(::Rml::Element *radioEl)
         }
     }
 
+    if (key == std::string(Keys::VoiceInputMode)) {
+        applyPushToTalk();
+        render();
+    }
+
     requestRender(100);
 }
 
@@ -868,6 +950,8 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
         shell.session()->getAnimatedImageCache()->setCacheLimitMiB(val);
     } else if (key == std::string(Keys::AnimationMaxMb)) {
         shell.session()->getAnimatedImageCache()->setAnimationLimitMiB(val);
+    } else if (key == std::string(Keys::VoicePushToTalkReleaseDelay)) {
+        applyPushToTalk();
 #ifndef STYX_NO_VOICE
     } else if (key == std::string(Keys::VoiceInputVolume)) {
         const float gain = static_cast<float>(val) / 100.0f;
@@ -930,6 +1014,12 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
 {
     if (action == std::string("close")) {
         shell.closeSettings();
+    } else if (action == std::string("record-ptt-key")) {
+        recordingPttKey = !recordingPttKey;
+        if (auto *ptt = shell.pushToTalk())
+            ptt->setSuspended(recordingPttKey);
+        render();
+        requestRender(100);
     } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
     } else if (action == std::string("open-acheron")) {
@@ -1007,6 +1097,42 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         render();
         requestRender(100);
     }
+}
+
+void SettingsController::recordPttKey(int key, int rmlModifiers)
+{
+    set(Keys::VoicePushToTalkKey, keyBindingToJson(recordKeyBinding(key, rmlModifiers)));
+    stopRecordingPttKey();
+    applyPushToTalk();
+    render();
+    requestRender(100);
+}
+
+void SettingsController::stopRecordingPttKey()
+{
+    if (!recordingPttKey)
+        return;
+    recordingPttKey = false;
+    if (auto *ptt = shell.pushToTalk())
+        ptt->setSuspended(false);
+}
+
+void SettingsController::applyPushToTalk()
+{
+    if (auto *ptt = shell.pushToTalk())
+        ptt->reload();
+
+#ifndef STYX_NO_VOICE
+    const std::string mode = getString(Keys::VoiceInputMode, Defaults::VoiceInputMode);
+    const int delay = getInt(Keys::VoicePushToTalkReleaseDelay, Defaults::VoicePushToTalkReleaseDelay);
+    const bool pttEnabled = (mode == "push_to_talk");
+    if (auto *sess = shell.session()) {
+        for (const auto &client : sess->getClients()) {
+            if (client && client->voice())
+                client->voice()->setPushToTalk(pttEnabled, delay);
+        }
+    }
+#endif
 }
 
 } // namespace Rml

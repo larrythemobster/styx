@@ -64,6 +64,10 @@ public:
     [[nodiscard]] float outputVolume() const { return cachedOutputVolume; }
     void setUserVolume(Snowflake userId, float volume);
     void setVadThreshold(float threshold);
+    // Push-to-talk replaces voice activity detection; the delay keeps the mic open after the
+    // key is let go. Read from settings at construction, applied to every connection.
+    void setPushToTalk(bool enabled, int releaseDelayMs);
+    void setPushToTalkHeld(bool held);
 
     void setOpusApplication(int application);
     void setOpusBitrate(int bitrate);
@@ -170,6 +174,9 @@ private:
 #endif
     std::vector<AudioDeviceInfo> cachedInputDevices;
     std::vector<AudioDeviceInfo> cachedOutputDevices;
+    bool cachedPushToTalk = false;
+    int cachedReleaseDelayMs = 20;
+    bool cachedPushToTalkHeld = false;
     float cachedInputGain = 1.0f;
     float cachedOutputVolume = 1.0f;
 

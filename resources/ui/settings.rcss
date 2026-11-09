@@ -771,3 +771,21 @@ select.settings-select selectbox option:hover
 	text-align: right;
 	margin-right: 12dp;
 }
+
+.settings-keybind
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	background-color: #1e1f22;
+	border-radius: 4dp;
+	padding: 8dp 8dp 8dp 12dp;
+	margin-bottom: 8dp;
+}
+
+.settings-keybind-label
+{
+	font-size: 14dp;
+	color: #dbdee1;
+}

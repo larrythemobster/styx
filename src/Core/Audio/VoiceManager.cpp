@@ -40,6 +40,8 @@ VoiceManager::VoiceManager(Snowflake accountId, const ProxyConfig &proxy)
     cachedInputGain = static_cast<float>(inVol) / 100.0f;
     const int outVol = Settings::getInt(Settings::Keys::VoiceOutputVolume, Settings::Defaults::VoiceOutputVolume);
     cachedOutputVolume = static_cast<float>(outVol) / 100.0f;
+    cachedPushToTalk = Settings::getString(Settings::Keys::VoiceInputMode, Settings::Defaults::VoiceInputMode) == "push_to_talk";
+    cachedReleaseDelayMs = Settings::getInt(Settings::Keys::VoicePushToTalkReleaseDelay, Settings::Defaults::VoicePushToTalkReleaseDelay);
 
     const std::string inDev = Settings::getString(Settings::Keys::VoiceInputDevice, Settings::Defaults::VoiceInputDevice);
     if (!inDev.empty())
@@ -314,6 +316,23 @@ void VoiceManager::setVadThreshold(float threshold)
 {
     if (audioPipeline && voiceLoop)
         voiceLoop->post([p = audioPipeline, threshold]() { p->setVadThreshold(threshold); });
+}
+
+void VoiceManager::setPushToTalk(bool enabled, int releaseDelayMs)
+{
+    cachedPushToTalk = enabled;
+    cachedReleaseDelayMs = releaseDelayMs;
+
+    if (audioPipeline && voiceLoop)
+        voiceLoop->post([p = audioPipeline, enabled, releaseDelayMs]() { p->setPushToTalk(enabled, releaseDelayMs); });
+}
+
+void VoiceManager::setPushToTalkHeld(bool held)
+{
+    cachedPushToTalkHeld = held;
+
+    if (audioPipeline && voiceLoop)
+        voiceLoop->post([p = audioPipeline, held]() { p->setPushToTalkHeld(held); });
 }
 void VoiceManager::setOpusApplication(int application)
 {
@@ -735,12 +754,15 @@ void VoiceManager::onVoiceClientConnected()
     int plp = cachedOpusPacketLossPercent;
     bool ns = cachedNoiseSuppression;
     bool nsVad = cachedUseRnnoiseVad;
+    bool ptt = cachedPushToTalk;
+    int pttDelay = cachedReleaseDelayMs;
+    bool pttHeld = cachedPushToTalkHeld;
     float inGain = cachedInputGain;
     float outVol = cachedOutputVolume;
     if (audioPipeline && voiceLoop) {
         voiceLoop->post([p = audioPipeline, audio, capturing, inputId, outputId,
                          application, bitrate, complexity, signalType, fec, plp, ns, nsVad,
-                         inGain, outVol]() {
+                         ptt, pttDelay, pttHeld, inGain, outVol]() {
             p->setOpusApplication(application);
             p->setOpusBitrate(bitrate);
             p->setOpusComplexity(complexity);
@@ -749,6 +771,8 @@ void VoiceManager::onVoiceClientConnected()
             p->setOpusPacketLossPercent(plp);
             p->setNoiseSuppressionEnabled(ns);
             p->setUseRnnoiseVad(nsVad);
+            p->setPushToTalk(ptt, pttDelay);
+            p->setPushToTalkHeld(pttHeld);
             p->start(audio, capturing);
             p->setInputGain(inGain);
             p->setOutputVolume(outVol);

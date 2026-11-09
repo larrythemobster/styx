@@ -1,4 +1,5 @@
 #include "ShortcutController.hpp"
+#include "UI/PushToTalk.hpp"
 
 #include "Shell.hpp"
 
@@ -17,6 +18,8 @@ ShortcutController::ShortcutController(Shell &shell)
 {
     if (auto *doc = shell.document()) {
         listen("keydown", [this](::Rml::Event &event) {
+            if (auto *ptt = this->shell.pushToTalk(); ptt && ptt->isSuspended())
+                return;
             const auto action = actionFor(event);
             if (action) {
                 const auto it = handlers.find(*action);
@@ -39,6 +42,11 @@ bool ShortcutController::hasHandler(ShortcutAction action) const
 
 std::optional<ShortcutAction> ShortcutController::actionFor(::Rml::Event &event)
 {
+    return matchShortcut(event.GetParameter<int>("key_identifier", 0), eventModifiers(event));
+}
+
+int ShortcutController::eventModifiers(::Rml::Event &event)
+{
     int modifiers = 0;
     if (event.GetParameter<int>("ctrl_key", 0) != 0)
         modifiers |= ::Rml::Input::KM_CTRL;
@@ -48,9 +56,7 @@ std::optional<ShortcutAction> ShortcutController::actionFor(::Rml::Event &event)
         modifiers |= ::Rml::Input::KM_ALT;
     if (event.GetParameter<int>("meta_key", 0) != 0)
         modifiers |= ::Rml::Input::KM_META;
-
-    const int key = event.GetParameter<int>("key_identifier", 0);
-    return matchShortcut(key, modifiers);
+    return modifiers;
 }
 
 } // namespace Rml

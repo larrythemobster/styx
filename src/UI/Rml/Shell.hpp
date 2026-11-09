@@ -23,6 +23,7 @@ class ChatModel;
 class MemberListModel;
 class TrayIcon;
 class CallSounds;
+class PushToTalk;
 class BrowserCaptchaResolver;
 enum class GuildSettingsSection;
 namespace MemberModeration { class Controller; }
@@ -59,6 +60,7 @@ public:
     const Location &location() const { return current; }
     Rml::View *view() const { return const_cast<Shell *>(this); }
     ChannelTreeModel *channelTree() const { return channelTreeModel.get(); }
+    PushToTalk *pushToTalk() const { return pushToTalkKey.get(); }
     // In-app keyboard shortcuts; controllers register their handlers when they're created.
     Rml::ShortcutController *shortcuts() const { return shortcutController.get(); }
     ChannelFilterProxyModel *channelFilter() const { return channelFilterProxy.get(); }
@@ -187,6 +189,7 @@ private:
 #endif
     std::unique_ptr<TrayIcon> trayIcon;
     std::unique_ptr<CallSounds> callSounds;
+    std::unique_ptr<PushToTalk> pushToTalkKey;
     std::unique_ptr<Rml::GuildSettingsController> guildSettingsController;
     std::unique_ptr<Rml::ForumController> forumController;
     std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;

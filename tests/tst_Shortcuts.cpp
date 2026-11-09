@@ -85,3 +85,56 @@ TEST_CASE("Shortcut labels format keys and modifiers", "[shortcuts]")
     REQUIRE(shortcutLabel(findShortcut(ShortcutAction::ShortcutsHelp)) == "Cmd+/");
 #endif
 }
+
+TEST_CASE("Key bindings record pressed key and modifiers", "[shortcuts]")
+{
+    REQUIRE(recordKeyBinding(KI::KI_F13, PRIMARY) == KeyBinding{KI::KI_F13, Primary});
+    REQUIRE(recordKeyBinding(KI::KI_LCONTROL, KI::KM_CTRL) == KeyBinding{KI::KI_LCONTROL, 0});
+    REQUIRE(isModifierKey(KI::KI_RSHIFT));
+    REQUIRE(isModifierKey(KI::KI_LMENU));
+    REQUIRE_FALSE(isModifierKey(KI::KI_F13));
+    REQUIRE_FALSE(isModifierKey(KI::KI_OEM_3));
+}
+
+TEST_CASE("Key bindings match matching presses", "[shortcuts]")
+{
+    const KeyBinding backquote{KI::KI_OEM_3, 0};
+    REQUIRE(keyBindingPressed(backquote, KI::KI_OEM_3, 0));
+    REQUIRE(keyBindingPressed(backquote, KI::KI_OEM_3, KI::KM_SHIFT));
+
+    const KeyBinding f13Primary{KI::KI_F13, Primary};
+    REQUIRE_FALSE(keyBindingPressed(f13Primary, KI::KI_F13, 0));
+    REQUIRE(keyBindingPressed(f13Primary, KI::KI_F13, PRIMARY));
+
+    REQUIRE_FALSE(keyBindingPressed(f13Primary, KI::KI_F12, PRIMARY));
+    REQUIRE_FALSE(keyBindingPressed(backquote, KI::KI_ESCAPE, 0));
+
+    const KeyBinding unset;
+    REQUIRE_FALSE(keyBindingPressed(unset, KI::KI_F13, PRIMARY));
+    REQUIRE_FALSE(keyBindingPressed(unset, KI::KI_OEM_3, 0));
+}
+
+TEST_CASE("Key binding labels format keys and modifiers", "[shortcuts]")
+{
+#ifndef __APPLE__
+    REQUIRE(keyBindingLabel({KI::KI_F13, Primary | Shift}) == "Ctrl+Shift+F13");
+#else
+    REQUIRE(keyBindingLabel({KI::KI_F13, Primary | Shift}) == "Cmd+Shift+F13");
+#endif
+    REQUIRE(keyBindingLabel({KI::KI_LCONTROL, 0}) == "Left Ctrl");
+    REQUIRE(keyBindingLabel({}) == "");
+}
+
+TEST_CASE("Key binding serialization matches expected JSON", "[shortcuts]")
+{
+    const std::string expected =
+        "{\"key\":" + std::to_string(KI::KI_F13) + ",\"modifiers\":" + std::to_string(Primary) + "}";
+    const KeyBinding binding{KI::KI_F13, Primary};
+    REQUIRE(keyBindingToJson(binding).dump() == expected);
+    REQUIRE(keyBindingFromJson(nlohmann::json::parse(expected)) == binding);
+
+    REQUIRE(keyBindingFromJson(nullptr) == KeyBinding{});
+    REQUIRE(keyBindingFromJson("x") == KeyBinding{});
+    REQUIRE(keyBindingFromJson(nlohmann::json{{"key", 0}}) == KeyBinding{});
+    REQUIRE(keyBindingFromJson(nlohmann::json{{"key", "a"}}) == KeyBinding{});
+}

@@ -31,6 +31,8 @@ public:
     // The action a keydown event asks for, for popovers in their own documents that the main
     // listener doesn't see.
     [[nodiscard]] static std::optional<ShortcutAction> actionFor(::Rml::Event &event);
+    // The Rml::Input::KeyModifier state a key event reports.
+    [[nodiscard]] static int eventModifiers(::Rml::Event &event);
 
 private:
     std::unordered_map<ShortcutAction, std::function<bool()>> handlers;

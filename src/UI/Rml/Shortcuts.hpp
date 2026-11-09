@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 namespace Styx {
 namespace UI {
 namespace Rml {
@@ -52,6 +54,33 @@ struct Shortcut
 
 // How the keys read in the help dialog: "Ctrl+Shift+M", or "Cmd+Shift+M" on macOS.
 [[nodiscard]] std::string shortcutLabel(const Shortcut &shortcut);
+
+// A key the user recorded, such as the push-to-talk key: an Rml::Input::KeyIdentifier plus
+// ShortcutModifier bits that must be held with it.
+struct KeyBinding
+{
+    int key = 0;
+    int modifiers = 0;
+
+    [[nodiscard]] bool valid() const { return key != 0; }
+    bool operator==(const KeyBinding &) const = default;
+};
+
+// ShortcutModifier bits for an Rml::Input::KeyModifier state (Ctrl, or Cmd on macOS, is Primary).
+[[nodiscard]] int shortcutModifiers(int rmlModifiers);
+// The binding a key press records. A modifier key bound on its own (Left Ctrl) doesn't also
+// require its own modifier bit, which the press reports as held.
+[[nodiscard]] KeyBinding recordKeyBinding(int key, int rmlModifiers);
+// Ctrl, Shift or Alt (Cmd and Option on macOS). A recorder waits for a modifier's release
+// before binding it alone, so it can still be held for a combination.
+[[nodiscard]] bool isModifierKey(int key);
+// Whether a key press triggers the binding: the same key with at least its modifiers held.
+[[nodiscard]] bool keyBindingPressed(const KeyBinding &binding, int key, int rmlModifiers);
+// "Ctrl+`", "Shift+F13", "Left Ctrl"; empty for an unset binding.
+[[nodiscard]] std::string keyBindingLabel(const KeyBinding &binding);
+// Stored in settings as {"key": n, "modifiers": n}; anything else reads as unset.
+[[nodiscard]] nlohmann::json keyBindingToJson(const KeyBinding &binding);
+[[nodiscard]] KeyBinding keyBindingFromJson(const nlohmann::json &json);
 
 } // namespace Rml
 } // namespace UI

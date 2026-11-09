@@ -216,6 +216,7 @@ set(PROJECT_SOURCES
     src/UI/BrowserCaptchaResolver.cpp
     src/UI/TrayIcon.cpp
     src/UI/CallSounds.cpp
+    src/UI/PushToTalk.cpp
     src/UI/Rml/AuditLogFormatter.cpp
     src/UI/Rml/GuildSettingsController.cpp
     src/UI/Rml/GuildSettingsSection.cpp
@@ -313,6 +314,7 @@ if(ENABLE_VOICE)
         src/Discord/Voice/DaveSession.cpp
         src/Core/Audio/VoiceManager.cpp
         src/Core/Audio/AudioPipeline.cpp
+        src/Core/Audio/TransmitGate.cpp
         src/Core/Audio/IAudioBackend.cpp
         src/Core/Audio/MiniaudioAudioBackend.cpp
         src/Core/Audio/OpusEncoder.cpp
@@ -408,6 +410,7 @@ if(BUILD_TESTS)
     styx_test(TestBlockedRuns BlockedRunsTests tests/tst_BlockedRuns.cpp src/UI/Chat/BlockedRuns.cpp)
     styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)
     styx_test(TestGuildCreate GuildCreateTests tests/tst_GuildCreate.cpp src/Discord/GuildCreate.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
+    styx_test(TestTransmitGate TransmitGateTests tests/tst_TransmitGate.cpp src/Core/Audio/TransmitGate.cpp)
     styx_test(TestSounds SoundsTests tests/tst_Sounds.cpp src/Core/Audio/Sounds.cpp src/Core/Audio/SoundMixer.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)

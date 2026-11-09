@@ -54,6 +54,7 @@
 #include "UI/MemberList/MemberListModel.hpp"
 #include "UI/TrayIcon.hpp"
 #include "UI/CallSounds.hpp"
+#include "UI/PushToTalk.hpp"
 #include "Platform/Desktop.hpp"
 #include "Platform/Settings.hpp"
 #include "Platform/Notifications.hpp"
@@ -203,6 +204,7 @@ Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
         }
     }));
     callSounds = std::make_unique<CallSounds>();
+    pushToTalkKey = std::make_unique<PushToTalk>(*this);
     for (auto *client : session->getClients()) setupPermanentConnections(client);
     setWindowTitle("Styx");
     resize(1280, 800);

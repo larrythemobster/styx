@@ -86,8 +86,7 @@ void AudioPipeline::stop()
 
     audioBackend = nullptr;
 
-    isSpeaking = false;
-    vadHoldoffCounter = 0;
+    gate.close();
 
     log(LogLevel::Debug, LogVoice) << "Audio pipeline stopped";
 }
@@ -108,10 +107,8 @@ void AudioPipeline::stopCapture()
 
     audioBackend->stopCapture();
 
-    if (isSpeaking) {
+    if (gate.close()) {
         sendTrailingSilence();
-        isSpeaking = false;
-        vadHoldoffCounter = 0;
         speakingChanged.publish(false);
     }
 }
@@ -203,6 +200,17 @@ void AudioPipeline::setOutputVolume(float volume)
 void AudioPipeline::setVadThreshold(float threshold)
 {
     vadThreshold = threshold;
+}
+
+void AudioPipeline::setPushToTalk(bool enabled, int releaseDelayMs)
+{
+    gate.setMode(enabled ? TransmitGate::Mode::PushToTalk : TransmitGate::Mode::VoiceActivity);
+    gate.setReleaseDelayMs(releaseDelayMs);
+}
+
+void AudioPipeline::setPushToTalkHeld(bool held)
+{
+    gate.setKeyHeld(held);
 }
 
 void AudioPipeline::setNoiseSuppressionEnabled(bool enabled)
@@ -309,22 +317,19 @@ void AudioPipeline::onAudioCaptured(const std::string &pcmData)
         rmsThrottleTimer = now;
     }
 
-    if (voiceDetected) {
-        vadHoldoffCounter = vadHoldoffFrames;
-        if (!isSpeaking) {
-            isSpeaking = true;
-            speakingChanged.publish(true);
-        }
-    } else if (vadHoldoffCounter > 0) {
-        vadHoldoffCounter--;
-    } else if (isSpeaking) {
+    switch (gate.step(voiceDetected)) {
+    case TransmitGate::Change::Started:
+        speakingChanged.publish(true);
+        break;
+    case TransmitGate::Change::Stopped:
         sendTrailingSilence();
-        isSpeaking = false;
         speakingChanged.publish(false);
         return;
+    case TransmitGate::Change::None:
+        break;
     }
 
-    if (!isSpeaking)
+    if (!gate.transmitting())
         return;
 
     std::string encoded = encoder->encode(frame);
