@@ -368,6 +368,7 @@ public:
     Platform::Signal<const StreamDelete &> streamDeleted;
     Platform::Signal<const InteractionCreate &> interactionCreated;
     Platform::Signal<const InteractionSuccess &> interactionSucceeded;
+    Platform::Signal<const AutocompleteResponse &> autocompleteReceived;
     Platform::Signal<const InteractionFailure &> interactionFailed;
     Platform::Signal<const Relationship &> relationshipAdded;
     Platform::Signal<const RelationshipPartial &> relationshipUpdated;

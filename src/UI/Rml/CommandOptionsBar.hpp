@@ -36,6 +36,14 @@ public:
     // While the command is on its way the inputs are disabled.
     void setPending(bool pending);
 
+    // The bot's autocomplete suggestions for one option, listed under its text field as
+    // rows with data-action="command-suggestion", data-option="{index}" and
+    // data-choice="{k}"; an empty list hides them. Ignored for an index without a field.
+    void setSuggestions(std::size_t optionIndex, std::vector<Discord::ApplicationCommandChoice> choices);
+    // Puts suggestion k's value in option optionIndex's field (strings as is, numbers as
+    // JSON text) and hides the list. Returns false when there's no such suggestion.
+    bool chooseSuggestion(std::size_t optionIndex, std::size_t choice);
+
 private:
     void readDrafts();
     void render();
@@ -48,6 +56,8 @@ private:
     std::vector<std::string> drafts;
     std::vector<std::string> optionErrors;
     std::string commandError;
+    std::size_t suggestionOption = 0;
+    std::vector<Discord::ApplicationCommandChoice> suggestions;
 };
 
 } // namespace Styx::UI::Rml

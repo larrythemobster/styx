@@ -60,6 +60,27 @@ std::vector<int> intArrayAt(const nlohmann::json &obj, const char *key)
     return result;
 }
 
+std::vector<ApplicationCommandChoice> parseChoices(const nlohmann::json &array)
+{
+    std::vector<ApplicationCommandChoice> choices;
+    if (!array.is_array())
+        return choices;
+
+    for (const auto &choiceJson : array) {
+        if (!choiceJson.is_object())
+            continue;
+        const auto choiceName = stringAt(choiceJson, "name");
+        const auto valIt = choiceJson.find("value");
+        if (choiceName.empty() || valIt == choiceJson.end() || valIt->is_null())
+            continue;
+        ApplicationCommandChoice choice;
+        choice.name = choiceName;
+        choice.value = *valIt;
+        choices.push_back(std::move(choice));
+    }
+    return choices;
+}
+
 std::vector<ApplicationCommandOption> parseOptions(const nlohmann::json &array)
 {
     std::vector<ApplicationCommandOption> options;
@@ -84,20 +105,8 @@ std::vector<ApplicationCommandOption> parseOptions(const nlohmann::json &array)
         opt.maxLength = optionalNumber<int>(optJson, "max_length");
 
         const auto choicesIt = optJson.find("choices");
-        if (choicesIt != optJson.end() && choicesIt->is_array()) {
-            for (const auto &choiceJson : *choicesIt) {
-                if (!choiceJson.is_object())
-                    continue;
-                const auto choiceName = stringAt(choiceJson, "name");
-                const auto valIt = choiceJson.find("value");
-                if (choiceName.empty() || valIt == choiceJson.end() || valIt->is_null())
-                    continue;
-                ApplicationCommandChoice choice;
-                choice.name = choiceName;
-                choice.value = *valIt;
-                opt.choices.push_back(std::move(choice));
-            }
-        }
+        if (choicesIt != optJson.end())
+            opt.choices = parseChoices(*choicesIt);
 
         const auto nestedIt = optJson.find("options");
         if (nestedIt != optJson.end())
@@ -169,6 +178,23 @@ ApplicationCommandIndex parseApplicationCommandIndex(const nlohmann::json &docum
     }
 
     return index;
+}
+
+AutocompleteResponse parseAutocompleteResponse(const nlohmann::json &data)
+{
+    AutocompleteResponse response;
+    if (!data.is_object())
+        return response;
+
+    const auto nonceIt = data.find("nonce");
+    if (nonceIt != data.end() && nonceIt->is_string())
+        response.nonce = nonceIt->get<std::string>();
+
+    const auto choicesIt = data.find("choices");
+    if (choicesIt != data.end())
+        response.choices = parseChoices(*choicesIt);
+
+    return response;
 }
 
 } // namespace Styx::Discord

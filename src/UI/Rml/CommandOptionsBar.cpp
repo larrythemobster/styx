@@ -2,9 +2,12 @@
 
 #include "Platform/Native.hpp"
 
+#include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/Elements/ElementFormControl.h>
+#include <RmlUi/Core/Elements/ElementFormControlInput.h>
 
+#include <cstddef>
 #include <format>
 #include <string>
 #include <string_view>
@@ -30,6 +33,34 @@ std::string renderSelect(std::size_t index, bool pending, const std::string &opt
                        index, pending ? " disabled" : "", options);
 }
 
+// Focuses a control the bar just rebuilt and, for text fields, selects start..end
+// (-1 for both puts the caret at the end).
+void focusControl(::Rml::Element *host, const std::string &id, int start, int end)
+{
+    ::Rml::Element *control = host ? host->GetElementById(id) : nullptr;
+    if (!control)
+        return;
+    control->Focus();
+    if (auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(control)) {
+        if (start < 0) {
+            start = static_cast<int>(input->GetValue().size());
+            end = start;
+        }
+        input->SetSelectionRange(start, end);
+    }
+}
+
+bool hasTextField(const Discord::ApplicationCommandOption &opt)
+{
+    return opt.choices.empty()
+        && opt.type != Discord::ApplicationCommandOptionType::BOOLEAN
+        && opt.type != Discord::ApplicationCommandOptionType::USER
+        && opt.type != Discord::ApplicationCommandOptionType::ROLE
+        && opt.type != Discord::ApplicationCommandOptionType::MENTIONABLE
+        && opt.type != Discord::ApplicationCommandOptionType::CHANNEL
+        && opt.type != Discord::ApplicationCommandOptionType::ATTACHMENT;
+}
+
 } // namespace
 
 void CommandOptionsBar::setHost(::Rml::Element *newHost)
@@ -49,6 +80,8 @@ void CommandOptionsBar::show(const SlashCommandEntry &newCommand, std::vector<st
     commandError.clear();
     pending = false;
     open = true;
+    suggestionOption = 0;
+    suggestions.clear();
     render();
 }
 
@@ -61,6 +94,8 @@ void CommandOptionsBar::hide()
     drafts.clear();
     optionErrors.clear();
     commandError.clear();
+    suggestionOption = 0;
+    suggestions.clear();
     render();
 }
 
@@ -83,6 +118,32 @@ void CommandOptionsBar::setPending(bool isPending)
     readDrafts();
     pending = isPending;
     render();
+}
+
+void CommandOptionsBar::setSuggestions(std::size_t optionIndex, std::vector<Discord::ApplicationCommandChoice> choices)
+{
+    if (!open || optionIndex >= command.options.size() || !hasTextField(command.options[optionIndex]))
+        return;
+
+    readDrafts();
+    suggestionOption = optionIndex;
+    suggestions = std::move(choices);
+    render();
+}
+
+bool CommandOptionsBar::chooseSuggestion(std::size_t optionIndex, std::size_t choice)
+{
+    if (!open || optionIndex != suggestionOption || choice >= suggestions.size())
+        return false;
+
+    readDrafts();
+    const auto &value = suggestions[choice].value;
+    drafts[optionIndex] = value.is_string() ? value.get<std::string>() : value.dump();
+    suggestions.clear();
+    render();
+    // Clicking the row moved focus off the field; put it back so typing carries on.
+    focusControl(host, "command-option-" + std::to_string(optionIndex), -1, -1);
+    return true;
 }
 
 void CommandOptionsBar::readDrafts()
@@ -116,7 +177,20 @@ void CommandOptionsBar::render()
         const auto &opt = command.options[i];
         std::string controlHtml;
 
-        if (!opt.choices.empty()) {
+        if (hasTextField(opt)) {
+            controlHtml = std::format(
+                "<input type=\"text\" id=\"command-option-{0}\" class=\"command-option-input\" value=\"{1}\"{2}/>",
+                i, Platform::htmlEscape(drafts[i]), pending ? " disabled" : "");
+            if (i == suggestionOption && !suggestions.empty()) {
+                controlHtml += "<div class=\"command-suggestions\">";
+                for (std::size_t k = 0; k < suggestions.size(); ++k) {
+                    controlHtml += std::format(
+                        "<div class=\"command-suggestion\" data-action=\"command-suggestion\" data-option=\"{0}\" data-choice=\"{1}\">{2}</div>",
+                        i, k, Platform::htmlEscape(suggestions[k].name));
+                }
+                controlHtml += "</div>";
+            }
+        } else if (!opt.choices.empty()) {
             std::string body = renderOption("", "Choose…", drafts[i].empty());
             for (const auto &choice : opt.choices)
                 body += renderOption(choice.name, choice.name, drafts[i] == choice.name);
@@ -143,10 +217,6 @@ void CommandOptionsBar::render()
             controlHtml = renderSelect(i, pending, body);
         } else if (opt.type == Discord::ApplicationCommandOptionType::ATTACHMENT) {
             controlHtml = "<div class=\"command-option-unsupported\">Files aren't supported yet</div>";
-        } else {
-            controlHtml = std::format(
-                "<input type=\"text\" id=\"command-option-{0}\" class=\"command-option-input\" value=\"{1}\"{2}/>",
-                i, Platform::htmlEscape(drafts[i]), pending ? " disabled" : "");
         }
 
         const std::string labelText = Platform::htmlEscape(opt.name) + (opt.required ? " *" : "");
@@ -172,8 +242,24 @@ void CommandOptionsBar::render()
     else
         rml += "<div class=\"command-options-hint\">Enter to send · Escape to cancel</div>";
 
+    // Re-rendering replaces every control, so put focus back where the person was typing;
+    // suggestions arrive mid-word.
+    ::Rml::Context *context = host->GetContext();
+    ::Rml::Element *focused = context ? context->GetFocusElement() : nullptr;
+    std::string focusedId;
+    int selectionStart = -1;
+    int selectionEnd = -1;
+    if (focused && !focused->GetId().empty() && host->GetElementById(focused->GetId()) == focused) {
+        focusedId = focused->GetId();
+        if (auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(focused))
+            input->GetSelection(&selectionStart, &selectionEnd, nullptr);
+    }
+
     host->SetProperty("display", "block");
     host->SetInnerRML(rml);
+
+    if (!focusedId.empty())
+        focusControl(host, focusedId, selectionStart, selectionEnd);
 }
 
 } // namespace Styx::UI::Rml

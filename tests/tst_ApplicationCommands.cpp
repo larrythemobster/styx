@@ -254,3 +254,39 @@ TEST_CASE("parseApplicationCommandIndex handles null icons absent command types 
     REQUIRE(index.commands[0].type == ApplicationCommandType::CHAT_INPUT);
     REQUIRE(index.commands[1].type == ApplicationCommandType::USER);
 }
+
+TEST_CASE("parseAutocompleteResponse parses choices and nonce", "[commands]")
+{
+    const auto doc = nlohmann::json::parse(R"({
+        "nonce": "test_nonce_123",
+        "choices": [
+            {
+                "name": "choice_str",
+                "value": "string_val"
+            },
+            {
+                "name": "choice_int",
+                "value": 42
+            },
+            {
+                "value": "missing_name"
+            }
+        ]
+    })");
+
+    const auto response = parseAutocompleteResponse(doc);
+    REQUIRE(response.nonce == "test_nonce_123");
+    REQUIRE(response.choices.size() == 2);
+    REQUIRE(response.choices[0].name == "choice_str");
+    REQUIRE(response.choices[0].value == "string_val");
+    REQUIRE(response.choices[1].name == "choice_int");
+    REQUIRE(response.choices[1].value == 42);
+    REQUIRE(response.choices[1].value.is_number_integer());
+
+    const auto docNullNonce = nlohmann::json::parse(R"({
+        "nonce": null,
+        "choices": []
+    })");
+    const auto responseNullNonce = parseAutocompleteResponse(docNullNonce);
+    REQUIRE(responseNullNonce.nonce.empty());
+}

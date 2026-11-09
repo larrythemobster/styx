@@ -377,6 +377,9 @@ void Gateway::handleDispatch(const Inbound &data)
     case GatewayEvent::INTERACTION_SUCCESS:
         gatewayInteractionSuccess.publish(data.getData<InteractionSuccess>());
         break;
+    case GatewayEvent::APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE:
+        gatewayAutocompleteResponse.publish(parseAutocompleteResponse(data.data));
+        break;
     case GatewayEvent::INTERACTION_FAILURE:
         gatewayInteractionFailure.publish(data.getData<InteractionFailure>());
         break;

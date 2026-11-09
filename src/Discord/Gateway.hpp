@@ -21,6 +21,7 @@
 #include "Inbound.hpp"
 #include "Outbound.hpp"
 #include "Events.hpp"
+#include "ApplicationCommands.hpp"
 
 namespace Styx {
 
@@ -134,6 +135,7 @@ public:
     Platform::Signal<const std::vector<UserSession> &> gatewaySessionsReplace;
     Platform::Signal<const InteractionCreate &> gatewayInteractionCreate;
     Platform::Signal<const InteractionSuccess &> gatewayInteractionSuccess;
+    Platform::Signal<const AutocompleteResponse &> gatewayAutocompleteResponse;
     Platform::Signal<const InteractionFailure &> gatewayInteractionFailure;
 
 private:

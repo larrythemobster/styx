@@ -7,6 +7,7 @@
 
 #include <RmlUi/Core.h>
 #include <RmlUi/Core/Elements/ElementFormControl.h>
+#include <RmlUi/Core/Elements/ElementFormControlInput.h>
 #include <RmlUi/Core/Elements/ElementFormControlSelect.h>
 #include <catch2/catch_test_macros.hpp>
 
@@ -248,4 +249,119 @@ TEST_CASE("Command options bar escapes option names and user drafts", "[commands
     auto *label = host->QuerySelector(".command-option-label");
     REQUIRE(label != nullptr);
     CHECK(label->GetAttribute<::Rml::String>("title", "") == "desc<b>&\"");
+}
+
+TEST_CASE("Command options bar manages autocomplete suggestions and selection", "[commands][rml]")
+{
+    TestViewFixture fixture;
+    auto *doc = fixture.loadHostDocument();
+    auto *host = doc->GetElementById("host");
+    REQUIRE(host != nullptr);
+
+    CommandOptionsBar bar;
+    bar.setHost(host);
+
+    SlashCommandEntry cmd;
+    cmd.displayName = "search";
+
+    ApplicationCommandOption queryOpt;
+    queryOpt.type = ApplicationCommandOptionType::STRING;
+    queryOpt.name = "query";
+
+    ApplicationCommandOption flagOpt;
+    flagOpt.type = ApplicationCommandOptionType::BOOLEAN;
+    flagOpt.name = "flag";
+
+    cmd.options = { queryOpt, flagOpt };
+    bar.show(cmd, {});
+
+    SECTION("setSuggestions on STRING option renders rows with data attributes and escapes names") {
+        bar.setSuggestions(0, {
+            { "Apple <b>bold</b>", "appl" },
+            { "Banana", "bana" }
+        });
+
+        REQUIRE(host->QuerySelector(".command-suggestions") != nullptr);
+        CHECK(host->QuerySelector("b") == nullptr);
+
+        ::Rml::ElementList items;
+        host->QuerySelectorAll(items, ".command-suggestion");
+        REQUIRE(items.size() == 2);
+
+        CHECK(items[0]->GetAttribute<::Rml::String>("data-action", "") == "command-suggestion");
+        CHECK(items[0]->GetAttribute<::Rml::String>("data-option", "") == "0");
+        CHECK(items[0]->GetAttribute<::Rml::String>("data-choice", "") == "0");
+        CHECK(items[0]->GetInnerRML() == "Apple &lt;b&gt;bold&lt;/b&gt;");
+
+        CHECK(items[1]->GetAttribute<::Rml::String>("data-action", "") == "command-suggestion");
+        CHECK(items[1]->GetAttribute<::Rml::String>("data-option", "") == "0");
+        CHECK(items[1]->GetAttribute<::Rml::String>("data-choice", "") == "1");
+        CHECK(items[1]->GetInnerRML() == "Banana");
+    }
+
+    SECTION("chooseSuggestion with an integer value puts 42 in values()[i] and removes command-suggestions; a string value goes in as is") {
+        bar.setSuggestions(0, {
+            { "Choice number", 42 },
+            { "Choice text", "custom string" }
+        });
+        REQUIRE(host->QuerySelector(".command-suggestions") != nullptr);
+
+        CHECK_FALSE(bar.chooseSuggestion(1, 0));
+        CHECK_FALSE(bar.chooseSuggestion(0, 5));
+
+        CHECK(bar.chooseSuggestion(0, 0));
+        CHECK(bar.values()[0] == "42");
+        CHECK(host->QuerySelector(".command-suggestions") == nullptr);
+        CHECK_FALSE(bar.chooseSuggestion(0, 0));
+
+        bar.setSuggestions(0, {
+            { "Choice text", "custom string" }
+        });
+        REQUIRE(host->QuerySelector(".command-suggestions") != nullptr);
+
+        CHECK(bar.chooseSuggestion(0, 0));
+        CHECK(bar.values()[0] == "custom string");
+        CHECK(host->QuerySelector(".command-suggestions") == nullptr);
+    }
+
+    SECTION("setSuggestions for a BOOLEAN option index renders nothing and chooseSuggestion returns false") {
+        bar.setSuggestions(1, { { "Yes", "yes" } });
+        CHECK(host->QuerySelector(".command-suggestions") == nullptr);
+        CHECK_FALSE(bar.chooseSuggestion(1, 0));
+    }
+
+    SECTION("show() of another command clears suggestions") {
+        bar.setSuggestions(0, { { "Apple", "appl" } });
+        REQUIRE(host->QuerySelector(".command-suggestions") != nullptr);
+
+        SlashCommandEntry otherCmd;
+        otherCmd.displayName = "other";
+        otherCmd.options = { queryOpt };
+        bar.show(otherCmd, {});
+
+        CHECK(host->QuerySelector(".command-suggestions") == nullptr);
+        CHECK_FALSE(bar.chooseSuggestion(0, 0));
+    }
+
+    SECTION("Suggestions keep focus and the caret in the field, and picking one refocuses it") {
+        auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(host->GetElementById("command-option-0"));
+        REQUIRE(input != nullptr);
+        input->SetValue("abcd");
+        input->Focus();
+        input->SetSelectionRange(2, 2);
+        bar.setSuggestions(0, { { "Apple", "appl" } });
+
+        auto *rebuilt = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(host->GetElementById("command-option-0"));
+        REQUIRE(rebuilt != nullptr);
+        CHECK(doc->GetContext()->GetFocusElement() == rebuilt);
+        int start = -1;
+        int end = -1;
+        rebuilt->GetSelection(&start, &end, nullptr);
+        CHECK(start == 2);
+        CHECK(end == 2);
+
+        host->Focus();
+        REQUIRE(bar.chooseSuggestion(0, 0));
+        CHECK(doc->GetContext()->GetFocusElement() == host->GetElementById("command-option-0"));
+    }
 }

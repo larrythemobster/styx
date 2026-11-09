@@ -1870,3 +1870,26 @@ select.command-option-select selectbox option:hover
 	color: #949ba4;
 	line-height: 32dp;
 }
+
+.command-suggestions
+{
+	display: block;
+	max-height: 200dp;
+	overflow-y: auto;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	margin-top: 2dp;
+}
+
+.command-suggestion
+{
+	padding: 4dp 8dp;
+	cursor: pointer;
+	color: #dbdee1;
+}
+
+.command-suggestion:hover
+{
+	background-color: #2b2d31;
+}

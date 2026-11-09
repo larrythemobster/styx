@@ -41,9 +41,11 @@
 #include "Platform/Utf8.hpp"
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 namespace Styx {
@@ -154,6 +156,11 @@ bool isSelectComponent(Discord::MessageComponentType type)
 
 // Entity select pickers list at most this many matches.
 constexpr std::size_t MaxSelectCandidates = 25;
+
+// Matches the ids CommandOptionsBar gives its controls, followed by the option index.
+constexpr std::string_view CommandOptionIdPrefix = "command-option-";
+// How long typing must pause before asking a bot for autocomplete suggestions.
+constexpr std::chrono::milliseconds AutocompleteDelay(300);
 
 // The interaction tracker keys requests by message; a slash command sent from the composer
 // belongs to no message, so it uses this key (no real message has ID 0).
@@ -371,6 +378,14 @@ void ChatController::setupEventListeners()
             if (const SlashCommandEntry *entry = commandPicker.entryAt(parseNumber(attribute(actionEl, "data-index"))))
                 chooseCommand(*entry);
             requestRender();
+        } else if (action == std::string("command-suggestion")) {
+            if (commandOptions.chooseSuggestion(parseNumber(attribute(actionEl, "data-option")),
+                                                parseNumber(attribute(actionEl, "data-choice")))) {
+                // A request still pending was for the text before the pick.
+                autocompleteTimer.stop();
+                autocompleteNonce.clear();
+                requestRender();
+            }
         } else if (action == std::string("toggle-reaction")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages()) {
@@ -481,9 +496,13 @@ void ChatController::setupEventListeners()
 
     // Keydown listener on #composer
     if (composerEl) {
-        listen("change", [this](::Rml::Event &) {
+        listen("change", [this](::Rml::Event &event) {
             updateComposerPlaceholder();
             updateCommandPicker();
+            const ::Rml::Element *target = event.GetTargetElement();
+            const std::string id = target ? target->GetId() : std::string();
+            if (id.starts_with(CommandOptionIdPrefix))
+                scheduleAutocomplete(parseNumber(id.substr(CommandOptionIdPrefix.size())));
         }, composerEl);
         listen("keydown", [this](::Rml::Event &event) {
             int key = event.GetParameter<int>("key_identifier", 0);
@@ -623,8 +642,7 @@ void ChatController::onLocationChanged(const Location &location)
     revealedComponentSpoilers.clear();
     interactions.clear();
     openSelect.reset();
-    chosenCommand.reset();
-    commandOptions.hide();
+    dropChosenCommand(false);
     commandPicker.hide();
     currentChannelId = location.channelId;
     currentGuildId = location.guildId;
@@ -653,8 +671,7 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
     revealedComponentSpoilers.clear();
     interactions.clear();
     openSelect.reset();
-    chosenCommand.reset();
-    commandOptions.hide();
+    dropChosenCommand(false);
     commandPicker.hide();
     for (auto &connection : instanceConnections)
         connection.disconnect();
@@ -693,10 +710,23 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
                     if (auto trackedId = interactions.succeeded(event.id, event.nonce.valueOr({})))
                         finishTrackedInteraction(*trackedId);
                 }));
+            instanceConnections.push_back(client->autocompleteReceived.connect(
+                [this](const Discord::AutocompleteResponse &event) {
+                    if (!chosenCommand || autocompleteNonce.empty() || event.nonce != autocompleteNonce)
+                        return;
+                    commandOptions.setSuggestions(autocompleteOption, event.choices);
+                    requestRender();
+                }));
             instanceConnections.push_back(client->interactionFailed.connect(
                 [this](const Discord::InteractionFailure &event) {
-                    if (auto trackedId = interactions.failed(event.id, event.nonce.valueOr({})))
+                    const std::string nonce = event.nonce.valueOr({});
+                    if (auto trackedId = interactions.failed(event.id, nonce)) {
                         finishTrackedInteraction(*trackedId);
+                    } else if (!autocompleteNonce.empty() && nonce == autocompleteNonce) {
+                        // The bot didn't answer the newest text, so older suggestions no longer apply.
+                        commandOptions.setSuggestions(autocompleteOption, {});
+                        requestRender();
+                    }
                 }));
         }
     }
@@ -1904,6 +1934,8 @@ void ChatController::dropChosenCommand(bool clearText)
 {
     chosenCommand.reset();
     commandOptions.hide();
+    autocompleteTimer.stop();
+    autocompleteNonce.clear();
     if (clearText && textareaEl) {
         textareaEl->SetValue("");
         updateComposerPlaceholder();
@@ -1922,7 +1954,7 @@ void ChatController::sendChosenCommand()
     std::vector<std::string> errors(options.size());
     bool invalid = false;
 
-    Discord::ApplicationCommandRequest request;
+    Discord::ApplicationCommandRequest request = chosenCommandRequest();
     for (std::size_t i = 0; i < options.size(); ++i) {
         if (i >= typed.size() || typed[i].empty()) {
             if (options[i].required) {
@@ -1946,15 +1978,7 @@ void ChatController::sendChosenCommand()
         return;
     }
 
-    request.applicationId = chosenCommand->applicationId;
-    request.guildId = currentGuildId;
-    request.channelId = currentChannelId;
-    request.commandId = chosenCommand->commandId;
-    request.commandVersion = chosenCommand->version;
-    request.commandName = chosenCommand->name;
-    request.subcommandPath = chosenCommand->subcommandPath;
     request.declaredOptions = options;
-    request.nonce = Core::Snowflake::generateNonce().toString();
     if (!interactions.begin(request.nonce, ComposerCommandId, chosenCommand->displayName))
         return;
     commandOptions.setErrors({}, {});
@@ -1969,6 +1993,55 @@ void ChatController::sendChosenCommand()
         self->commandOptions.setErrors({}, result.error.empty() ? "The command couldn't be sent" : result.error);
         self->requestRender();
     });
+}
+
+Discord::ApplicationCommandRequest ChatController::chosenCommandRequest() const
+{
+    Discord::ApplicationCommandRequest request;
+    request.applicationId = chosenCommand->applicationId;
+    request.guildId = currentGuildId;
+    request.channelId = currentChannelId;
+    request.commandId = chosenCommand->commandId;
+    request.commandVersion = chosenCommand->version;
+    request.commandName = chosenCommand->name;
+    request.subcommandPath = chosenCommand->subcommandPath;
+    request.nonce = Core::Snowflake::generateNonce().toString();
+    return request;
+}
+
+void ChatController::scheduleAutocomplete(std::size_t optionIndex)
+{
+    if (!chosenCommand || optionIndex >= chosenCommand->options.size() || !chosenCommand->options[optionIndex].autocomplete)
+        return;
+    // Answers for the text before this keystroke are stale from now on.
+    autocompleteNonce.clear();
+    // Wait for a pause in typing so each keystroke doesn't become a request.
+    autocompleteTimer.start(AutocompleteDelay, false, [this, optionIndex] { requestAutocomplete(optionIndex); });
+}
+
+void ChatController::requestAutocomplete(std::size_t optionIndex)
+{
+    Core::ClientInstance *instance = shell.currentInstance();
+    if (!chosenCommand || !instance || !instance->discord())
+        return;
+
+    const auto &options = chosenCommand->options;
+    const std::vector<std::string> typed = commandOptions.values();
+    Discord::ApplicationCommandRequest request = chosenCommandRequest();
+    request.declaredOptions = options;
+    request.focusedOption = options[optionIndex].name;
+    request.focusedText = typed[optionIndex];
+    // The bot sees what's filled in so far; values that don't parse yet are left out.
+    for (std::size_t i = 0; i < options.size(); ++i) {
+        if (i == optionIndex || typed[i].empty())
+            continue;
+        if (auto value = Discord::commandOptionValue(options[i], typed[i]); value.success())
+            request.values.push_back({ options[i].name, options[i].type, std::move(*value.value) });
+    }
+    // Only the newest request's answer is shown; older ones arrive for text already changed.
+    autocompleteNonce = request.nonce;
+    autocompleteOption = optionIndex;
+    instance->discord()->createApplicationCommandInteraction(request, [](const Core::Result<void> &) {});
 }
 
 void ChatController::finishTrackedInteraction(Core::Snowflake trackedId)

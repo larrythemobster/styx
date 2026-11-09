@@ -201,6 +201,7 @@ Client::Client(const std::string &token, const std::string &gatewayUrl, const st
     track(gateway->gatewayStreamDelete.connect([this](const auto &v) { streamDeleted.publish(v); }));
     track(gateway->gatewayInteractionCreate.connect([this](const auto &v) { interactionCreated.publish(v); }));
     track(gateway->gatewayInteractionSuccess.connect([this](const auto &v) { interactionSucceeded.publish(v); }));
+    track(gateway->gatewayAutocompleteResponse.connect([this](const auto &v) { autocompleteReceived.publish(v); }));
     track(gateway->gatewayInteractionFailure.connect([this](const auto &v) { interactionFailed.publish(v); }));
     track(gateway->gatewayRelationshipAdd.connect([this](const auto &v) { relationshipAdded.publish(v); }));
     track(gateway->gatewayRelationshipUpdate.connect([this](const auto &v) { relationshipUpdated.publish(v); }));

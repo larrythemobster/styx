@@ -335,3 +335,108 @@ TEST_CASE("applicationCommandBody rejects invalid requests", "[commands]")
     REQUIRE_FALSE(emptySess.success());
     REQUIRE(emptySess.error == "Session ID is required");
 }
+
+TEST_CASE("applicationCommandBody serializes autocomplete request for subcommand", "[commands]")
+{
+    auto req = createBaseRequest();
+    req.commandName = "search";
+    req.subcommandPath = { "find" };
+
+    ApplicationCommandOption optCount;
+    optCount.name = "count";
+    optCount.type = ApplicationCommandOptionType::INTEGER;
+
+    ApplicationCommandOption optQuery;
+    optQuery.name = "query";
+    optQuery.type = ApplicationCommandOptionType::STRING;
+
+    req.declaredOptions = { optCount, optQuery };
+    req.values = {
+        { "count", ApplicationCommandOptionType::INTEGER, 5 }
+    };
+    req.focusedOption = "query";
+    req.focusedText = "ab";
+
+    const auto result = applicationCommandBody(req, "sess_123");
+    REQUIRE(result.success());
+
+    const auto expected = nlohmann::json::parse(R"({
+        "type": 4,
+        "application_id": "1001",
+        "channel_id": "1003",
+        "guild_id": "1002",
+        "session_id": "sess_123",
+        "nonce": "nonce_1",
+        "data": {
+            "id": "2001",
+            "type": 1,
+            "name": "search",
+            "version": "3001",
+            "options": [
+                {
+                    "type": 1,
+                    "name": "find",
+                    "options": [
+                        {
+                            "type": 4,
+                            "name": "count",
+                            "value": 5
+                        },
+                        {
+                            "type": 3,
+                            "name": "query",
+                            "value": "ab",
+                            "focused": true
+                        }
+                    ]
+                }
+            ]
+        }
+    })");
+
+    REQUIRE(*result.value == expected);
+}
+
+TEST_CASE("applicationCommandBody accepts missing required option for autocomplete", "[commands]")
+{
+    auto req = createBaseRequest();
+
+    ApplicationCommandOption requiredOpt;
+    requiredOpt.name = "query";
+    requiredOpt.type = ApplicationCommandOptionType::STRING;
+    requiredOpt.required = true;
+
+    ApplicationCommandOption otherOpt;
+    otherOpt.name = "filter";
+    otherOpt.type = ApplicationCommandOptionType::STRING;
+
+    req.declaredOptions = { requiredOpt, otherOpt };
+    req.focusedOption = "filter";
+    req.focusedText = "val";
+
+    const auto autocompleteResult = applicationCommandBody(req, "sess_1");
+    REQUIRE(autocompleteResult.success());
+
+    req.focusedOption.clear();
+    req.focusedText.clear();
+    const auto missingReqResult = applicationCommandBody(req, "sess_1");
+    REQUIRE_FALSE(missingReqResult.success());
+    REQUIRE(missingReqResult.error == "query is required");
+}
+
+TEST_CASE("applicationCommandBody rejects undeclared focused option", "[commands]")
+{
+    auto req = createBaseRequest();
+
+    ApplicationCommandOption opt;
+    opt.name = "query";
+    opt.type = ApplicationCommandOptionType::STRING;
+
+    req.declaredOptions = { opt };
+    req.focusedOption = "unknown_opt";
+    req.focusedText = "text";
+
+    const auto result = applicationCommandBody(req, "sess_1");
+    REQUIRE_FALSE(result.success());
+    REQUIRE(result.error == "Unknown option unknown_opt");
+}

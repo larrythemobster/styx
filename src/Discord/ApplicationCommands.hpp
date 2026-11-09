@@ -92,4 +92,14 @@ struct ApplicationCommandIndex
 // a name or (for commands) an application ID are left out; unknown fields are ignored.
 [[nodiscard]] ApplicationCommandIndex parseApplicationCommandIndex(const nlohmann::json &document);
 
+// APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE: the bot's suggestions for the interaction
+// with this nonce (empty when Discord sent null). Choices without a name or value are
+// left out, as in the index.
+struct AutocompleteResponse
+{
+    std::vector<ApplicationCommandChoice> choices;
+    std::string nonce;
+};
+[[nodiscard]] AutocompleteResponse parseAutocompleteResponse(const nlohmann::json &data);
+
 } // namespace Styx::Discord

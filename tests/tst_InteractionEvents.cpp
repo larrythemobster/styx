@@ -110,3 +110,8 @@ TEST_CASE("InteractionFailure preserves unknown reason codes with undefined nonc
     REQUIRE(event.nonce.isUndefined());
     REQUIRE(event.reasonCode == 9999);
 }
+
+TEST_CASE("GatewayEvent maps APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE", "[interaction-events]")
+{
+    REQUIRE(parseGatewayEvent("APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE") == GatewayEvent::APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE);
+}

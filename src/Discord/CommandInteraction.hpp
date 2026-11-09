@@ -50,13 +50,22 @@ struct ApplicationCommandRequest
     std::vector<ApplicationCommandOption> declaredOptions;
     std::vector<CommandOptionValue> values;
     std::string nonce;
+    // Set to ask the bot for suggestions (interaction type 4) instead of running the
+    // command: the name of the option being typed in and its raw text. The other values
+    // are what's filled in so far, and required options may be missing.
+    std::string focusedOption;
+    std::string focusedText;
 };
 
-// The POST /interactions body for an application command (type 2): data carries id,
-// type 1, name, version and options, with the values nested inside the subcommand and
-// group options. Fails when a required option has no value, a value names an option the
-// leaf doesn't declare or repeats one, the path is longer than two, or the session,
-// nonce, application ID, channel ID, command ID, name or version is missing.
+// The POST /interactions body for an application command (type 2), or for autocomplete
+// (type 4) when focusedOption is set: data carries id, type 1, name, version and options,
+// with the values nested inside the subcommand and group options. For autocomplete the
+// focused option goes out as {"type", "name", "value": focusedText (a string, whatever
+// the option's type), "focused": true}, in declared order with the others, replacing any
+// value given for it. Fails when a required option has no value (not for autocomplete),
+// a value or the focused option names an option the leaf doesn't declare, a value
+// repeats one, the path is longer than two, or the session, nonce, application ID,
+// channel ID, command ID, name or version is missing.
 [[nodiscard]] Core::Result<nlohmann::json> applicationCommandBody(const ApplicationCommandRequest &request,
                                                                   const std::string &sessionId);
 

@@ -158,24 +158,41 @@ Core::Result<nlohmann::json> applicationCommandBody(const ApplicationCommandRequ
     if (request.subcommandPath.size() > 2)
         return Core::Result<nlohmann::json>::makeError("Subcommand path is too deep");
 
+    const auto declares = [&request](std::string_view name) {
+        return std::ranges::any_of(request.declaredOptions,
+                                   [name](const ApplicationCommandOption &opt) { return opt.name == name; });
+    };
+    const bool isAutocomplete = !request.focusedOption.empty();
+    if (isAutocomplete && !declares(request.focusedOption))
+        return Core::Result<nlohmann::json>::makeError("Unknown option " + request.focusedOption);
+
     std::unordered_map<std::string_view, const CommandOptionValue *> valueMap;
     for (const auto &val : request.values) {
-        const auto it = std::find_if(request.declaredOptions.begin(), request.declaredOptions.end(),
-                                     [&](const ApplicationCommandOption &opt) { return opt.name == val.name; });
-        if (it == request.declaredOptions.end())
+        if (isAutocomplete && val.name == request.focusedOption)
+            continue;
+        if (!declares(val.name))
             return Core::Result<nlohmann::json>::makeError("Unknown option " + val.name);
         if (!valueMap.emplace(val.name, &val).second)
             return Core::Result<nlohmann::json>::makeError("Option " + val.name + " given twice");
     }
 
-    for (const auto &opt : request.declaredOptions) {
-        if (opt.required && !valueMap.contains(opt.name))
-            return Core::Result<nlohmann::json>::makeError(opt.name + " is required");
+    if (!isAutocomplete) {
+        for (const auto &opt : request.declaredOptions) {
+            if (opt.required && !valueMap.contains(opt.name))
+                return Core::Result<nlohmann::json>::makeError(opt.name + " is required");
+        }
     }
 
     auto leaf = nlohmann::json::array();
     for (const auto &opt : request.declaredOptions) {
-        if (const auto it = valueMap.find(opt.name); it != valueMap.end()) {
+        if (isAutocomplete && opt.name == request.focusedOption) {
+            leaf.push_back({
+                { "type", static_cast<int>(opt.type) },
+                { "name", opt.name },
+                { "value", request.focusedText },
+                { "focused", true }
+            });
+        } else if (const auto it = valueMap.find(opt.name); it != valueMap.end()) {
             leaf.push_back({
                 { "type", static_cast<int>(opt.type) },
                 { "name", opt.name },
@@ -221,7 +238,7 @@ Core::Result<nlohmann::json> applicationCommandBody(const ApplicationCommandRequ
     data["options"] = std::move(options);
 
     nlohmann::json body;
-    body["type"] = 2;
+    body["type"] = isAutocomplete ? 4 : 2;
     body["application_id"] = request.applicationId.toString();
     body["channel_id"] = request.channelId.toString();
     if (request.guildId.isValid())

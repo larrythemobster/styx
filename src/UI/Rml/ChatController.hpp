@@ -6,6 +6,8 @@
 #include "CommandOptionsBar.hpp"
 #include "Core/PendingAttachment.hpp"
 #include "Core/Snowflake.hpp"
+#include "Discord/CommandInteraction.hpp"
+#include "Platform/Timer.hpp"
 #include "UI/Chat/BlockedRuns.hpp"
 #include "UI/Chat/InteractionTracker.hpp"
 #include "UI/Chat/SelectCandidates.hpp"
@@ -115,6 +117,10 @@ private:
     void dropChosenCommand(bool clearText);
     // Checks the options bar and sends the chosen command; errors stay in the bar.
     void sendChosenCommand();
+    // The chosen command's IDs, name and path for this channel, with a fresh nonce.
+    [[nodiscard]] Discord::ApplicationCommandRequest chosenCommandRequest() const;
+    void scheduleAutocomplete(std::size_t optionIndex);
+    void requestAutocomplete(std::size_t optionIndex);
     // A tracked interaction finished: re-render its message, or settle the composer's command.
     void finishTrackedInteraction(Core::Snowflake trackedId);
     void openReactionPickerForMessage(Core::Snowflake messageId);
@@ -163,6 +169,10 @@ private:
     // The command chosen in the picker while the composer still starts with its name.
     std::optional<SlashCommandEntry> chosenCommand;
     CommandOptionsBar commandOptions;
+    Platform::Timer autocompleteTimer;
+    // The newest autocomplete request; answers to any other are stale.
+    std::string autocompleteNonce;
+    std::size_t autocompleteOption = 0;
 
     std::vector<Platform::Connection> instanceConnections;
     Platform::Connection emojiConnection;
