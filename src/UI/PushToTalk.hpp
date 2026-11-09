@@ -2,7 +2,11 @@
 
 #include "Platform/Signal.hpp"
 #include "UI/Rml/Shortcuts.hpp"
+#ifdef __linux__
+#include "UI/X11PttHook.hpp"
+#else
 #include "UI/WindowsPttHook.hpp"
+#endif
 
 #include <string>
 #include <vector>
@@ -12,9 +16,9 @@ namespace Styx::UI {
 class Shell;
 
 // Holds every account's microphone open while the push-to-talk key is down.
-// On Windows, a low-level keyboard hook catches the shortcut globally even when another
-// application has focus. On other platforms, or if the hook cannot be installed, push-to-talk
-// falls back to focused-window events and releases when the window loses focus.
+// Supports global input on Windows and X11 even when another application has focus.
+// On Wayland, macOS, or on installation failure, push-to-talk is focused-only and
+// releases when the window loses focus.
 class PushToTalk
 {
 public:
@@ -39,7 +43,11 @@ private:
     bool held = false;
     Rml::KeyBinding binding;
     std::vector<Platform::Connection> connections;
+#ifdef __linux__
+    X11PttHook globalHook;
+#else
     WindowsPttHook globalHook;
+#endif
 };
 
 } // namespace Styx::UI

@@ -218,6 +218,7 @@ set(PROJECT_SOURCES
     src/UI/CallSounds.cpp
     src/UI/PushToTalk.cpp
     src/UI/WindowsPttHook.cpp
+    src/UI/X11PttHook.cpp
     src/UI/Rml/AuditLogFormatter.cpp
     src/UI/Rml/GuildSettingsController.cpp
     src/UI/Rml/GuildSettingsSection.cpp
@@ -414,6 +415,10 @@ if(BUILD_TESTS)
     styx_test(TestTransmitGate TransmitGateTests tests/tst_TransmitGate.cpp src/Core/Audio/TransmitGate.cpp)
     styx_test(TestWindowsPttHook WindowsPttHookTests tests/tst_WindowsPttHook.cpp src/UI/WindowsPttHook.cpp)
     target_link_libraries(TestWindowsPttHook PRIVATE RmlUi::RmlUi)
+    if(UNIX AND NOT APPLE)
+        styx_test(TestX11PttHook X11PttHookTests tests/tst_X11PttHook.cpp src/UI/X11PttHook.cpp)
+        target_link_libraries(TestX11PttHook PRIVATE RmlUi::RmlUi)
+    endif()
     styx_test(TestSounds SoundsTests tests/tst_Sounds.cpp src/Core/Audio/Sounds.cpp src/Core/Audio/SoundMixer.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)
@@ -632,6 +637,13 @@ else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(STYX_SECRET REQUIRED IMPORTED_TARGET libsecret-1)
     pkg_check_modules(STYX_GIO REQUIRED IMPORTED_TARGET gio-2.0)
+    pkg_check_modules(STYX_XINPUT REQUIRED IMPORTED_TARGET x11 xi)
+    set_source_files_properties(src/UI/X11PttHook.cpp PROPERTIES COMPILE_DEFINITIONS STYX_HAVE_X11_PTT)
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::STYX_XINPUT)
+    if(TARGET TestX11PttHook)
+        target_compile_definitions(TestX11PttHook PRIVATE STYX_HAVE_X11_PTT)
+        target_link_libraries(TestX11PttHook PRIVATE PkgConfig::STYX_XINPUT)
+    endif()
     target_link_libraries(styx_platform PRIVATE SDL3::SDL3 PkgConfig::STYX_SECRET PkgConfig::STYX_GIO)
 endif()
 target_compile_features(styx_platform PUBLIC cxx_std_20)

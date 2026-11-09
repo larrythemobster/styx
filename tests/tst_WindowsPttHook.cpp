@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "UI/PttKeyState.hpp"
 #include "UI/WindowsPttHook.hpp"
 #include "UI/Rml/Shortcuts.hpp"
 
@@ -20,7 +21,7 @@ namespace KI = ::Rml::Input;
 
 TEST_CASE("Key state ignores press with missing modifiers", "[ptt]")
 {
-    WindowsPttKeyState state('T', ShortcutModifier::Primary);
+    PttKeyState state('T', ShortcutModifier::Primary);
 
     REQUIRE_FALSE(state.update('T', 0, true).has_value());
     REQUIRE_FALSE(state.update('T', ShortcutModifier::Shift, true).has_value());
@@ -30,20 +31,20 @@ TEST_CASE("Key state ignores press with missing modifiers", "[ptt]")
 
 TEST_CASE("Key state matches press with required and extra modifiers", "[ptt]")
 {
-    WindowsPttKeyState state('T', ShortcutModifier::Primary);
+    PttKeyState state('T', ShortcutModifier::Primary);
     REQUIRE(state.update('T', ShortcutModifier::Primary, true) == std::optional<bool>(true));
 
-    WindowsPttKeyState extraState('T', ShortcutModifier::Primary);
+    PttKeyState extraState('T', ShortcutModifier::Primary);
     REQUIRE(extraState.update('T', ShortcutModifier::Primary | ShortcutModifier::Shift, true) == std::optional<bool>(true));
 
-    WindowsPttKeyState allState('T', ShortcutModifier::Primary);
+    PttKeyState allState('T', ShortcutModifier::Primary);
     REQUIRE(allState.update('T', ShortcutModifier::Primary | ShortcutModifier::Shift | ShortcutModifier::Alt, true) ==
             std::optional<bool>(true));
 }
 
 TEST_CASE("Key state ignores repeated down and repeated up events", "[ptt]")
 {
-    WindowsPttKeyState state('T', ShortcutModifier::Primary);
+    PttKeyState state('T', ShortcutModifier::Primary);
 
     REQUIRE(state.update('T', ShortcutModifier::Primary, true) == std::optional<bool>(true));
     REQUIRE_FALSE(state.update('T', ShortcutModifier::Primary, true).has_value());
@@ -56,7 +57,7 @@ TEST_CASE("Key state ignores repeated down and repeated up events", "[ptt]")
 
 TEST_CASE("Key state ignores unrelated keys while held", "[ptt]")
 {
-    WindowsPttKeyState state('T', ShortcutModifier::Primary);
+    PttKeyState state('T', ShortcutModifier::Primary);
 
     REQUIRE(state.update('T', ShortcutModifier::Primary, true) == std::optional<bool>(true));
 
@@ -70,7 +71,7 @@ TEST_CASE("Key state ignores unrelated keys while held", "[ptt]")
 
 TEST_CASE("Key state transitions to released even when modifiers released first", "[ptt]")
 {
-    WindowsPttKeyState state('T', ShortcutModifier::Primary);
+    PttKeyState state('T', ShortcutModifier::Primary);
 
     REQUIRE(state.update('T', ShortcutModifier::Primary, true) == std::optional<bool>(true));
     REQUIRE(state.update('T', 0, false) == std::optional<bool>(false));
@@ -79,7 +80,7 @@ TEST_CASE("Key state transitions to released even when modifiers released first"
 TEST_CASE("Key state works for a lone modifier target", "[ptt]")
 {
     constexpr int targetVk = 0xA2; // VK_LCONTROL
-    WindowsPttKeyState ctrlState(targetVk, 0);
+    PttKeyState ctrlState(targetVk, 0);
 
     REQUIRE(ctrlState.update(targetVk, 0, true) == std::optional<bool>(true));
     REQUIRE_FALSE(ctrlState.update(targetVk, 0, true).has_value());
@@ -87,7 +88,7 @@ TEST_CASE("Key state works for a lone modifier target", "[ptt]")
     REQUIRE_FALSE(ctrlState.update(targetVk, 0, false).has_value());
 
     constexpr int targetAlt = 0xA4; // VK_LMENU
-    WindowsPttKeyState altState(targetAlt, 0);
+    PttKeyState altState(targetAlt, 0);
 
     REQUIRE(altState.update(targetAlt, ShortcutModifier::Alt, true) == std::optional<bool>(true));
     REQUIRE_FALSE(altState.update(targetAlt, ShortcutModifier::Alt, true).has_value());
@@ -97,7 +98,7 @@ TEST_CASE("Key state works for a lone modifier target", "[ptt]")
 
 TEST_CASE("Key state with zero target key ignores all events", "[ptt]")
 {
-    WindowsPttKeyState state(0, 0);
+    PttKeyState state(0, 0);
 
     REQUIRE_FALSE(state.update(0, 0, true).has_value());
     REQUIRE_FALSE(state.update('A', 0, true).has_value());

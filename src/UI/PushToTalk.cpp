@@ -4,6 +4,11 @@
 #include "Core/Session.hpp"
 #include "Core/SettingsKeys.hpp"
 #include "UI/Rml/Shell.hpp"
+#ifdef __linux__
+#include <SDL3/SDL_video.h>
+#endif
+
+#include <string_view>
 
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
@@ -46,9 +51,16 @@ void PushToTalk::updateGlobalHook()
 {
     setHeld(false);
     globalHook.stop();
-#if defined(_WIN32) && !defined(STYX_NO_VOICE)
-    if (enabled && binding.valid() && !suspended)
+#if (defined(_WIN32) || defined(__linux__)) && !defined(STYX_NO_VOICE)
+    if (enabled && binding.valid() && !suspended) {
+#if defined(_WIN32)
         globalHook.start(binding, [this](bool down) { setHeld(down); });
+#elif defined(__linux__)
+        const char *driver = SDL_GetCurrentVideoDriver();
+        std::string_view videoDriver = driver ? std::string_view(driver) : std::string_view{};
+        globalHook.start(binding, [this](bool down) { setHeld(down); }, videoDriver);
+#endif
+    }
 #endif
 }
 
@@ -58,7 +70,12 @@ std::string PushToTalk::shortcutScopeDescription() const
         return "Press a key or key combination to record a shortcut.";
     if (globalHook.active())
         return "Push to talk works even when Styx is not the focused window.";
-#ifdef _WIN32
+#ifdef __linux__
+    const char *driver = SDL_GetCurrentVideoDriver();
+    if (driver && std::string_view(driver) == "wayland")
+        return "Wayland restricts global keyboard access. Push to talk works only while Styx is focused.";
+#endif
+#if defined(_WIN32) || defined(__linux__)
     if (enabled && binding.valid() && !globalHook.error().empty())
         return "Global push to talk is unavailable: " + globalHook.error() + ". Push to talk works only while Styx is focused.";
 #endif

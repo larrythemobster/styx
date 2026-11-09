@@ -1,4 +1,5 @@
 #include "UI/WindowsPttHook.hpp"
+#include "UI/PttKeyState.hpp"
 
 #include "Platform/Dispatcher.hpp"
 
@@ -6,7 +7,6 @@
 
 #include <atomic>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 
@@ -22,34 +22,6 @@
 #endif
 
 namespace Styx::UI {
-
-WindowsPttKeyState::WindowsPttKeyState(int virtualKey, int modifiers)
-    : targetKey(virtualKey)
-    , requiredModifiers(modifiers)
-    , held(false)
-{
-}
-
-std::optional<bool> WindowsPttKeyState::update(int virtualKey, int modifiers, bool down)
-{
-    if (targetKey == 0 || virtualKey != targetKey)
-        return std::nullopt;
-
-    if (down) {
-        if (!held && (modifiers & requiredModifiers) == requiredModifiers) {
-            held = true;
-            return true;
-        }
-        return std::nullopt;
-    }
-
-    if (held) {
-        held = false;
-        return false;
-    }
-
-    return std::nullopt;
-}
 
 #ifdef _WIN32
 
@@ -68,7 +40,7 @@ struct WindowsPttHook::Impl
     std::shared_ptr<SharedState> shared;
     std::thread workerThread;
     DWORD threadId = 0;
-    WindowsPttKeyState keyState{0, 0};
+    PttKeyState keyState{0, 0};
     std::string lastError;
 
     inline static thread_local Impl *currentHook = nullptr;
@@ -172,7 +144,7 @@ bool WindowsPttHook::start(const Rml::KeyBinding &binding, std::function<void(bo
         return false;
     }
 
-    impl->keyState = WindowsPttKeyState(vk, binding.modifiers);
+    impl->keyState = PttKeyState(vk, binding.modifiers);
     impl->shared = std::make_shared<SharedState>();
     impl->shared->callback = std::move(callback);
 

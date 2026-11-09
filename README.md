@@ -27,9 +27,9 @@ Member moderation includes kick, ban, timeout, nickname and searchable role
 forms. CAPTCHA prompts use RmlUi while the challenge still opens in your browser.
 
 Voice & Video settings offer Voice Activity or Push to Talk. Record a shortcut and
-adjust its release delay from 0 to 2000 ms. On Windows, the shortcut works while
-other apps have focus, using a passive low-level hook that never consumes the key.
-On Linux and macOS, push to talk currently works only while Styx has focus.
+adjust its release delay from 0 to 2000 ms. Windows and X11 with XInput2 2.2 support
+passive global input that never consumes keys, so other applications still receive
+them. On Wayland and macOS, push to talk works only while Styx has focus.
 
 Native platform services provide file dialogs, the system tray, credential
 storage and startup error dialogs.
@@ -118,8 +118,9 @@ MP4 cases run when FFmpeg is enabled.
 - rnnoise (optional, noise suppression, vendored)
 - libdatachannel with libsrtp and FFmpeg (optional, Go Live, Windows only)
 
-Linux builds also need Autoconf, Automake, Libtool, Gettext, M4 and NASM.
-The Linux CI jobs install these build tools explicitly.
+Linux builds also need libX11 and libXi development headers, along with Autoconf,
+Automake, Libtool, Gettext, M4 and NASM. The Linux CI jobs install these build tools
+explicitly.
 
 ## Credits
 

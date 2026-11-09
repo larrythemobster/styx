@@ -4,24 +4,9 @@
 
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 
 namespace Styx::UI {
-
-// Converts Windows virtual keys into held/released transitions for one binding. Modifiers use
-// ShortcutModifier bits. Kept separate from the OS hook so repeats and releases can be tested.
-class WindowsPttKeyState
-{
-public:
-    WindowsPttKeyState(int virtualKey, int modifiers);
-    std::optional<bool> update(int virtualKey, int modifiers, bool down);
-
-private:
-    int targetKey;
-    int requiredModifiers;
-    bool held = false;
-};
 
 // Passive WH_KEYBOARD_LL observer with its own message thread. start/stop and destruction run
 // on the main thread. Only binding transitions are posted to Dispatcher::main; stop invalidates
