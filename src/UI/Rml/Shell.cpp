@@ -379,11 +379,7 @@ void Shell::setupPermanentConnections(ClientInstance *client)
     track(client->discord()->guildLeaveFailed.connect([this, client](Snowflake id, const std::string &error) {
         auto guild = client->getGuild(id);
         std::string name = guild ? guild->name.get() : id.toString();
-        Rml::ConfirmOptions options;
-        options.title = "Failed to leave server";
-        options.body = "Could not leave <b>" + Platform::htmlEscape(name) + "</b>.<br/>Error: " + Platform::htmlEscape(error);
-        options.confirmText = "OK"; options.cancelText.clear();
-        Rml::showConfirmModal(*this, options);
+        showActionFailed("Failed to leave server", "Could not leave <b>" + Platform::htmlEscape(name) + "</b>.<br/>Error: " + Platform::htmlEscape(error));
     }));
     track(client->channelCreated.connect([this, client](const Discord::ChannelCreate &event) { channelTreeModel->addChannel(event, client->accountId()); }));
     track(client->channelUpdated.connect([this, client](const Discord::ChannelUpdate &event) { channelTreeModel->updateChannel(event, client->accountId()); }));
@@ -757,6 +753,14 @@ void Shell::stepServer(int direction)
     if (target->isValid()) openGuild(current.accountId, *target);
     else openHome(current.accountId);
 }
+void Shell::showActionFailed(const std::string &title, const std::string &bodyRml)
+{
+    Rml::ConfirmOptions options;
+    options.title = title;
+    options.body = bodyRml;
+    options.confirmText = "OK"; options.cancelText.clear();
+    Rml::showConfirmModal(*this, options);
+}
 void Shell::showContextMenu(std::vector<Rml::MenuItem> items) { if (contextMenu) contextMenu->show(std::move(items), mapFromGlobal(Platform::Desktop::cursorPosition())); }
 void Shell::showContextMenuForUser(Snowflake userId, Snowflake guild)
 {
@@ -776,6 +780,27 @@ void Shell::showContextMenuForUser(Snowflake userId, Snowflake guild)
     menu.push_back({"Profile", [this, userId, guild] { showUserProfile(userId, guild); }});
     menu.push_back({"Mention", [userId] { Platform::Desktop::setClipboardText("<@" + userId.toString() + ">"); }, client != nullptr});
     menu.push_back({"Open DM", [this, guard, userId] { if (guard) openDmWithUser(guard->accountId(), userId); }, client && userId != client->accountId()});
+    if (client && userId != client->accountId()) {
+        auto relationship = client->relationships()->getRelationship(userId);
+        const bool blocked = relationship && relationship->type.hasValue() && relationship->type.get() == Discord::RelationshipType::BLOCKED;
+        const std::string name = client->users()->getDisplayName(userId, guild);
+        auto done = [self = Platform::Guard<Shell>(this), name](const char *verb) {
+            return [self, name, verb](const Core::Result<void> &result) {
+                if (self && !result.success()) self->showActionFailed(std::string("Failed to ") + verb, std::string("Could not ") + verb + " <b>" + Platform::htmlEscape(name) + "</b>.<br/>Error: " + Platform::htmlEscape(result.error));
+            };
+        };
+        if (blocked) {
+            menu.push_back({"Unblock", [guard, userId, done] { if (guard) guard->discord()->removeRelationship(userId, done("unblock")); }});
+        } else {
+            Rml::MenuItem block{"Block", [this, guard, userId, name, done] {
+                Rml::showConfirmModal(*this, "Block " + name + "?",
+                    "They won't be able to message you or add you as a friend, and their messages will be hidden from you.",
+                    "Block", [guard, userId, done] { if (guard) guard->discord()->blockUser(userId, done("block")); }, nullptr, true);
+            }};
+            block.danger = true;
+            menu.push_back(std::move(block));
+        }
+    }
     if (guild.isValid() && client) {
         auto target = MemberModeration::targetFor(client, guild, userId);
         if (!target || !MemberModeration::canEditRoles(client, *target)) {

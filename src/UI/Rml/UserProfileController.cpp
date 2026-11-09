@@ -101,6 +101,11 @@ void UserProfileController::ensureDocument()
             auto user = currentUserId;
             hide(); shell.openDmWithUser(account, user);
         }
+        if (closest(target, "data-action")) {
+            event.StopPropagation();
+            const auto user = currentUserId, guild = currentGuildId;
+            hide(); shell.showContextMenuForUser(user, guild);
+        }
     }, profileDocument);
     listen("keydown", [this](::Rml::Event &event) {
         if (event.GetParameter<int>("key_identifier", 0) == ::Rml::Input::KI_ESCAPE) {

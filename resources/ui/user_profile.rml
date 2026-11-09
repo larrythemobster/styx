@@ -10,6 +10,7 @@
 		<div id="profile-card" class="profile-card">
 			<div id="profile-banner" class="profile-banner">
 				<img id="profile-banner-img" class="profile-banner-img" src="" />
+				<div class="profile-more-btn" data-action="more" title="More"><img src="icon:ellipsis"/></div>
 			</div>
 
 			<div class="profile-header">

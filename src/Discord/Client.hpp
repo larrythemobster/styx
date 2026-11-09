@@ -278,8 +278,9 @@ public:
     void sendFriendRequest(const std::string &username, ActionCallback callback);
     // Accepts an incoming friend request.
     void acceptFriendRequest(Snowflake userId, ActionCallback callback);
-    // Ignores an incoming request, cancels an outgoing one, or removes a friend.
+    // Ignores an incoming request, cancels an outgoing one, removes a friend or unblocks.
     void removeRelationship(Snowflake userId, ActionCallback callback);
+    void blockUser(Snowflake userId, ActionCallback callback);
 
 public:
     Platform::Signal<Core::ConnectionState> stateChanged;

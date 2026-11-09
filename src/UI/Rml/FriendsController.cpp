@@ -76,7 +76,7 @@ void FriendsController::connectInstance(Core::ClientInstance *instance)
     lastInstance = instance;
     ++requestGeneration;
     searchText.clear();
-    pendingError.clear();
+    relationshipError.clear();
     addFriendInputText.clear();
     addFriendFeedback.clear();
     addFriendPending = false;
@@ -125,6 +125,8 @@ void FriendsController::setupEventListeners()
                 switchTab(Tab::All);
             else if (tabStr == std::string_view("pending"))
                 switchTab(Tab::Pending);
+            else if (tabStr == std::string_view("blocked"))
+                switchTab(Tab::Blocked);
             else if (tabStr == std::string_view("add"))
                 switchTab(Tab::AddFriend);
             return;
@@ -147,13 +149,13 @@ void FriendsController::setupEventListeners()
             if (action == std::string_view("accept-request")) {
                 Snowflake uId = parseId(attribute(act, "data-user-id"));
                 if (uId.isValid())
-                    respondToRequest(uId, true);
+                    updateRelationship(uId, true);
                 return;
             }
-            if (action == std::string_view("remove-request")) {
+            if (action == std::string_view("remove-request") || action == std::string_view("unblock")) {
                 Snowflake uId = parseId(attribute(act, "data-user-id"));
                 if (uId.isValid())
-                    respondToRequest(uId, false);
+                    updateRelationship(uId, false);
                 return;
             }
             if (action == std::string_view("clear-friends-search")) {
@@ -173,7 +175,7 @@ void FriendsController::setupEventListeners()
         if (auto *row = closest(target, "data-user-id")) {
             Snowflake uId = parseId(attribute(row, "data-user-id"));
             if (uId.isValid()) {
-                if (currentTab == Tab::Pending)
+                if (showsRelationships())
                     this->shell.showUserProfile(uId, Snowflake::Invalid);
                 else
                     this->shell.openDmWithUser(this->shell.location().accountId, uId);
@@ -230,7 +232,7 @@ void FriendsController::switchTab(Tab newTab)
         return;
     currentTab = newTab;
     addFriendFeedback.clear();
-    pendingError.clear();
+    relationshipError.clear();
     rebuild();
 }
 
@@ -270,11 +272,11 @@ void FriendsController::sendFriendRequest()
     scheduleRebuild();
 }
 
-void FriendsController::respondToRequest(Snowflake userId, bool accept)
+void FriendsController::updateRelationship(Snowflake userId, bool accept)
 {
     auto *inst = shell.currentInstance();
     if (!inst || !inst->discord()) {
-        pendingError = "Client instance not available.";
+        relationshipError = "Client instance not available.";
         scheduleRebuild();
         return;
     }
@@ -284,9 +286,9 @@ void FriendsController::respondToRequest(Snowflake userId, bool accept)
         if (!self)
             return;
         if (res.success()) {
-            self->pendingError.clear();
+            self->relationshipError.clear();
         } else {
-            self->pendingError = res.error;
+            self->relationshipError = res.error;
             self->scheduleRebuild();
         }
     };
@@ -413,6 +415,7 @@ void FriendsController::renderHeader(std::string &rml, int onlineCount, int allC
     const std::string onlineClass = (currentTab == Tab::Online) ? " selected" : std::string();
     const std::string allClass = (currentTab == Tab::All) ? " selected" : std::string();
     const std::string pendingClass = (currentTab == Tab::Pending) ? " selected" : std::string();
+    const std::string blockedClass = (currentTab == Tab::Blocked) ? " selected" : std::string();
     const std::string addClass = (currentTab == Tab::AddFriend) ? " selected" : std::string();
 
     int pendingCount = 0;
@@ -430,10 +433,12 @@ void FriendsController::renderHeader(std::string &rml, int onlineCount, int allC
         "<div class=\"friends-tab{0}\" data-tab=\"online\">Online{1}</div>"
         "<div class=\"friends-tab{2}\" data-tab=\"all\">All{3}</div>"
         "<div class=\"friends-tab{4}\" data-tab=\"pending\">Pending{5}</div>"
-        "<div class=\"friends-tab-add{6}\" data-tab=\"add\">Add Friend</div>",
+        "<div class=\"friends-tab{6}\" data-tab=\"blocked\">Blocked</div>"
+        "<div class=\"friends-tab-add{7}\" data-tab=\"add\">Add Friend</div>",
         onlineClass, onlineCount > 0 ? std::format(" ({0})", onlineCount) : std::string(),
         allClass, allCount > 0 ? std::format(" ({0})", allCount) : std::string(),
         pendingClass, pendingCountStr,
+        blockedClass,
         addClass);
 }
 
@@ -519,6 +524,9 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
                 continue;
             if (rel.isSpamRequest.valueOr(false))
                 continue;
+        } else if (currentTab == Tab::Blocked) {
+            if (rel.type.get() != Discord::RelationshipType::BLOCKED)
+                continue;
         } else {
             if (rel.type.get() != Discord::RelationshipType::FRIEND)
                 continue;
@@ -535,12 +543,16 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
                 continue;
         }
 
-        if (currentTab == Tab::Pending) {
+        if (showsRelationships()) {
             item.relationshipType = rel.type.get();
             item.statusClass = "status-offline";
-            item.subtext = (item.relationshipType == Discord::RelationshipType::INCOMING_REQUEST)
-                               ? "Incoming Friend Request"
-                               : "Outgoing Friend Request";
+            if (currentTab == Tab::Blocked) {
+                item.subtext = "Blocked";
+            } else {
+                item.subtext = (item.relationshipType == Discord::RelationshipType::INCOMING_REQUEST)
+                                   ? "Incoming Friend Request"
+                                   : "Outgoing Friend Request";
+            }
         } else {
             item.isOnline = (badge.status != Discord::StatusType::OFFLINE);
             switch (badge.status) {
@@ -594,13 +606,15 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
     std::string sectionTitle;
     if (currentTab == Tab::Pending)
         sectionTitle = std::format("Pending — {0}", items.size());
+    else if (currentTab == Tab::Blocked)
+        sectionTitle = std::format("Blocked — {0}", items.size());
     else if (currentTab == Tab::Online)
         sectionTitle = std::format("Online — {0}", items.size());
     else
         sectionTitle = std::format("All friends — {0}", items.size());
 
-    if (currentTab == Tab::Pending && !pendingError.empty())
-        rml += std::format("<div class=\"friends-pending-error\">{0}</div>", Rml::escape(pendingError));
+    if (showsRelationships() && !relationshipError.empty())
+        rml += std::format("<div class=\"friends-pending-error\">{0}</div>", Rml::escape(relationshipError));
 
     rml += std::format("<div class=\"friends-section-title\">{0}</div>", sectionTitle);
     rml += "<div id=\"friends-list\">";
@@ -614,6 +628,9 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
         } else if (currentTab == Tab::Pending) {
             emptyTitle = "There are no pending friend requests.";
             emptySubtitle = "Here's Wumpus for now.";
+        } else if (currentTab == Tab::Blocked) {
+            emptyTitle = "You can't unblock the Wumpus.";
+            emptySubtitle = "You haven't blocked anyone.";
         } else if (currentTab == Tab::Online) {
             emptyTitle = "No one's around to play with Wumpus.";
             emptySubtitle = "None of your friends are currently online.";
@@ -644,6 +661,11 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
                     "<div class=\"friend-action-btn friend-action-decline\" data-action=\"remove-request\" data-user-id=\"{0}\" title=\"{1}\">"
                     "<img class=\"icon\" src=\"icon:x\"/>"
                     "</div>", idStr, isIncoming ? "Ignore" : "Cancel");
+            } else if (currentTab == Tab::Blocked) {
+                actions = std::format(
+                    "<div class=\"friend-action-btn friend-action-decline\" data-action=\"unblock\" data-user-id=\"{0}\" title=\"Unblock\">"
+                    "<img class=\"icon\" src=\"icon:user-minus\"/>"
+                    "</div>", idStr);
             } else {
                 actions = std::format(
                     "<div class=\"friend-action-btn\" data-action=\"message\" data-user-id=\"{0}\" title=\"Message\">"

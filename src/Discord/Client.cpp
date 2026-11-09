@@ -733,6 +733,11 @@ void Client::removeRelationship(Snowflake userId, ActionCallback callback)
     httpClient->delete_("/users/@me/relationships/" + userId.toString(), actionHandler("Removing a relationship", std::move(callback)));
 }
 
+void Client::blockUser(Snowflake userId, ActionCallback callback)
+{
+    httpClient->put("/users/@me/relationships/" + userId.toString(), nlohmann::json{{"type", static_cast<int>(RelationshipType::BLOCKED)}}, actionHandler("Blocking a user", std::move(callback)));
+}
+
 
 void Client::setState(Core::ConnectionState state)
 {

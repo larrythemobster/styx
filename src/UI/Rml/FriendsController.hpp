@@ -28,6 +28,7 @@ public:
         Online,
         All,
         Pending,
+        Blocked,
         AddFriend,
     };
 
@@ -46,6 +47,8 @@ private:
         Discord::RelationshipType relationshipType = Discord::RelationshipType::NONE;
     };
 
+    bool showsRelationships() const { return currentTab == Tab::Pending || currentTab == Tab::Blocked; }
+
     void rebuild();
 
     void render();
@@ -60,12 +63,12 @@ private:
     void setupEventListeners();
     void connectInstance(Core::ClientInstance *instance);
     void sendFriendRequest();
-    void respondToRequest(Core::Snowflake userId, bool accept);
+    void updateRelationship(Core::Snowflake userId, bool accept);
     void updateAddFriendControls();
 
     Tab currentTab = Tab::Online;
     std::string searchText;
-    std::string pendingError;
+    std::string relationshipError;
     std::string addFriendInputText;
     std::string addFriendFeedback;
     bool addFriendSuccess = false;

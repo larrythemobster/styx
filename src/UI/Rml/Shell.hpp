@@ -141,6 +141,8 @@ private:
     std::vector<NavigationEntry> serverNavigation() const;
     void stepChannel(int direction, bool unreadOnly);
     void stepServer(int direction);
+    // An OK-only dialog for a request that failed; bodyRml is already escaped.
+    void showActionFailed(const std::string &title, const std::string &bodyRml);
     void showFromTray();
     void quitFromTray();
     Core::Session *coreSession;

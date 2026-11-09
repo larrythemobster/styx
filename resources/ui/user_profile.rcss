@@ -44,6 +44,33 @@
 	overflow: hidden;
 }
 
+.profile-more-btn
+{
+	position: absolute;
+	top: 8dp;
+	right: 8dp;
+	width: 28dp;
+	height: 28dp;
+	border-radius: 14dp;
+	background-color: #00000080;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+}
+
+.profile-more-btn img
+{
+	width: 16dp;
+	height: 16dp;
+	image-color: #f2f3f5;
+}
+
+.profile-more-btn:hover
+{
+	background-color: #000000c0;
+}
+
 .profile-banner-img
 {
 	width: 100%;
