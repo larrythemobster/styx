@@ -85,6 +85,11 @@ galleries and files. Bot actions and selects are read-only. Link buttons use the
 external-link confirmation dialog; hidden component spoilers do not load media
 until revealed.
 
+The client API can submit [component interactions](https://docs.discord.food/interactions/receiving-and-responding#create-interaction)
+with the current Gateway session and a caller-supplied nonce. REST success means
+admission, not completion. `interactionCreated`, `interactionSucceeded` and
+`interactionFailed` carry Gateway correlation and outcomes.
+
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.
 

@@ -940,5 +940,49 @@ struct UserNoteUpdate : Core::JsonUtils::JsonObject
     }
 };
 
+struct InteractionCreate : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> id;
+    Field<std::string, true> nonce;
+
+    static InteractionCreate fromJson(const nlohmann::json &obj)
+    {
+        InteractionCreate event;
+        get(obj, "id", event.id);
+        get(obj, "nonce", event.nonce);
+        return event;
+    }
+};
+
+struct InteractionSuccess : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> id;
+    Field<std::string, false, true> nonce;
+
+    static InteractionSuccess fromJson(const nlohmann::json &obj)
+    {
+        InteractionSuccess event;
+        get(obj, "id", event.id);
+        get(obj, "nonce", event.nonce);
+        return event;
+    }
+};
+
+struct InteractionFailure : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> id;
+    Field<std::string, true> nonce;
+    Field<int> reasonCode;
+
+    static InteractionFailure fromJson(const nlohmann::json &obj)
+    {
+        InteractionFailure event;
+        get(obj, "id", event.id);
+        get(obj, "nonce", event.nonce);
+        get(obj, "reason_code", event.reasonCode);
+        return event;
+    }
+};
+
 } // namespace Discord
 } // namespace Styx

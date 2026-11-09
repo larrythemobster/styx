@@ -32,6 +32,7 @@
 #include "UserEdits.hpp"
 #include "HttpClient.hpp"
 #include "ClientIdentity.hpp"
+#include "ComponentInteraction.hpp"
 
 using Styx::Core::Snowflake;
 
@@ -215,6 +216,9 @@ public:
     template <typename T>
     using ResultCallback = std::function<void(const Core::Result<T> &)>;
     using ActionCallback = ResultCallback<void>;
+
+    // REST admission only; interactionSucceeded/interactionFailed report the application's result.
+    void createComponentInteraction(const ComponentInteractionRequest &request, ActionCallback callback = {});
     void modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<User> callback = {});
     void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
     void modifyPreloadedSettings(Proto::PreloadedSettingsEdit edit, ActionCallback callback = {});
@@ -354,6 +358,9 @@ public:
     Platform::Signal<const StreamUpdate &> streamUpdated;
     Platform::Signal<const StreamServerUpdate &> streamServerUpdated;
     Platform::Signal<const StreamDelete &> streamDeleted;
+    Platform::Signal<const InteractionCreate &> interactionCreated;
+    Platform::Signal<const InteractionSuccess &> interactionSucceeded;
+    Platform::Signal<const InteractionFailure &> interactionFailed;
     Platform::Signal<const Relationship &> relationshipAdded;
     Platform::Signal<const RelationshipPartial &> relationshipUpdated;
     Platform::Signal<const RelationshipPartial &> relationshipRemoved;

@@ -248,6 +248,8 @@ set(PROJECT_SOURCES
     src/Storage/RoleRepository.cpp
     src/Discord/Client.cpp
     src/Discord/ClientMessages.cpp
+    src/Discord/ClientInteractions.cpp
+    src/Discord/ComponentInteraction.cpp
     src/Discord/MessageSearch.cpp
     src/Discord/InviteLink.cpp
     src/Discord/GuildCreate.cpp
@@ -461,6 +463,9 @@ if(BUILD_TESTS)
     endif()
     styx_test(TestEmbeds EmbedTests tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageComponents MessageComponentTests tests/tst_MessageComponents.cpp src/Core/Snowflake.cpp)
+    styx_test(TestComponentInteractions ComponentInteractionTests
+        tests/tst_ComponentInteraction.cpp tests/tst_InteractionEvents.cpp
+        src/Discord/ComponentInteraction.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageSearch MessageSearchTests tests/tst_MessageSearch.cpp src/Discord/MessageSearch.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageCache MessageCacheTests tests/tst_MessageCache.cpp
         src/Storage/DatabaseManager.cpp src/Storage/BaseRepository.cpp

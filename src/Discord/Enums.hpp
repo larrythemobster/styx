@@ -193,6 +193,9 @@ enum class GatewayEvent {
     PRESENCE_UPDATE,
     PRESENCES_REPLACE,
     SESSIONS_REPLACE,
+    INTERACTION_CREATE,
+    INTERACTION_SUCCESS,
+    INTERACTION_FAILURE,
 };
 
 enum class RelationshipType {
@@ -265,6 +268,9 @@ inline GatewayEvent parseGatewayEvent(std::string_view event)
         { "PRESENCE_UPDATE", GatewayEvent::PRESENCE_UPDATE },
         { "PRESENCES_REPLACE", GatewayEvent::PRESENCES_REPLACE },
         { "SESSIONS_REPLACE", GatewayEvent::SESSIONS_REPLACE },
+        { "INTERACTION_CREATE", GatewayEvent::INTERACTION_CREATE },
+        { "INTERACTION_SUCCESS", GatewayEvent::INTERACTION_SUCCESS },
+        { "INTERACTION_FAILURE", GatewayEvent::INTERACTION_FAILURE },
     };
 
     auto found = events.find(std::string(event));

@@ -44,6 +44,7 @@ public:
     void hardStop();
 
     [[nodiscard]] bool isRunning() const { return running; }
+    [[nodiscard]] std::string currentSessionId() const;
 
     void subscribeToGuild(Core::Snowflake guildId, Core::Snowflake channelId, const std::vector<std::pair<int, int>> &ranges);
     void setMemberUpdatesSubscription(Core::Snowflake guildId, bool subscribed);
@@ -131,6 +132,9 @@ public:
     Platform::Signal<const Presence &> gatewayPresenceUpdate;
     Platform::Signal<const std::vector<Presence> &> gatewayPresencesReplace;
     Platform::Signal<const std::vector<UserSession> &> gatewaySessionsReplace;
+    Platform::Signal<const InteractionCreate &> gatewayInteractionCreate;
+    Platform::Signal<const InteractionSuccess &> gatewayInteractionSuccess;
+    Platform::Signal<const InteractionFailure &> gatewayInteractionFailure;
 
 private:
     void sendPayload(const Core::OrderedJson &obj);
@@ -239,7 +243,7 @@ private:
     std::optional<QoSPayload> upcomingQoS;
     std::atomic<bool> sessionEstablished{ false };
 
-    std::mutex sessionMutex;
+    mutable std::mutex sessionMutex;
     std::string sessionId;
     std::string resumeGatewayUrl;
 

@@ -86,6 +86,15 @@ void Gateway::hardStop()
     teardown();
 }
 
+std::string Gateway::currentSessionId() const
+{
+    std::lock_guard lock(sessionMutex);
+    if (!running || wantToClose || !sessionEstablished || !canResume)
+        return {};
+
+    return sessionId;
+}
+
 void Gateway::teardown()
 {
     ++*ingestEpoch;
@@ -168,6 +177,8 @@ void Gateway::onPayloadReceived(const nlohmann::json &root)
         Core::log(Core::LogLevel::Info, LogDiscord) << "Invalid session, resumable:" << resumable;
         if (!resumable) {
             canResume = false;
+            sessionEstablished = false;
+            std::lock_guard lock(sessionMutex);
             sessionId.clear();
         }
         shouldReconnect = true;
@@ -359,6 +370,15 @@ void Gateway::handleDispatch(const Inbound &data)
         break;
     case GatewayEvent::SESSIONS_REPLACE:
         handleSessionsReplace(data);
+        break;
+    case GatewayEvent::INTERACTION_CREATE:
+        gatewayInteractionCreate.publish(data.getData<InteractionCreate>());
+        break;
+    case GatewayEvent::INTERACTION_SUCCESS:
+        gatewayInteractionSuccess.publish(data.getData<InteractionSuccess>());
+        break;
+    case GatewayEvent::INTERACTION_FAILURE:
+        gatewayInteractionFailure.publish(data.getData<InteractionFailure>());
         break;
     case GatewayEvent::UNKNOWN:
         Core::log(Core::LogLevel::Info, LogDiscord) << "Unknown gateway event: " << t;
@@ -1258,7 +1278,10 @@ void Gateway::resume()
     Core::log(Core::LogLevel::Info, LogDiscord) << "Sending RESUME";
     Resume resumeMsg;
     resumeMsg.token = token;
-    resumeMsg.sessionId = sessionId;
+    {
+        std::lock_guard lock(sessionMutex);
+        resumeMsg.sessionId = sessionId;
+    }
     resumeMsg.seq = lastReceivedSequence.load();
     sendPayload(resumeMsg.toJson());
     sessionEstablished = true;
