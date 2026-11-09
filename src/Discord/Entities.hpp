@@ -1279,6 +1279,198 @@ struct MessageReference : Core::JsonUtils::JsonObject
     }
 };
 
+struct ComponentSelectOption : Core::JsonUtils::JsonObject
+{
+    Field<std::string> label;
+    Field<std::string> value;
+    Field<std::string, true> description;
+    Field<Emoji, true> emoji;
+    Field<bool, true> isDefault;
+
+    static ComponentSelectOption fromJson(const nlohmann::json &obj)
+    {
+        ComponentSelectOption option;
+        get(obj, "label", option.label);
+        get(obj, "value", option.value);
+        get(obj, "description", option.description);
+        get(obj, "emoji", option.emoji);
+        get(obj, "default", option.isDefault);
+        return option;
+    }
+};
+
+struct ComponentSelectDefaultValue : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> id;
+    Field<std::string> type;
+
+    static ComponentSelectDefaultValue fromJson(const nlohmann::json &obj)
+    {
+        ComponentSelectDefaultValue defaultValue;
+        get(obj, "id", defaultValue.id);
+        get(obj, "type", defaultValue.type);
+        return defaultValue;
+    }
+};
+
+struct ComponentMedia : Core::JsonUtils::JsonObject
+{
+    Field<std::string> url;
+    Field<Core::Snowflake, true> id;
+    Field<Core::Snowflake, true> attachmentId;
+    Field<std::string, true> proxyUrl;
+    Field<std::string, true> contentType;
+    Field<std::string, true> placeholder;
+    Field<int, true, true> width;
+    Field<int, true, true> height;
+    Field<int, true> flags;
+    Field<int, true> loadingState;
+    Field<int, true> placeholderVersion;
+
+    static ComponentMedia fromJson(const nlohmann::json &obj)
+    {
+        ComponentMedia media;
+        get(obj, "url", media.url);
+        get(obj, "id", media.id);
+        get(obj, "attachment_id", media.attachmentId);
+        get(obj, "proxy_url", media.proxyUrl);
+        get(obj, "content_type", media.contentType);
+        get(obj, "placeholder", media.placeholder);
+        get(obj, "width", media.width);
+        get(obj, "height", media.height);
+        get(obj, "flags", media.flags);
+        get(obj, "loading_state", media.loadingState);
+        get(obj, "placeholder_version", media.placeholderVersion);
+        return media;
+    }
+};
+
+struct ComponentGalleryItem : Core::JsonUtils::JsonObject
+{
+    Field<ComponentMedia> media;
+    Field<std::string, true, true> description;
+    Field<bool, true> spoiler;
+
+    static ComponentGalleryItem fromJson(const nlohmann::json &obj)
+    {
+        ComponentGalleryItem item;
+        get(obj, "media", item.media);
+        get(obj, "description", item.description);
+        get(obj, "spoiler", item.spoiler);
+        return item;
+    }
+};
+
+struct MessageComponent : Core::JsonUtils::JsonObject
+{
+    Field<MessageComponentType> type;
+    Field<uint32_t, true> id;
+    Field<std::vector<MessageComponent>, true> components;
+    std::shared_ptr<const MessageComponent> accessory;
+    Field<int, true> style;
+    Field<std::string, true> label;
+    Field<std::string, true> customId;
+    Field<std::string, true> url;
+    Field<Core::Snowflake, true> skuId;
+    Field<Emoji, true> emoji;
+    Field<bool, true> disabled;
+    Field<std::vector<ComponentSelectOption>, true> options;
+    Field<std::string, true> placeholder;
+    Field<int, true> minValues;
+    Field<int, true> maxValues;
+    Field<std::vector<ComponentSelectDefaultValue>, true> defaultValues;
+    Field<std::vector<ChannelType>, true> channelTypes;
+    Field<std::string, true> content;
+    Field<ComponentMedia, true> media;
+    Field<ComponentMedia, true> file;
+    Field<std::string, true, true> description;
+    Field<bool, true> spoiler;
+    Field<std::vector<ComponentGalleryItem>, true> items;
+    Field<std::string, true> name;
+    Field<int64_t, true> size;
+    Field<bool, true> divider;
+    Field<int, true> spacing;
+    Field<uint32_t, true, true> accentColor;
+
+    static MessageComponent fromJson(const nlohmann::json &obj)
+    {
+        MessageComponent component;
+        get(obj, "type", component.type);
+        get(obj, "id", component.id);
+
+        switch (component.type.get()) {
+        case MessageComponentType::ACTION_ROW:
+            get(obj, "components", component.components);
+            break;
+        case MessageComponentType::BUTTON:
+            get(obj, "style", component.style);
+            get(obj, "label", component.label);
+            get(obj, "custom_id", component.customId);
+            get(obj, "url", component.url);
+            get(obj, "sku_id", component.skuId);
+            get(obj, "emoji", component.emoji);
+            get(obj, "disabled", component.disabled);
+            break;
+        case MessageComponentType::STRING_SELECT:
+        case MessageComponentType::USER_SELECT:
+        case MessageComponentType::ROLE_SELECT:
+        case MessageComponentType::MENTIONABLE_SELECT:
+        case MessageComponentType::CHANNEL_SELECT: {
+            get(obj, "custom_id", component.customId);
+            get(obj, "placeholder", component.placeholder);
+            get(obj, "min_values", component.minValues);
+            get(obj, "max_values", component.maxValues);
+            get(obj, "disabled", component.disabled);
+            if (component.type == MessageComponentType::STRING_SELECT) {
+                get(obj, "options", component.options);
+            } else {
+                get(obj, "default_values", component.defaultValues);
+                if (component.type == MessageComponentType::CHANNEL_SELECT)
+                    get(obj, "channel_types", component.channelTypes);
+            }
+            break;
+        }
+        case MessageComponentType::SECTION: {
+            get(obj, "components", component.components);
+            const auto it = obj.find("accessory");
+            if (it != obj.end() && it->is_object())
+                component.accessory = std::make_shared<MessageComponent>(fromJson(*it));
+            break;
+        }
+        case MessageComponentType::TEXT_DISPLAY:
+            get(obj, "content", component.content);
+            break;
+        case MessageComponentType::THUMBNAIL:
+            get(obj, "media", component.media);
+            get(obj, "description", component.description);
+            get(obj, "spoiler", component.spoiler);
+            break;
+        case MessageComponentType::MEDIA_GALLERY:
+            get(obj, "items", component.items);
+            break;
+        case MessageComponentType::FILE:
+            get(obj, "file", component.file);
+            get(obj, "spoiler", component.spoiler);
+            get(obj, "name", component.name);
+            get(obj, "size", component.size);
+            break;
+        case MessageComponentType::SEPARATOR:
+            get(obj, "divider", component.divider);
+            get(obj, "spacing", component.spacing);
+            break;
+        case MessageComponentType::CONTAINER:
+            get(obj, "components", component.components);
+            get(obj, "accent_color", component.accentColor);
+            get(obj, "spoiler", component.spoiler);
+            break;
+        default:
+            break;
+        }
+
+        return component;
+    }
+};
+
 struct Message : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> id;
@@ -1298,6 +1490,7 @@ struct Message : Core::JsonUtils::JsonObject
     Field<bool, true> mentionEveryone;
     Field<std::vector<Reaction>, true> reactions;
     Field<std::vector<StickerItem>, true> stickerItems;
+    Field<std::vector<MessageComponent>, true> components;
 
     Field<MessageReference, true> messageReference;
 
@@ -1321,6 +1514,7 @@ struct Message : Core::JsonUtils::JsonObject
     std::string reactionsJson;
     std::string stickersJson;
     std::string snapshotJson;
+    std::string componentsJson;
 
     // sent
     bool isPendingOutbound = false;
@@ -1387,6 +1581,7 @@ struct Message : Core::JsonUtils::JsonObject
         get(obj, "mention_everyone", message.mentionEveryone);
         get(obj, "reactions", message.reactions);
         get(obj, "sticker_items", message.stickerItems);
+        get(obj, "components", message.components);
         get(obj, "message_reference", message.messageReference);
         get(obj, "guild_id", message.guildId);
         get(obj, "channel_type", message.channelType);
@@ -1412,6 +1607,7 @@ struct Message : Core::JsonUtils::JsonObject
         message.embedsJson = compactArrayJson(obj, "embeds");
         message.reactionsJson = compactArrayJson(obj, "reactions");
         message.stickersJson = compactArrayJson(obj, "sticker_items");
+        message.componentsJson = compactArrayJson(obj, "components");
 
         return message;
     }
@@ -1455,6 +1651,11 @@ struct Message : Core::JsonUtils::JsonObject
         if (present.contains("embeds")) {
             embeds = update.embeds;
             embedsJson = update.embedsJson;
+        }
+
+        if (present.contains("components")) {
+            components = update.components;
+            componentsJson = update.componentsJson;
         }
 
         if (present.contains("reactions")) {

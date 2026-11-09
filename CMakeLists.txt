@@ -459,6 +459,7 @@ if(BUILD_TESTS)
         target_link_libraries(TestRmlRender PRIVATE user32 gdi32)
     endif()
     styx_test(TestEmbeds EmbedTests tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
+    styx_test(TestMessageComponents MessageComponentTests tests/tst_MessageComponents.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageSearch MessageSearchTests tests/tst_MessageSearch.cpp src/Discord/MessageSearch.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestFavoriteGifs FavoriteGifTests tests/tst_FavoriteGifs.cpp
         src/Core/Gifs/FavoriteGifRules.cpp src/UI/Gifs/GifMasonryLayout.cpp

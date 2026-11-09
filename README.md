@@ -77,6 +77,11 @@ Ubuntu/WSL under Xvfb with software OpenGL, with `ENABLE_VOICE=OFF`,
 `ENABLE_RNNOISE=OFF` and `ENABLE_FFMPEG=OFF`. Linux voice and FFmpeg playback,
 and the native macOS UI, have not been verified.
 
+Message parsing retains typed legacy and Components V2 trees, including replies
+and forwarded snapshots. Partial updates preserve omitted components and clear
+them on an empty array. Component rendering and disk persistence are not yet
+supported.
+
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.
 
