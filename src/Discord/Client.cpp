@@ -5,11 +5,14 @@
 #include <algorithm>
 #include <charconv>
 #include <format>
+#include <utility>
+#include <string_view>
 
 #include "ApiError.hpp"
 #include "Enums.hpp"
 #include "Core/Logging.hpp"
 #include "Proto/ProtoReader.hpp"
+#include "Proto/PreloadedSettings.hpp"
 #include "Proto/UserSettings.hpp"
 
 namespace Styx {
@@ -48,6 +51,41 @@ std::optional<Proto::FrecencyUserSettings> decodeFrecencySettings(const nlohmann
     if (!bytes || bytes->empty()) return std::nullopt;
     Proto::ProtoReader reader(*bytes);
     return Proto::FrecencyUserSettings::fromProto(reader);
+}
+
+Core::Result<Proto::PreloadedSettingsSnapshot> decodePreloadedSettingsProto(std::string_view base64)
+{
+    const auto decoded = Platform::fromBase64(base64);
+    if (!decoded)
+        return Core::Result<Proto::PreloadedSettingsSnapshot>::makeError("Invalid base64 in settings");
+    return Proto::PreloadedSettingsSnapshot::fromProto(
+        std::string_view(reinterpret_cast<const char *>(decoded->data()), decoded->size()));
+}
+
+Core::Result<Proto::PreloadedSettingsSnapshot> decodePreloadedSettingsResponse(const HttpResponse &response, bool *outOfDate = nullptr)
+{
+    if (outOfDate)
+        *outOfDate = false;
+
+    if (!response.success) {
+        const ApiError error = ApiError::fromResponse(response);
+        return Core::Result<Proto::PreloadedSettingsSnapshot>::makeError(error.message, error.code);
+    }
+
+    const auto document = nlohmann::json::parse(response.body, nullptr, false);
+    if (!document.is_object())
+        return Core::Result<Proto::PreloadedSettingsSnapshot>::makeError("Invalid JSON response");
+
+    if (outOfDate && document.contains("out_of_date")) {
+        if (!document["out_of_date"].is_boolean())
+            return Core::Result<Proto::PreloadedSettingsSnapshot>::makeError("Invalid out_of_date in response");
+        *outOfDate = document["out_of_date"].get<bool>();
+    }
+
+    if (!document.contains("settings") || !document["settings"].is_string())
+        return Core::Result<Proto::PreloadedSettingsSnapshot>::makeError("Missing settings field");
+
+    return decodePreloadedSettingsProto(document["settings"].get_ref<const std::string &>());
 }
 
 std::string guildEndpoint(Snowflake guild, const std::string &path = {})
@@ -247,11 +285,21 @@ void Client::onGatewayReady(const Ready &data)
     for (const auto &guild : data.guilds.get())
         indexGuildMappings(guild);
 
-    const std::string protoStr = data.userSettingsProto.get();
-    settings = Proto::PreloadedUserSettings::fromBase64(protoStr);
+    legacyGuildFolders.reset();
+    preloadedSnapshot = Proto::PreloadedSettingsSnapshot();
 
-    if ((!settings.guildFolders.has_value() || settings.guildFolders->folders.empty()) && data.userSettings.hasValue() && !data.userSettings->guildFolders->empty())
-        settings.guildFolders = guildFoldersFromLegacy(data.userSettings->guildFolders.get());
+    auto snapshotResult = decodePreloadedSettingsProto(data.userSettingsProto.get());
+    if (snapshotResult.success())
+        preloadedSnapshot = std::move(*snapshotResult.value);
+
+    Proto::ProtoReader reader(preloadedSnapshot.bytes());
+    settings = Proto::PreloadedUserSettings::fromProto(reader);
+
+    if (!preloadedSnapshot.hasGroup(14) && data.userSettings.hasValue()
+        && data.userSettings->guildFolders.hasValue() && !data.userSettings->guildFolders->empty()) {
+        legacyGuildFolders = guildFoldersFromLegacy(data.userSettings->guildFolders.get());
+        settings.guildFolders = legacyGuildFolders;
+    }
 
     applyDiscordLocale();
 
@@ -267,23 +315,44 @@ void Client::onGatewayReadySupplemental(const ReadySupplemental &data)
 
 void Client::onGatewayUserSettingsProtoUpdate(const UserSettingsProtoUpdate &event)
 {
+    Platform::Guard<Client> self(this);
     if (event.type.get() == UserSettingsProtoType::PRELOADED) {
-        const std::string protoStr = event.proto.get();
-        auto updated = Proto::PreloadedUserSettings::fromBase64(protoStr);
-
-        if (event.partial.hasValue() && event.partial.get()) {
-            settings.mergeFrom(updated);
+        auto snapshotResult = decodePreloadedSettingsProto(event.proto.get());
+        if (snapshotResult.success()) {
+            const bool partial = event.partial.hasValue() && event.partial.get();
+            applyPreloadedSnapshot(std::move(*snapshotResult.value), partial);
         } else {
-            if (!updated.guildFolders.has_value() || updated.guildFolders->folders.empty())
-                updated.guildFolders = settings.guildFolders;
-            settings = updated;
+            Core::log(Core::LogLevel::Warning, LogDiscord) << "Failed to parse preloaded user settings proto update";
         }
-
-        applyDiscordLocale();
-        settingsChanged.publish();
     }
 
-    userSettingsProtoUpdated.publish(event);
+    if (self)
+        self->userSettingsProtoUpdated.publish(event);
+}
+
+void Client::applyPreloadedSnapshot(Proto::PreloadedSettingsSnapshot snapshot, bool partial)
+{
+    const auto cachedVersion = preloadedSnapshot.dataVersion();
+    const auto incomingVersion = snapshot.dataVersion();
+    if (cachedVersion && incomingVersion && *incomingVersion < *cachedVersion)
+        return;
+
+    const bool hasGuildFolders = snapshot.hasGroup(14);
+    if (partial)
+        preloadedSnapshot.mergeFrom(snapshot);
+    else
+        preloadedSnapshot = std::move(snapshot);
+
+    if (hasGuildFolders)
+        legacyGuildFolders.reset();
+
+    Proto::ProtoReader reader(preloadedSnapshot.bytes());
+    settings = Proto::PreloadedUserSettings::fromProto(reader);
+    if (!settings.guildFolders.has_value() && legacyGuildFolders.has_value())
+        settings.guildFolders = legacyGuildFolders;
+
+    applyDiscordLocale();
+    settingsChanged.publish();
 }
 
 void Client::applyDiscordLocale()
@@ -674,59 +743,98 @@ void Client::patchFrecencySettings(const std::string &partialProto, std::optiona
     });
 }
 
-void Client::setCustomStatus(const std::optional<Proto::CustomStatus> &customStatus, ActionCallback callback)
+void Client::modifyPreloadedSettings(Proto::PreloadedSettingsEdit edit, ActionCallback callback)
 {
-    const Proto::StatusSettings emptyStatus;
-    const auto &currentStatus = settings.status ? *settings.status : emptyStatus;
-    const std::string patchBytes = Proto::customStatusPatch(currentStatus, customStatus);
-    const nlohmann::json payload{{"settings", Platform::toBase64(patchBytes)}};
-
-    Platform::Guard<Client> self(this);
-    httpClient->patch("/users/@me/settings-proto/1", payload, [self, callback = std::move(callback)](const HttpResponse &response) {
-        if (!response.success) {
-            const ApiError error = ApiError::fromResponse(response);
-            if (callback)
-                callback(Core::Result<void>::makeError(error.message, error.code));
-            return;
-        }
-
-        const auto document = nlohmann::json::parse(response.body, nullptr, false);
-        if (!document.is_object()) {
-            if (callback)
-                callback(Core::Result<void>::makeError("Invalid JSON response"));
-            return;
-        }
-
-        if (document.value("out_of_date", false)) {
-            if (callback)
-                callback(Core::Result<void>::makeError("Settings are out of date"));
-            return;
-        }
-
-        if (!document.contains("settings") || !document["settings"].is_string()) {
-            if (callback)
-                callback(Core::Result<void>::makeError("Missing settings field"));
-            return;
-        }
-
-        const auto decoded = Platform::fromBase64(document["settings"].get_ref<const std::string &>());
-        if (!decoded) {
-            if (callback)
-                callback(Core::Result<void>::makeError("Invalid base64 in settings"));
-            return;
-        }
-
-        Proto::ProtoReader reader(*decoded);
-        const auto returnedSettings = Proto::PreloadedUserSettings::fromProto(reader);
-
-        if (self) {
-            self->settings.status = returnedSettings.status;
-            self->settingsChanged.publish();
-        }
-
+    if (edit.empty()) {
         if (callback)
             callback(Core::Result<void>::makeOk());
+        return;
+    }
+
+    pendingPreloadedEdits.push_back({ std::move(edit), std::move(callback) });
+    if (!preloadedEditInFlight)
+        startNextPreloadedEdit();
+}
+
+void Client::startNextPreloadedEdit()
+{
+    if (pendingPreloadedEdits.empty() || preloadedEditInFlight)
+        return;
+
+    preloadedEditInFlight = true;
+
+    Platform::Guard<Client> self(this);
+    httpClient->get("/users/@me/settings-proto/1", {}, [self](const HttpResponse &response) {
+        if (!self)
+            return;
+
+        auto snapshotResult = decodePreloadedSettingsResponse(response);
+        if (!snapshotResult.success()) {
+            self->finishPreloadedEdit(Core::Result<void>::makeError(std::move(snapshotResult.error), snapshotResult.code));
+            return;
+        }
+
+        auto freshSnapshot = std::move(*snapshotResult.value);
+        auto patchResult = Proto::preloadedSettingsPatch(freshSnapshot, self->pendingPreloadedEdits.front().edit);
+        if (!patchResult.success()) {
+            self->finishPreloadedEdit(Core::Result<void>::makeError(std::move(patchResult.error)));
+            return;
+        }
+
+        nlohmann::json payload;
+        payload["settings"] = Platform::toBase64(*patchResult.value);
+        payload["required_data_version"] = freshSnapshot.dataVersion().value_or(0);
+        self->applyPreloadedSnapshot(std::move(freshSnapshot), false);
+        if (!self)
+            return;
+
+        self->httpClient->patch("/users/@me/settings-proto/1", payload, [self](const HttpResponse &patchResponse) {
+            if (!self)
+                return;
+
+            bool outOfDate = false;
+            auto patchSnapshotResult = decodePreloadedSettingsResponse(patchResponse, &outOfDate);
+            if (outOfDate) {
+                if (patchSnapshotResult.success())
+                    self->applyPreloadedSnapshot(std::move(*patchSnapshotResult.value), false);
+                if (self)
+                    self->finishPreloadedEdit(Core::Result<void>::makeError("Settings changed on another client. Try again."));
+                return;
+            }
+
+            if (!patchSnapshotResult.success()) {
+                self->finishPreloadedEdit(Core::Result<void>::makeError(std::move(patchSnapshotResult.error), patchSnapshotResult.code));
+                return;
+            }
+
+            self->applyPreloadedSnapshot(std::move(*patchSnapshotResult.value), false);
+            if (self)
+                self->finishPreloadedEdit(Core::Result<void>::makeOk());
+        });
     });
+}
+
+void Client::finishPreloadedEdit(Core::Result<void> result)
+{
+    ActionCallback callback = std::move(pendingPreloadedEdits.front().callback);
+    pendingPreloadedEdits.pop_front();
+
+    Platform::Guard<Client> self(this);
+    if (callback)
+        callback(result);
+
+    if (!self)
+        return;
+
+    preloadedEditInFlight = false;
+    startNextPreloadedEdit();
+}
+
+void Client::setCustomStatus(const std::optional<Proto::CustomStatus> &customStatus, ActionCallback callback)
+{
+    Proto::PreloadedSettingsEdit edit;
+    edit.customStatus.emplace(customStatus);
+    modifyPreloadedSettings(std::move(edit), std::move(callback));
 }
 
 HttpCallback Client::applyThen(std::function<void(const nlohmann::json &)> apply, HttpCallback finish)

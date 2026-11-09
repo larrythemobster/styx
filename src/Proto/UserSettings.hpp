@@ -4,7 +4,6 @@
 #include <optional>
 #include <span>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "Core/Snowflake.hpp"
@@ -60,7 +59,6 @@ struct LocalizationSettings
     std::optional<std::string> locale;
 
     static LocalizationSettings fromProto(ProtoReader &reader);
-    void mergeFrom(const LocalizationSettings &other);
 };
 
 struct PreloadedUserSettings
@@ -70,13 +68,7 @@ struct PreloadedUserSettings
     std::optional<LocalizationSettings> localization;
 
     static PreloadedUserSettings fromProto(ProtoReader &reader);
-    static PreloadedUserSettings fromBase64(std::string_view base64);
-
-    void mergeFrom(const PreloadedUserSettings &other);
 };
-
-// The API replaces the whole status group; nullopt clears custom status without resetting its siblings.
-std::string customStatusPatch(const StatusSettings &current, const std::optional<CustomStatus> &customStatus);
 
 } // namespace Proto
 } // namespace Styx

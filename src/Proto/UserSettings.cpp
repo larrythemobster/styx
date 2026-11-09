@@ -2,7 +2,6 @@
 
 #include "ProtoReader.hpp"
 #include "ProtoWriter.hpp"
-#include "Platform/Base64.hpp"
 
 namespace Styx {
 namespace Proto {
@@ -329,70 +328,6 @@ PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
     }
 
     return settings;
-}
-
-PreloadedUserSettings PreloadedUserSettings::fromBase64(std::string_view base64)
-{
-    const auto decoded = Platform::fromBase64(base64);
-    if (!decoded)
-        return PreloadedUserSettings{};
-
-    ProtoReader reader(*decoded);
-    return fromProto(reader);
-}
-
-
-void LocalizationSettings::mergeFrom(const LocalizationSettings &other)
-{
-    if (other.locale.has_value())
-        locale = other.locale;
-}
-
-void PreloadedUserSettings::mergeFrom(const PreloadedUserSettings &other)
-{
-    if (other.guildFolders.has_value())
-        guildFolders = other.guildFolders;
-
-    if (other.localization.has_value()) {
-        if (localization.has_value())
-            localization->mergeFrom(other.localization.value());
-        else
-            localization = other.localization;
-    }
-
-    if (other.status.has_value())
-        status = other.status;
-}
-
-
-std::string customStatusPatch(const StatusSettings &current, const std::optional<CustomStatus> &customStatus)
-{
-    ProtoWriter statusWriter;
-
-    if (current.status.has_value()) {
-        ProtoWriter stringVal;
-        stringVal.writeString(1, *current.status);
-        statusWriter.writeBytes(1, stringVal.bytes());
-    }
-
-    if (customStatus.has_value())
-        statusWriter.writeBytes(2, customStatus->toProto());
-
-    if (current.showCurrentGame.has_value()) {
-        ProtoWriter boolVal;
-        boolVal.writeVarint(1, *current.showCurrentGame ? 1 : 0);
-        statusWriter.writeBytes(3, boolVal.bytes());
-    }
-
-    if (current.statusExpiresAtMs != 0)
-        statusWriter.writeFixed64(4, current.statusExpiresAtMs);
-
-    std::string statusBytes = statusWriter.takeBytes();
-    statusBytes.append(current.unknownFields);
-
-    ProtoWriter root;
-    root.writeBytes(11, statusBytes);
-    return root.takeBytes();
 }
 
 } // namespace Proto

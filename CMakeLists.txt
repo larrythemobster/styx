@@ -268,6 +268,7 @@ set(PROJECT_SOURCES
     src/Proto/ProtoReader.cpp
     src/Proto/ProtoWriter.cpp
     src/Proto/UserSettings.cpp
+    src/Proto/PreloadedSettings.cpp
     src/Proto/FrecencySettings.cpp
     src/Core/TokenStore.cpp
     src/App.cpp
@@ -436,7 +437,11 @@ if(BUILD_TESTS)
         src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestProto ProtoTests tests/tst_Proto.cpp src/Proto/ProtoReader.cpp
         src/Proto/ProtoWriter.cpp src/Proto/FrecencySettings.cpp src/Proto/UserSettings.cpp
+        src/Proto/PreloadedSettings.cpp
         src/Core/Snowflake.cpp)
+    styx_test(TestPreloadedSettings PreloadedSettingsTests tests/tst_PreloadedSettings.cpp
+        src/Proto/PreloadedSettings.cpp src/Proto/UserSettings.cpp
+        src/Proto/ProtoReader.cpp src/Proto/ProtoWriter.cpp src/Core/Snowflake.cpp)
     styx_test(TestProxy ProxyTests tests/tst_Proxy.cpp src/Core/ProxyConfig.cpp
         src/Core/Logging.cpp src/Core/ImageManager.cpp src/Core/Snowflake.cpp
         src/Discord/Voice/Socks5UdpAssociation.cpp src/Discord/CdnUrls.cpp)

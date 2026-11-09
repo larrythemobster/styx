@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "Proto/FrecencySettings.hpp"
+#include "Proto/PreloadedSettings.hpp"
 #include "Proto/ProtoReader.hpp"
 #include "Proto/UserSettings.hpp"
 #include "Proto/ProtoWriter.hpp"
@@ -348,9 +349,13 @@ TEST_CASE("Proto: Guild and channel frecency skips non-fixed64 key", "[proto]")
 
 TEST_CASE("Proto: Custom status patch clear on empty is literal 5a00", "[proto]")
 {
-    StatusSettings current;
-    const std::string patch = customStatusPatch(current, std::nullopt);
-    REQUIRE(toHex(patch) == "5a00");
+    PreloadedSettingsSnapshot current;
+    PreloadedSettingsEdit edit;
+    edit.customStatus = std::optional<CustomStatus>(std::nullopt);
+
+    const auto patch = preloadedSettingsPatch(current, edit);
+    REQUIRE(patch.success());
+    REQUIRE(toHex(*patch.value) == "5a00");
 
     const std::vector<uint8_t> patchBytes = fromHex("5a00");
     ProtoReader reader(patchBytes);
@@ -367,13 +372,17 @@ TEST_CASE("Proto: Custom status patch clear on empty is literal 5a00", "[proto]"
 
 TEST_CASE("Proto: Custom status patch set with unicode emoji matches literal bytes", "[proto]")
 {
-    StatusSettings current;
+    PreloadedSettingsSnapshot current;
     CustomStatus custom;
     custom.text = "Busy";
     custom.emojiName = "\xf0\x9f\x94\xa5";
 
-    const std::string patch = customStatusPatch(current, custom);
-    REQUIRE(toHex(patch) == "5a0e120c0a04427573791a04f09f94a5");
+    PreloadedSettingsEdit edit;
+    edit.customStatus = custom;
+
+    const auto patch = preloadedSettingsPatch(current, edit);
+    REQUIRE(patch.success());
+    REQUIRE(toHex(*patch.value) == "5a0e120c0a04427573791a04f09f94a5");
 
     const std::vector<uint8_t> patchBytes = fromHex("5a0e120c0a04427573791a04f09f94a5");
     ProtoReader reader(patchBytes);
@@ -392,11 +401,18 @@ TEST_CASE("Proto: Custom status patch set with unicode emoji matches literal byt
 
 TEST_CASE("Proto: Custom status patch clear preserves DND, false showCurrentGame, expiry and unknown fields", "[proto]")
 {
-    const auto original = fromHex("0a050a03646e6412050a034f6c641a020800210068e5cf8b0100002a02082a98062a");
-    const auto current = StatusSettings::fromProto(original);
+    const auto rawWire = fromHex("5a220a050a03646e6412050a034f6c641a020800210068e5cf8b0100002a02082a98062a");
+    const auto currentSnapshot = PreloadedSettingsSnapshot::fromProto(
+        std::string_view(reinterpret_cast<const char *>(rawWire.data()), rawWire.size())
+    );
+    REQUIRE(currentSnapshot.success());
 
-    const std::string patch = customStatusPatch(current, std::nullopt);
-    REQUIRE(toHex(patch) == "5a1b0a050a03646e641a020800210068e5cf8b0100002a02082a98062a");
+    PreloadedSettingsEdit edit;
+    edit.customStatus = std::optional<CustomStatus>(std::nullopt);
+
+    const auto patch = preloadedSettingsPatch(*currentSnapshot.value, edit);
+    REQUIRE(patch.success());
+    REQUIRE(toHex(*patch.value) == "5a1b0a050a03646e641a020800210068e5cf8b0100002a02082a98062a");
 
     const std::vector<uint8_t> patchBytes = fromHex("5a1b0a050a03646e641a020800210068e5cf8b0100002a02082a98062a");
     ProtoReader reader(patchBytes);
@@ -414,9 +430,11 @@ TEST_CASE("Proto: Custom status patch clear preserves DND, false showCurrentGame
 
 TEST_CASE("Proto: Custom status patch set with custom emoji ID and fixed64 timestamps", "[proto]")
 {
-    StatusSettings current;
-    current.status = "online";
-    current.unknownFields = "\x30\x01";
+    const auto rawWire = fromHex("5a0c0a080a066f6e6c696e653001");
+    const auto currentSnapshot = PreloadedSettingsSnapshot::fromProto(
+        std::string_view(reinterpret_cast<const char *>(rawWire.data()), rawWire.size())
+    );
+    REQUIRE(currentSnapshot.success());
 
     CustomStatus custom;
     custom.text = "In a meeting";
@@ -424,11 +442,13 @@ TEST_CASE("Proto: Custom status patch set with custom emoji ID and fixed64 times
     custom.expiresAtMs = 0x0203040506070809ULL;
     custom.createdAtMs = 0x030405060708090aULL;
 
-    const std::string patch = customStatusPatch(current, custom);
-    REQUIRE(toHex(patch) == "5a370a080a066f6e6c696e6512290a0c496e2061206d656574696e67110807060504030201210908070605040302290a090807060504033001");
+    PreloadedSettingsEdit edit;
+    edit.customStatus = custom;
 
-    const std::vector<uint8_t> patchBytes = fromHex("5a370a080a066f6e6c696e6512290a0c496e2061206d656574696e67110807060504030201210908070605040302290a090807060504033001");
-    ProtoReader reader(patchBytes);
+    const auto patch = preloadedSettingsPatch(*currentSnapshot.value, edit);
+    REQUIRE(patch.success());
+
+    ProtoReader reader(*patch.value);
     const PreloadedUserSettings decoded = PreloadedUserSettings::fromProto(reader);
     REQUIRE(decoded.status.has_value());
     REQUIRE(decoded.status->status == "online");
@@ -458,42 +478,72 @@ TEST_CASE("Proto: StatusSettings unknown field handling and clean failure recove
     REQUIRE(parsedTruncated.unknownFields.empty());
 }
 
-TEST_CASE("Proto: PreloadedUserSettings mergeFrom replaces full status", "[proto]")
+TEST_CASE("Proto: Snapshot mergeFrom replaces full status and preserves omitted groups", "[proto]")
 {
-    PreloadedUserSettings local;
-    StatusSettings localStatus;
-    localStatus.status = "online";
-    CustomStatus localCustom;
-    localCustom.text = "Focusing";
-    localStatus.customStatus = localCustom;
-    local.status = localStatus;
+    const auto localWire = fromHex("5a160a080a066f6e6c696e65120a0a08466f637573696e6762090a070a05656e2d5553");
+    auto localSnapshot = PreloadedSettingsSnapshot::fromProto(
+        std::string_view(reinterpret_cast<const char *>(localWire.data()), localWire.size())
+    );
+    REQUIRE(localSnapshot.success());
 
-    LocalizationSettings localLoc;
-    localLoc.locale = "en-US";
-    local.localization = localLoc;
+    const auto updateWire1 = fromHex("5a070a050a03646e64");
+    const auto serverUpdate1 = PreloadedSettingsSnapshot::fromProto(
+        std::string_view(reinterpret_cast<const char *>(updateWire1.data()), updateWire1.size())
+    );
+    REQUIRE(serverUpdate1.success());
 
-    // Incoming partial update has status with "dnd" but custom_status is omitted (server cleared it)
-    PreloadedUserSettings serverUpdate;
-    StatusSettings updateStatus;
-    updateStatus.status = "dnd";
-    serverUpdate.status = updateStatus;
+    localSnapshot.value->mergeFrom(*serverUpdate1.value);
 
-    local.mergeFrom(serverUpdate);
-    REQUIRE(local.status.has_value());
-    REQUIRE(local.status->status == "dnd");
-    REQUIRE_FALSE(local.status->customStatus.has_value());
-    REQUIRE(local.localization.has_value());
-    REQUIRE(local.localization->locale == "en-US");
+    ProtoReader reader1(localSnapshot.value->bytes());
+    const PreloadedUserSettings decoded1 = PreloadedUserSettings::fromProto(reader1);
+    REQUIRE(decoded1.status.has_value());
+    REQUIRE(decoded1.status->status == "dnd");
+    REQUIRE_FALSE(decoded1.status->customStatus.has_value());
+    REQUIRE(decoded1.localization.has_value());
+    REQUIRE(decoded1.localization->locale == "en-US");
 
-    // Incoming partial update without status preserves existing status
-    PreloadedUserSettings locOnlyUpdate;
-    LocalizationSettings newLoc;
-    newLoc.locale = "fr";
-    locOnlyUpdate.localization = newLoc;
+    const auto updateWire2 = fromHex("62060a040a026672");
+    const auto serverUpdate2 = PreloadedSettingsSnapshot::fromProto(
+        std::string_view(reinterpret_cast<const char *>(updateWire2.data()), updateWire2.size())
+    );
+    REQUIRE(serverUpdate2.success());
 
-    local.mergeFrom(locOnlyUpdate);
-    REQUIRE(local.status.has_value());
-    REQUIRE(local.status->status == "dnd");
-    REQUIRE(local.localization.has_value());
-    REQUIRE(local.localization->locale == "fr");
+    localSnapshot.value->mergeFrom(*serverUpdate2.value);
+
+    ProtoReader reader2(localSnapshot.value->bytes());
+    const PreloadedUserSettings decoded2 = PreloadedUserSettings::fromProto(reader2);
+    REQUIRE(decoded2.status.has_value());
+    REQUIRE(decoded2.status->status == "dnd");
+    REQUIRE_FALSE(decoded2.status->customStatus.has_value());
+    REQUIRE(decoded2.localization.has_value());
+    REQUIRE(decoded2.localization->locale == "fr");
+}
+
+TEST_CASE("Proto: Varints and tags reject overflow without losing valid uint64 boundaries", "[proto]")
+{
+    const auto maximum = fromHex("ffffffffffffffffff01");
+    ProtoReader maximumReader(maximum);
+    uint64_t value = 0;
+    REQUIRE(maximumReader.readVarint(value));
+    REQUIRE(value == 0xFFFFFFFFFFFFFFFFULL);
+    REQUIRE(maximumReader.atEnd());
+
+    for (const auto hex : {"ffffffffffffffffff02", "80808080808080808080", "80"}) {
+        const auto invalid = fromHex(hex);
+        ProtoReader reader(invalid);
+        REQUIRE_FALSE(reader.readVarint(value));
+    }
+
+    const auto maximumTag = fromHex("fdffffff0f");
+    ProtoReader tagReader(maximumTag);
+    Tag tag;
+    REQUIRE(tagReader.readTag(tag));
+    REQUIRE(tag.fieldNumber == 0x1FFFFFFFu);
+    REQUIRE(tag.wireType == WireType::FIXED32);
+
+    for (const auto hex : {"00", "8080808010", "0e", "0f"}) {
+        const auto invalid = fromHex(hex);
+        ProtoReader reader(invalid);
+        REQUIRE_FALSE(reader.readTag(tag));
+    }
 }

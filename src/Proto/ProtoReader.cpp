@@ -44,6 +44,8 @@ bool ProtoReader::readVarint(uint64_t &value)
 
         if (!readByte(byte))
             return false;
+        if (shift == 63 && byte > 1)
+            return false;
 
         value |= static_cast<uint64_t>(byte & 0x7F) << shift;
         shift += 7;
@@ -117,6 +119,8 @@ bool ProtoReader::readTag(Tag &tag)
 
     uint64_t tagValue;
     if (!readVarint(tagValue))
+        return false;
+    if (tagValue < 8 || tagValue > 0xFFFFFFFFULL || (tagValue & 0x7) > 5)
         return false;
 
     tag.fieldNumber = static_cast<uint32_t>(tagValue >> 3);

@@ -41,6 +41,12 @@ The smile button in the user panel edits custom status text, Unicode or server
 emoji, and expiry. Save, remove the emoji, or clear the whole status. Updates keep
 the current presence and activity-visibility settings.
 
+Account settings edits read the latest server protobuf, keep untouched fields
+and send only changed groups with a data-version check. Custom status uses this
+write path, which also supports appearance, privacy and guild-folder edits.
+Conflicts report an error rather than overwriting another client's changes.
+Styx's custom theme generator and local notification preferences stay local.
+
 My Account's Edit Profile dialog changes your display name, pronouns, bio, avatar
 and banner. Images use the same crop and preview pipeline as server settings.
 Reset discards unsaved edits. If only part of a save succeeds, retry sends the

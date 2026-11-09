@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <cstdint>
+#include <deque>
 
 #include <optional>
 
@@ -21,6 +22,7 @@
 #include "Core/PendingAttachment.hpp"
 
 #include "Proto/FrecencySettings.hpp"
+#include "Proto/PreloadedSettings.hpp"
 #include "Proto/UserSettings.hpp"
 
 #include "Gateway.hpp"
@@ -215,6 +217,7 @@ public:
     using ActionCallback = ResultCallback<void>;
     void modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<User> callback = {});
     void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
+    void modifyPreloadedSettings(Proto::PreloadedSettingsEdit edit, ActionCallback callback = {});
     void setCustomStatus(const std::optional<Proto::CustomStatus> &customStatus, ActionCallback callback = {});
 
     void fetchReactors(Snowflake channelId, Snowflake messageId, const std::string &reactionKey, bool isBurst, int limit, std::optional<Snowflake> after, ResultCallback<std::vector<User>> callback);
@@ -435,6 +438,10 @@ private:
     HttpCallback memberUpdateHandler(Snowflake guildId, const char *what, ActionCallback callback);
     HttpCallback memberRemovalHandler(Snowflake guildId, Snowflake userId, const char *what, ActionCallback callback);
 
+    void startNextPreloadedEdit();
+    void finishPreloadedEdit(Core::Result<void> result);
+    void applyPreloadedSnapshot(Proto::PreloadedSettingsSnapshot snapshot, bool partial);
+
 private:
     Core::ConnectionState state = Core::ConnectionState::Disconnected;
 
@@ -453,6 +460,15 @@ private:
 
     std::unordered_map<Snowflake, std::string> applicationIcons;
     std::unordered_set<Snowflake> applicationIconRequests;
+
+    struct PendingPreloadedEdit {
+        Proto::PreloadedSettingsEdit edit;
+        ActionCallback callback;
+    };
+    std::deque<PendingPreloadedEdit> pendingPreloadedEdits;
+    bool preloadedEditInFlight = false;
+    Proto::PreloadedSettingsSnapshot preloadedSnapshot;
+    std::optional<Proto::GuildFolders> legacyGuildFolders;
 
     Proto::PreloadedUserSettings settings;
     User me;
