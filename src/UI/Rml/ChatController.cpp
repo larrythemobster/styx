@@ -130,6 +130,11 @@ std::string systemMessageClass(Discord::MessageType type)
     }
 }
 
+void dismissEphemeral(Shell &shell, Core::Snowflake channelId, Core::Snowflake messageId)
+{
+    if (Core::ClientInstance *instance = shell.currentInstance(); instance && instance->messages())
+        instance->messages()->dismissEphemeralMessage(channelId, messageId);
+}
 } // namespace
 
 ChatController::ChatController(Shell &shell, ::Rml::Element *root)
@@ -259,6 +264,10 @@ void ChatController::setupEventListeners()
             uint64_t mid = parseNumber(attribute(actionEl, "data-message-id"));
             if (mid != 0)
                 shell.jumpToMessage(currentChannelId, Core::Snowflake(mid));
+        } else if (action == std::string("dismiss-ephemeral")) {
+            uint64_t mid = parseNumber(attribute(actionEl, "data-message-id"));
+            if (mid != 0)
+                dismissEphemeral(shell, currentChannelId, Core::Snowflake(mid));
         } else if (action == std::string("jump-to-present")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages())
@@ -493,7 +502,7 @@ void ChatController::setupEventListeners()
                         Core::Snowflake selfId = instance->accountId();
                         for (int r = model->rowCount() - 1; r >= 0; --r) {
                             const auto message = model->row(r);
-                            if (message.userId == selfId && !message.isSystemMessage) {
+                            if (message.userId == selfId && !message.isSystemMessage && !message.isEphemeral) {
                                 event.StopPropagation();
                                 setEditTarget(message.messageId, message.content);
                                 break;
@@ -903,13 +912,14 @@ std::string ChatController::buildMessageHtml(int row)
     std::string rowClasses = std::string("message-row");
     if (showHeader)
         rowClasses += std::string(" group-start");
-    if (mentionsMe)
+    if (mentionsMe && !message.isEphemeral)
         rowClasses += std::string(" mentions-me");
     if (isPending)
         rowClasses += std::string(" message-pending");
     if (isError)
         rowClasses += std::string(" message-error");
-
+    if (message.isEphemeral)
+        rowClasses += std::string(" message-ephemeral");
     out += std::format("<div class=\"{0}\" data-message-id=\"{1}\">", rowClasses, std::to_string(uint64_t(msgId)));
 
     // Reply preview
@@ -1098,7 +1108,7 @@ std::string ChatController::buildMessageHtml(int row)
     }
 
     // Reactions
-    if (!reactions.empty()) {
+    if (!reactions.empty() && !message.isEphemeral) {
         out += std::string("<div class=\"reactions-container\">");
         for (const auto &rx : reactions) {
             std::string emojiContent;
@@ -1117,11 +1127,21 @@ std::string ChatController::buildMessageHtml(int row)
     }
 
     // Hover toolbar
-    out += std::format("<div class=\"message-toolbar\">"
-        "<div class=\"toolbar-button\" data-action=\"toolbar-react\" data-message-id=\"{0}\" title=\"Add Reaction\"><img src=\"icon:smile-plus\" /></div>"
-        "<div class=\"toolbar-button\" data-action=\"toolbar-reply\" data-message-id=\"{0}\" data-author=\"{1}\" title=\"Reply\"><img src=\"icon:reply\" /></div>"
-        "<div class=\"toolbar-button\" data-action=\"toolbar-more\" data-message-id=\"{0}\" title=\"More\"><img src=\"icon:ellipsis\" /></div>"
-        "</div>", std::to_string(uint64_t(msgId)), Platform::htmlEscape(authorName));
+    if (!message.isEphemeral) {
+        out += std::format("<div class=\"message-toolbar\">"
+            "<div class=\"toolbar-button\" data-action=\"toolbar-react\" data-message-id=\"{0}\" title=\"Add Reaction\"><img src=\"icon:smile-plus\" /></div>"
+            "<div class=\"toolbar-button\" data-action=\"toolbar-reply\" data-message-id=\"{0}\" data-author=\"{1}\" title=\"Reply\"><img src=\"icon:reply\" /></div>"
+            "<div class=\"toolbar-button\" data-action=\"toolbar-more\" data-message-id=\"{0}\" title=\"More\"><img src=\"icon:ellipsis\" /></div>"
+            "</div>", std::to_string(uint64_t(msgId)), Platform::htmlEscape(authorName));
+    }
+
+    // Ephemeral footer
+    if (message.isEphemeral) {
+        out += std::format("<div class=\"message-ephemeral-footer\">"
+            "<span class=\"ephemeral-footer-label\">Only you can see this</span>"
+            "<button class=\"ephemeral-dismiss-button\" data-action=\"dismiss-ephemeral\" data-message-id=\"{0}\">Dismiss</button>"
+            "</div>", std::to_string(uint64_t(msgId)));
+    }
 
     out += std::string("</div>");
     return out;

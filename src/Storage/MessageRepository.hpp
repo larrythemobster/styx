@@ -30,6 +30,7 @@ public:
 private:
     void loadAttachmentsForMessages(std::vector<Discord::Message> &messages, Platform::Database &db);
     Discord::Message readMessageFromQuery(const Platform::Statement &q);
+    static void purgeStoredMessage(Platform::Database &db, Core::Snowflake messageId);
 
     UserRepository userRepository;
 };

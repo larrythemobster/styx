@@ -206,6 +206,7 @@ struct ChatRow {
     bool isForwarded = false;
     ForwardOriginData forwardOrigin;
     std::vector<StickerData> stickers;
+    bool isEphemeral = false;
 };
 
 class ChatModel : public Platform::Trackable

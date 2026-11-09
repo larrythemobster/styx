@@ -16,6 +16,7 @@
 #include "MessageReactors.hpp"
 #include "MessageSegments.hpp"
 #include "PendingAttachment.hpp"
+#include "EphemeralMessages.hpp"
 #include "Snowflake.hpp"
 #include "Storage/MessageRepository.hpp"
 #include "Discord/Entities.hpp"
@@ -62,6 +63,7 @@ public:
                      Snowflake replyToMessageId = Snowflake::Invalid,
                      const std::vector<PendingAttachment> &attachments = {});
     void cancelSend(Snowflake channelId, const std::string &nonce);
+    bool dismissEphemeralMessage(Snowflake channelId, Snowflake messageId);
 
     using ReactionLocation = Discord::Client::ReactionLocation;
     void addReaction(Snowflake channelId, Snowflake messageId, const Discord::Emoji &emoji, bool isBurst, ReactionLocation location);
@@ -132,6 +134,8 @@ private:
     void cacheGatewayMembers(const Discord::Message &msg);
     void parseMessageContent(Discord::Message &msg);
     void cacheParsedContent(Discord::Message &msg, const std::string &content, Snowflake channelId) const;
+    void receiveEphemeralMessage(Discord::Message message);
+    void publishMessages(MessageRequestResult result);
 
     Storage::MessageRepository repo;
 
@@ -154,6 +158,7 @@ private:
     std::unordered_set<Snowflake> fetchedChannels;
     std::unordered_map<Snowflake, Snowflake> channelStartId;
     std::set<std::pair<Snowflake, LoadType>> pagesInFlight;
+    EphemeralMessages ephemeralMessages;
 };
 
 } // namespace Core

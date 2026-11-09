@@ -189,10 +189,10 @@ void MessageManager::requestLoadChannel(Snowflake channelId)
         if (const auto *tail = segments[channelId].tail()) {
             int count = static_cast<int>(tail->ids.size());
             if (auto slice = cachedSlice(channelId, *tail, std::max(0, count - PageSize), count)) {
-                messagesReceived.publish(MessageRequestResult{ .success = true,
+                publishMessages(MessageRequestResult{ .success = true,
                                         .type = LoadType::Latest,
                                         .channelId = channelId,
-                                        .messages = *slice,
+                                        .messages = std::move(*slice),
                                         .reachedLatest = true });
                 return;
             }
@@ -271,10 +271,10 @@ void MessageManager::requestLoadAround(Snowflake channelId, Snowflake messageId)
         int from = std::max(0, pos.index - JumpWindow / 2);
         int to = std::min(count, from + JumpWindow);
         if (auto slice = cachedSlice(channelId, *pos.run, from, to)) {
-            messagesReceived.publish(MessageRequestResult{ .success = true,
+            publishMessages(MessageRequestResult{ .success = true,
                                     .type = LoadType::Jump,
                                     .channelId = channelId,
-                                    .messages = *slice,
+                                    .messages = std::move(*slice),
                                     .reachedLatest = pos.run->isTail && to == count });
             return;
         }
@@ -298,7 +298,7 @@ void MessageManager::fetchPage(LoadType type, Snowflake channelId, Snowflake anc
 
         if (!result.success()) {
             log(LogLevel::Warning, LogCore) << "Failed to load" << type << "page in" << channelId << result.error;
-            messagesReceived.publish(MessageRequestResult{ .success = false,
+            publishMessages(MessageRequestResult{ .success = false,
                                     .type = type,
                                     .channelId = channelId,
                                     .anchorId = anchorId });
@@ -383,8 +383,25 @@ void MessageManager::cacheGatewayMembers(const Discord::Message &msg)
         membersLearnedFromMessage.publish(guildId, changedUserIds);
 }
 
+bool MessageManager::dismissEphemeralMessage(Snowflake channelId, Snowflake messageId)
+{
+    if (!ephemeralMessages.dismiss(channelId, messageId))
+        return false;
+
+    messageDeleted.publish(channelId, messageId);
+    return true;
+}
+
 void MessageManager::onMessageCreated(const Discord::Message &message)
 {
+    if (ephemeralMessages.isDismissed(message.id))
+        return;
+
+    if (message.isEphemeral()) {
+        receiveEphemeralMessage(message);
+        return;
+    }
+
     if (message.guildId.hasValue())
         client->registerChannelGuild(message.channelId, message.guildId.get());
 
@@ -395,6 +412,17 @@ void MessageManager::onMessageCreated(const Discord::Message &message)
 
 void MessageManager::onMessageUpdated(const Discord::Message &message)
 {
+    if (ephemeralMessages.isDismissed(message.id))
+        return;
+
+    if (const auto *priv = ephemeralMessages.find(message.id)) {
+        Discord::Message merged = *priv;
+        merged.applyUpdate(message);
+        merged.flags.get().setFlag(Discord::MessageFlag::EPHEMERAL, true);
+        receiveEphemeralMessage(std::move(merged));
+        return;
+    }
+
     cacheGatewayMembers(message);
 
     Discord::Message merged;
@@ -411,10 +439,19 @@ void MessageManager::onMessageUpdated(const Discord::Message &message)
     if (haveBaseline) {
         merged.applyUpdate(message);
     } else {
-        if (!message.presentKeys.contains("content")) {
+        if (message.isEphemeral() || !message.presentKeys.contains("content"))
             return;
-        }
         merged = message;
+    }
+
+    if (merged.isEphemeral()) {
+        messageCache.remove(merged.id);
+        if (segments.contains(merged.channelId))
+            segments[merged.channelId].remove(merged.id);
+
+        repo.updateMessageContent(merged);
+        receiveEphemeralMessage(std::move(merged));
+        return;
     }
 
     parseMessageContent(merged);
@@ -432,6 +469,9 @@ void MessageManager::onMessageDeleted(const Discord::MessageDelete &event)
 {
     Snowflake channelId = event.channelId.get();
     Snowflake messageId = event.id.get();
+
+    if (dismissEphemeralMessage(channelId, messageId))
+        return;
 
     messageCache.remove(messageId);
 
@@ -922,30 +962,79 @@ void MessageManager::onReactionRemoveEmoji(const Discord::MessageReactionRemoveE
     emitReactionUpdate(msg);
 }
 
+void MessageManager::receiveEphemeralMessage(Discord::Message message)
+{
+    parseMessageContent(message);
+    const Snowflake channelId = message.channelId;
+    const Snowflake messageId = message.id;
+    if (ephemeralMessages.put(std::move(message))) {
+        if (const auto *stored = ephemeralMessages.find(messageId)) {
+            messagesReceived.publish(MessageRequestResult{
+                .success = true,
+                .type = Discord::Client::MessageLoadType::Created,
+                .channelId = channelId,
+                .messages = { *stored },
+                .reachedLatest = false,
+                .anchorId = Snowflake::Invalid
+            });
+        }
+    }
+}
+
+void MessageManager::publishMessages(MessageRequestResult result)
+{
+    if (result.success && (result.type == LoadType::Latest || (result.type == LoadType::Jump && result.reachedLatest))) {
+        const std::size_t beforeCount = result.messages.size();
+        ephemeralMessages.appendForChannel(result.channelId, result.messages);
+        if (result.messages.size() > beforeCount) {
+            std::sort(result.messages.begin(), result.messages.end(),
+                      [](const auto &a, const auto &b) { return a.id.get() < b.id.get(); });
+        }
+    }
+    messagesReceived.publish(result);
+}
+
 void MessageManager::onApiMessagesReceived(const std::vector<Discord::Message> &messages, LoadType type,
                                            Snowflake channelId, Snowflake anchorId)
 {
-    repo.saveMessages(messages);
+    const std::size_t rawCount = messages.size();
 
-    auto sortedMessages = messages;
-    std::sort(sortedMessages.begin(), sortedMessages.end(),
+    std::vector<Discord::Message> publicMessages;
+    publicMessages.reserve(messages.size());
+
+    for (const auto &msg : messages) {
+        if (ephemeralMessages.isDismissed(msg.id))
+            continue;
+
+        if (msg.isEphemeral()) {
+            Discord::Message copy = msg;
+            parseMessageContent(copy);
+            ephemeralMessages.put(std::move(copy));
+        } else {
+            publicMessages.push_back(msg);
+        }
+    }
+
+    repo.saveMessages(publicMessages);
+
+    std::sort(publicMessages.begin(), publicMessages.end(),
               [](const auto &a, const auto &b) { return a.id.get() < b.id.get(); });
 
-    bool shortPage = sortedMessages.size() < PageSize;
+    bool shortPage = rawCount < PageSize;
     if (type == LoadType::History && shortPage)
-        channelStartId[channelId] = sortedMessages.empty() ? anchorId : sortedMessages.front().id.get();
-    else if (type == LoadType::Latest && shortPage && !sortedMessages.empty())
-        channelStartId[channelId] = sortedMessages.front().id.get();
+        channelStartId[channelId] = publicMessages.empty() ? anchorId : publicMessages.front().id.get();
+    else if (type == LoadType::Latest && shortPage && !publicMessages.empty())
+        channelStartId[channelId] = publicMessages.front().id.get();
 
-    for (auto &msg : sortedMessages)
+    for (auto &msg : publicMessages)
         parseMessageContent(msg);
 
-    for (const auto &msg : sortedMessages) {
+    for (const auto &msg : publicMessages) {
         messageCache.insert(msg.id, msg);
     }
 
     auto &segs = segments[channelId];
-    std::vector<Snowflake> ids = idsOf(sortedMessages);
+    std::vector<Snowflake> ids = idsOf(publicMessages);
     bool reachedLatest = false;
 
     switch (type) {
@@ -964,7 +1053,7 @@ void MessageManager::onApiMessagesReceived(const std::vector<Discord::Message> &
     case LoadType::Jump: {
         bool coversPresent = false;
         if (type == LoadType::Future) {
-            coversPresent = sortedMessages.size() < PageSize;
+            coversPresent = rawCount < PageSize;
         } else {
             int atOrAfterTarget = std::count_if(ids.cbegin(), ids.cend(),
                                                 [&](Snowflake id) { return id >= anchorId; });
@@ -984,17 +1073,17 @@ void MessageManager::onApiMessagesReceived(const std::vector<Discord::Message> &
                 auto *cached = messageCache.object(pos.run->ids[i]);
                 if (!cached)
                     break;
-                sortedMessages.push_back(*cached);
+                publicMessages.push_back(*cached);
             }
         }
         break;
     }
     }
 
-    messagesReceived.publish(MessageRequestResult{ .success = true,
+    publishMessages(MessageRequestResult{ .success = true,
                             .type = type,
                             .channelId = channelId,
-                            .messages = sortedMessages,
+                            .messages = std::move(publicMessages),
                             .reachedLatest = reachedLatest,
                             .anchorId = anchorId });
 }

@@ -19,6 +19,36 @@ static void bindComponents(Platform::Statement &stmt, const std::string &compone
         stmt.bindNull(":components");
 }
 
+static bool isPrivateSnapshot(const Discord::Message &message)
+{
+    if (!message.snapshotMessage)
+        return false;
+    if (message.snapshotMessage->isEphemeral())
+        return true;
+    if (message.snapshotMessage->referencedMessage && message.snapshotMessage->referencedMessage->isEphemeral())
+        return true;
+    return isPrivateSnapshot(*message.snapshotMessage);
+}
+
+static void bindSnapshot(Platform::Statement &stmt, const Discord::Message &message)
+{
+    if (!message.snapshotJson.empty() && !isPrivateSnapshot(message))
+        stmt.bind(":snapshot", std::string_view(message.snapshotJson));
+    else
+        stmt.bindNull(":snapshot");
+}
+
+void MessageRepository::purgeStoredMessage(Platform::Database &db, Core::Snowflake messageId)
+{
+    auto qAtt = db.prepare("DELETE FROM attachments WHERE message_id = :message_id");
+    qAtt.bind(":message_id", static_cast<int64_t>(messageId));
+    execLogged(qAtt, "MessageRepository: Purge attachments for private message");
+
+    auto qMsg = db.prepare("DELETE FROM messages WHERE id = :id");
+    qMsg.bind(":id", static_cast<int64_t>(messageId));
+    execLogged(qMsg, "MessageRepository: Purge private message");
+}
+
 MessageRepository::MessageRepository(Core::Snowflake accountId)
     : BaseRepository(DatabaseManager::getCacheConnectionName(accountId)), userRepository(accountId)
 {
@@ -56,6 +86,11 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
         std::vector<Discord::Message> referencedMessages;
 
         for (const auto &message : messages) {
+            if (message.isEphemeral()) {
+                purgeStoredMessage(db, message.id.get());
+                continue;
+            }
+
             qMsg.bind(":id", static_cast<int64_t>(message.id.get()));
             qMsg.bind(":channel_id", static_cast<int64_t>(message.channelId.get()));
             qMsg.bind(":author_id", static_cast<int64_t>(message.author->id.get()));
@@ -99,7 +134,11 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
 
             if (message.referencedMessage) {
                 qMsg.bind(":ref_msg_id", static_cast<int64_t>(message.referencedMessage->id.get()));
-                referencedMessages.push_back(*message.referencedMessage);
+                if (message.referencedMessage->isEphemeral()) {
+                    purgeStoredMessage(db, message.referencedMessage->id.get());
+                } else {
+                    referencedMessages.push_back(*message.referencedMessage);
+                }
             } else if (message.messageReference.hasValue() && message.messageReference->messageId.hasValue()) {
                 qMsg.bind(":ref_msg_id", static_cast<int64_t>(message.messageReference->messageId.get()));
             } else {
@@ -122,12 +161,7 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
             else
                 qMsg.bindNull(":ref_guild_id");
 
-            if (!message.snapshotJson.empty()) {
-                std::string snp = message.snapshotJson;
-                qMsg.bind(":snapshot", std::string_view(snp));
-            } else {
-                qMsg.bindNull(":snapshot");
-            }
+            bindSnapshot(qMsg, message);
 
             execLogged(qMsg, "MessageRepository: Save messages");
 
@@ -171,6 +205,11 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
             )");
 
             for (const auto &ref : referencedMessages) {
+                if (ref.isEphemeral()) {
+                    purgeStoredMessage(db, ref.id.get());
+                    continue;
+                }
+
                 qRef.bind(":id", static_cast<int64_t>(ref.id.get()));
                 qRef.bind(":channel_id", static_cast<int64_t>(ref.channelId.get()));
                 qRef.bind(":author_id", static_cast<int64_t>(ref.author->id.get()));
@@ -210,12 +249,7 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
                 else
                     qRef.bindNull(":ref_type");
 
-                if (!ref.snapshotJson.empty()) {
-                    std::string snp = ref.snapshotJson;
-                    qRef.bind(":snapshot", std::string_view(snp));
-                } else {
-                    qRef.bindNull(":snapshot");
-                }
+                bindSnapshot(qRef, ref);
 
                 execLogged(qRef, "MessageRepository: Save referenced message");
 
@@ -244,6 +278,17 @@ void MessageRepository::markMessageDeleted(Core::Snowflake messageId)
 void MessageRepository::updateMessageContent(const Discord::Message &message)
 {
     auto &db = getDb();
+    if (message.isEphemeral()) {
+        Transaction txn(db);
+        try {
+            purgeStoredMessage(db, message.id.get());
+            txn.commit();
+        } catch (const Platform::SqliteError &e) {
+            Core::log(Core::LogLevel::Warning, LogDB) << "MessageRepository: Purge private message failed:" << e.what();
+        }
+        return;
+    }
+
     try {
         auto q = db.prepare(R"(
             UPDATE messages
@@ -270,12 +315,7 @@ void MessageRepository::updateMessageContent(const Discord::Message &message)
 
         q.bind(":flags", static_cast<int64_t>(message.flags.get()));
 
-        if (!message.snapshotJson.empty()) {
-            std::string snp = message.snapshotJson;
-            q.bind(":snapshot", std::string_view(snp));
-        } else {
-            q.bindNull(":snapshot");
-        }
+        bindSnapshot(q, message);
 
         bindComponents(q, message.componentsJson);
 

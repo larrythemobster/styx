@@ -166,6 +166,7 @@ set(PROJECT_SOURCES
     src/Core/Session.cpp
     src/Core/Logging.cpp
     src/Core/MessageManager.cpp
+    src/Core/EphemeralMessages.cpp
     src/Core/MessageReactors.cpp
     src/Core/MessageSegments.cpp
     src/Core/ForumManager.cpp
@@ -466,6 +467,8 @@ if(BUILD_TESTS)
     styx_test(TestComponentInteractions ComponentInteractionTests
         tests/tst_ComponentInteraction.cpp tests/tst_InteractionEvents.cpp
         src/Discord/ComponentInteraction.cpp src/Core/Snowflake.cpp)
+    styx_test(TestEphemeralMessages EphemeralMessageTests tests/tst_EphemeralMessages.cpp
+        src/Core/EphemeralMessages.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageSearch MessageSearchTests tests/tst_MessageSearch.cpp src/Discord/MessageSearch.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageCache MessageCacheTests tests/tst_MessageCache.cpp
         src/Storage/DatabaseManager.cpp src/Storage/BaseRepository.cpp

@@ -203,6 +203,24 @@ static Message makeSyntheticMessage(
         id, channelId, authorId, username, content, componentsJson, stickersJson, flags, snapshotJson));
 }
 
+static nlohmann::json makeAttachmentJson(const std::string &id, const std::string &filename)
+{
+    return {
+        { "id", id },
+        { "filename", filename },
+        { "size", 1024 },
+        { "url", "https://cdn.example.com/" + filename },
+        { "proxy_url", "https://media.example.com/" + filename }
+    };
+}
+
+static int64_t countRows(Styx::Platform::Database &db, const std::string &sql)
+{
+    auto q = db.prepare(sql);
+    REQUIRE(q.step());
+    return q.getInt64(0);
+}
+
 } // namespace
 
 TEST_CASE("Message cache: nested V2 component tree survives save, close, reopen, getMessage and range retrieval", "[message_cache]")
@@ -542,4 +560,196 @@ TEST_CASE("Message cache: forwarded snapshot components survive disk reload for 
     REQUIRE(ref.contentMessage().components->front().components.hasValue());
     REQUIRE(ref.contentMessage().components->front().components->front().customId.valueOr("") == "snap_btn");
     REQUIRE(nlohmann::json::parse(ref.snapshotMessage->componentsJson) == nlohmann::json::parse(refSnapshotComponents));
+}
+
+TEST_CASE("Message cache: mixed public and private save yields public reload and no private main, attachment, or reference row", "[message_cache]")
+{
+    SandboxFixture fixture;
+    const Snowflake accountId(10006);
+    fixture.openCache(accountId);
+    MessageRepository repo(accountId);
+
+    auto pubObj = makeMessageJson("601", "200", "9061", "user_pub", "Public outer text");
+    pubObj["attachments"] = nlohmann::json::array({ makeAttachmentJson("701", "pub.png") });
+
+    auto privRefObj = makeMessageJson("603", "200", "9063", "user_priv_ref", "Secret ref text",
+        "", "", static_cast<int64_t>(MessageFlag::EPHEMERAL));
+    privRefObj["attachments"] = nlohmann::json::array({ makeAttachmentJson("703", "priv_ref.png") });
+    pubObj["referenced_message"] = privRefObj;
+
+    auto privMainObj = makeMessageJson("602", "200", "9062", "user_priv_main", "Secret main text",
+        "", "", static_cast<int64_t>(MessageFlag::EPHEMERAL));
+    privMainObj["attachments"] = nlohmann::json::array({ makeAttachmentJson("702", "priv_main.png") });
+
+    repo.saveMessages({ Message::fromJson(pubObj), Message::fromJson(privMainObj) });
+
+    DatabaseManager::instance().closeCacheDatabase(accountId);
+    fixture.openCache(accountId);
+    MessageRepository reopenedRepo(accountId);
+
+    const auto loadedPub = reopenedRepo.getMessage(601);
+    REQUIRE(loadedPub.has_value());
+    REQUIRE(loadedPub->id.get() == Snowflake(601));
+    REQUIRE(loadedPub->content.get() == "Public outer text");
+    REQUIRE(loadedPub->attachments.hasValue());
+    REQUIRE(loadedPub->attachments->size() == 1);
+    REQUIRE(loadedPub->attachments->front().id.get() == Snowflake(701));
+    REQUIRE(loadedPub->referencedMessage == nullptr);
+
+    REQUIRE_FALSE(reopenedRepo.getMessage(602).has_value());
+    REQUIRE_FALSE(reopenedRepo.getMessage(603).has_value());
+
+    {
+        auto &db = DatabaseManager::instance().getDatabase(DatabaseManager::getCacheConnectionName(accountId));
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE id IN (602, 603)") == 0);
+        REQUIRE(countRows(db, "SELECT count(*) FROM attachments WHERE message_id IN (602, 603)") == 0);
+    }
+}
+
+TEST_CASE("Message cache: updating existing public row with private message purges old row and attachments without persisting payload", "[message_cache]")
+{
+    SandboxFixture fixture;
+    const Snowflake accountId(10007);
+    fixture.openCache(accountId);
+    MessageRepository repo(accountId);
+
+    auto pubObj = makeMessageJson("610", "200", "9070", "user_update", "Original public content");
+    pubObj["attachments"] = nlohmann::json::array({ makeAttachmentJson("710", "old.png") });
+    repo.saveMessages({ Message::fromJson(pubObj) });
+
+    const auto loadedBefore = repo.getMessage(610);
+    REQUIRE(loadedBefore.has_value());
+    REQUIRE(loadedBefore->content.get() == "Original public content");
+    REQUIRE(loadedBefore->attachments.hasValue());
+    REQUIRE(loadedBefore->attachments->size() == 1);
+
+    auto privUpdateObj = makeMessageJson("610", "200", "9070", "user_update", "Secret replaced text",
+        "", "", static_cast<int64_t>(MessageFlag::EPHEMERAL));
+    repo.updateMessageContent(Message::fromJson(privUpdateObj));
+
+    REQUIRE_FALSE(repo.getMessage(610).has_value());
+
+    {
+        auto &db = DatabaseManager::instance().getDatabase(DatabaseManager::getCacheConnectionName(accountId));
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE id = 610") == 0);
+        REQUIRE(countRows(db, "SELECT count(*) FROM attachments WHERE message_id = 610") == 0);
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE content LIKE '%Secret replaced text%'") == 0);
+    }
+
+    auto pubObj2 = makeMessageJson("611", "200", "9071", "user_save_purge", "Initial public text");
+    pubObj2["attachments"] = nlohmann::json::array({ makeAttachmentJson("711", "old2.png") });
+    repo.saveMessages({ Message::fromJson(pubObj2) });
+    REQUIRE(repo.getMessage(611).has_value());
+
+    auto privSaveObj = makeMessageJson("611", "200", "9071", "user_save_purge", "Secret save text",
+        "", "", static_cast<int64_t>(MessageFlag::EPHEMERAL));
+    repo.saveMessages({ Message::fromJson(privSaveObj) });
+
+    REQUIRE_FALSE(repo.getMessage(611).has_value());
+
+    {
+        auto &db = DatabaseManager::instance().getDatabase(DatabaseManager::getCacheConnectionName(accountId));
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE id = 611") == 0);
+        REQUIRE(countRows(db, "SELECT count(*) FROM attachments WHERE message_id = 611") == 0);
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE content LIKE '%Secret save text%'") == 0);
+    }
+}
+
+TEST_CASE("Message cache: private snapshot JSON does not persist while outer public text does", "[message_cache]")
+{
+    SandboxFixture fixture;
+    const Snowflake accountId(10008);
+    fixture.openCache(accountId);
+    MessageRepository repo(accountId);
+
+    const auto privateSnapshotObj = makeMessageJson("621", "200", "9081", "snap_author", "Secret snapshot text",
+        "", "", static_cast<int64_t>(MessageFlag::EPHEMERAL));
+
+    auto forwardObj = makeMessageJson("620", "200", "9080", "fwd_author", "Public outer forwarder text",
+        "", "", static_cast<int64_t>(MessageFlag::HAS_SNAPSHOT), privateSnapshotObj.dump());
+    forwardObj["message_reference"] = { { "type", 1 }, { "channel_id", "200" }, { "message_id", "621" } };
+
+    repo.saveMessages({ Message::fromJson(forwardObj) });
+
+    DatabaseManager::instance().closeCacheDatabase(accountId);
+    fixture.openCache(accountId);
+    MessageRepository reopenedRepo(accountId);
+
+    const auto loaded = reopenedRepo.getMessage(620);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->id.get() == Snowflake(620));
+    REQUIRE(loaded->content.get() == "Public outer forwarder text");
+    REQUIRE(loaded->snapshotMessage == nullptr);
+    REQUIRE(loaded->snapshotJson.empty());
+
+    {
+        auto &db = DatabaseManager::instance().getDatabase(DatabaseManager::getCacheConnectionName(accountId));
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE snapshot IS NOT NULL AND id = 620") == 0);
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE content LIKE '%Secret snapshot text%'") == 0);
+    }
+}
+
+TEST_CASE("Message cache: legacy private messages and attachments are purged on reopen while ordinary rows survive", "[message_cache]")
+{
+    SandboxFixture fixture;
+    const Snowflake accountId(10009);
+    fixture.openCache(accountId);
+
+    {
+        auto &db = DatabaseManager::instance().getDatabase(DatabaseManager::getCacheConnectionName(accountId));
+        db.execute(
+            "INSERT INTO users (id, username) VALUES (9090, 'legacy_user');\n"
+            "INSERT INTO messages (id, author_id, channel_id, content, timestamp, type, flags, deleted) "
+            "VALUES (630, 9090, 200, 'Ordinary surviving message', '2026-11-09T12:00:00.000000+00:00', 0, 0, 0);\n"
+            "INSERT INTO attachments (id, message_id, filename, size, url, proxy_url) "
+            "VALUES (730, 630, 'surviving.png', 1024, 'https://cdn.example.com/surviving.png', 'https://media.example.com/surviving.png');\n"
+            "INSERT INTO messages (id, author_id, channel_id, content, timestamp, type, flags, deleted) "
+            "VALUES (631, 9090, 200, 'Legacy private message', '2026-11-09T12:00:00.000000+00:00', 0, 64, 0);\n"
+            "INSERT INTO attachments (id, message_id, filename, size, url, proxy_url) "
+            "VALUES (731, 631, 'legacy.png', 2048, 'https://cdn.example.com/legacy.png', 'https://media.example.com/legacy.png');\n"
+            "INSERT INTO messages (id, author_id, channel_id, content, timestamp, type, flags, deleted) "
+            "VALUES (632, 9090, 200, 'Legacy private with extra flags', '2026-11-09T12:00:00.000000+00:00', 0, 65, 0);\n"
+            "INSERT INTO attachments (id, message_id, filename, size, url, proxy_url) "
+            "VALUES (732, 632, 'legacy2.png', 4096, 'https://cdn.example.com/legacy2.png', 'https://media.example.com/legacy2.png');"
+        );
+    }
+
+    DatabaseManager::instance().closeCacheDatabase(accountId);
+    fixture.openCache(accountId);
+    MessageRepository reopenedRepo(accountId);
+
+    const auto ordinaryMsg = reopenedRepo.getMessage(630);
+    REQUIRE(ordinaryMsg.has_value());
+    REQUIRE(ordinaryMsg->id.get() == Snowflake(630));
+    REQUIRE(ordinaryMsg->content.get() == "Ordinary surviving message");
+    REQUIRE(ordinaryMsg->attachments.hasValue());
+    REQUIRE(ordinaryMsg->attachments->size() == 1);
+    REQUIRE(ordinaryMsg->attachments->front().id.get() == Snowflake(730));
+
+    REQUIRE_FALSE(reopenedRepo.getMessage(631).has_value());
+    REQUIRE_FALSE(reopenedRepo.getMessage(632).has_value());
+
+    {
+        auto &db = DatabaseManager::instance().getDatabase(DatabaseManager::getCacheConnectionName(accountId));
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE (flags & 64) != 0") == 0);
+        REQUIRE(countRows(db, "SELECT count(*) FROM attachments WHERE message_id IN (631, 632)") == 0);
+    }
+
+    DatabaseManager::instance().closeCacheDatabase(accountId);
+    fixture.openCache(accountId);
+    MessageRepository secondReopenRepo(accountId);
+
+    const auto ordinaryAgain = secondReopenRepo.getMessage(630);
+    REQUIRE(ordinaryAgain.has_value());
+    REQUIRE(ordinaryAgain->id.get() == Snowflake(630));
+    REQUIRE(ordinaryAgain->content.get() == "Ordinary surviving message");
+    REQUIRE(ordinaryAgain->attachments.hasValue());
+    REQUIRE(ordinaryAgain->attachments->size() == 1);
+    REQUIRE(ordinaryAgain->attachments->front().id.get() == Snowflake(730));
+
+    {
+        auto &db = DatabaseManager::instance().getDatabase(DatabaseManager::getCacheConnectionName(accountId));
+        REQUIRE(countRows(db, "SELECT count(*) FROM messages WHERE (flags & 64) != 0") == 0);
+        REQUIRE(countRows(db, "SELECT count(*) FROM attachments WHERE message_id IN (631, 632)") == 0);
+    }
 }

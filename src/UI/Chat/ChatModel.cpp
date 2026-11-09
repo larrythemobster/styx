@@ -137,9 +137,11 @@ ChatRow ChatModel::row(int index) const
     result.editedTimestamp = message.editedTimestamp.valueOr(Platform::DateTime{});
     result.isSystemMessage = isSystemMessageType(result.messageType);
     result.isForwarded = message.isForwarded();
+    result.isEphemeral = message.isEphemeral();
     result.dateSeparator = index == 0 || !messages[index - 1].timestamp->sameDate(result.timestamp);
     result.showHeader = !result.isSystemMessage && (result.messageType == Discord::MessageType::REPLY || index == 0
         || result.dateSeparator || messages[index - 1].author->id != message.author->id
+        || messages[index - 1].isEphemeral() != message.isEphemeral()
         || isSystemMessageType(messages[index - 1].type.get())
         || std::abs(messages[index - 1].timestamp->secondsUntil(result.timestamp)) > 7 * 60);
     if (message.author.hasValue()) {
@@ -340,8 +342,22 @@ ChatRow ChatModel::row(int index) const
     return result;
 }
 bool ChatModel::setCachedSize(int row, Platform::Size size) { if (row < 0 || row >= rowCount()) return false; sizeCache[messages[row].id] = size; return true; }
-Snowflake ChatModel::getOldestMessageId() const { return messages.empty() ? Snowflake::Invalid : messages.front().id.get(); }
-Snowflake ChatModel::getNewestMessageId() const { return messages.empty() ? Snowflake::Invalid : messages.back().id.get(); }
+Snowflake ChatModel::getOldestMessageId() const
+{
+    for (const auto &m : messages) {
+        if (!m.isEphemeral())
+            return m.id.get();
+    }
+    return Snowflake::Invalid;
+}
+Snowflake ChatModel::getNewestMessageId() const
+{
+    for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
+        if (!it->isEphemeral())
+            return it->id.get();
+    }
+    return Snowflake::Invalid;
+}
 int ChatModel::rowForMessage(Snowflake id) const { for (int i = 0; i < rowCount(); ++i) if (messages[i].id == id) return i; return -1; }
 Snowflake ChatModel::getActiveChannelId() const { return currentChannelId; }
 Snowflake ChatModel::getActiveGuildId() const { return currentGuildId; }
@@ -380,13 +396,25 @@ void ChatModel::handleIncomingMessages(const Core::MessageRequestResult &result)
     case Type::Created:
         for (const auto &message : incoming) {
             int row = rowForMessage(message.id);
-            if (row < 0 && message.nonce.hasValue()) for (int i = 0; i < rowCount(); ++i)
-                if (messages[i].nonce.hasValue() && messages[i].nonce.get() == message.nonce.get()) { row = i; break; }
+            if (row < 0 && !message.isEphemeral() && message.nonce.hasValue()) {
+                for (int i = 0; i < rowCount(); ++i) {
+                    if (!messages[i].isEphemeral() && messages[i].nonce.hasValue() && messages[i].nonce.get() == message.nonce.get()) {
+                        row = i;
+                        break;
+                    }
+                }
+            }
             if (row >= 0) {
                 auto previous = messages[row].id.get();
                 prunePreviewCaches(messages[row]);
-                if (messages[row].nonce.hasValue()) { pendingNonces.erase(messages[row].nonce.get()); uploadProgress.erase(messages[row].nonce.get()); }
-                messages[row] = message; sizeCache.erase(previous); embedCache.erase(previous); forwardOriginCache.erase(previous);
+                if (messages[row].nonce.hasValue()) {
+                    pendingNonces.erase(messages[row].nonce.get());
+                    uploadProgress.erase(messages[row].nonce.get());
+                }
+                messages[row] = message;
+                sizeCache.erase(previous);
+                embedCache.erase(previous);
+                forwardOriginCache.erase(previous);
                 rowsChanged.publish(row, std::min(row + 1, rowCount() - 1));
             } else if (atLatest) {
                 if (message.isPendingOutbound && message.nonce.hasValue()) pendingNonces.insert(message.nonce.get());

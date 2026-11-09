@@ -1300,7 +1300,7 @@ void ClientInstance::onMessagesReceived(const MessageRequestResult &result)
 
 void ClientInstance::onMessageCreated(const Discord::Message &msg)
 {
-    if (!msg.channelId.hasValue() || !msg.id.hasValue())
+    if (msg.isEphemeral() || !msg.channelId.hasValue() || !msg.id.hasValue())
         return;
 
     Snowflake channelId = msg.channelId.get();

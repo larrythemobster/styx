@@ -4,6 +4,7 @@
 
 #include "Core/Logging.hpp"
 #include "Platform/Paths.hpp"
+#include "Transaction.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -358,6 +359,15 @@ void DatabaseManager::setupCacheTables(Platform::Database &db)
     )");
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_channel_recipients_channel ON channel_recipients(channel_id);");
+
+    try {
+        Transaction txn(db);
+        db.execute("DELETE FROM attachments WHERE message_id IN (SELECT id FROM messages WHERE (flags & 64) != 0)");
+        db.execute("DELETE FROM messages WHERE (flags & 64) != 0");
+        txn.commit();
+    } catch (const Platform::SqliteError &e) {
+        Core::log(Core::LogLevel::Warning, LogDB) << "setupCacheTables: Legacy ephemeral cleanup failed:" << e.what();
+    }
 }
 
 } // namespace Storage

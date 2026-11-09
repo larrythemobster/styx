@@ -286,6 +286,16 @@
 	background-color: #f0b23224;
 }
 
+.message-row.message-ephemeral
+{
+	background-color: #1a1c2314;
+}
+
+.message-row.message-ephemeral:hover
+{
+	background-color: #1a1c2324;
+}
+
 .message-row.group-start
 {
 	margin-top: 16dp;
@@ -1500,3 +1510,60 @@ a.component-button.component-link:focus
 	box-sizing: border-box;
 	margin-top: 6dp;
 }
+
+/* Ephemeral message footer */
+.message-ephemeral-footer
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8dp;
+	margin-top: 6dp;
+	margin-bottom: 4dp;
+}
+
+.ephemeral-footer-label
+{
+	font-family: ui;
+	font-size: 13dp;
+	line-height: 18dp;
+	color: #949ba4;
+}
+
+.ephemeral-dismiss-button
+{
+	display: inline-block;
+	min-height: 32dp;
+	height: auto;
+	line-height: 20dp;
+	padding: 6dp 12dp;
+	border-radius: 4dp;
+	font-family: ui;
+	font-size: 14dp;
+	font-weight: 500;
+	text-align: center;
+	white-space: normal;
+	word-break: break-word;
+	border-width: 1dp;
+	border-color: transparent;
+	box-sizing: border-box;
+	background-color: #2b2d31;
+	color: #f2f3f5;
+	cursor: pointer;
+	tab-index: auto;
+	max-width: 240dp;
+}
+
+.ephemeral-dismiss-button:hover
+{
+	background-color: #35373c;
+	color: #ffffff;
+}
+
+.ephemeral-dismiss-button:focus
+{
+	background-color: #35373c;
+	border-color: #5865f2;
+}
+

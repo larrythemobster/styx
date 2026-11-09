@@ -1522,6 +1522,11 @@ struct Message : Core::JsonUtils::JsonObject
     // track for MESSAGE_UPDATE
     std::unordered_set<std::string> presentKeys;
 
+    [[nodiscard]] bool isEphemeral() const
+    {
+        return flags.get().testFlag(MessageFlag::EPHEMERAL);
+    }
+
     [[nodiscard]] bool isForwarded() const
     {
         return messageReference.hasValue() &&

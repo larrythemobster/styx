@@ -625,7 +625,7 @@ void ForumManager::onThreadMemberUpdate(const Discord::ThreadMemberUpdate &event
 
 void ForumManager::onMessageCreated(const Discord::Message &msg)
 {
-    if (!msg.channelId.hasValue())
+    if (msg.isEphemeral() || !msg.channelId.hasValue())
         return;
 
     const Snowflake threadId = msg.channelId.get();
