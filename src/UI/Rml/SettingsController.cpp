@@ -657,7 +657,9 @@ void SettingsController::renderVoiceVideo(std::string &rml)
         rml += formatRml("<button class=\"%1\" data-action=\"record-ptt-key\">%2</button>", btnClass, btnText);
         rml += std::string("</div>");
 
-        rml += std::string("<div class=\"settings-description\">Push to talk works while Styx is the focused window.</div>");
+        const auto *ptt = shell.pushToTalk();
+        const std::string scopeDesc = ptt ? ptt->shortcutScopeDescription() : std::string("Push to talk works while Styx is the focused window.");
+        rml += formatRml("<div class=\"settings-description\">%1</div>", Rml::escape(scopeDesc));
 
         const int pttDelay = getInt(Keys::VoicePushToTalkReleaseDelay, Defaults::VoicePushToTalkReleaseDelay);
         rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
@@ -1102,8 +1104,8 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
 void SettingsController::recordPttKey(int key, int rmlModifiers)
 {
     set(Keys::VoicePushToTalkKey, keyBindingToJson(recordKeyBinding(key, rmlModifiers)));
-    stopRecordingPttKey();
     applyPushToTalk();
+    stopRecordingPttKey();
     render();
     requestRender(100);
 }

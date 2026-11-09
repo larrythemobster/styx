@@ -217,6 +217,7 @@ set(PROJECT_SOURCES
     src/UI/TrayIcon.cpp
     src/UI/CallSounds.cpp
     src/UI/PushToTalk.cpp
+    src/UI/WindowsPttHook.cpp
     src/UI/Rml/AuditLogFormatter.cpp
     src/UI/Rml/GuildSettingsController.cpp
     src/UI/Rml/GuildSettingsSection.cpp
@@ -411,6 +412,8 @@ if(BUILD_TESTS)
     styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)
     styx_test(TestGuildCreate GuildCreateTests tests/tst_GuildCreate.cpp src/Discord/GuildCreate.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestTransmitGate TransmitGateTests tests/tst_TransmitGate.cpp src/Core/Audio/TransmitGate.cpp)
+    styx_test(TestWindowsPttHook WindowsPttHookTests tests/tst_WindowsPttHook.cpp src/UI/WindowsPttHook.cpp)
+    target_link_libraries(TestWindowsPttHook PRIVATE RmlUi::RmlUi)
     styx_test(TestSounds SoundsTests tests/tst_Sounds.cpp src/Core/Audio/Sounds.cpp src/Core/Audio/SoundMixer.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)

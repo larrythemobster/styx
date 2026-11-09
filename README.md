@@ -27,8 +27,9 @@ Member moderation includes kick, ban, timeout, nickname and searchable role
 forms. CAPTCHA prompts use RmlUi while the challenge still opens in your browser.
 
 Voice & Video settings offer Voice Activity or Push to Talk. Record a shortcut and
-adjust its release delay from 0 to 2000 ms. Push to Talk currently works only while
-the Styx window has focus.
+adjust its release delay from 0 to 2000 ms. On Windows, the shortcut works while
+other apps have focus, using a passive low-level hook that never consumes the key.
+On Linux and macOS, push to talk currently works only while Styx has focus.
 
 Native platform services provide file dialogs, the system tray, credential
 storage and startup error dialogs.
