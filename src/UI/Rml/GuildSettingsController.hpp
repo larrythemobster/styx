@@ -75,6 +75,7 @@ private:
 
     void saveChanges();
     enum class ImageSlot { Icon, Banner, Splash };
+    static const char *previewFrame(ImageSlot slot);
     void chooseImage(ImageSlot slot);
     void uploadExpression(bool sticker);
     void reportError(const std::string &message);
@@ -96,7 +97,7 @@ private:
     // Helpers
     [[nodiscard]] Core::ClientInstance *instance() const;
     [[nodiscard]] std::optional<Discord::Guild> guild() const;
-    [[nodiscard]] std::string getGuildIconUrl() const;
+    [[nodiscard]] std::string slotImageSource(ImageSlot slot) const;
 
     ::Rml::ElementDocument *document = nullptr;
     bool visible = false;

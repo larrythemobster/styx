@@ -124,6 +124,22 @@ body#guild-settings-overlay
 	height: 100%;
 }
 
+.guild-image-preview
+{
+	width: 320dp;
+	height: 180dp;
+	border-radius: 8dp;
+	overflow: hidden;
+	background: #1e1f22;
+	margin: 8dp 0 12dp 0;
+}
+
+.guild-image-preview img
+{
+	width: 100%;
+	height: 100%;
+}
+
 .guild-icon-initials
 {
 	font-size: 28dp;

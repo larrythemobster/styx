@@ -20,6 +20,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <initializer_list>
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Element.h>
@@ -108,14 +109,24 @@ GuildSettingsController::GuildSettingsController(Shell &shell)
 {
 }
 
-namespace {
-// The picked icon before it's saved; RmlUi can't show the data URI that gets uploaded.
-constexpr const char *IconPreviewFrame = "guild-settings-icon";
+// A picked image before it's saved; RmlUi can't show the data URI that gets uploaded.
+const char *GuildSettingsController::previewFrame(ImageSlot slot)
+{
+    switch (slot) {
+    case ImageSlot::Icon:
+        return "guild-settings-icon";
+    case ImageSlot::Banner:
+        return "guild-settings-banner";
+    case ImageSlot::Splash:
+        return "guild-settings-splash";
+    }
+    return "";
 }
 
 GuildSettingsController::~GuildSettingsController()
 {
-    Runtime::instance().clearFrame(IconPreviewFrame);
+    for (auto slot : {ImageSlot::Icon, ImageSlot::Banner, ImageSlot::Splash})
+        Runtime::instance().clearFrame(previewFrame(slot));
     removeListeners();
     if (document) {
         document->Close();
@@ -200,17 +211,26 @@ std::optional<Discord::Guild> GuildSettingsController::guild() const
     return inst ? inst->getGuild(currentGuildId) : std::nullopt;
 }
 
-std::string GuildSettingsController::getGuildIconUrl() const
+std::string GuildSettingsController::slotImageSource(ImageSlot slot) const
 {
-    if (!draftProfile.iconDataUri.empty())
-        return std::string("frame:") + IconPreviewFrame;
-    if (draftProfile.iconRemoved)
+    const bool icon = slot == ImageSlot::Icon;
+    const bool banner = slot == ImageSlot::Banner;
+    const std::string &draftUri = icon ? draftProfile.iconDataUri : banner ? draftBoost.bannerUri : draftBoost.splashUri;
+    if (!draftUri.empty())
+        return std::string("frame:") + previewFrame(slot);
+    if (icon ? draftProfile.iconRemoved : banner ? draftBoost.bannerRemoved : draftBoost.splashRemoved)
         return {};
 
     auto g = guild();
-    if (g && g->icon.hasValue() && !g->icon->empty())
-        return shell.imageSource(Discord::Cdn::guildIcon(currentGuildId, g->icon.get(), 128), {96, 96});
-    return {};
+    if (!g)
+        return {};
+    const std::string hash = icon ? g->icon.valueOr("") : banner ? g->banner.valueOr("") : g->splash.valueOr("");
+    if (hash.empty())
+        return {};
+    if (icon)
+        return shell.imageSource(Discord::Cdn::guildIcon(currentGuildId, hash, 128), {96, 96});
+    const std::string url = banner ? Discord::Cdn::guildBanner(currentGuildId, hash, 480) : Discord::Cdn::guildSplash(currentGuildId, hash, 480);
+    return shell.imageSource(url, {320, 180});
 }
 
 void GuildSettingsController::open(Core::Snowflake accountId, Core::Snowflake guildId, GuildSettingsSection section)
@@ -388,7 +408,7 @@ void GuildSettingsController::renderProfile(std::string &rml)
 
     // Icon Row
     rml += "<div class=\"guild-icon-upload-row\">";
-    std::string iconSrc = getGuildIconUrl();
+    std::string iconSrc = slotImageSource(ImageSlot::Icon);
     rml += "<div class=\"guild-icon-preview\">";
     if (!iconSrc.empty()) {
         rml += "<img src=\"" + escape(iconSrc) + "\"/>";
@@ -586,33 +606,33 @@ void GuildSettingsController::renderBoostPerks(std::string &rml)
            "\" data-action=\"toggle-progress-bar\"><div class=\"settings-switch-thumb\"></div></div>";
     rml += "</div>";
 
-    // Banner slot
-    rml += "<div class=\"settings-card\">";
-    rml += "<div class=\"settings-label\">Server Banner Background</div>";
-    rml += "<div class=\"settings-description\">Displayed at the top of your channel list. Minimum 960x540 (16:9 ratio).</div>";
-    if (tier >= 2) {
-        rml += "<div class=\"settings-button-group\">";
-        rml += "<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-banner\">Upload Banner</div>";
-        rml += "<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-banner\">Remove Banner</div>";
+    // key names the actions (choose-banner, remove-banner) and title the buttons.
+    auto renderCard = [&rml, this](ImageSlot slot, bool unlocked, const std::string &key, const std::string &title,
+                                   const char *label, const char *description, const char *lockNote) {
+        rml += "<div class=\"settings-card\">";
+        rml += std::string("<div class=\"settings-label\">") + label + "</div>";
+        rml += std::string("<div class=\"settings-description\">") + description + "</div>";
+        if (unlocked) {
+            const std::string src = slotImageSource(slot);
+            if (!src.empty())
+                rml += "<div class=\"guild-image-preview\"><img src=\"" + escape(src) + "\"/></div>";
+            rml += "<div class=\"settings-button-group\">";
+            rml += "<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-" + key + "\">Upload " + title + "</div>";
+            if (!src.empty())
+                rml += "<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-" + key + "\">Remove " + title + "</div>";
+            rml += "</div>";
+        } else {
+            rml += std::string("<div class=\"settings-note\">") + lockNote + "</div>";
+        }
         rml += "</div>";
-    } else {
-        rml += "<div class=\"settings-note\">Locked \xE2\x80\x94 Requires Level 2 Server Boosts (7 Boosts).</div>";
-    }
-    rml += "</div>";
+    };
 
-    // Invite Splash slot
-    rml += "<div class=\"settings-card\">";
-    rml += "<div class=\"settings-label\">Server Invite Splash</div>";
-    rml += "<div class=\"settings-description\">Shown when people visit your invite links in a web browser. Minimum 1920x1080.</div>";
-    if (tier >= 1) {
-        rml += "<div class=\"settings-button-group\">";
-        rml += "<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-splash\">Upload Splash</div>";
-        rml += "<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-splash\">Remove Splash</div>";
-        rml += "</div>";
-    } else {
-        rml += "<div class=\"settings-note\">Locked \xE2\x80\x94 Requires Level 1 Server Boosts (2 Boosts).</div>";
-    }
-    rml += "</div>";
+    renderCard(ImageSlot::Banner, tier >= 2, "banner", "Banner", "Server Banner Background",
+               "Displayed at the top of your channel list. Minimum 960x540 (16:9 ratio).",
+               "Locked \xE2\x80\x94 Requires Level 2 Server Boosts (7 Boosts).");
+    renderCard(ImageSlot::Splash, tier >= 1, "splash", "Splash", "Server Invite Splash",
+               "Shown when people visit your invite links in a web browser. Minimum 1920x1080.",
+               "Locked \xE2\x80\x94 Requires Level 1 Server Boosts (2 Boosts).");
 }
 
 // 4. Emoji
@@ -1813,9 +1833,9 @@ void GuildSettingsController::chooseImage(ImageSlot slot)
         if (slot == ImageSlot::Icon) {
             self->draftProfile.iconDataUri = std::move(prepared.dataUri);
             self->draftProfile.iconRemoved = false;
-            Runtime::instance().setFrame(IconPreviewFrame, prepared.preview);
         } else if (slot == ImageSlot::Banner) { self->draftBoost.bannerUri = std::move(prepared.dataUri); self->draftBoost.bannerRemoved = false; }
         else { self->draftBoost.splashUri = std::move(prepared.dataUri); self->draftBoost.splashRemoved = false; }
+        Runtime::instance().setFrame(previewFrame(slot), prepared.preview);
         self->renderContent();
         self->updateUnsavedChangesBar();
         self->requestRender();
