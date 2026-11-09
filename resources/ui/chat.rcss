@@ -1738,3 +1738,135 @@ input.component-select-search:focus { border-color: #5865f2; }
 	border-color: #5865f2;
 }
 
+
+/* Command options bar */
+
+.command-options
+{
+	display: none;
+	padding: 8dp 12dp;
+	border-bottom: 1dp #27272b;
+}
+
+.command-options-title
+{
+	font-size: 14dp;
+	font-weight: 600;
+	color: #dbdee1;
+	margin-bottom: 8dp;
+}
+
+.command-option
+{
+	display: inline-block;
+	vertical-align: top;
+	margin-right: 8dp;
+	margin-bottom: 6dp;
+	width: 200dp;
+}
+
+.command-option-label
+{
+	font-size: 12dp;
+	font-weight: bold;
+	color: #949ba4;
+	margin-bottom: 4dp;
+}
+
+input.command-option-input
+{
+	display: block;
+	width: 100%;
+	height: 32dp;
+	padding: 6dp 8dp;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	color: #dbdee1;
+	font-size: 14dp;
+	box-sizing: border-box;
+}
+
+select.command-option-select
+{
+	display: block;
+	width: 100%;
+	height: 32dp;
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	color: #dbdee1;
+	font-size: 14dp;
+	box-sizing: border-box;
+}
+
+select.command-option-select selectvalue
+{
+	padding: 6dp 10dp;
+	color: #dbdee1;
+}
+
+select.command-option-select selectarrow
+{
+	width: 24dp;
+	height: 32dp;
+}
+
+select.command-option-select selectbox
+{
+	background-color: #111214;
+	border: 1dp #202024;
+	border-radius: 4dp;
+	padding: 4dp;
+	z-index: 200;
+	max-height: 220dp;
+	overflow-y: auto;
+}
+
+select.command-option-select selectbox option
+{
+	padding: 6dp 8dp;
+	border-radius: 4dp;
+	color: #dbdee1;
+}
+
+select.command-option-select selectbox option:hover
+{
+	background-color: #242428;
+	color: #ffffff;
+}
+
+.command-option-error
+{
+	font-size: 13dp;
+	color: #f23f43;
+	margin-top: 4dp;
+}
+
+.command-options-error
+{
+	font-size: 13dp;
+	color: #f23f43;
+	margin-top: 6dp;
+}
+
+.command-options-status
+{
+	font-size: 12dp;
+	color: #949ba4;
+	margin-top: 6dp;
+}
+
+.command-options-hint
+{
+	font-size: 12dp;
+	color: #949ba4;
+	margin-top: 6dp;
+}
+
+.command-option-unsupported
+{
+	font-size: 13dp;
+	color: #949ba4;
+	line-height: 32dp;
+}

@@ -154,6 +154,10 @@ bool isSelectComponent(Discord::MessageComponentType type)
 
 // Entity select pickers list at most this many matches.
 constexpr std::size_t MaxSelectCandidates = 25;
+
+// The interaction tracker keys requests by message; a slash command sent from the composer
+// belongs to no message, so it uses this key (no real message has ID 0).
+const Core::Snowflake ComposerCommandId(0);
 } // namespace
 
 ChatController::ChatController(Shell &shell, ::Rml::Element *root)
@@ -512,14 +516,16 @@ void ChatController::setupEventListeners()
                     if (!hasSendPermission)
                         return;
 
+                    if (chosenCommand) {
+                        sendChosenCommand();
+                        return;
+                    }
+
                     std::string text;
                     if (textareaEl)
                         text = Platform::trim(textareaEl->GetValue());
 
                     if (text.empty() && pendingAttachments.empty())
-                        return;
-                    // A chosen command is never sent as plain text.
-                    if (chosenCommand)
                         return;
 
                     if (editingMessageId.isValid()) {
@@ -539,7 +545,10 @@ void ChatController::setupEventListeners()
                     return;
                 }
             } else if (key == ::Rml::Input::KI_ESCAPE) {
-                if (editingMessageId.isValid()) {
+                if (chosenCommand) {
+                    event.StopPropagation();
+                    dropChosenCommand(true);
+                } else if (editingMessageId.isValid()) {
                     event.StopPropagation();
                     clearEditTarget();
                 } else if (replyTargetId.isValid()) {
@@ -615,6 +624,7 @@ void ChatController::onLocationChanged(const Location &location)
     interactions.clear();
     openSelect.reset();
     chosenCommand.reset();
+    commandOptions.hide();
     commandPicker.hide();
     currentChannelId = location.channelId;
     currentGuildId = location.guildId;
@@ -644,6 +654,7 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
     interactions.clear();
     openSelect.reset();
     chosenCommand.reset();
+    commandOptions.hide();
     commandPicker.hide();
     for (auto &connection : instanceConnections)
         connection.disconnect();
@@ -679,13 +690,13 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
                 }));
             instanceConnections.push_back(client->interactionSucceeded.connect(
                 [this](const Discord::InteractionSuccess &event) {
-                    if (auto messageId = interactions.succeeded(event.id, event.nonce.valueOr({})))
-                        refreshMessage(*messageId);
+                    if (auto trackedId = interactions.succeeded(event.id, event.nonce.valueOr({})))
+                        finishTrackedInteraction(*trackedId);
                 }));
             instanceConnections.push_back(client->interactionFailed.connect(
                 [this](const Discord::InteractionFailure &event) {
-                    if (auto messageId = interactions.failed(event.id, event.nonce.valueOr({})))
-                        refreshMessage(*messageId);
+                    if (auto trackedId = interactions.failed(event.id, event.nonce.valueOr({})))
+                        finishTrackedInteraction(*trackedId);
                 }));
         }
     }
@@ -1006,14 +1017,26 @@ void ChatController::searchOpenSelect(::Rml::Element *input)
 
 std::vector<SelectCandidate> ChatController::selectCandidatesFor(const Discord::MessageComponent &select)
 {
+    using Type = Discord::MessageComponentType;
+    const auto type = select.type.get();
+    std::vector<int> channelTypes;
+    if (select.channelTypes.hasValue())
+        for (const auto channelType : select.channelTypes.get())
+            channelTypes.push_back(static_cast<int>(channelType));
+    return entityCandidates({ .users = type == Type::USER_SELECT || type == Type::MENTIONABLE_SELECT,
+                              .roles = type == Type::ROLE_SELECT || type == Type::MENTIONABLE_SELECT,
+                              .channels = type == Type::CHANNEL_SELECT },
+                            channelTypes);
+}
+
+std::vector<SelectCandidate> ChatController::entityCandidates(EntityKinds kinds, const std::vector<int> &channelTypes)
+{
     std::vector<SelectCandidate> out;
     Core::ClientInstance *instance = shell.currentInstance();
     if (!instance)
         return out;
-    using Type = Discord::MessageComponentType;
-    const auto type = select.type.get();
 
-    if (type == Type::USER_SELECT || type == Type::MENTIONABLE_SELECT) {
+    if (kinds.users) {
         if (currentGuildId.isValid()) {
             for (const auto &member : instance->users()->getKnownMembers(currentGuildId)) {
                 if (member.user.hasValue())
@@ -1024,19 +1047,18 @@ std::vector<SelectCandidate> ChatController::selectCandidatesFor(const Discord::
                 out.push_back({ user.id->toString(), user.getDisplayName(), "user" });
         }
     }
-    if ((type == Type::ROLE_SELECT || type == Type::MENTIONABLE_SELECT) && currentGuildId.isValid()) {
+    if (kinds.roles && currentGuildId.isValid()) {
         // The @everyone role shares the guild's ID and can't be picked.
         for (const auto &role : instance->getRolesForGuild(currentGuildId)) {
             if (role.id.get() != currentGuildId && role.name.hasValue())
                 out.push_back({ role.id->toString(), role.name.get(), "role" });
         }
     }
-    if (type == Type::CHANNEL_SELECT && currentGuildId.isValid()) {
-        const bool anyType = !select.channelTypes.hasValue() || select.channelTypes->empty();
+    if (kinds.channels && currentGuildId.isValid()) {
         for (const auto &channel : instance->getGuildChannels(currentGuildId)) {
-            const auto channelType = channel.type.get();
-            const bool allowed = anyType ? channelType != Discord::ChannelType::GUILD_CATEGORY
-                                         : std::ranges::find(select.channelTypes.get(), channelType) != select.channelTypes->end();
+            const int channelType = static_cast<int>(channel.type.get());
+            const bool allowed = channelTypes.empty() ? channel.type.get() != Discord::ChannelType::GUILD_CATEGORY
+                                                      : std::ranges::find(channelTypes, channelType) != channelTypes.end();
             if (allowed && channel.name.hasValue())
                 out.push_back({ channel.id->toString(), channel.name.get(), "channel" });
         }
@@ -1657,6 +1679,7 @@ void ChatController::updateComposer()
     std::string composerHtml = std::format("{0}"
         "{1}"
         "<div id=\"command-picker\" class=\"command-picker\"></div>"
+        "<div id=\"command-options\" class=\"command-options\"></div>"
         "<div class=\"composer-main-row\">"
         "<div class=\"composer-btn\" data-action=\"composer-attach\" title=\"Attach file\"><img src=\"icon:image\" /></div>"
         "<div class=\"composer-input-wrap\">"
@@ -1669,8 +1692,10 @@ void ChatController::updateComposer()
 
     textareaEl = nullptr;
     commandPicker.setHost(nullptr);
+    commandOptions.setHost(nullptr);
     composerEl->SetInnerRML(composerHtml);
     commandPicker.setHost(composerEl->GetElementById("command-picker"));
+    commandOptions.setHost(composerEl->GetElementById("command-options"));
     textareaEl = dynamic_cast<::Rml::ElementFormControlTextArea*>(composerEl->GetElementById("composer-input"));
     if (textareaEl) {
         textareaEl->SetValue(draft);
@@ -1834,7 +1859,7 @@ void ChatController::updateCommandPicker()
 {
     const std::string text = textareaEl ? std::string(textareaEl->GetValue()) : std::string();
     if (chosenCommand && !text.starts_with("/" + chosenCommand->displayName + " "))
-        chosenCommand.reset();
+        dropChosenCommand(false);
 
     const auto query = slashQuery(text);
     Core::ClientInstance *instance = shell.currentInstance();
@@ -1861,6 +1886,104 @@ void ChatController::chooseCommand(const SlashCommandEntry &entry)
     textareaEl->SetSelectionRange(static_cast<int>(text.size()), static_cast<int>(text.size()));
     textareaEl->Focus();
     updateComposerPlaceholder();
+
+    std::vector<std::vector<SelectCandidate>> candidates;
+    using OptionType = Discord::ApplicationCommandOptionType;
+    for (const auto &option : chosenCommand->options) {
+        const auto type = option.type;
+        candidates.push_back(entityCandidates({ .users = type == OptionType::USER || type == OptionType::MENTIONABLE,
+                                                .roles = type == OptionType::ROLE || type == OptionType::MENTIONABLE,
+                                                .channels = type == OptionType::CHANNEL },
+                                              option.channelTypes));
+    }
+    commandOptions.show(*chosenCommand, std::move(candidates));
+    requestRender();
+}
+
+void ChatController::dropChosenCommand(bool clearText)
+{
+    chosenCommand.reset();
+    commandOptions.hide();
+    if (clearText && textareaEl) {
+        textareaEl->SetValue("");
+        updateComposerPlaceholder();
+    }
+    requestRender();
+}
+
+void ChatController::sendChosenCommand()
+{
+    Core::ClientInstance *instance = shell.currentInstance();
+    if (!chosenCommand || !instance || !instance->discord() || !interactions.pendingPath(ComposerCommandId).empty())
+        return;
+
+    const auto &options = chosenCommand->options;
+    const std::vector<std::string> typed = commandOptions.values();
+    std::vector<std::string> errors(options.size());
+    bool invalid = false;
+
+    Discord::ApplicationCommandRequest request;
+    for (std::size_t i = 0; i < options.size(); ++i) {
+        if (i >= typed.size() || typed[i].empty()) {
+            if (options[i].required) {
+                errors[i] = options[i].type == Discord::ApplicationCommandOptionType::ATTACHMENT
+                    ? "Files aren't supported yet" : "Required";
+                invalid = true;
+            }
+            continue;
+        }
+        auto value = Discord::commandOptionValue(options[i], typed[i]);
+        if (!value.success()) {
+            errors[i] = std::move(value.error);
+            invalid = true;
+            continue;
+        }
+        request.values.push_back({ options[i].name, options[i].type, std::move(*value.value) });
+    }
+    if (invalid) {
+        commandOptions.setErrors(std::move(errors), {});
+        requestRender();
+        return;
+    }
+
+    request.applicationId = chosenCommand->applicationId;
+    request.guildId = currentGuildId;
+    request.channelId = currentChannelId;
+    request.commandId = chosenCommand->commandId;
+    request.commandVersion = chosenCommand->version;
+    request.commandName = chosenCommand->name;
+    request.subcommandPath = chosenCommand->subcommandPath;
+    request.declaredOptions = options;
+    request.nonce = Core::Snowflake::generateNonce().toString();
+    if (!interactions.begin(request.nonce, ComposerCommandId, chosenCommand->displayName))
+        return;
+    commandOptions.setErrors({}, {});
+    commandOptions.setPending(true);
+    requestRender();
+
+    Platform::Guard<ChatController> self(this);
+    instance->discord()->createApplicationCommandInteraction(request, [self, nonce = request.nonce](const Core::Result<void> &result) {
+        if (!self || result.success() || !self->interactions.rejected(nonce))
+            return;
+        self->commandOptions.setPending(false);
+        self->commandOptions.setErrors({}, result.error.empty() ? "The command couldn't be sent" : result.error);
+        self->requestRender();
+    });
+}
+
+void ChatController::finishTrackedInteraction(Core::Snowflake trackedId)
+{
+    if (trackedId != ComposerCommandId) {
+        refreshMessage(trackedId);
+        return;
+    }
+    if (interactions.hasFailed(trackedId)) {
+        commandOptions.setPending(false);
+        commandOptions.setErrors({}, "This interaction failed");
+        requestRender();
+        return;
+    }
+    dropChosenCommand(true);
 }
 
 void ChatController::openReactionPickerForMessage(Core::Snowflake messageId)

@@ -3,6 +3,7 @@
 #include "Controller.hpp"
 #include "Shell.hpp"
 #include "SlashCommandPicker.hpp"
+#include "CommandOptionsBar.hpp"
 #include "Core/PendingAttachment.hpp"
 #include "Core/Snowflake.hpp"
 #include "UI/Chat/BlockedRuns.hpp"
@@ -86,8 +87,15 @@ private:
     void handleSelectAction(const std::string &action, Core::Snowflake messageId, const std::string &path,
                             int optionIndex, const std::string &value);
     void searchOpenSelect(::Rml::Element *input);
-    // Cached members, roles or channels an entity select can offer here.
+    // Cached members, roles or channels an entity select or command option can offer here;
+    // empty channelTypes allows every channel but categories.
     [[nodiscard]] std::vector<SelectCandidate> selectCandidatesFor(const Discord::MessageComponent &select);
+    struct EntityKinds {
+        bool users = false;
+        bool roles = false;
+        bool channels = false;
+    };
+    [[nodiscard]] std::vector<SelectCandidate> entityCandidates(EntityKinds kinds, const std::vector<int> &channelTypes);
     void checkAndLoadOlder();
     void checkAndLoadNewer();
     void setReplyTarget(Core::Snowflake messageId, const std::string &authorName, const std::string &snippet);
@@ -103,6 +111,12 @@ private:
     [[nodiscard]] CommandContext commandContext(Core::ClientInstance &instance) const;
     void updateCommandPicker();
     void chooseCommand(const SlashCommandEntry &entry);
+    // Leaves command mode: hides the options bar and, if asked, empties the composer.
+    void dropChosenCommand(bool clearText);
+    // Checks the options bar and sends the chosen command; errors stay in the bar.
+    void sendChosenCommand();
+    // A tracked interaction finished: re-render its message, or settle the composer's command.
+    void finishTrackedInteraction(Core::Snowflake trackedId);
     void openReactionPickerForMessage(Core::Snowflake messageId);
     void openEmojiPickerForComposer();
 
@@ -148,6 +162,7 @@ private:
     SlashCommandPicker commandPicker;
     // The command chosen in the picker while the composer still starts with its name.
     std::optional<SlashCommandEntry> chosenCommand;
+    CommandOptionsBar commandOptions;
 
     std::vector<Platform::Connection> instanceConnections;
     Platform::Connection emojiConnection;
