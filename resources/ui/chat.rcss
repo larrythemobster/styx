@@ -170,6 +170,44 @@
 	flex-shrink: 0;
 }
 
+.blocked-run
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin: 2dp 16dp;
+	padding: 6dp 12dp;
+	border-radius: 4dp;
+	background-color: #1e1f22;
+	cursor: pointer;
+}
+
+.blocked-run:hover
+{
+	background-color: #2b2d31;
+}
+
+.blocked-run-icon
+{
+	width: 16dp;
+	height: 16dp;
+	image-color: #949ba4;
+	margin-right: 8dp;
+}
+
+.blocked-run-text
+{
+	font-size: 14dp;
+	color: #949ba4;
+}
+
+.blocked-run-toggle
+{
+	font-size: 14dp;
+	color: #00a8fc;
+	margin-left: 8dp;
+}
+
 /* System message */
 .system-message
 {

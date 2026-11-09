@@ -4,8 +4,10 @@
 #include "Shell.hpp"
 #include "Core/PendingAttachment.hpp"
 #include "Core/Snowflake.hpp"
+#include "UI/Chat/BlockedRuns.hpp"
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include "Platform/Signal.hpp"
 
@@ -66,6 +68,8 @@ private:
     // Message DOM helpers
     void renderAllMessages();
     std::string buildMessageHtml(int row);
+    [[nodiscard]] std::vector<bool> blockedRows() const;
+    void refreshBlockedRun(int row);
     void checkAndLoadOlder();
     void checkAndLoadNewer();
     void setReplyTarget(Core::Snowflake messageId, const std::string &authorName, const std::string &snippet);
@@ -98,6 +102,7 @@ private:
     std::string replySnippet;
     Core::Snowflake editingMessageId;
     std::vector<Core::PendingAttachment> pendingAttachments;
+    std::unordered_set<Core::Snowflake> expandedBlockedRuns;
 
     std::vector<Platform::Connection> instanceConnections;
     Platform::Connection emojiConnection;

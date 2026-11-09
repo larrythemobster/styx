@@ -11,6 +11,7 @@
 #include "Core/PermissionManager.hpp"
 #include "Core/Presence/PresenceManager.hpp"
 #include "Core/ReadStateManager.hpp"
+#include "Core/RelationshipManager.hpp"
 #include "Core/Session.hpp"
 #include "Core/TypingTracker.hpp"
 #include "Core/UserManager.hpp"
@@ -266,6 +267,12 @@ void ChatController::setupEventListeners()
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages())
                 instance->messages()->requestLoadChannel(currentChannelId);
+        } else if (action == std::string("toggle-blocked-run")) {
+            const Core::Snowflake runId(parseNumber(attribute(actionEl, "data-run-id")));
+            if (!expandedBlockedRuns.erase(runId))
+                expandedBlockedRuns.insert(runId);
+            if (ChatModel *model = shell.chat())
+                refreshBlockedRun(model->rowForMessage(runId));
         } else if (action == std::string("open-image")) {
             std::string url = attribute(actionEl, "data-url");
             if (!url.empty()) {
@@ -501,6 +508,8 @@ void ChatController::setupModelConnections()
 
 void ChatController::onLocationChanged(const Location &location)
 {
+    if (currentChannelId != location.channelId)
+        expandedBlockedRuns.clear();
     currentChannelId = location.channelId;
     currentGuildId = location.guildId;
     currentAccountId = location.accountId;
@@ -537,6 +546,12 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
                     updateComposer();
                 }
             }));
+        if (auto *relationships = instance->relationships()) {
+            instanceConnections.push_back(relationships->relationshipChanged.connect(
+                [this](Core::Snowflake) { renderAllMessages(); }));
+            instanceConnections.push_back(relationships->relationshipsReset.connect(
+                [this] { renderAllMessages(); }));
+        }
     }
     currentAccountId = shell.location().accountId;
     updateHeader();
@@ -592,8 +607,9 @@ void ChatController::onRowsInserted(int first, int last)
     }
 
     updateJumpBar();
+    refreshBlockedRun(first - 1);
+    refreshBlockedRun(last + 1);
 }
-
 void ChatController::onRowsRemoved(int first, int last)
 {
     if (!messagesEl)
@@ -605,8 +621,9 @@ void ChatController::onRowsRemoved(int first, int last)
     }
     requestRender();
     updateJumpBar();
+    refreshBlockedRun(first - 1);
+    refreshBlockedRun(first);
 }
-
 void ChatController::onDataChanged(int first, int last)
 {
     if (!messagesEl)
@@ -622,6 +639,7 @@ void ChatController::onDataChanged(int first, int last)
 
 void ChatController::onModelReset()
 {
+    expandedBlockedRuns.clear();
     loadingHistory = false;
     renderAllMessages();
 }
@@ -692,6 +710,36 @@ void ChatController::checkAndLoadNewer()
     }
 }
 
+std::vector<bool> ChatController::blockedRows() const
+{
+    ChatModel *model = shell.chat();
+    Core::ClientInstance *instance = shell.currentInstance();
+    if (!model || !instance || !instance->relationships())
+        return {};
+
+    Core::RelationshipManager *relationships = instance->relationships();
+    const int count = model->rowCount();
+    std::vector<bool> blocked;
+    blocked.reserve(count);
+    for (int r = 0; r < count; ++r) {
+        const auto userId = model->row(r).userId;
+        blocked.push_back(userId.isValid() && relationships->isBlockedOrIgnored(userId));
+    }
+    return blocked;
+}
+
+void ChatController::refreshBlockedRun(int row)
+{
+    ChatModel *model = shell.chat();
+    if (!model || row < 0 || row >= model->rowCount())
+        return;
+
+    const auto blocked = blockedRows();
+    const BlockedRun run = blockedRunAt(blocked, row);
+    if (run.count > 0)
+        onDataChanged(run.first, run.first + run.count - 1);
+}
+
 std::string ChatController::buildMessageHtml(int row)
 {
     ChatModel *model = shell.chat();
@@ -724,6 +772,26 @@ std::string ChatController::buildMessageHtml(int row)
             "<span class=\"date-separator-text\">{0}</span>"
             "<span class=\"date-separator-line\"></span>"
             "</div>", formatDateSeparator(timestamp));
+    }
+    const auto blocked = blockedRows();
+    const BlockedRun run = blockedRunAt(blocked, row);
+    if (run.count > 0) {
+        const auto runId = model->row(run.first).messageId;
+        const bool expanded = expandedBlockedRuns.contains(runId);
+        if (row == run.first) {
+            out += std::format(
+                "<div class=\"blocked-run\" data-action=\"toggle-blocked-run\" data-run-id=\"{0}\">"
+                "<img class=\"blocked-run-icon\" src=\"icon:user-minus\"/>"
+                "<span class=\"blocked-run-text\">{1} blocked {2}</span>"
+                "<span class=\"blocked-run-toggle\">{3}</span>"
+                "</div>",
+                runId.toString(),
+                run.count,
+                run.count == 1 ? "message" : "messages",
+                expanded ? "Hide messages" : "Show messages");
+        }
+        if (!expanded)
+            return out;
     }
 
     if (isSystem) {
