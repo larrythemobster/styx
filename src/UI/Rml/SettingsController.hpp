@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Controller.hpp"
+#include "Keybinds.hpp"
 #include "Platform/Native.hpp"
 #include "Platform/Timer.hpp"
+#include <optional>
 #include <string>
 
 namespace Styx {
@@ -21,6 +23,7 @@ public:
         Chat,
         Notifications,
         VoiceVideo,
+        Keybinds,
         GoLive,
         Advanced,
     };
@@ -45,6 +48,7 @@ private:
     void renderChat(std::string &rml);
     void renderNotifications(std::string &rml);
     void renderVoiceVideo(std::string &rml);
+    void renderKeybinds(std::string &rml);
     void renderGoLive(std::string &rml);
     void renderAdvanced(std::string &rml);
 
@@ -54,9 +58,10 @@ private:
     void handleSliderChange(::Rml::Element *sliderEl);
     void handleSelectChange(::Rml::Element *selectEl);
     void handleAction(const std::string &action, ::Rml::Element *target);
-    void stopRecordingPttKey();
-    // Stores the recorded push-to-talk binding and applies it.
-    void recordPttKey(int key, int rmlModifiers);
+    void renderKeybindRow(std::string &rml, KeybindAction action);
+    void refreshKeybinds();
+    void stopRecordingKeybind();
+    void recordConfiguredKey(int key, int rmlModifiers);
     void applyPushToTalk();
 
     Section currentSection = Section::MyAccount;
@@ -65,7 +70,8 @@ private:
     Platform::Color themeSeedColor;
     int themeSchemeIndex = 0;
     bool themeDarkMode = true;
-    bool recordingPttKey = false;
+    std::optional<KeybindAction> recordingKeybind;
+    std::string keybindError;
 };
 
 } // namespace Rml

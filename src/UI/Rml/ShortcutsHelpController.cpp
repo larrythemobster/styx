@@ -1,5 +1,6 @@
 #include "ShortcutsHelpController.hpp"
 
+#include "Keybinds.hpp"
 #include "Platform/Native.hpp"
 #include "RmlView.hpp"
 #include "Shell.hpp"
@@ -38,6 +39,8 @@ void ShortcutsHelpController::open()
     if (!helpDocument)
         return;
 
+    refreshShortcuts();
+
     visible = true;
     helpDocument->Show(::Rml::ModalFlag::None);
     requestRender();
@@ -54,6 +57,26 @@ void ShortcutsHelpController::close()
     requestRender();
 }
 
+void ShortcutsHelpController::refreshShortcuts()
+{
+    if (!helpDocument)
+        return;
+
+    if (auto *listEl = helpDocument->GetElementById("shortcuts-help-list")) {
+        std::string html;
+        for (const auto &shortcut : effectiveShortcuts(ShortcutController::keybinds())) {
+            html += std::format(
+                "<div class=\"shortcuts-help-row\">"
+                "<span class=\"shortcuts-help-description\">{}</span>"
+                "<span class=\"shortcuts-help-keys\">{}</span>"
+                "</div>",
+                Platform::htmlEscape(shortcut.description),
+                Platform::htmlEscape(shortcutLabel(shortcut)));
+        }
+        listEl->SetInnerRML(html);
+    }
+}
+
 void ShortcutsHelpController::ensureDocument()
 {
     if (helpDocument)
@@ -68,21 +91,6 @@ void ShortcutsHelpController::ensureDocument()
         return;
 
     regionRoot = helpDocument;
-
-    if (auto *listEl = helpDocument->GetElementById("shortcuts-help-list")) {
-        std::string html;
-        for (const auto &shortcut : shortcutTable()) {
-            html += std::format(
-                "<div class=\"shortcuts-help-row\">"
-                "<span class=\"shortcuts-help-description\">{}</span>"
-                "<span class=\"shortcuts-help-keys\">{}</span>"
-                "</div>",
-                Platform::htmlEscape(shortcut.description),
-                Platform::htmlEscape(shortcutLabel(shortcut)));
-        }
-        listEl->SetInnerRML(html);
-    }
-
     setupEventListeners();
 }
 

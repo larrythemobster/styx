@@ -789,3 +789,34 @@ select.settings-select selectbox option:hover
 	font-size: 14dp;
 	color: #dbdee1;
 }
+
+.settings-keybind-actions
+{
+	display: flex;
+	align-items: center;
+}
+
+.settings-keybind-actions .settings-btn,
+.settings-keybind-actions button
+{
+	margin-left: 8dp;
+}
+
+.settings-keybind-actions .settings-btn:first-child,
+.settings-keybind-actions button:first-child
+{
+	margin-left: 0;
+}
+
+.settings-keybind .settings-btn,
+.settings-keybind button
+{
+	min-height: 40dp;
+}
+
+.settings-keybind-error
+{
+	color: #f23f43;
+	font-size: 13dp;
+	margin-bottom: 12dp;
+}

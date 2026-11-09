@@ -12,22 +12,57 @@
 namespace Styx {
 namespace UI {
 namespace Rml {
+KeybindSet ShortcutController::cachedKeybinds = parseKeybinds(nullptr, nullptr, nullptr);
 
 ShortcutController::ShortcutController(Shell &shell)
     : Controller(shell, nullptr)
 {
+    reloadKeybinds();
+
+    track(this->shell.focusLost.connect([this] {
+        downKeys.fill(false);
+    }));
+
     if (auto *doc = shell.document()) {
         listen("keydown", [this](::Rml::Event &event) {
+            const int key = event.GetParameter<int>("key_identifier", 0);
+            const bool wasDown = (key >= 0 && key < static_cast<int>(downKeys.size())) ? downKeys[key] : false;
+            if (key >= 0 && key < static_cast<int>(downKeys.size()))
+                downKeys[key] = true;
+
             if (auto *ptt = this->shell.pushToTalk(); ptt && ptt->isSuspended())
                 return;
+
             const auto action = actionFor(event);
-            if (action) {
-                const auto it = handlers.find(*action);
-                if (it != handlers.end() && it->second())
-                    event.StopPropagation();
+            if (!action)
+                return;
+
+            if (wasDown && (*action == ShortcutAction::ToggleMute || *action == ShortcutAction::ToggleDeafen)) {
+                event.StopPropagation();
+                return;
             }
+
+            const auto it = handlers.find(*action);
+            if (it != handlers.end() && it->second())
+                event.StopPropagation();
+        }, doc, true);
+
+        listen("keyup", [this](::Rml::Event &event) {
+            const int key = event.GetParameter<int>("key_identifier", 0);
+            if (key >= 0 && key < static_cast<int>(downKeys.size()))
+                downKeys[key] = false;
         }, doc, true);
     }
+}
+
+void ShortcutController::reloadKeybinds()
+{
+    cachedKeybinds = loadKeybinds();
+}
+
+const KeybindSet &ShortcutController::keybinds()
+{
+    return cachedKeybinds;
 }
 
 void ShortcutController::setHandler(ShortcutAction action, std::function<bool()> handler)
@@ -42,7 +77,7 @@ bool ShortcutController::hasHandler(ShortcutAction action) const
 
 std::optional<ShortcutAction> ShortcutController::actionFor(::Rml::Event &event)
 {
-    return matchShortcut(event.GetParameter<int>("key_identifier", 0), eventModifiers(event));
+    return matchKeybindShortcut(event.GetParameter<int>("key_identifier", 0), eventModifiers(event), cachedKeybinds);
 }
 
 int ShortcutController::eventModifiers(::Rml::Event &event)

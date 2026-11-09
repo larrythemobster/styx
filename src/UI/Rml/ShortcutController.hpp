@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Controller.hpp"
+#include "Keybinds.hpp"
 #include "Shortcuts.hpp"
 
+#include <array>
 #include <functional>
 #include <optional>
 #include <unordered_map>
@@ -22,6 +24,9 @@ class ShortcutController final : public Controller
 public:
     explicit ShortcutController(Shell &shell);
 
+    static void reloadKeybinds();
+    [[nodiscard]] static const KeybindSet &keybinds();
+
     // One handler per action; setting it again replaces the old one. A handler returns whether
     // it acted: when it didn't, or there's no handler, the key reaches the focused element as
     // usual. Bare keys such as Page Up rely on this to leave text boxes alone when idle.
@@ -35,7 +40,9 @@ public:
     [[nodiscard]] static int eventModifiers(::Rml::Event &event);
 
 private:
+    static KeybindSet cachedKeybinds;
     std::unordered_map<ShortcutAction, std::function<bool()>> handlers;
+    std::array<bool, 256> downKeys{};
 };
 
 } // namespace Rml

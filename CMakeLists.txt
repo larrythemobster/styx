@@ -292,6 +292,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/SearchController.cpp
     src/UI/Rml/SwitcherController.cpp
     src/UI/Rml/Shortcuts.cpp
+    src/UI/Rml/Keybinds.cpp
     src/UI/Rml/ShortcutController.cpp
     src/UI/Rml/ShortcutsHelpController.cpp
     src/UI/Rml/JoinServerController.cpp
@@ -408,6 +409,8 @@ if(BUILD_TESTS)
     styx_test(TestQuickSwitcher QuickSwitcherTests tests/tst_QuickSwitcher.cpp src/Core/QuickSwitcher.cpp src/Core/Snowflake.cpp)
     styx_test(TestShortcuts ShortcutsTests tests/tst_Shortcuts.cpp src/UI/Rml/Shortcuts.cpp)
     target_link_libraries(TestShortcuts PRIVATE RmlUi::RmlUi)
+    styx_test(TestKeybinds KeybindsTests tests/tst_Keybinds.cpp src/UI/Rml/Keybinds.cpp src/UI/Rml/Shortcuts.cpp)
+    target_link_libraries(TestKeybinds PRIVATE RmlUi::RmlUi)
     styx_test(TestNavigation NavigationTests tests/tst_Navigation.cpp src/UI/ChannelList/Navigation.cpp src/Core/Snowflake.cpp)
     styx_test(TestBlockedRuns BlockedRunsTests tests/tst_BlockedRuns.cpp src/UI/Chat/BlockedRuns.cpp)
     styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)

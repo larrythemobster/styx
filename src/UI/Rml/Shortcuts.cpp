@@ -80,20 +80,22 @@ std::string keyName(int key)
     }
 }
 
+int ownRmlModifier(int key)
+{
+    if (key == ::Rml::Input::KI_LCONTROL || key == ::Rml::Input::KI_RCONTROL)
+        return ::Rml::Input::KM_CTRL;
+    if (key == ::Rml::Input::KI_LSHIFT || key == ::Rml::Input::KI_RSHIFT)
+        return ::Rml::Input::KM_SHIFT;
+    if (key == ::Rml::Input::KI_LMENU || key == ::Rml::Input::KI_RMENU)
+        return ::Rml::Input::KM_ALT;
+    if (key == ::Rml::Input::KI_LMETA || key == ::Rml::Input::KI_RMETA)
+        return ::Rml::Input::KM_META;
+    return 0;
+}
+
 int ownModifier(int key)
 {
-#ifdef __APPLE__
-    if (key == ::Rml::Input::KI_LMETA || key == ::Rml::Input::KI_RMETA)
-        return Primary;
-#else
-    if (key == ::Rml::Input::KI_LCONTROL || key == ::Rml::Input::KI_RCONTROL)
-        return Primary;
-#endif
-    if (key == ::Rml::Input::KI_LSHIFT || key == ::Rml::Input::KI_RSHIFT)
-        return Shift;
-    if (key == ::Rml::Input::KI_LMENU || key == ::Rml::Input::KI_RMENU)
-        return Alt;
-    return 0;
+    return shortcutModifiers(ownRmlModifier(key));
 }
 
 std::string comboLabel(int key, int modifiers)
@@ -186,6 +188,16 @@ bool isModifierKey(int key)
 bool keyBindingPressed(const KeyBinding &binding, int key, int rmlModifiers)
 {
     return binding.valid() && key == binding.key && (shortcutModifiers(rmlModifiers) & binding.modifiers) == binding.modifiers;
+}
+
+bool keyBindingPressedExactly(const KeyBinding &binding, int key, int rmlModifiers)
+{
+    if (!binding.valid() || key != binding.key)
+        return false;
+    int effectiveModifiers =
+        rmlModifiers & ~(::Rml::Input::KM_CAPSLOCK | ::Rml::Input::KM_NUMLOCK | ::Rml::Input::KM_SCROLLLOCK);
+    effectiveModifiers &= ~ownRmlModifier(key);
+    return effectiveModifiers == toRmlModifiers(binding.modifiers);
 }
 
 std::string keyBindingLabel(const KeyBinding &binding)

@@ -45,7 +45,7 @@ struct Shortcut
     std::string_view description;
 };
 
-// Every in-app shortcut, in the order the help dialog lists them.
+// Default shortcuts, in help-dialog order; effectiveShortcuts applies voice binding overrides.
 [[nodiscard]] const std::vector<Shortcut> &shortcutTable();
 
 // The action for a key press, given the key and the Rml::Input::KeyModifier bits held.
@@ -76,6 +76,9 @@ struct KeyBinding
 [[nodiscard]] bool isModifierKey(int key);
 // Whether a key press triggers the binding: the same key with at least its modifiers held.
 [[nodiscard]] bool keyBindingPressed(const KeyBinding &binding, int key, int rmlModifiers);
+// Whether a key press matches the binding exactly: the same key with exact modifiers held.
+// Ignores lock keys and strips a lone modifier key's own modifier bit.
+[[nodiscard]] bool keyBindingPressedExactly(const KeyBinding &binding, int key, int rmlModifiers);
 // "Ctrl+`", "Shift+F13", "Left Ctrl"; empty for an unset binding.
 [[nodiscard]] std::string keyBindingLabel(const KeyBinding &binding);
 // Stored in settings as {"key": n, "modifiers": n}; anything else reads as unset.

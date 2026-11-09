@@ -10,7 +10,7 @@ namespace Styx {
 namespace UI {
 namespace Rml {
 
-// The Ctrl+/ dialog listing every keyboard shortcut, read from shortcutTable().
+// The Ctrl+/ dialog lists the currently configured in-app shortcuts.
 class ShortcutsHelpController final : public Controller
 {
 public:
@@ -23,6 +23,7 @@ public:
 
 private:
     void ensureDocument();
+    void refreshShortcuts();
     void setupEventListeners();
 
     ::Rml::ElementDocument *helpDocument = nullptr;

@@ -37,6 +37,8 @@ inline constexpr const char *VoiceInputVolume = "voice/input_volume";
 inline constexpr const char *VoiceOutputVolume = "voice/output_volume";
 inline constexpr const char *VoiceInputMode = "voice/input_mode";
 inline constexpr const char *VoicePushToTalkKey = "voice/ptt_key";
+inline constexpr const char *VoiceToggleMuteKey = "voice/toggle_mute_key";
+inline constexpr const char *VoiceToggleDeafenKey = "voice/toggle_deafen_key";
 inline constexpr const char *VoicePushToTalkReleaseDelay = "voice/ptt_release_delay";
 
 // Stream / Go Live

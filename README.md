@@ -31,6 +31,12 @@ adjust its release delay from 0 to 2000 ms. Windows and X11 with XInput2 2.2 sup
 passive global input that never consumes keys, so other applications still receive
 them. On Wayland and macOS, push to talk works only while Styx has focus.
 
+The Keybinds page records and removes saved Push to Talk, Toggle Mute and Toggle
+Deafen shortcuts, and rejects conflicts with other bindings or fixed shortcuts.
+Mute and deafen work while Styx is focused. Their default keys are Ctrl+Shift+M
+and Ctrl+Shift+D, or Cmd+Shift+M and Cmd+Shift+D on macOS. Rebinding or removing
+them disables the old keys. The shortcut help dialog shows the current bindings.
+
 Native platform services provide file dialogs, the system tray, credential
 storage and startup error dialogs.
 

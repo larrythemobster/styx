@@ -120,7 +120,7 @@ void SettingsController::onSettingsOpenChanged(bool open)
         regionRoot->SetClass("open", true);
         requestRender(200);
     } else {
-        stopRecordingPttKey();
+        stopRecordingKeybind();
         regionRoot->SetClass("open", false);
         hideTransitionTimer.start(std::chrono::milliseconds(160), false, [this] {
             if (!shell.isSettingsOpen() && regionRoot)
@@ -134,7 +134,7 @@ void SettingsController::setSection(Section section)
 {
     if (currentSection == section)
         return;
-    stopRecordingPttKey();
+    stopRecordingKeybind();
     currentSection = section;
     render();
     requestRender(100);
@@ -176,6 +176,7 @@ void SettingsController::renderSidebar(std::string &rml)
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"chat\">Chat &amp; Accessibility</div>", currentSection == Section::Chat ? std::string(" active") : std::string());
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"notifications\">Notifications</div>", currentSection == Section::Notifications ? std::string(" active") : std::string());
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"voice-video\">Voice &amp; Video</div>", currentSection == Section::VoiceVideo ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"keybinds\">Keybinds</div>", currentSection == Section::Keybinds ? std::string(" active") : std::string());
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"go-live\">Go Live</div>", currentSection == Section::GoLive ? std::string(" active") : std::string());
     rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"advanced\">Advanced</div>", currentSection == Section::Advanced ? std::string(" active") : std::string());
 
@@ -220,6 +221,9 @@ void SettingsController::renderContent(std::string &rml)
         break;
     case Section::VoiceVideo:
         renderVoiceVideo(rml);
+        break;
+    case Section::Keybinds:
+        renderKeybinds(rml);
         break;
     case Section::GoLive:
         renderGoLive(rml);
@@ -640,22 +644,7 @@ void SettingsController::renderVoiceVideo(std::string &rml)
 
     if (inputMode == std::string("push_to_talk")) {
         rml += std::string("<div class=\"settings-label\">Shortcut</div>");
-        const auto binding = keyBindingFromJson(get(Keys::VoicePushToTalkKey));
-        std::string label;
-        if (recordingPttKey) {
-            label = "Press a key…";
-        } else {
-            label = keyBindingLabel(binding);
-            if (label.empty())
-                label = "No Keybind Set";
-        }
-        const std::string btnClass = recordingPttKey ? "settings-btn settings-btn-danger" : "settings-btn settings-btn-secondary";
-        const std::string btnText = recordingPttKey ? "Stop Recording" : "Record Keybind";
-
-        rml += std::string("<div class=\"settings-keybind\" id=\"ptt-keybind\">");
-        rml += formatRml("<span class=\"settings-keybind-label\">%1</span>", Rml::escape(label));
-        rml += formatRml("<button class=\"%1\" data-action=\"record-ptt-key\">%2</button>", btnClass, btnText);
-        rml += std::string("</div>");
+        renderKeybindRow(rml, KeybindAction::PushToTalk);
 
         const auto *ptt = shell.pushToTalk();
         const std::string scopeDesc = ptt ? ptt->shortcutScopeDescription() : std::string("Push to talk works while Styx is the focused window.");
@@ -697,6 +686,66 @@ void SettingsController::renderVoiceVideo(std::string &rml)
     rml += std::string("</div>"); // .settings-card
 }
 
+
+void SettingsController::renderKeybinds(std::string &rml)
+{
+    rml += std::string("<div class=\"settings-section-title\">Keybinds</div>");
+    rml += std::string("<div class=\"settings-description\">Record a shortcut for each action. Mute and deafen shortcuts work while Styx is focused.</div>");
+    rml += std::string("<div class=\"settings-card\">");
+
+    rml += formatRml("<div class=\"settings-label\">%1</div>", Rml::escape(keybindName(KeybindAction::PushToTalk)));
+    renderKeybindRow(rml, KeybindAction::PushToTalk);
+    if (const auto *ptt = shell.pushToTalk()) {
+        const std::string scopeDesc = ptt->shortcutScopeDescription();
+        if (!scopeDesc.empty())
+            rml += formatRml("<div class=\"settings-description\">%1</div>", Rml::escape(scopeDesc));
+    }
+
+    rml += formatRml("<div class=\"settings-label\">%1</div>", Rml::escape(keybindName(KeybindAction::ToggleMute)));
+    renderKeybindRow(rml, KeybindAction::ToggleMute);
+
+    rml += formatRml("<div class=\"settings-label\">%1</div>", Rml::escape(keybindName(KeybindAction::ToggleDeafen)));
+    renderKeybindRow(rml, KeybindAction::ToggleDeafen);
+
+    rml += std::string("</div>"); // .settings-card
+}
+
+void SettingsController::renderKeybindRow(std::string &rml, KeybindAction action)
+{
+    const auto &configured = ShortcutController::keybinds();
+    const auto &binding = configured.get(action);
+    const int actionIdx = static_cast<int>(action);
+
+    const bool isRecording = recordingKeybind.has_value() && *recordingKeybind == action;
+
+    std::string label;
+    if (isRecording) {
+        label = "Press a key…";
+    } else {
+        label = keyBindingLabel(binding);
+        if (label.empty())
+            label = "No Keybind Set";
+    }
+
+    const std::string btnClass = isRecording ? "settings-btn settings-btn-danger" : "settings-btn settings-btn-secondary";
+    const std::string btnText = isRecording ? "Stop Recording" : "Record Keybind";
+
+    rml += std::string("<div class=\"settings-keybind\">");
+    rml += formatRml("<span class=\"settings-keybind-label\">%1</span>", Rml::escape(label));
+    rml += std::string("<div class=\"settings-keybind-actions\">");
+    rml += formatRml("<button class=\"%1\" id=\"record-keybind-%2\" data-action=\"record-keybind\" data-keybind=\"%2\">%3</button>",
+                     btnClass, actionIdx, btnText);
+    if (binding.valid()) {
+        rml += formatRml("<button class=\"settings-btn settings-btn-danger\" data-action=\"remove-keybind\" data-keybind=\"%1\">Remove</button>",
+                         actionIdx);
+    }
+    rml += std::string("</div>"); // .settings-keybind-actions
+    rml += std::string("</div>"); // .settings-keybind
+
+    const auto errorText = isRecording ? keybindError : keybindConflictText(action, binding, configured);
+    if (!errorText.empty())
+        rml += formatRml("<div class=\"settings-keybind-error\">%1</div>", Rml::escape(errorText));
+}
 
 void SettingsController::renderGoLive(std::string &rml)
 {
@@ -786,6 +835,8 @@ void SettingsController::setupEventListeners()
                 setSection(Section::Notifications);
             else if (sec == std::string("voice-video"))
                 setSection(Section::VoiceVideo);
+            else if (sec == std::string("keybinds"))
+                setSection(Section::Keybinds);
             else if (sec == std::string("go-live"))
                 setSection(Section::GoLive);
             else if (sec == std::string("advanced"))
@@ -831,19 +882,18 @@ void SettingsController::setupEventListeners()
 
     listen("keyup", [this](::Rml::Event &event) {
         const int key = event.GetParameter<int>("key_identifier", 0);
-        if (recordingPttKey && isModifierKey(key))
-            recordPttKey(key, ShortcutController::eventModifiers(event));
+        if (recordingKeybind && isModifierKey(key))
+            recordConfiguredKey(key, ShortcutController::eventModifiers(event));
     }, regionRoot);
 
     listen("keydown", [this](::Rml::Event &event) {
-        if (recordingPttKey) {
+        if (recordingKeybind) {
             const int key = event.GetParameter<int>("key_identifier", 0);
             if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE) {
-                stopRecordingPttKey();
-                render();
-                requestRender(100);
+                stopRecordingKeybind();
+                refreshKeybinds();
             } else if (!isModifierKey(key)) {
-                recordPttKey(key, ShortcutController::eventModifiers(event));
+                recordConfiguredKey(key, ShortcutController::eventModifiers(event));
             }
             event.StopPropagation();
             return;
@@ -1016,12 +1066,31 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
 {
     if (action == std::string("close")) {
         shell.closeSettings();
-    } else if (action == std::string("record-ptt-key")) {
-        recordingPttKey = !recordingPttKey;
+    } else if (action == std::string("record-keybind")) {
+        const int rawAction = target ? target->GetAttribute<int>("data-keybind", -1) : -1;
+        if (rawAction < 0 || rawAction > 2)
+            return;
+        const auto act = static_cast<KeybindAction>(rawAction);
+        if (recordingKeybind && *recordingKeybind == act) {
+            stopRecordingKeybind();
+        } else {
+            recordingKeybind = act;
+            keybindError.clear();
+            if (auto *ptt = shell.pushToTalk())
+                ptt->setSuspended(true);
+        }
+        refreshKeybinds();
+    } else if (action == std::string("remove-keybind")) {
+        const int rawAction = target ? target->GetAttribute<int>("data-keybind", -1) : -1;
+        if (rawAction < 0 || rawAction > 2)
+            return;
+        const auto act = static_cast<KeybindAction>(rawAction);
         if (auto *ptt = shell.pushToTalk())
-            ptt->setSuspended(recordingPttKey);
-        render();
-        requestRender(100);
+            ptt->setSuspended(true);
+        storeKeybind(act, KeyBinding{});
+        applyPushToTalk();
+        stopRecordingKeybind();
+        refreshKeybinds();
     } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
     } else if (action == std::string("open-acheron")) {
@@ -1101,26 +1170,53 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
     }
 }
 
-void SettingsController::recordPttKey(int key, int rmlModifiers)
+void SettingsController::refreshKeybinds()
 {
-    set(Keys::VoicePushToTalkKey, keyBindingToJson(recordKeyBinding(key, rmlModifiers)));
-    applyPushToTalk();
-    stopRecordingPttKey();
     render();
+    if (recordingKeybind && regionRoot) {
+        const std::string btnId = "record-keybind-" + std::to_string(static_cast<int>(*recordingKeybind));
+        if (auto *btn = regionRoot->GetElementById(btnId))
+            btn->Focus();
+    }
     requestRender(100);
 }
 
-void SettingsController::stopRecordingPttKey()
+void SettingsController::recordConfiguredKey(int key, int rmlModifiers)
 {
-    if (!recordingPttKey)
+    if (!recordingKeybind)
         return;
-    recordingPttKey = false;
-    if (auto *ptt = shell.pushToTalk())
+
+    const auto binding = recordKeyBinding(key, rmlModifiers);
+    if (!binding.valid())
+        return;
+
+    const auto action = *recordingKeybind;
+    const auto configured = loadKeybinds();
+    const auto conflict = keybindConflictText(action, binding, configured);
+    if (!conflict.empty()) {
+        keybindError = conflict;
+        refreshKeybinds();
+        return;
+    }
+
+    storeKeybind(action, binding);
+    applyPushToTalk();
+    stopRecordingKeybind();
+    refreshKeybinds();
+}
+
+void SettingsController::stopRecordingKeybind()
+{
+    recordingKeybind.reset();
+    keybindError.clear();
+    if (auto *ptt = shell.pushToTalk(); ptt && ptt->isSuspended())
         ptt->setSuspended(false);
 }
 
 void SettingsController::applyPushToTalk()
 {
+    ShortcutController::reloadKeybinds();
+
     if (auto *ptt = shell.pushToTalk())
         ptt->reload();
 
