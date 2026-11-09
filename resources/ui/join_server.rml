@@ -1,0 +1,22 @@
+<rml>
+<head>
+    <title>Join a Server</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="join_server.rcss"/>
+</head>
+<body id="join-server-body">
+    <div class="join-server-backdrop" data-action="close"></div>
+    <div class="join-server-popover">
+        <div class="join-server-title">Join a Server</div>
+        <div class="join-server-subtitle">Enter an invite below to join an existing server.</div>
+        <input id="join-server-input" class="join-server-input" type="text" placeholder="https://discord.gg/hTKzmak"/>
+        <div id="join-server-preview" class="join-server-preview" style="display: none;"></div>
+        <div id="join-server-error" class="join-server-error" style="display: none;"></div>
+        <div class="join-server-buttons">
+            <button class="join-server-cancel" data-action="close">Cancel</button>
+            <button id="join-server-confirm" class="join-server-confirm" data-action="confirm">Join Server</button>
+        </div>
+    </div>
+</body>
+</rml>

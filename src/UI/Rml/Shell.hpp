@@ -39,6 +39,7 @@ class ThreadBrowserController;
 class SearchController;
 class ExpressionPickerController;
 class ShortcutController;
+class JoinServerController;
 }
 struct Location {
     Core::Snowflake accountId, guildId, channelId;
@@ -117,6 +118,9 @@ public:
     void openThreadBrowser(Core::Snowflake channelId);
     // Message search for the current server, or for the DM channelId at home.
     void openSearch(Core::Snowflake channelId, const std::string &scopeName);
+    // The Join a Server dialog, looking code up at once unless it's empty. location is where the
+    // invite was opened, sent to Discord as context ("Join Guild", "Markdown Link").
+    void openJoinServer(const std::string &code, const std::string &location);
     void applyCloseToTray();
     // Shows the current mention count on the taskbar, or clears it when the setting is off.
     void refreshTaskbarBadge();
@@ -180,6 +184,7 @@ private:
     std::unique_ptr<Rml::ForumController> forumController;
     std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;
     std::unique_ptr<Rml::SearchController> searchController;
+    std::unique_ptr<Rml::JoinServerController> joinServerController;
     // Declared after the controllers so it, and the handlers pointing into them, goes first.
     std::unique_ptr<Rml::ShortcutController> shortcutController;
 };

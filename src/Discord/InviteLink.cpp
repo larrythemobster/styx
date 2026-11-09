@@ -21,6 +21,52 @@ bool stripPrefixCaseInsensitive(std::string_view &str, std::string_view prefix)
     return false;
 }
 
+std::string_view stripSchemeAndWww(std::string_view text)
+{
+    std::string_view s = Platform::trim(text);
+    if (!stripPrefixCaseInsensitive(s, "https://"))
+        stripPrefixCaseInsensitive(s, "http://");
+    stripPrefixCaseInsensitive(s, "www.");
+    return s;
+}
+
+std::optional<std::string_view> codeAfterHost(std::string_view text)
+{
+    std::string_view s = stripSchemeAndWww(text);
+
+    static constexpr std::string_view hosts[] = {
+        "discord.gg/",
+        "discord.com/invite/",
+        "discordapp.com/invite/",
+        "ptb.discord.com/invite/",
+        "canary.discord.com/invite/",
+    };
+
+    for (std::string_view host : hosts) {
+        if (stripPrefixCaseInsensitive(s, host)) {
+            const size_t end = s.find_first_of("/?#");
+            if (end != std::string_view::npos)
+                s = s.substr(0, end);
+            return s;
+        }
+    }
+    return std::nullopt;
+}
+
+bool validCode(std::string_view code)
+{
+    if (code.empty())
+        return false;
+
+    for (char c : code) {
+        const bool isAsciiLetter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        const bool isDigit = (c >= '0' && c <= '9');
+        if (!isAsciiLetter && !isDigit && c != '-')
+            return false;
+    }
+    return true;
+}
+
 std::string stringOrEmpty(const nlohmann::json &obj, const char *key)
 {
     if (obj.is_object()) {
@@ -35,40 +81,19 @@ std::string stringOrEmpty(const nlohmann::json &obj, const char *key)
 
 std::optional<std::string> parseInviteCode(std::string_view text)
 {
-    std::string_view s = Platform::trim(text);
-    if (!stripPrefixCaseInsensitive(s, "https://"))
-        stripPrefixCaseInsensitive(s, "http://");
-    stripPrefixCaseInsensitive(s, "www.");
-
-    static constexpr std::string_view hosts[] = {
-        "discord.gg/",
-        "discord.com/invite/",
-        "discordapp.com/invite/",
-        "ptb.discord.com/invite/",
-        "canary.discord.com/invite/",
-    };
-
-    std::string_view code = s;
-    for (std::string_view host : hosts) {
-        if (stripPrefixCaseInsensitive(code, host)) {
-            const size_t end = code.find_first_of("/?#");
-            if (end != std::string_view::npos)
-                code = code.substr(0, end);
-            break;
-        }
-    }
-
-    if (code.empty())
+    const auto hostCode = codeAfterHost(text);
+    const std::string_view code = hostCode ? *hostCode : stripSchemeAndWww(text);
+    if (!validCode(code))
         return std::nullopt;
-
-    for (char c : code) {
-        const bool isAsciiLetter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-        const bool isDigit = (c >= '0' && c <= '9');
-        if (!isAsciiLetter && !isDigit && c != '-')
-            return std::nullopt;
-    }
-
     return std::string(code);
+}
+
+std::optional<std::string> parseInviteLink(std::string_view text)
+{
+    const auto code = codeAfterHost(text);
+    if (!code || !validCode(*code))
+        return std::nullopt;
+    return std::string(*code);
 }
 
 InvitePreview parseInvitePreview(const nlohmann::json &invite)

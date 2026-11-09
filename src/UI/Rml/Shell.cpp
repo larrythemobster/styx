@@ -20,6 +20,7 @@
 #include "SettingsController.hpp"
 #include "ThreadBrowserController.hpp"
 #include "SearchController.hpp"
+#include "JoinServerController.hpp"
 #include "SwitcherController.hpp"
 #include "ShortcutController.hpp"
 #include "ShortcutsHelpController.hpp"
@@ -714,6 +715,12 @@ void Shell::openSearch(Snowflake channel, const std::string &scopeName)
         track(searchController->resultActivated.connect([this](Snowflake resultChannel, Snowflake message) { jumpToMessage(resultChannel, message); }));
     }
     searchController->open(instance, guild, channel, scopeName);
+}
+void Shell::openJoinServer(const std::string &code, const std::string &location)
+{
+    if (!instance) return;
+    if (!joinServerController) joinServerController = std::make_unique<Rml::JoinServerController>(*this);
+    joinServerController->open(code, location);
 }
 std::vector<NavigationEntry> Shell::channelNavigation() const
 {

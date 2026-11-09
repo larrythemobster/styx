@@ -171,6 +171,21 @@ body.rail-folder-open .rail-expanded
 	image-color: #ffffff;
 }
 
+.kind-add .rail-btn img.rail-icon
+{
+	image-color: #23a55a;
+}
+
+.kind-add .rail-btn:hover
+{
+	background-color: #23a55a;
+}
+
+.kind-add .rail-btn:hover img.rail-icon
+{
+	image-color: #ffffff;
+}
+
 .rail-monogram
 {
 	font-size: 14dp;

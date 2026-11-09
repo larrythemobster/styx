@@ -52,6 +52,8 @@ private:
     void updateHeader();
     // Message search for this server, or for this DM at home.
     void openSearch();
+    // Invite links open the Join a Server dialog; other links ask before opening the browser.
+    void openLink(const std::string &url);
     // Scrolls the messages one page up (-1) or down (1); false when the chat isn't showing.
     bool scrollMessagesByPage(int direction);
     // Marks the open channel read; false when it's already read or the composer wants Escape.

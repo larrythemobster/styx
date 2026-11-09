@@ -26,6 +26,18 @@ TEST_CASE("parseInviteCode extracts invite codes from various link formats and r
     REQUIRE_FALSE(parseInviteCode("discord.com/channels/1/2").has_value());
 }
 
+TEST_CASE("parseInviteLink extracts codes only from invite links", "[invite]")
+{
+    REQUIRE(parseInviteLink("https://discord.gg/abc") == "abc");
+    REQUIRE(parseInviteLink("discord.com/invite/xyz?x=1") == "xyz");
+
+    REQUIRE_FALSE(parseInviteLink("abc123").has_value());
+    REQUIRE_FALSE(parseInviteLink("https://example.com").has_value());
+    REQUIRE_FALSE(parseInviteLink("https://example.com/invite/abc").has_value());
+    REQUIRE_FALSE(parseInviteLink("https://discord.com/channels/1/2").has_value());
+    REQUIRE_FALSE(parseInviteLink("https://foo").has_value());
+}
+
 TEST_CASE("parseInvitePreview parses all fields from a full invite payload", "[invite]")
 {
     const auto doc = nlohmann::json::parse(R"({

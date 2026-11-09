@@ -17,6 +17,7 @@
 #include "Core/UserManager.hpp"
 
 #include "Discord/ChannelLink.hpp"
+#include "Discord/InviteLink.hpp"
 #include "Discord/Client.hpp"
 #include "Discord/Entities.hpp"
 
@@ -232,14 +233,7 @@ void ChatController::setupEventListeners()
                         shell.openChannel(currentAccountId, link->guildId, link->channelId);
                     return;
                 }
-                Rml::showConfirmModal(
-                    shell,
-                    std::string("External Link"),
-                    "Are you sure you want to open <b>" + escape(url) + "</b>?",
-                    std::string("Open Link"),
-                    [url]() { Platform::Desktop::openUrl(url); },
-                    nullptr,
-                    false);
+                openLink(url);
                 return;
             }
             return;
@@ -368,15 +362,7 @@ void ChatController::setupEventListeners()
                     shell.openChannel(currentAccountId, link->guildId, link->channelId);
             }
         } else if (action == std::string("link")) {
-            std::string url = attribute(actionEl, "data-href");
-            Rml::showConfirmModal(
-                shell,
-                std::string("External Link"),
-                "Are you sure you want to open <b>" + escape(url) + "</b>?",
-                std::string("Open Link"),
-                [url]() { Platform::Desktop::openUrl(url); },
-                nullptr,
-                false);
+            openLink(attribute(actionEl, "data-href"));
         }
     });
 
@@ -487,6 +473,22 @@ void ChatController::setupEventListeners()
             }
         }, composerEl, true);
     }
+}
+
+void ChatController::openLink(const std::string &url)
+{
+    if (auto code = Discord::parseInviteLink(url)) {
+        shell.openJoinServer(*code, "Markdown Link");
+        return;
+    }
+    Rml::showConfirmModal(
+        shell,
+        std::string("External Link"),
+        "Are you sure you want to open <b>" + escape(url) + "</b>?",
+        std::string("Open Link"),
+        [url]() { Platform::Desktop::openUrl(url); },
+        nullptr,
+        false);
 }
 
 void ChatController::setupModelConnections()

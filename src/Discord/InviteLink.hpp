@@ -15,6 +15,9 @@ namespace Styx::Discord {
 // discord.com/invite/abc123, discordapp.com/invite/abc123 and the ptb./canary. hosts, with or
 // without https:// and www., ignoring any query or fragment. Nothing for anything else.
 [[nodiscard]] std::optional<std::string> parseInviteCode(std::string_view text);
+// Like parseInviteCode but only for invite links: a bare word, or a link to any other site,
+// gives nothing. Chat links use this, since every URL would otherwise look like a raw code.
+[[nodiscard]] std::optional<std::string> parseInviteLink(std::string_view text);
 
 // What GET /invites/{code}?with_counts=true&with_expiration=true says about an invite.
 struct InvitePreview
