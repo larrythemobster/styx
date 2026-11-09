@@ -64,6 +64,7 @@
 #include <algorithm>
 #include <format>
 #include <filesystem>
+#include <functional>
 #include <system_error>
 
 namespace Styx::UI {
@@ -252,7 +253,14 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     auto picker = std::make_unique<Rml::ExpressionPickerController>(*this);
     expressionPickerController = picker.get(); controllers.push_back(std::move(picker));
     auto switcher = std::make_unique<Rml::SwitcherController>(*this);
-    shortcutController->setHandler(Rml::ShortcutAction::QuickSwitcher, [s = switcher.get()] { s->isOpen() ? s->close() : s->open(); });
+    using Rml::ShortcutAction;
+    shortcutController->setHandler(ShortcutAction::QuickSwitcher, [s = switcher.get()] { s->isOpen() ? s->close() : s->open(); return true; });
+    shortcutController->setHandler(ShortcutAction::PreviousChannel, [this] { stepChannel(-1, false); return true; });
+    shortcutController->setHandler(ShortcutAction::NextChannel, [this] { stepChannel(1, false); return true; });
+    shortcutController->setHandler(ShortcutAction::PreviousUnreadChannel, [this] { stepChannel(-1, true); return true; });
+    shortcutController->setHandler(ShortcutAction::NextUnreadChannel, [this] { stepChannel(1, true); return true; });
+    shortcutController->setHandler(ShortcutAction::PreviousServer, [this] { stepServer(-1); return true; });
+    shortcutController->setHandler(ShortcutAction::NextServer, [this] { stepServer(1); return true; });
     controllers.push_back(std::move(switcher));
     accountsController = std::make_unique<Rml::AccountsController>(*this);
     if (accountsModel->rowCount() == 0) accountsController->showLogin();
@@ -703,6 +711,44 @@ void Shell::openSearch(Snowflake channel, const std::string &scopeName)
         track(searchController->resultActivated.connect([this](Snowflake resultChannel, Snowflake message) { jumpToMessage(resultChannel, message); }));
     }
     searchController->open(instance, guild, channel, scopeName);
+}
+std::vector<NavigationEntry> Shell::channelNavigation() const
+{
+    std::vector<NavigationEntry> entries;
+    auto add = [&entries](const ChannelNode *node) { entries.push_back({node->id, node->isUnread && !node->isMuted}); };
+    if (current.isHome()) {
+        if (auto *header = channelTreeModel->dmHeaderNode(current.accountId))
+            for (auto *node : channelFilterProxy->children(header)) add(node);
+        return entries;
+    }
+    // Walks what the sidebar shows: categories, then channels and the threads under them.
+    std::function<void(ChannelNode *)> walk = [&](ChannelNode *parent) {
+        for (auto *node : channelFilterProxy->children(parent)) {
+            if (node->type == ChannelNode::Type::Channel || node->type == ChannelNode::Type::Forum || node->type == ChannelNode::Type::Thread) add(node);
+            if (node->type != ChannelNode::Type::VoiceChannel) walk(node);
+        }
+    };
+    if (auto *server = channelTreeModel->serverNode(current.accountId, current.guildId)) walk(server);
+    return entries;
+}
+std::vector<NavigationEntry> Shell::serverNavigation() const
+{
+    std::vector<NavigationEntry> entries{{Snowflake::Invalid, false}};
+    for (const auto &row : serverRailModel->rows())
+        if (row.kind == ServerRailModel::Kind::Server && row.accountId == current.accountId) entries.push_back({row.id, serverRailModel->isUnread(row)});
+    return entries;
+}
+void Shell::stepChannel(int direction, bool unreadOnly)
+{
+    if (auto target = stepNavigation(channelNavigation(), current.channelId, direction, unreadOnly))
+        openChannel(current.accountId, current.guildId, *target);
+}
+void Shell::stepServer(int direction)
+{
+    auto target = stepNavigation(serverNavigation(), current.guildId, direction, false);
+    if (!target) return;
+    if (target->isValid()) openGuild(current.accountId, *target);
+    else openHome(current.accountId);
 }
 void Shell::showContextMenu(std::vector<Rml::MenuItem> items) { if (contextMenu) contextMenu->show(std::move(items), mapFromGlobal(Platform::Desktop::cursorPosition())); }
 void Shell::showContextMenuForUser(Snowflake userId, Snowflake guild)

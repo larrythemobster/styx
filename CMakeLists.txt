@@ -224,6 +224,7 @@ set(PROJECT_SOURCES
     src/UI/Accounts/AccountsModel.cpp
     src/UI/ChannelList/ChannelTreeModel.cpp
     src/UI/ChannelList/ChannelFilterProxyModel.cpp
+    src/UI/ChannelList/Navigation.cpp
     src/UI/ChannelList/ServerRailModel.cpp
     src/UI/Chat/ChatModel.cpp
     src/UI/Chat/GifPlayback.cpp
@@ -397,6 +398,7 @@ if(BUILD_TESTS)
     styx_test(TestQuickSwitcher QuickSwitcherTests tests/tst_QuickSwitcher.cpp src/Core/QuickSwitcher.cpp src/Core/Snowflake.cpp)
     styx_test(TestShortcuts ShortcutsTests tests/tst_Shortcuts.cpp src/UI/Rml/Shortcuts.cpp)
     target_link_libraries(TestShortcuts PRIVATE RmlUi::RmlUi)
+    styx_test(TestNavigation NavigationTests tests/tst_Navigation.cpp src/UI/ChannelList/Navigation.cpp src/Core/Snowflake.cpp)
     styx_test(TestSounds SoundsTests tests/tst_Sounds.cpp src/Core/Audio/Sounds.cpp src/Core/Audio/SoundMixer.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)

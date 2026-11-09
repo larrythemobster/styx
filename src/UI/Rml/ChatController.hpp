@@ -50,6 +50,8 @@ private:
     void updateHeader();
     // Message search for this server, or for this DM at home.
     void openSearch();
+    // Scrolls the messages one page up (-1) or down (1); false when the chat isn't showing.
+    bool scrollMessagesByPage(int direction);
     void updateTyping();
     void updateComposer();
     void updateComposerPlaceholder();

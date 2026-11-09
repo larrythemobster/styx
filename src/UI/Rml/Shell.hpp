@@ -3,6 +3,7 @@
 #include "RmlView.hpp"
 #include "ContextMenu.hpp"
 #include "Core/Snowflake.hpp"
+#include "UI/ChannelList/Navigation.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -133,6 +134,13 @@ private:
     void restoreLastLocation(Core::Snowflake accountId);
     bool channelReadable(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId) const;
     Core::Snowflake firstReadableChannel(Core::Snowflake accountId, Core::Snowflake guildId) const;
+    // The current server's channels, or the DMs at home, in sidebar order; voice channels are
+    // left out so an arrow key never joins a call.
+    std::vector<NavigationEntry> channelNavigation() const;
+    // Home (id Invalid) and the current account's servers in rail order.
+    std::vector<NavigationEntry> serverNavigation() const;
+    void stepChannel(int direction, bool unreadOnly);
+    void stepServer(int direction);
     void showFromTray();
     void quitFromTray();
     Core::Session *coreSession;

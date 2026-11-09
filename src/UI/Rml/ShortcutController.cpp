@@ -20,16 +20,14 @@ ShortcutController::ShortcutController(Shell &shell)
             const auto action = actionFor(event);
             if (action) {
                 const auto it = handlers.find(*action);
-                if (it != handlers.end()) {
+                if (it != handlers.end() && it->second())
                     event.StopPropagation();
-                    it->second();
-                }
             }
         }, doc, true);
     }
 }
 
-void ShortcutController::setHandler(ShortcutAction action, std::function<void()> handler)
+void ShortcutController::setHandler(ShortcutAction action, std::function<bool()> handler)
 {
     handlers.insert_or_assign(action, std::move(handler));
 }

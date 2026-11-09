@@ -22,9 +22,10 @@ class ShortcutController final : public Controller
 public:
     explicit ShortcutController(Shell &shell);
 
-    // One handler per action; setting it again replaces the old one. Actions without a handler
-    // let the key press through.
-    void setHandler(ShortcutAction action, std::function<void()> handler);
+    // One handler per action; setting it again replaces the old one. A handler returns whether
+    // it acted: when it didn't, or there's no handler, the key reaches the focused element as
+    // usual. Bare keys such as Page Up rely on this to leave text boxes alone when idle.
+    void setHandler(ShortcutAction action, std::function<bool()> handler);
     [[nodiscard]] bool hasHandler(ShortcutAction action) const;
 
     // The action a keydown event asks for, for popovers in their own documents that the main
@@ -32,7 +33,7 @@ public:
     [[nodiscard]] static std::optional<ShortcutAction> actionFor(::Rml::Event &event);
 
 private:
-    std::unordered_map<ShortcutAction, std::function<void()>> handlers;
+    std::unordered_map<ShortcutAction, std::function<bool()>> handlers;
 };
 
 } // namespace Rml

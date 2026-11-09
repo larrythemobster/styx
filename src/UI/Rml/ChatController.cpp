@@ -134,14 +134,28 @@ ChatController::ChatController(Shell &shell, ::Rml::Element *root)
     initElements();
     setupEventListeners();
     setupModelConnections();
-    if (auto *shortcuts = shell.shortcuts())
-        shortcuts->setHandler(ShortcutAction::Search, [this] { openSearch(); });
+    if (auto *shortcuts = shell.shortcuts()) {
+        shortcuts->setHandler(ShortcutAction::Search, [this] { openSearch(); return true; });
+        shortcuts->setHandler(ShortcutAction::ScrollUp, [this] { return scrollMessagesByPage(-1); });
+        shortcuts->setHandler(ShortcutAction::ScrollDown, [this] { return scrollMessagesByPage(1); });
+    }
 
     currentChannelId = shell.location().channelId;
     currentGuildId = shell.location().guildId;
     currentAccountId = shell.location().accountId;
 
     onInstanceChanged(shell.currentInstance());
+}
+
+bool ChatController::scrollMessagesByPage(int direction)
+{
+    // The settings overlay and Friends page cover the chat; their own text boxes keep the key.
+    if (!messagesEl || shell.isSettingsOpen() || shell.isFriendsOpen())
+        return false;
+    // A little overlap so the line at the edge stays in view, as browsers do.
+    messagesEl->SetScrollTop(messagesEl->GetScrollTop() + direction * messagesEl->GetClientHeight() * 0.9f);
+    requestRender();
+    return true;
 }
 
 ChatController::~ChatController() = default;
