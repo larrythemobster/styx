@@ -593,6 +593,15 @@ void ChatController::onLocationChanged(const Location &location)
     currentChannelId = location.channelId;
     currentGuildId = location.guildId;
     currentAccountId = location.accountId;
+    // Load the channel's slash commands ahead of the first "/"; the cache fetches each
+    // scope once per session.
+    if (Core::ClientInstance *instance = shell.instanceFor(location.accountId); instance && location.channelId.isValid()) {
+        using Scope = Core::CommandIndexCache::Scope;
+        using Kind = Core::CommandIndexCache::ScopeKind;
+        auto *indexes = instance->commandIndexes();
+        indexes->request(location.guildId.isValid() ? Scope{ Kind::Guild, location.guildId } : Scope{ Kind::Channel, location.channelId });
+        indexes->request(Scope{ Kind::User, Core::Snowflake::Invalid });
+    }
     if (textareaEl)
         textareaEl->SetValue("");
 

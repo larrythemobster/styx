@@ -167,6 +167,7 @@ set(PROJECT_SOURCES
     src/Core/Logging.cpp
     src/Core/MessageManager.cpp
     src/Core/EphemeralMessages.cpp
+    src/Core/CommandIndexCache.cpp
     src/Core/MessageReactors.cpp
     src/Core/MessageSegments.cpp
     src/Core/ForumManager.cpp
@@ -254,6 +255,7 @@ set(PROJECT_SOURCES
     src/Discord/ClientMessages.cpp
     src/Discord/ClientInteractions.cpp
     src/Discord/ComponentInteraction.cpp
+    src/Discord/ApplicationCommands.cpp
     src/Discord/MessageSearch.cpp
     src/Discord/InviteLink.cpp
     src/Discord/GuildCreate.cpp
@@ -473,6 +475,10 @@ if(BUILD_TESTS)
     styx_test(TestComponentInteractions ComponentInteractionTests
         tests/tst_ComponentInteraction.cpp tests/tst_InteractionEvents.cpp
         src/Discord/ComponentInteraction.cpp src/Core/Snowflake.cpp)
+    styx_test(TestApplicationCommands ApplicationCommandTests tests/tst_ApplicationCommands.cpp
+        src/Discord/ApplicationCommands.cpp src/Core/Snowflake.cpp)
+    styx_test(TestCommandIndexCache CommandIndexCacheTests tests/tst_CommandIndexCache.cpp
+        src/Core/CommandIndexCache.cpp src/Core/Snowflake.cpp)
     styx_test(TestEphemeralMessages EphemeralMessageTests tests/tst_EphemeralMessages.cpp
         src/Core/EphemeralMessages.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageSearch MessageSearchTests tests/tst_MessageSearch.cpp src/Discord/MessageSearch.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)

@@ -15,6 +15,7 @@ namespace Styx::Platform {
 class Database;
 }
 #include "AccountInfo.hpp"
+#include "CommandIndexCache.hpp"
 #include "Discord/Client.hpp"
 #include "Emoji/EmojiManager.hpp"
 #include "Gifs/FavoriteGifs.hpp"
@@ -70,6 +71,7 @@ public:
     [[nodiscard]] EmojiManager *emojis() const;
     [[nodiscard]] FavoriteGifs *favoriteGifs() const;
     [[nodiscard]] CallStore *calls() const;
+    [[nodiscard]] CommandIndexCache *commandIndexes() const;
 #ifndef STYX_NO_VOICE
     [[nodiscard]] Audio::VoiceManager *voice() const;
 #endif
@@ -226,6 +228,7 @@ private:
     std::unique_ptr<Stream::StreamManager> streamManager;
 #endif
     std::unique_ptr<CallStore> callStore;
+    std::unique_ptr<CommandIndexCache> commandIndexCache;
     Snowflake selectedChannelId;
     std::string gatewaySessionId;
 

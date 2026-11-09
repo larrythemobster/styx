@@ -80,6 +80,22 @@ ClientInstance::ClientInstance(const AccountInfo &info,
     messageManager->setEmojiManager(emojiManager.get());
 
     callStore = std::make_unique<CallStore>();
+    commandIndexCache = std::make_unique<CommandIndexCache>(
+        [discord = client.get()](CommandIndexCache::Scope scope, CommandIndexCache::FetchCallback done) {
+            switch (scope.kind) {
+            case CommandIndexCache::ScopeKind::Guild:
+                discord->fetchGuildCommandIndex(scope.id, std::move(done));
+                break;
+            case CommandIndexCache::ScopeKind::Channel:
+                discord->fetchChannelCommandIndex(scope.id, std::move(done));
+                break;
+            case CommandIndexCache::ScopeKind::User:
+                discord->fetchUserCommandIndex(std::move(done));
+                break;
+            }
+        });
+    // A new session may come with different apps installed.
+    track(client->ready.connect([this](const auto &) { commandIndexCache->clear(); }));
     track(client->callCreated.connect([this](auto &&...args) { onCallCreated(args...); }));
     track(client->callUpdated.connect([this](const Discord::CallUpdate &event) {
         callStore->handleCallUpdate(event);
@@ -1600,6 +1616,11 @@ FavoriteGifs *ClientInstance::favoriteGifs() const
 CallStore *ClientInstance::calls() const
 {
     return callStore.get();
+}
+
+CommandIndexCache *ClientInstance::commandIndexes() const
+{
+    return commandIndexCache.get();
 }
 
 #ifndef STYX_NO_VOICE

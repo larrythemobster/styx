@@ -33,6 +33,7 @@
 #include "HttpClient.hpp"
 #include "ClientIdentity.hpp"
 #include "ComponentInteraction.hpp"
+#include "ApplicationCommands.hpp"
 
 using Styx::Core::Snowflake;
 
@@ -219,6 +220,10 @@ public:
 
     // REST admission only; interactionSucceeded/interactionFailed report the application's result.
     void createComponentInteraction(const ComponentInteractionRequest &request, ActionCallback callback = {});
+    // Slash command indexes: a server's apps, a DM's or group DM's, and the user's own.
+    void fetchGuildCommandIndex(Snowflake guildId, ResultCallback<ApplicationCommandIndex> callback);
+    void fetchChannelCommandIndex(Snowflake channelId, ResultCallback<ApplicationCommandIndex> callback);
+    void fetchUserCommandIndex(ResultCallback<ApplicationCommandIndex> callback);
     void modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<User> callback = {});
     void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
     void modifyPreloadedSettings(Proto::PreloadedSettingsEdit edit, ActionCallback callback = {});

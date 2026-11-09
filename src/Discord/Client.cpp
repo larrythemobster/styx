@@ -852,6 +852,32 @@ HttpCallback Client::applyThen(std::function<void(const nlohmann::json &)> apply
     };
 }
 
+namespace {
+
+constexpr auto parseCommandIndex = [](const nlohmann::json &document) {
+    return parseApplicationCommandIndex(document);
+};
+
+} // namespace
+
+void Client::fetchGuildCommandIndex(Snowflake guildId, ResultCallback<ApplicationCommandIndex> callback)
+{
+    httpClient->get(guildEndpoint(guildId, "/application-command-index"), {},
+        valueHandler<ApplicationCommandIndex>("Fetching guild command index", std::move(callback), parseCommandIndex));
+}
+
+void Client::fetchChannelCommandIndex(Snowflake channelId, ResultCallback<ApplicationCommandIndex> callback)
+{
+    httpClient->get("/channels/" + channelId.toString() + "/application-command-index", {},
+        valueHandler<ApplicationCommandIndex>("Fetching channel command index", std::move(callback), parseCommandIndex));
+}
+
+void Client::fetchUserCommandIndex(ResultCallback<ApplicationCommandIndex> callback)
+{
+    httpClient->get("/users/@me/application-command-index", {},
+        valueHandler<ApplicationCommandIndex>("Fetching user command index", std::move(callback), parseCommandIndex));
+}
+
 void Client::fetchGuildProfile(Snowflake guildId, ResultCallback<GuildProfileEdit> callback)
 {
     httpClient->get(guildEndpoint(guildId, "/profile"), {},
