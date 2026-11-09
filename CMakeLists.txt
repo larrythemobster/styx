@@ -234,6 +234,7 @@ set(PROJECT_SOURCES
     src/UI/Chat/InteractionTracker.cpp
     src/UI/Chat/SelectDraft.cpp
     src/UI/Chat/SelectCandidates.cpp
+    src/UI/Chat/SlashCommands.cpp
     src/UI/ChannelList/ServerRailModel.cpp
     src/UI/Chat/ChatModel.cpp
     src/UI/Chat/GifPlayback.cpp
@@ -290,6 +291,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/UserPanelController.cpp
     src/UI/Rml/CustomStatusController.cpp
     src/UI/Rml/ChatController.cpp
+    src/UI/Rml/SlashCommandPicker.cpp
     src/UI/Rml/ComponentRenderer.cpp
     src/UI/Rml/MemberListController.cpp
     src/UI/Rml/FriendsController.cpp
@@ -428,6 +430,7 @@ if(BUILD_TESTS)
     styx_test(TestInteractionTracker InteractionTrackerTests tests/tst_InteractionTracker.cpp src/UI/Chat/InteractionTracker.cpp src/Core/Snowflake.cpp)
     styx_test(TestSelectDraft SelectDraftTests tests/tst_SelectDraft.cpp src/UI/Chat/SelectDraft.cpp)
     styx_test(TestSelectCandidates SelectCandidatesTests tests/tst_SelectCandidates.cpp src/UI/Chat/SelectCandidates.cpp)
+    styx_test(TestSlashCommands SlashCommandTests tests/tst_SlashCommands.cpp src/UI/Chat/SlashCommands.cpp src/Core/Snowflake.cpp)
     styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)
     styx_test(TestGuildCreate GuildCreateTests tests/tst_GuildCreate.cpp src/Discord/GuildCreate.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestUserEdits UserEditsTests tests/tst_UserEdits.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)

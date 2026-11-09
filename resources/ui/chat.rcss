@@ -1032,6 +1032,64 @@
 	box-sizing: border-box;
 }
 
+/* Slash command picker, above the composer row */
+.command-picker
+{
+	display: none;
+	max-height: 320dp;
+	overflow-y: auto;
+	padding: 8dp;
+	border-bottom: 1dp #27272b;
+	box-sizing: border-box;
+}
+.command-picker-title
+{
+	font-size: 12dp;
+	font-weight: bold;
+	color: #949ba4;
+	padding: 0 8dp 6dp 8dp;
+}
+.command-picker-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 8dp;
+	padding: 6dp 8dp;
+	border-radius: 4dp;
+	cursor: pointer;
+}
+.command-picker-row:hover,
+.command-picker-row.active { background-color: #2b2d31; }
+.command-picker-name
+{
+	font-size: 14dp;
+	font-weight: 600;
+	color: #f2f3f5;
+	flex-shrink: 0;
+}
+.command-picker-description
+{
+	flex: 1;
+	min-width: 0;
+	font-size: 13dp;
+	color: #b5bac1;
+	overflow: hidden;
+	white-space: nowrap;
+}
+.command-picker-app
+{
+	flex-shrink: 0;
+	font-size: 12dp;
+	color: #949ba4;
+}
+.command-picker-empty
+{
+	padding: 6dp 8dp;
+	font-size: 14dp;
+	color: #949ba4;
+}
+
 .composer-btn
 {
     width: 40dp;

@@ -363,6 +363,10 @@ void ChatController::setupEventListeners()
                                    attribute(actionEl, "data-component-path"),
                                    static_cast<int>(parseNumber(attribute(actionEl, "data-option-index"))),
                                    attribute(actionEl, "data-value"));
+        } else if (action == std::string("command-picker-choose")) {
+            if (const SlashCommandEntry *entry = commandPicker.entryAt(parseNumber(attribute(actionEl, "data-index"))))
+                chooseCommand(*entry);
+            requestRender();
         } else if (action == std::string("toggle-reaction")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages()) {
@@ -475,10 +479,27 @@ void ChatController::setupEventListeners()
     if (composerEl) {
         listen("change", [this](::Rml::Event &) {
             updateComposerPlaceholder();
+            updateCommandPicker();
         }, composerEl);
         listen("keydown", [this](::Rml::Event &event) {
             int key = event.GetParameter<int>("key_identifier", 0);
             const bool shift = event.GetParameter<int>("shift_key", 0) != 0;
+
+            if (commandPicker.isOpen()) {
+                using PickerKey = SlashCommandPicker::Key;
+                const bool choose = !shift && (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER || key == ::Rml::Input::KI_TAB);
+                const PickerKey pickerKey = key == ::Rml::Input::KI_UP ? PickerKey::Up
+                    : key == ::Rml::Input::KI_DOWN ? PickerKey::Down
+                    : choose ? PickerKey::Choose
+                    : key == ::Rml::Input::KI_ESCAPE ? PickerKey::Close : PickerKey::None;
+                if (pickerKey != PickerKey::None) {
+                    event.StopPropagation();
+                    if (const SlashCommandEntry *entry = commandPicker.press(pickerKey))
+                        chooseCommand(*entry);
+                    requestRender();
+                    return;
+                }
+            }
 
             if (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER) {
                 if (shift) {
@@ -496,6 +517,9 @@ void ChatController::setupEventListeners()
                         text = Platform::trim(textareaEl->GetValue());
 
                     if (text.empty() && pendingAttachments.empty())
+                        return;
+                    // A chosen command is never sent as plain text.
+                    if (chosenCommand)
                         return;
 
                     if (editingMessageId.isValid()) {
@@ -590,18 +614,15 @@ void ChatController::onLocationChanged(const Location &location)
     revealedComponentSpoilers.clear();
     interactions.clear();
     openSelect.reset();
+    chosenCommand.reset();
+    commandPicker.hide();
     currentChannelId = location.channelId;
     currentGuildId = location.guildId;
     currentAccountId = location.accountId;
     // Load the channel's slash commands ahead of the first "/"; the cache fetches each
     // scope once per session.
-    if (Core::ClientInstance *instance = shell.instanceFor(location.accountId); instance && location.channelId.isValid()) {
-        using Scope = Core::CommandIndexCache::Scope;
-        using Kind = Core::CommandIndexCache::ScopeKind;
-        auto *indexes = instance->commandIndexes();
-        indexes->request(location.guildId.isValid() ? Scope{ Kind::Guild, location.guildId } : Scope{ Kind::Channel, location.channelId });
-        indexes->request(Scope{ Kind::User, Core::Snowflake::Invalid });
-    }
+    if (Core::ClientInstance *instance = shell.instanceFor(location.accountId); instance && location.channelId.isValid())
+        requestCommandIndexes(*instance);
     if (textareaEl)
         textareaEl->SetValue("");
 
@@ -622,6 +643,8 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
     revealedComponentSpoilers.clear();
     interactions.clear();
     openSelect.reset();
+    chosenCommand.reset();
+    commandPicker.hide();
     for (auto &connection : instanceConnections)
         connection.disconnect();
     instanceConnections.clear();
@@ -644,6 +667,11 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
             instanceConnections.push_back(relationships->relationshipsReset.connect(
                 [this] { renderAllMessages(); }));
         }
+        instanceConnections.push_back(instance->commandIndexes()->indexReady.connect(
+            [this](Core::CommandIndexCache::Scope) {
+                if (commandPicker.isOpen())
+                    updateCommandPicker();
+            }));
         if (Discord::Client *client = instance->discord()) {
             instanceConnections.push_back(client->interactionCreated.connect(
                 [this](const Discord::InteractionCreate &event) {
@@ -1628,6 +1656,7 @@ void ChatController::updateComposer()
 
     std::string composerHtml = std::format("{0}"
         "{1}"
+        "<div id=\"command-picker\" class=\"command-picker\"></div>"
         "<div class=\"composer-main-row\">"
         "<div class=\"composer-btn\" data-action=\"composer-attach\" title=\"Attach file\"><img src=\"icon:image\" /></div>"
         "<div class=\"composer-input-wrap\">"
@@ -1639,7 +1668,9 @@ void ChatController::updateComposer()
         "{5}", replyBarHtml, attachmentsHtml, hasSendPermission ? std::string() : std::string(" composer-disabled"), Platform::htmlEscape(placeholder), hasSendPermission ? std::string() : std::string(" disabled"), slowmodeHtml);
 
     textareaEl = nullptr;
+    commandPicker.setHost(nullptr);
     composerEl->SetInnerRML(composerHtml);
+    commandPicker.setHost(composerEl->GetElementById("command-picker"));
     textareaEl = dynamic_cast<::Rml::ElementFormControlTextArea*>(composerEl->GetElementById("composer-input"));
     if (textareaEl) {
         textareaEl->SetValue(draft);
@@ -1776,6 +1807,60 @@ void ChatController::showMessageContextMenu(Core::Snowflake messageId)
         Platform::Desktop::setClipboardText(messageId.toString());
     } });
     shell.showContextMenu(std::move(menu));
+}
+
+std::pair<const Discord::ApplicationCommandIndex *, const Discord::ApplicationCommandIndex *>
+ChatController::requestCommandIndexes(Core::ClientInstance &instance) const
+{
+    using Scope = Core::CommandIndexCache::Scope;
+    using Kind = Core::CommandIndexCache::ScopeKind;
+    auto *indexes = instance.commandIndexes();
+    const auto *scopeIndex = indexes->request(currentGuildId.isValid() ? Scope{ Kind::Guild, currentGuildId }
+                                                                       : Scope{ Kind::Channel, currentChannelId });
+    return { scopeIndex, indexes->request(Scope{ Kind::User, Core::Snowflake::Invalid }) };
+}
+
+CommandContext ChatController::commandContext(Core::ClientInstance &instance) const
+{
+    if (currentGuildId.isValid())
+        return CommandContext::Guild;
+    const auto channel = instance.getChannel(currentChannelId);
+    const bool botDm = channel && channel->type.get() == Discord::ChannelType::DM && channel->recipients.hasValue()
+        && std::ranges::any_of(channel->recipients.get(), [](const Discord::User &user) { return user.bot.valueOr(false); });
+    return botDm ? CommandContext::BotDm : CommandContext::PrivateChannel;
+}
+
+void ChatController::updateCommandPicker()
+{
+    const std::string text = textareaEl ? std::string(textareaEl->GetValue()) : std::string();
+    if (chosenCommand && !text.starts_with("/" + chosenCommand->displayName + " "))
+        chosenCommand.reset();
+
+    const auto query = slashQuery(text);
+    Core::ClientInstance *instance = shell.currentInstance();
+    if (!query || chosenCommand || !instance || !hasSendPermission || editingMessageId.isValid()) {
+        commandPicker.hide();
+        requestRender();
+        return;
+    }
+    const auto [scopeIndex, userIndex] = requestCommandIndexes(*instance);
+    commandPicker.show(*query, availableSlashCommands(scopeIndex, userIndex, commandContext(*instance)),
+                       !scopeIndex || !userIndex);
+    requestRender();
+}
+
+void ChatController::chooseCommand(const SlashCommandEntry &entry)
+{
+    // Copy before hiding: the entry lives in the picker's list.
+    chosenCommand = entry;
+    commandPicker.hide();
+    if (!textareaEl)
+        return;
+    const std::string text = "/" + chosenCommand->displayName + " ";
+    textareaEl->SetValue(text);
+    textareaEl->SetSelectionRange(static_cast<int>(text.size()), static_cast<int>(text.size()));
+    textareaEl->Focus();
+    updateComposerPlaceholder();
 }
 
 void ChatController::openReactionPickerForMessage(Core::Snowflake messageId)

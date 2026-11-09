@@ -2,6 +2,7 @@
 
 #include "Controller.hpp"
 #include "Shell.hpp"
+#include "SlashCommandPicker.hpp"
 #include "Core/PendingAttachment.hpp"
 #include "Core/Snowflake.hpp"
 #include "UI/Chat/BlockedRuns.hpp"
@@ -12,6 +13,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include "Platform/Signal.hpp"
 
@@ -93,6 +95,14 @@ private:
     void setEditTarget(Core::Snowflake messageId, const std::string &content);
     void clearEditTarget();
     void showMessageContextMenu(Core::Snowflake messageId);
+    // Slash commands: the indexes for this channel (null while loading; asking starts the
+    // fetch), the context they are used in, and the picker's response to composer edits
+    // and choices.
+    std::pair<const Discord::ApplicationCommandIndex *, const Discord::ApplicationCommandIndex *>
+    requestCommandIndexes(Core::ClientInstance &instance) const;
+    [[nodiscard]] CommandContext commandContext(Core::ClientInstance &instance) const;
+    void updateCommandPicker();
+    void chooseCommand(const SlashCommandEntry &entry);
     void openReactionPickerForMessage(Core::Snowflake messageId);
     void openEmojiPickerForComposer();
 
@@ -135,6 +145,9 @@ private:
         std::string query;
     };
     std::optional<OpenSelect> openSelect;
+    SlashCommandPicker commandPicker;
+    // The command chosen in the picker while the composer still starts with its name.
+    std::optional<SlashCommandEntry> chosenCommand;
 
     std::vector<Platform::Connection> instanceConnections;
     Platform::Connection emojiConnection;
