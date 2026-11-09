@@ -716,3 +716,43 @@ TEST_CASE("Disabled bot/premium buttons and wire-disabled links are inert, safe 
     auto *disabledLinkActive = doc->QuerySelector("a[data-action='link'][data-href='https://example.com/disabled']");
     CHECK(disabledLinkActive == nullptr);
 }
+
+TEST_CASE("Interactive messages make only custom_id buttons clickable and resolve their paths", "[components][interactions]")
+{
+    TestViewFixture fixture;
+    std::vector<std::string> requestedUrls;
+    auto ctx = makeContext(requestedUrls);
+    ctx.interactive = true;
+    ctx.pendingPath = "0.1";
+
+    const Message message = parseMessage({ { "flags", 32768 }, { "components", {
+        { { "type", 1 }, { "id", 1 }, { "components", {
+            { { "type", 2 }, { "id", 2 }, { "style", 1 }, { "label", "Go" }, { "custom_id", "go" } },
+            { { "type", 2 }, { "id", 3 }, { "style", 3 }, { "label", "Busy" }, { "custom_id", "busy" } },
+            { { "type", 2 }, { "id", 4 }, { "style", 4 }, { "label", "Off" }, { "custom_id", "off" }, { "disabled", true } },
+            { { "type", 2 }, { "id", 5 }, { "style", 6 }, { "sku_id", "123456789012345678" } } } } },
+        { { "type", 9 }, { "id", 6 }, { "components", { { { "type", 10 }, { "id", 7 }, { "content", "Text" } } } },
+          { "accessory", { { "type", 2 }, { "id", 8 }, { "style", 2 }, { "label", "Side" }, { "custom_id", "side" } } } } } } });
+
+    auto *doc = fixture.loadComponents(renderMessageComponents(message, ctx));
+    ::Rml::ElementList clickable;
+    doc->QuerySelectorAll(clickable, "button[data-action='component-button']");
+    REQUIRE(clickable.size() == 2);
+    CHECK(clickable[0]->GetAttribute<::Rml::String>("data-component-path", "") == "0.0");
+    CHECK(clickable[1]->GetAttribute<::Rml::String>("data-component-path", "") == "1.a");
+    REQUIRE(doc->QuerySelector("button.component-pending") != nullptr);
+    CHECK(doc->QuerySelector("button.component-pending")->HasAttribute("disabled"));
+
+    REQUIRE(componentAtPath(message, "0.0") != nullptr);
+    CHECK(componentAtPath(message, "0.0")->customId.get() == "go");
+    REQUIRE(componentAtPath(message, "1.a") != nullptr);
+    CHECK(componentAtPath(message, "1.a")->customId.get() == "side");
+    CHECK(componentAtPath(message, "0.9") == nullptr);
+    CHECK(componentAtPath(message, "0.x") == nullptr);
+
+    ctx.interactive = false;
+    doc = fixture.loadComponents(renderMessageComponents(message, ctx));
+    ::Rml::ElementList readOnly;
+    doc->QuerySelectorAll(readOnly, "button[data-action='component-button']");
+    CHECK(readOnly.empty());
+}

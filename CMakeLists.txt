@@ -230,6 +230,7 @@ set(PROJECT_SOURCES
     src/UI/ChannelList/ChannelFilterProxyModel.cpp
     src/UI/ChannelList/Navigation.cpp
     src/UI/Chat/BlockedRuns.cpp
+    src/UI/Chat/InteractionTracker.cpp
     src/UI/ChannelList/ServerRailModel.cpp
     src/UI/Chat/ChatModel.cpp
     src/UI/Chat/GifPlayback.cpp
@@ -420,6 +421,7 @@ if(BUILD_TESTS)
     target_link_libraries(TestKeybinds PRIVATE RmlUi::RmlUi)
     styx_test(TestNavigation NavigationTests tests/tst_Navigation.cpp src/UI/ChannelList/Navigation.cpp src/Core/Snowflake.cpp)
     styx_test(TestBlockedRuns BlockedRunsTests tests/tst_BlockedRuns.cpp src/UI/Chat/BlockedRuns.cpp)
+    styx_test(TestInteractionTracker InteractionTrackerTests tests/tst_InteractionTracker.cpp src/UI/Chat/InteractionTracker.cpp src/Core/Snowflake.cpp)
     styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)
     styx_test(TestGuildCreate GuildCreateTests tests/tst_GuildCreate.cpp src/Discord/GuildCreate.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestUserEdits UserEditsTests tests/tst_UserEdits.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)

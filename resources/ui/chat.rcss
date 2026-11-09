@@ -1203,6 +1203,36 @@
 .component-premium { background-color: #2b2635; color: #dbdee1; }
 .component-link { background-color: #2b2d31; color: #949ba4; }
 
+/* Clickable bot buttons, in Discord's full button colours */
+.component-button.component-active
+{
+	color: #ffffff;
+	cursor: pointer;
+	tab-index: auto;
+}
+.component-active.component-primary { background-color: #5865f2; }
+.component-active.component-primary:hover { background-color: #4752c4; }
+.component-active.component-secondary { background-color: #4e5058; }
+.component-active.component-secondary:hover { background-color: #6d6f78; }
+.component-active.component-success { background-color: #248046; }
+.component-active.component-success:hover { background-color: #1a6334; }
+.component-active.component-danger { background-color: #da373c; }
+.component-active.component-danger:hover { background-color: #a12828; }
+.component-active:focus { border: 1dp #f2f3f5; }
+
+/* Waiting on the bot after a click */
+.component-button.component-pending { opacity: 0.6; }
+
+.component-interaction-failed
+{
+	display: block;
+	font-family: ui;
+	font-size: 13dp;
+	line-height: 18dp;
+	color: #f23f43;
+	margin-top: 2dp;
+}
+
 /* Actionable external link button */
 a.component-button.component-link
 {

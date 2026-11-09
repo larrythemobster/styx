@@ -135,6 +135,13 @@ void dismissEphemeral(Shell &shell, Core::Snowflake channelId, Core::Snowflake m
     if (Core::ClientInstance *instance = shell.currentInstance(); instance && instance->messages())
         instance->messages()->dismissEphemeralMessage(channelId, messageId);
 }
+
+Core::Snowflake applicationIdFor(const Discord::Message &message)
+{
+    if (message.applicationId.hasValue())
+        return message.applicationId.get();
+    return message.author->bot.valueOr(false) ? message.author->id.get() : Core::Snowflake::Invalid;
+}
 } // namespace
 
 ChatController::ChatController(Shell &shell, ::Rml::Element *root)
@@ -333,6 +340,10 @@ void ChatController::setupEventListeners()
             state.paths.insert(std::move(path));
             onDataChanged(row, row);
             requestRender();
+        } else if (action == std::string("component-button")) {
+            if (::Rml::Element *msgEl = closest(actionEl, "data-message-id"))
+                clickComponentButton(Core::Snowflake(parseNumber(attribute(msgEl, "data-message-id"))),
+                                     attribute(actionEl, "data-component-path"));
         } else if (action == std::string("toggle-reaction")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages()) {
@@ -553,6 +564,7 @@ void ChatController::onLocationChanged(const Location &location)
     if (currentChannelId != location.channelId)
         expandedBlockedRuns.clear();
     revealedComponentSpoilers.clear();
+    interactions.clear();
     currentChannelId = location.channelId;
     currentGuildId = location.guildId;
     currentAccountId = location.accountId;
@@ -574,6 +586,7 @@ void ChatController::onLocationChanged(const Location &location)
 void ChatController::onInstanceChanged(Core::ClientInstance *instance)
 {
     revealedComponentSpoilers.clear();
+    interactions.clear();
     for (auto &connection : instanceConnections)
         connection.disconnect();
     instanceConnections.clear();
@@ -595,6 +608,22 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
                 [this](Core::Snowflake) { renderAllMessages(); }));
             instanceConnections.push_back(relationships->relationshipsReset.connect(
                 [this] { renderAllMessages(); }));
+        }
+        if (Discord::Client *client = instance->discord()) {
+            instanceConnections.push_back(client->interactionCreated.connect(
+                [this](const Discord::InteractionCreate &event) {
+                    interactions.created(event.id, event.nonce.valueOr({}));
+                }));
+            instanceConnections.push_back(client->interactionSucceeded.connect(
+                [this](const Discord::InteractionSuccess &event) {
+                    if (auto messageId = interactions.succeeded(event.id, event.nonce.valueOr({})))
+                        refreshMessage(*messageId);
+                }));
+            instanceConnections.push_back(client->interactionFailed.connect(
+                [this](const Discord::InteractionFailure &event) {
+                    if (auto messageId = interactions.failed(event.id, event.nonce.valueOr({})))
+                        refreshMessage(*messageId);
+                }));
         }
     }
     currentAccountId = shell.location().accountId;
@@ -774,6 +803,52 @@ std::vector<bool> ChatController::blockedRows() const
     return blocked;
 }
 
+void ChatController::refreshMessage(Core::Snowflake messageId)
+{
+    ChatModel *model = shell.chat();
+    const int row = model ? model->rowForMessage(messageId) : -1;
+    if (row < 0)
+        return;
+    onDataChanged(row, row);
+    requestRender();
+}
+
+void ChatController::clickComponentButton(Core::Snowflake messageId, const std::string &path)
+{
+    ChatModel *model = shell.chat();
+    Core::ClientInstance *instance = shell.currentInstance();
+    const int row = model ? model->rowForMessage(messageId) : -1;
+    if (row < 0 || !instance || !instance->discord())
+        return;
+    const Discord::Message &message = *model->messageAt(row);
+    const Discord::MessageComponent *button = componentAtPath(message, path);
+    const Core::Snowflake applicationId = applicationIdFor(message);
+    if (message.isForwarded() || !button || button->type.get() != Discord::MessageComponentType::BUTTON
+        || !button->customId.hasValue() || !applicationId.isValid())
+        return;
+
+    Discord::ComponentInteractionRequest request;
+    request.applicationId = applicationId;
+    request.guildId = currentGuildId;
+    request.channelId = message.channelId;
+    request.messageId = messageId;
+    request.messageFlags = static_cast<std::uint64_t>(message.flags.get().toInt());
+    request.componentType = Discord::MessageComponentType::BUTTON;
+    request.customId = button->customId.get();
+    request.nonce = Core::Snowflake::generateNonce().toString();
+    if (!interactions.begin(request.nonce, messageId, path))
+        return;
+    refreshMessage(messageId);
+
+    Platform::Guard<ChatController> self(this);
+    instance->discord()->createComponentInteraction(request, [self, nonce = request.nonce](const Core::Result<void> &result) {
+        if (!self || result.success())
+            return;
+        if (auto failedMessage = self->interactions.rejected(nonce))
+            self->refreshMessage(*failedMessage);
+    });
+}
+
 void ChatController::refreshBlockedRun(int row)
 {
     ChatModel *model = shell.chat();
@@ -905,6 +980,8 @@ std::string ChatController::buildMessageHtml(int row)
             };
             ctx.fileSize = formatFileSize;
             ctx.revealedSpoilers = revealedPaths;
+            ctx.interactive = !rawMsg->isForwarded() && applicationIdFor(*rawMsg).isValid();
+            ctx.pendingPath = interactions.pendingPath(msgId);
             componentsHtml = renderMessageComponents(*rawMsg, ctx);
         }
     }
@@ -1096,6 +1173,8 @@ std::string ChatController::buildMessageHtml(int row)
     // Components
     if (!componentsHtml.empty()) {
         out += componentsHtml;
+        if (interactions.hasFailed(msgId))
+            out += std::string("<div class=\"component-interaction-failed\">This interaction failed</div>");
     }
 
     // Stickers

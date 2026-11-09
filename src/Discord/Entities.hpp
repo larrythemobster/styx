@@ -1491,6 +1491,9 @@ struct Message : Core::JsonUtils::JsonObject
     Field<std::vector<Reaction>, true> reactions;
     Field<std::vector<StickerItem>, true> stickerItems;
     Field<std::vector<MessageComponent>, true> components;
+    // Set on interaction replies and app-owned webhooks; a bot's own messages leave it out
+    // and its user ID doubles as the application ID.
+    Field<Core::Snowflake, true> applicationId;
 
     Field<MessageReference, true> messageReference;
 
@@ -1574,6 +1577,7 @@ struct Message : Core::JsonUtils::JsonObject
         get(obj, "channel_id", message.channelId);
         get(obj, "author", message.author);
         get(obj, "content", message.content);
+        get(obj, "application_id", message.applicationId);
         get(obj, "timestamp", message.timestamp);
         get(obj, "edited_timestamp", message.editedTimestamp);
         get(obj, "type", message.type);

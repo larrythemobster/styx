@@ -7,6 +7,7 @@
 #include "UI/Rml/RmlRuntime.hpp"
 
 #include <cctype>
+#include <charconv>
 #include <format>
 #include <optional>
 #include <string>
@@ -274,7 +275,7 @@ std::string buttonStyleClass(int style)
     }
 }
 
-std::string renderButton(const Discord::MessageComponent &comp, const ComponentRenderContext &context)
+std::string renderButton(const Discord::MessageComponent &comp, const std::string &path, const ComponentRenderContext &context)
 {
     const int style = comp.style.valueOr(1);
     const bool wireDisabled = comp.disabled.valueOr(false);
@@ -296,6 +297,22 @@ std::string renderButton(const Discord::MessageComponent &comp, const ComponentR
     if (style == 5) {
         return std::format(
             "<button class=\"component-button component-link\" disabled title=\"Read-only\">{0}</button>",
+            inner);
+    }
+
+    // Premium buttons start a purchase, which Styx doesn't offer.
+    const bool clickable = context.interactive && style != 6 && !wireDisabled && !stringOrEmpty(comp.customId).empty();
+    if (clickable && context.pendingPath == path) {
+        return std::format(
+            "<button class=\"component-button {0} component-pending\" disabled title=\"Sending\">{1}</button>",
+            buttonStyleClass(style),
+            inner);
+    }
+    if (clickable) {
+        return std::format(
+            "<button class=\"component-button component-active {0}\" data-action=\"component-button\" data-component-path=\"{1}\">{2}</button>",
+            buttonStyleClass(style),
+            Platform::htmlEscape(path),
             inner);
     }
 
@@ -566,7 +583,7 @@ std::string renderComponent(const Discord::MessageComponent &comp,
                            renderChildren(comp, path, visible, context, isV2, depth));
 
     case Discord::MessageComponentType::BUTTON:
-        return renderButton(comp, context);
+        return renderButton(comp, path, context);
 
     case Discord::MessageComponentType::STRING_SELECT:
     case Discord::MessageComponentType::USER_SELECT:
@@ -624,6 +641,34 @@ std::string renderMessageComponents(const Discord::Message &message,
         return {};
 
     return "<div class=\"message-components\">" + innerHtml + "</div>";
+}
+
+const Discord::MessageComponent *componentAtPath(const Discord::Message &message, std::string_view path)
+{
+    const auto &visible = message.contentMessage();
+    if (!visible.components.hasValue())
+        return nullptr;
+
+    const Discord::MessageComponent *current = nullptr;
+    while (!path.empty()) {
+        const size_t dot = path.find('.');
+        const std::string_view segment = path.substr(0, dot);
+        path = dot == std::string_view::npos ? std::string_view{} : path.substr(dot + 1);
+
+        if (current && segment == "a") {
+            current = current->accessory.get();
+        } else {
+            const auto &list = current ? current->components : visible.components;
+            size_t index = 0;
+            const auto [end, ec] = std::from_chars(segment.data(), segment.data() + segment.size(), index);
+            if (ec != std::errc{} || end != segment.data() + segment.size() || !list.hasValue() || index >= list->size())
+                return nullptr;
+            current = &list.get()[index];
+        }
+        if (!current)
+            return nullptr;
+    }
+    return current;
 }
 
 } // namespace Styx::UI::Rml

@@ -5,6 +5,7 @@
 #include "Core/PendingAttachment.hpp"
 #include "Core/Snowflake.hpp"
 #include "UI/Chat/BlockedRuns.hpp"
+#include "UI/Chat/InteractionTracker.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -73,6 +74,8 @@ private:
     std::string buildMessageHtml(int row);
     [[nodiscard]] std::vector<bool> blockedRows() const;
     void refreshBlockedRun(int row);
+    void refreshMessage(Core::Snowflake messageId);
+    void clickComponentButton(Core::Snowflake messageId, const std::string &path);
     void checkAndLoadOlder();
     void checkAndLoadNewer();
     void setReplyTarget(Core::Snowflake messageId, const std::string &authorName, const std::string &snippet);
@@ -112,6 +115,7 @@ private:
         std::unordered_set<std::string> paths;
     };
     std::unordered_map<Core::Snowflake, ComponentSpoilerState> revealedComponentSpoilers;
+    InteractionTracker interactions;
 
     std::vector<Platform::Connection> instanceConnections;
     Platform::Connection emojiConnection;
