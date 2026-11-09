@@ -22,6 +22,7 @@
 #include "SearchController.hpp"
 #include "SwitcherController.hpp"
 #include "ShortcutController.hpp"
+#include "ShortcutsHelpController.hpp"
 #include "ExpressionPickerController.hpp"
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
@@ -265,6 +266,9 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     shortcutController->setHandler(ShortcutAction::ToggleMute, [this] { setSelfMute(!selfMute); return true; });
     shortcutController->setHandler(ShortcutAction::ToggleDeafen, [this] { setSelfDeaf(!selfDeaf); return true; });
     controllers.push_back(std::move(switcher));
+    auto help = std::make_unique<Rml::ShortcutsHelpController>(*this);
+    shortcutController->setHandler(ShortcutAction::ShortcutsHelp, [h = help.get()] { h->isOpen() ? h->close() : h->open(); return true; });
+    controllers.push_back(std::move(help));
     accountsController = std::make_unique<Rml::AccountsController>(*this);
     if (accountsModel->rowCount() == 0) accountsController->showLogin();
     applyBodyClasses();

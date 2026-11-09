@@ -1,0 +1,109 @@
+/* Keyboard shortcuts help popover styling */
+
+body#shortcuts-help-body {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: transparent;
+    z-index: 200;
+}
+
+.shortcuts-help-backdrop {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000000a0;
+    z-index: 201;
+}
+
+.shortcuts-help-popover {
+    position: absolute;
+    top: 80dp;
+    left: 50%;
+    margin-left: -280dp;
+    width: 560dp;
+    max-height: 520dp;
+    background-color: #111214;
+    border: 1dp #202024;
+    border-radius: 8dp;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-sizing: border-box;
+    z-index: 202;
+}
+
+.shortcuts-help-header {
+    height: 44dp;
+    padding: 0 16dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1dp #202024;
+    background-color: #0b0b0c;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+.shortcuts-help-title {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #f2f3f5;
+}
+
+.shortcuts-help-close {
+    width: 24dp;
+    height: 24dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.shortcuts-help-close img {
+    width: 16dp;
+    height: 16dp;
+    image-color: #949ba4;
+}
+
+.shortcuts-help-close:hover img {
+    image-color: #f2f3f5;
+}
+
+.shortcuts-help-list {
+    margin-top: 8dp;
+    max-height: 460dp;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 0 16dp 16dp 16dp;
+    box-sizing: border-box;
+}
+
+.shortcuts-help-row {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8dp 4dp;
+    border-bottom: 1dp #202024;
+}
+
+.shortcuts-help-description {
+    font-size: 14dp;
+    color: #dbdee1;
+}
+
+.shortcuts-help-keys {
+    font-size: 13dp;
+    color: #f2f3f5;
+    background-color: #1e1f22;
+    border: 1dp #202024;
+    border-radius: 4dp;
+    padding: 2dp 8dp;
+}

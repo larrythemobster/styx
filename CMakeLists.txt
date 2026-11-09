@@ -287,6 +287,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/SwitcherController.cpp
     src/UI/Rml/Shortcuts.cpp
     src/UI/Rml/ShortcutController.cpp
+    src/UI/Rml/ShortcutsHelpController.cpp
     src/UI/Rml/ExpressionPickerController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )

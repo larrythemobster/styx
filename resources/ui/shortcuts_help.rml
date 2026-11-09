@@ -1,0 +1,20 @@
+<rml>
+<head>
+    <title>Keyboard Shortcuts</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="shortcuts_help.rcss"/>
+</head>
+<body id="shortcuts-help-body">
+    <div class="shortcuts-help-backdrop" data-action="close"></div>
+    <div class="shortcuts-help-popover">
+        <div class="shortcuts-help-header">
+            <span class="shortcuts-help-title">Keyboard shortcuts</span>
+            <div class="shortcuts-help-close" data-action="close">
+                <img src="icon:x"/>
+            </div>
+        </div>
+        <div id="shortcuts-help-list" class="shortcuts-help-list"></div>
+    </div>
+</body>
+</rml>
