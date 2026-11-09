@@ -34,6 +34,7 @@
 #include "ClientIdentity.hpp"
 #include "ComponentInteraction.hpp"
 #include "ApplicationCommands.hpp"
+#include "CommandInteraction.hpp"
 
 using Styx::Core::Snowflake;
 
@@ -220,6 +221,8 @@ public:
 
     // REST admission only; interactionSucceeded/interactionFailed report the application's result.
     void createComponentInteraction(const ComponentInteractionRequest &request, ActionCallback callback = {});
+    // Same admission rules, for a slash command (interaction type 2).
+    void createApplicationCommandInteraction(const ApplicationCommandRequest &request, ActionCallback callback = {});
     // Slash command indexes: a server's apps, a DM's or group DM's, and the user's own.
     void fetchGuildCommandIndex(Snowflake guildId, ResultCallback<ApplicationCommandIndex> callback);
     void fetchChannelCommandIndex(Snowflake channelId, ResultCallback<ApplicationCommandIndex> callback);
