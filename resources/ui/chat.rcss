@@ -1343,6 +1343,31 @@ a.component-button.component-link:focus
 	color: #949ba4;
 }
 
+input.component-select-search
+{
+	display: block;
+	width: 100%;
+	box-sizing: border-box;
+	height: 32dp;
+	padding: 6dp 8dp;
+	margin-bottom: 4dp;
+	background-color: #1e1f22;
+	border: 1dp #1e1f22;
+	border-radius: 4dp;
+	color: #dbdee1;
+	font-family: ui;
+	font-size: 14dp;
+}
+input.component-select-search:focus { border-color: #5865f2; }
+
+.component-select-empty
+{
+	display: block;
+	padding: 8dp 10dp;
+	font-size: 14dp;
+	color: #949ba4;
+}
+
 .component-select-apply
 {
 	margin-top: 6dp;

@@ -18,6 +18,7 @@
 using namespace Styx::UI::Rml;
 using namespace Styx::Discord;
 using Styx::Core::Snowflake;
+using Styx::UI::SelectCandidate;
 
 namespace {
 
@@ -804,4 +805,40 @@ TEST_CASE("An open string select lists options, marks the draft and gates Apply 
     doc = fixture.loadComponents(renderMessageComponents(message, ctx));
     CHECK(doc->QuerySelector(".component-select-apply") == nullptr);
     CHECK(doc->QuerySelector(".component-select-option") != nullptr);
+}
+
+TEST_CASE("An open entity select shows a search box, candidate rows by value and the chosen labels", "[components][interactions]")
+{
+    TestViewFixture fixture;
+    std::vector<std::string> requestedUrls;
+    auto ctx = makeContext(requestedUrls);
+    ctx.interactive = true;
+    const std::vector<std::string> draft = { "222" };
+    const std::vector<SelectCandidate> matches = { { "111", "alice", "user" }, { "222", "Mods", "role" } };
+    const std::vector<SelectCandidate> chosen = { { "222", "Mods", "role" } };
+    ctx.openSelectPath = "0.0";
+    ctx.openSelectValues = &draft;
+    ctx.openSelectQuery = "a<b";
+    ctx.openSelectCandidates = &matches;
+    ctx.openSelectChosen = &chosen;
+
+    nlohmann::json select = { { "type", 7 }, { "id", 2 }, { "custom_id", "who" }, { "max_values", 2 } };
+    nlohmann::json row = { { "type", 1 }, { "id", 1 }, { "components", nlohmann::json::array({ select }) } };
+    const Message message = parseMessage({ { "components", nlohmann::json::array({ row }) } });
+
+    auto *doc = fixture.loadComponents(renderMessageComponents(message, ctx));
+    auto *search = doc->QuerySelector("input.component-select-search");
+    REQUIRE(search != nullptr);
+    CHECK(search->GetAttribute<::Rml::String>("value", "") == "a<b");
+    ::Rml::ElementList rows;
+    doc->QuerySelectorAll(rows, ".component-select-option");
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0]->GetAttribute<::Rml::String>("data-value", "") == "111");
+    CHECK_FALSE(rows[0]->IsClassSet("selected"));
+    CHECK(rows[1]->IsClassSet("selected"));
+    CHECK(doc->QuerySelector(".component-select-value")->GetInnerRML() == "@Mods");
+    REQUIRE(doc->QuerySelector(".component-select-apply") != nullptr);
+    CHECK_FALSE(doc->QuerySelector(".component-select-apply")->HasAttribute("disabled"));
+
+    CHECK(renderSelectCandidates("0.0", {}, draft).find("No results") != std::string::npos);
 }

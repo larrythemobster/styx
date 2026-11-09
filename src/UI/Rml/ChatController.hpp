@@ -6,6 +6,7 @@
 #include "Core/Snowflake.hpp"
 #include "UI/Chat/BlockedRuns.hpp"
 #include "UI/Chat/InteractionTracker.hpp"
+#include "UI/Chat/SelectCandidates.hpp"
 
 #include <optional>
 #include <string>
@@ -23,6 +24,7 @@ namespace Styx {
 
 namespace Discord {
 struct Emoji;
+struct MessageComponent;
 }
 
 namespace UI {
@@ -76,9 +78,14 @@ private:
     [[nodiscard]] std::vector<bool> blockedRows() const;
     void refreshBlockedRun(int row);
     void refreshMessage(Core::Snowflake messageId);
-    // Sends a button click (no values) or a string select choice.
+    // Sends a button click (no values) or a select choice.
     void useComponent(Core::Snowflake messageId, const std::string &path, std::vector<std::string> values = {});
-    void handleSelectAction(const std::string &action, Core::Snowflake messageId, const std::string &path, int optionIndex);
+    // optionIndex identifies a string select option, value an entity select candidate.
+    void handleSelectAction(const std::string &action, Core::Snowflake messageId, const std::string &path,
+                            int optionIndex, const std::string &value);
+    void searchOpenSelect(::Rml::Element *input);
+    // Cached members, roles or channels an entity select can offer here.
+    [[nodiscard]] std::vector<SelectCandidate> selectCandidatesFor(const Discord::MessageComponent &select);
     void checkAndLoadOlder();
     void checkAndLoadNewer();
     void setReplyTarget(Core::Snowflake messageId, const std::string &authorName, const std::string &snippet);
@@ -123,6 +130,9 @@ private:
         Core::Snowflake messageId;
         std::string path;
         std::vector<std::string> values;
+        // Entity selects only: everything offered, and the search text.
+        std::vector<SelectCandidate> candidates;
+        std::string query;
     };
     std::optional<OpenSelect> openSelect;
 

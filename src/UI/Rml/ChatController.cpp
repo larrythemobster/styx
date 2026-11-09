@@ -32,12 +32,14 @@
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/Elements/ElementFormControlInput.h>
 #include <RmlUi/Core/Elements/ElementFormControlTextArea.h>
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/Input.h>
 
 #include "Platform/Desktop.hpp"
 #include "Platform/Utf8.hpp"
+#include <algorithm>
 #include <charconv>
 #include <filesystem>
 #include <format>
@@ -142,6 +144,16 @@ Core::Snowflake applicationIdFor(const Discord::Message &message)
         return message.applicationId.get();
     return message.author->bot.valueOr(false) ? message.author->id.get() : Core::Snowflake::Invalid;
 }
+
+bool isSelectComponent(Discord::MessageComponentType type)
+{
+    using Type = Discord::MessageComponentType;
+    return type == Type::STRING_SELECT || type == Type::USER_SELECT || type == Type::ROLE_SELECT
+        || type == Type::MENTIONABLE_SELECT || type == Type::CHANNEL_SELECT;
+}
+
+// Entity select pickers list at most this many matches.
+constexpr std::size_t MaxSelectCandidates = 25;
 } // namespace
 
 ChatController::ChatController(Shell &shell, ::Rml::Element *root)
@@ -349,7 +361,8 @@ void ChatController::setupEventListeners()
             if (::Rml::Element *msgEl = closest(actionEl, "data-message-id"))
                 handleSelectAction(action, Core::Snowflake(parseNumber(attribute(msgEl, "data-message-id"))),
                                    attribute(actionEl, "data-component-path"),
-                                   static_cast<int>(parseNumber(attribute(actionEl, "data-option-index"))));
+                                   static_cast<int>(parseNumber(attribute(actionEl, "data-option-index"))),
+                                   attribute(actionEl, "data-value"));
         } else if (action == std::string("toggle-reaction")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages()) {
@@ -450,6 +463,11 @@ void ChatController::setupEventListeners()
             if (atBottom && shell.chat() && !shell.chat()->isAtLatest()) {
                 checkAndLoadNewer();
             }
+        }, messagesEl);
+        listen("change", [this](::Rml::Event &event) {
+            ::Rml::Element *target = event.GetTargetElement();
+            if (target && target->IsClassSet("component-select-search"))
+                searchOpenSelect(target);
         }, messagesEl);
     }
 
@@ -834,7 +852,7 @@ void ChatController::useComponent(Core::Snowflake messageId, const std::string &
     if (message.isForwarded() || !component || !component->customId.hasValue() || !applicationId.isValid())
         return;
     const auto type = component->type.get();
-    if (type != Discord::MessageComponentType::BUTTON && type != Discord::MessageComponentType::STRING_SELECT)
+    if (type != Discord::MessageComponentType::BUTTON && !isSelectComponent(type))
         return;
 
     Discord::ComponentInteractionRequest request;
@@ -860,17 +878,21 @@ void ChatController::useComponent(Core::Snowflake messageId, const std::string &
     });
 }
 
-void ChatController::handleSelectAction(const std::string &action, Core::Snowflake messageId, const std::string &path, int optionIndex)
+void ChatController::handleSelectAction(const std::string &action, Core::Snowflake messageId, const std::string &path,
+                                        int optionIndex, const std::string &value)
 {
     ChatModel *model = shell.chat();
     const int row = model ? model->rowForMessage(messageId) : -1;
     if (row < 0)
         return;
     const Discord::MessageComponent *select = componentAtPath(*model->messageAt(row), path);
-    if (!select || select->type.get() != Discord::MessageComponentType::STRING_SELECT || !select->options.hasValue())
+    if (!select)
         return;
-    const auto &options = select->options.get();
-    const SelectLimits limits = stringSelectLimits(*select);
+    const auto type = select->type.get();
+    const bool isString = type == Discord::MessageComponentType::STRING_SELECT;
+    if (!isSelectComponent(type) || (isString && !select->options.hasValue()))
+        return;
+    const SelectLimits limits = selectComponentLimits(*select);
     const bool sameSelect = openSelect && openSelect->messageId == messageId && openSelect->path == path;
 
     if (action == "component-select-toggle") {
@@ -878,10 +900,22 @@ void ChatController::handleSelectAction(const std::string &action, Core::Snowfla
         if (sameSelect) {
             openSelect.reset();
         } else {
-            OpenSelect opened{ messageId, path, {} };
-            for (const auto &option : options)
-                if (option.isDefault.valueOr(false))
-                    opened.values.push_back(option.value.get());
+            OpenSelect opened{ messageId, path, {}, {}, {} };
+            if (isString) {
+                for (const auto &option : select->options.get())
+                    if (option.isDefault.valueOr(false))
+                        opened.values.push_back(option.value.get());
+            } else {
+                opened.candidates = selectCandidatesFor(*select);
+                if (select->defaultValues.hasValue()) {
+                    for (const auto &defaultValue : select->defaultValues.get()) {
+                        std::string id = defaultValue.id->toString();
+                        if (std::ranges::none_of(opened.candidates, [&](const SelectCandidate &c) { return c.value == id; }))
+                            opened.candidates.push_back({ id, id, defaultValue.type.get() });
+                        opened.values.push_back(std::move(id));
+                    }
+                }
+            }
             openSelect = std::move(opened);
         }
         if (previous.isValid() && previous != messageId)
@@ -893,9 +927,18 @@ void ChatController::handleSelectAction(const std::string &action, Core::Snowfla
         return;
 
     if (action == "component-select-option") {
-        if (optionIndex < 0 || optionIndex >= static_cast<int>(options.size()))
-            return;
-        if (!toggleSelectValue(openSelect->values, options[optionIndex].value.get(), limits)) {
+        std::string chosen;
+        if (isString) {
+            const auto &options = select->options.get();
+            if (optionIndex < 0 || optionIndex >= static_cast<int>(options.size()))
+                return;
+            chosen = options[optionIndex].value.get();
+        } else {
+            if (std::ranges::none_of(openSelect->candidates, [&](const SelectCandidate &c) { return c.value == value; }))
+                return;
+            chosen = value;
+        }
+        if (!toggleSelectValue(openSelect->values, chosen, limits)) {
             refreshMessage(messageId);
             return;
         }
@@ -907,6 +950,61 @@ void ChatController::handleSelectAction(const std::string &action, Core::Snowfla
     openSelect.reset();
     refreshMessage(messageId);
     useComponent(messageId, path, std::move(values));
+}
+
+void ChatController::searchOpenSelect(::Rml::Element *input)
+{
+    auto *field = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(input);
+    if (!field || !openSelect || attribute(input, "data-component-path") != openSelect->path)
+        return;
+    openSelect->query = field->GetValue();
+    ::Rml::Element *list = input->GetParentNode() ? input->GetParentNode()->QuerySelector(".component-select-candidates") : nullptr;
+    if (!list)
+        return;
+    list->SetInnerRML(renderSelectCandidates(openSelect->path,
+                                             filterSelectCandidates(openSelect->candidates, openSelect->query, MaxSelectCandidates),
+                                             openSelect->values));
+    requestRender();
+}
+
+std::vector<SelectCandidate> ChatController::selectCandidatesFor(const Discord::MessageComponent &select)
+{
+    std::vector<SelectCandidate> out;
+    Core::ClientInstance *instance = shell.currentInstance();
+    if (!instance)
+        return out;
+    using Type = Discord::MessageComponentType;
+    const auto type = select.type.get();
+
+    if (type == Type::USER_SELECT || type == Type::MENTIONABLE_SELECT) {
+        if (currentGuildId.isValid()) {
+            for (const auto &member : instance->users()->getKnownMembers(currentGuildId)) {
+                if (member.user.hasValue())
+                    out.push_back({ member.user->id->toString(), instance->users()->getDisplayName(member.user->id.get(), currentGuildId), "user" });
+            }
+        } else if (auto channel = instance->getChannel(currentChannelId); channel && channel->recipients.hasValue()) {
+            for (const auto &user : channel->recipients.get())
+                out.push_back({ user.id->toString(), user.getDisplayName(), "user" });
+        }
+    }
+    if ((type == Type::ROLE_SELECT || type == Type::MENTIONABLE_SELECT) && currentGuildId.isValid()) {
+        // The @everyone role shares the guild's ID and can't be picked.
+        for (const auto &role : instance->getRolesForGuild(currentGuildId)) {
+            if (role.id.get() != currentGuildId && role.name.hasValue())
+                out.push_back({ role.id->toString(), role.name.get(), "role" });
+        }
+    }
+    if (type == Type::CHANNEL_SELECT && currentGuildId.isValid()) {
+        const bool anyType = !select.channelTypes.hasValue() || select.channelTypes->empty();
+        for (const auto &channel : instance->getGuildChannels(currentGuildId)) {
+            const auto channelType = channel.type.get();
+            const bool allowed = anyType ? channelType != Discord::ChannelType::GUILD_CATEGORY
+                                         : std::ranges::find(select.channelTypes.get(), channelType) != select.channelTypes->end();
+            if (allowed && channel.name.hasValue())
+                out.push_back({ channel.id->toString(), channel.name.get(), "channel" });
+        }
+    }
+    return out;
 }
 
 void ChatController::refreshBlockedRun(int row)
@@ -1011,6 +1109,8 @@ std::string ChatController::buildMessageHtml(int row)
 
         if (visible.components.hasValue() && !visible.components->empty()) {
             ComponentRenderContext ctx;
+            std::vector<SelectCandidate> filteredCandidates;
+            std::vector<SelectCandidate> chosenCandidates;
             ctx.markdown = [this, &mentionsMe](const std::string &raw) -> std::string {
                 auto rendered = ChatMarkdown::toRml(raw, shell, currentAccountId, currentGuildId, currentChannelId);
                 mentionsMe |= rendered.mentionsUser;
@@ -1045,6 +1145,15 @@ std::string ChatController::buildMessageHtml(int row)
             if (openSelect && openSelect->messageId == msgId) {
                 ctx.openSelectPath = openSelect->path;
                 ctx.openSelectValues = &openSelect->values;
+                ctx.openSelectQuery = openSelect->query;
+                filteredCandidates = filterSelectCandidates(openSelect->candidates, openSelect->query, MaxSelectCandidates);
+                for (const auto &value : openSelect->values) {
+                    const auto found = std::ranges::find(openSelect->candidates, value, &SelectCandidate::value);
+                    if (found != openSelect->candidates.end())
+                        chosenCandidates.push_back(*found);
+                }
+                ctx.openSelectCandidates = &filteredCandidates;
+                ctx.openSelectChosen = &chosenCandidates;
             }
             componentsHtml = renderMessageComponents(*rawMsg, ctx);
         }

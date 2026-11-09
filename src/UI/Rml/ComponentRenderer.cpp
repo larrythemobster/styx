@@ -332,12 +332,32 @@ std::string renderOptionDisplay(const Discord::ComponentSelectOption &option, co
     return display + richText(option.label.get());
 }
 
+std::string renderSelectOptionRow(const std::string &path, bool chosen, const std::string &keyAttribute,
+                                  const std::string &label, const std::string &description)
+{
+    return std::format(
+        "<div class=\"component-select-option{0}\" role=\"option\" aria-selected=\"{1}\" data-action=\"component-select-option\" "
+        "data-component-path=\"{2}\" {3}><div class=\"component-select-option-label\">{4}</div>{5}</div>",
+        chosen ? " selected" : "",
+        chosen ? "true" : "false",
+        Platform::htmlEscape(path),
+        keyAttribute,
+        label,
+        description.empty() ? std::string() : "<div class=\"component-select-option-description\">" + description + "</div>");
+}
+
+std::string candidateLabel(const SelectCandidate &candidate)
+{
+    return richText((candidate.kind == "channel" ? "#" : "@") + candidate.label);
+}
+
 std::string renderSelect(const Discord::MessageComponent &comp, const std::string &path, const ComponentRenderContext &context)
 {
     const bool isString = comp.type.get() == Discord::MessageComponentType::STRING_SELECT;
-    const bool usable = context.interactive && isString && comp.options.hasValue() && !comp.options->empty()
-        && !comp.disabled.valueOr(false) && !stringOrEmpty(comp.customId).empty();
-    const bool open = usable && context.openSelectValues && context.openSelectPath == path;
+    const bool usable = context.interactive && !comp.disabled.valueOr(false) && !stringOrEmpty(comp.customId).empty()
+        && (!isString || (comp.options.hasValue() && !comp.options->empty()));
+    const bool open = usable && context.openSelectValues && context.openSelectPath == path
+        && (isString || (context.openSelectCandidates && context.openSelectChosen));
     const bool pending = usable && context.pendingPath == path;
 
     std::string selected;
@@ -357,6 +377,9 @@ std::string renderSelect(const Discord::MessageComponent &comp, const std::strin
                 display += " — " + richText(option.description.get());
             appendSelection(std::move(display));
         }
+    } else if (open) {
+        for (const auto &candidate : *context.openSelectChosen)
+            appendSelection(candidateLabel(candidate));
     } else if (!isString && comp.defaultValues.hasValue()) {
         for (const auto &value : comp.defaultValues.get()) {
             auto label = context.defaultLabel(value.id.get(), value.type.get());
@@ -389,25 +412,24 @@ std::string renderSelect(const Discord::MessageComponent &comp, const std::strin
     if (!open)
         return out;
 
-    const auto &options = comp.options.get();
-    const SelectLimits limits = stringSelectLimits(comp);
     out += "<div class=\"component-select-menu\" role=\"listbox\">";
-    for (size_t i = 0; i < options.size(); ++i) {
-        const auto &option = options[i];
-        const bool chosen = std::ranges::find(*context.openSelectValues, option.value.get()) != context.openSelectValues->end();
-        std::string description;
-        if (option.description.hasValue() && !option.description->empty())
-            description = "<div class=\"component-select-option-description\">" + richText(option.description.get()) + "</div>";
+    if (isString) {
+        const auto &options = comp.options.get();
+        for (size_t i = 0; i < options.size(); ++i) {
+            const auto &option = options[i];
+            const bool chosen = std::ranges::find(*context.openSelectValues, option.value.get()) != context.openSelectValues->end();
+            out += renderSelectOptionRow(path, chosen, std::format("data-option-index=\"{}\"", i), renderOptionDisplay(option, context),
+                                         option.description.hasValue() ? richText(option.description.get()) : std::string());
+        }
+    } else {
         out += std::format(
-            "<div class=\"component-select-option{0}\" role=\"option\" aria-selected=\"{1}\" data-action=\"component-select-option\" "
-            "data-component-path=\"{2}\" data-option-index=\"{3}\"><div class=\"component-select-option-label\">{4}</div>{5}</div>",
-            chosen ? " selected" : "",
-            chosen ? "true" : "false",
+            "<input type=\"text\" class=\"component-select-search\" data-component-path=\"{0}\" value=\"{1}\" placeholder=\"Search\" />"
+            "<div class=\"component-select-candidates\">{2}</div>",
             Platform::htmlEscape(path),
-            i,
-            renderOptionDisplay(option, context),
-            description);
+            Platform::htmlEscape(context.openSelectQuery),
+            renderSelectCandidates(path, *context.openSelectCandidates, *context.openSelectValues));
     }
+    const SelectLimits limits = selectComponentLimits(comp);
     if (!limits.single()) {
         out += std::format(
             "<button class=\"component-button component-active component-primary component-select-apply\" "
@@ -730,11 +752,28 @@ const Discord::MessageComponent *componentAtPath(const Discord::Message &message
     return current;
 }
 
-SelectLimits stringSelectLimits(const Discord::MessageComponent &select)
+SelectLimits selectComponentLimits(const Discord::MessageComponent &select)
 {
+    constexpr int MaxSelectValues = 25;
     const auto optionalInt = [](const auto &field) { return field.hasValue() ? std::optional<int>(field.get()) : std::nullopt; };
-    const int optionCount = select.options.hasValue() ? static_cast<int>(select.options->size()) : 0;
+    const int optionCount = select.type.get() != Discord::MessageComponentType::STRING_SELECT ? MaxSelectValues
+        : select.options.hasValue() ? static_cast<int>(select.options->size()) : 0;
     return selectLimits(optionalInt(select.minValues), optionalInt(select.maxValues), optionCount);
+}
+
+std::string renderSelectCandidates(const std::string &path, const std::vector<SelectCandidate> &candidates,
+                                   const std::vector<std::string> &chosenValues)
+{
+    if (candidates.empty())
+        return "<div class=\"component-select-empty\">No results</div>";
+
+    std::string out;
+    for (const auto &candidate : candidates) {
+        const bool chosen = std::ranges::find(chosenValues, candidate.value) != chosenValues.end();
+        out += renderSelectOptionRow(path, chosen, std::format("data-value=\"{}\"", Platform::htmlEscape(candidate.value)),
+                                     candidateLabel(candidate), std::string());
+    }
+    return out;
 }
 
 } // namespace Styx::UI::Rml
