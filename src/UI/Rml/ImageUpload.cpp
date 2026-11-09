@@ -179,12 +179,14 @@ PreparedImage prepareCropped(const std::string &path, int maxWidth, int maxHeigh
     }
     prepared.originalMd5 = md5Hex(bytes);
     const auto mime = mimeType(bytes);
+    auto image = Platform::Image::decode(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
     if (isAnimation(bytes, mime)) {
         prepared.animated = true;
         prepared.dataUri = dataUri(bytes, mime);
+        if (image)
+            prepared.preview = std::move(*image);
         return prepared;
     }
-    auto image = Platform::Image::decode(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
     if (!image || image->empty() || maxWidth <= 0 || maxHeight <= 0) {
         if (mime == "image/avif" && maxWidth > 0 && maxHeight > 0)
             prepared.dataUri = dataUri(bytes, mime);
@@ -214,8 +216,12 @@ PreparedImage prepareCropped(const std::string &path, int maxWidth, int maxHeigh
                                         std::max(1, static_cast<int>(std::round(height * scale))));
     }
     const auto png = Platform::Image::encodePng(cropped);
-    if (png.empty()) prepared.error = "Unable to process image";
-    else prepared.dataUri = dataUri(png, "image/png");
+    if (png.empty()) {
+        prepared.error = "Unable to process image";
+    } else {
+        prepared.dataUri = dataUri(png, "image/png");
+        prepared.preview = std::move(cropped);
+    }
     return prepared;
 }
 

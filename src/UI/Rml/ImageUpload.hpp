@@ -14,6 +14,9 @@ struct PreparedImage
     std::string originalMd5;
     std::string error;
     bool animated = false;
+    // What will be uploaded, for showing before it's saved: RmlUi can't load the data URI. For
+    // an animation it's the first frame; empty when the image can't be decoded here.
+    Platform::ImageBuffer preview;
 };
 
 std::string fileFilter();

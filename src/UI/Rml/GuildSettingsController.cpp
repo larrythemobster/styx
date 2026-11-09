@@ -108,8 +108,14 @@ GuildSettingsController::GuildSettingsController(Shell &shell)
 {
 }
 
+namespace {
+// The picked icon before it's saved; RmlUi can't show the data URI that gets uploaded.
+constexpr const char *IconPreviewFrame = "guild-settings-icon";
+}
+
 GuildSettingsController::~GuildSettingsController()
 {
+    Runtime::instance().clearFrame(IconPreviewFrame);
     removeListeners();
     if (document) {
         document->Close();
@@ -197,7 +203,7 @@ std::optional<Discord::Guild> GuildSettingsController::guild() const
 std::string GuildSettingsController::getGuildIconUrl() const
 {
     if (!draftProfile.iconDataUri.empty())
-        return draftProfile.iconDataUri;
+        return std::string("frame:") + IconPreviewFrame;
     if (draftProfile.iconRemoved)
         return {};
 
@@ -1804,8 +1810,11 @@ void GuildSettingsController::chooseImage(ImageSlot slot)
         if (!self || files.empty() || !self->isCurrentRequest(guildId, generation)) return;
         auto prepared = ImageUpload::prepareCropped(files.front(), bounds.width, bounds.height);
         if (prepared.dataUri.empty()) { self->reportError(prepared.error); return; }
-        if (slot == ImageSlot::Icon) { self->draftProfile.iconDataUri = std::move(prepared.dataUri); self->draftProfile.iconRemoved = false; }
-        else if (slot == ImageSlot::Banner) { self->draftBoost.bannerUri = std::move(prepared.dataUri); self->draftBoost.bannerRemoved = false; }
+        if (slot == ImageSlot::Icon) {
+            self->draftProfile.iconDataUri = std::move(prepared.dataUri);
+            self->draftProfile.iconRemoved = false;
+            Runtime::instance().setFrame(IconPreviewFrame, prepared.preview);
+        } else if (slot == ImageSlot::Banner) { self->draftBoost.bannerUri = std::move(prepared.dataUri); self->draftBoost.bannerRemoved = false; }
         else { self->draftBoost.splashUri = std::move(prepared.dataUri); self->draftBoost.splashRemoved = false; }
         self->renderContent();
         self->updateUnsavedChangesBar();

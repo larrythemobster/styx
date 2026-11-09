@@ -9,7 +9,6 @@
 #include "Core/UserManager.hpp"
 #include "Discord/Client.hpp"
 #include "Platform/Desktop.hpp"
-#include "Platform/Image.hpp"
 #include "Platform/Native.hpp"
 #include "Platform/Utf8.hpp"
 
@@ -174,8 +173,8 @@ void CreateServerController::pickIcon()
         } else {
             iconDataUri = std::move(prepared.dataUri);
             error.clear();
-            if (auto buffer = Platform::Image::decodeFile(files.front()))
-                Runtime::instance().setFrame("create-server-icon", *buffer);
+            if (!prepared.preview.empty())
+                Runtime::instance().setFrame("create-server-icon", prepared.preview);
         }
         render();
     }, false);
