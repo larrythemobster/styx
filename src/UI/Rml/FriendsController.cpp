@@ -76,6 +76,7 @@ void FriendsController::connectInstance(Core::ClientInstance *instance)
     lastInstance = instance;
     ++requestGeneration;
     searchText.clear();
+    pendingError.clear();
     addFriendInputText.clear();
     addFriendFeedback.clear();
     addFriendPending = false;
@@ -122,6 +123,8 @@ void FriendsController::setupEventListeners()
                 switchTab(Tab::Online);
             else if (tabStr == std::string_view("all"))
                 switchTab(Tab::All);
+            else if (tabStr == std::string_view("pending"))
+                switchTab(Tab::Pending);
             else if (tabStr == std::string_view("add"))
                 switchTab(Tab::AddFriend);
             return;
@@ -141,6 +144,18 @@ void FriendsController::setupEventListeners()
                     this->shell.showContextMenuForUser(uId, Snowflake::Invalid);
                 return;
             }
+            if (action == std::string_view("accept-request")) {
+                Snowflake uId = parseId(attribute(act, "data-user-id"));
+                if (uId.isValid())
+                    respondToRequest(uId, true);
+                return;
+            }
+            if (action == std::string_view("remove-request")) {
+                Snowflake uId = parseId(attribute(act, "data-user-id"));
+                if (uId.isValid())
+                    respondToRequest(uId, false);
+                return;
+            }
             if (action == std::string_view("clear-friends-search")) {
                 searchText.clear();
                 if (auto *inp = dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("friends-search-input"))) {
@@ -157,8 +172,12 @@ void FriendsController::setupEventListeners()
 
         if (auto *row = closest(target, "data-user-id")) {
             Snowflake uId = parseId(attribute(row, "data-user-id"));
-            if (uId.isValid())
-                this->shell.openDmWithUser(this->shell.location().accountId, uId);
+            if (uId.isValid()) {
+                if (currentTab == Tab::Pending)
+                    this->shell.showUserProfile(uId, Snowflake::Invalid);
+                else
+                    this->shell.openDmWithUser(this->shell.location().accountId, uId);
+            }
             return;
         }
     });
@@ -211,6 +230,7 @@ void FriendsController::switchTab(Tab newTab)
         return;
     currentTab = newTab;
     addFriendFeedback.clear();
+    pendingError.clear();
     rebuild();
 }
 
@@ -248,6 +268,33 @@ void FriendsController::sendFriendRequest()
         self->scheduleRebuild();
     });
     scheduleRebuild();
+}
+
+void FriendsController::respondToRequest(Snowflake userId, bool accept)
+{
+    auto *inst = shell.currentInstance();
+    if (!inst || !inst->discord()) {
+        pendingError = "Client instance not available.";
+        scheduleRebuild();
+        return;
+    }
+
+    const Platform::Guard<FriendsController> self(this);
+    auto callback = [self](const Core::Result<void> &res) {
+        if (!self)
+            return;
+        if (res.success()) {
+            self->pendingError.clear();
+        } else {
+            self->pendingError = res.error;
+            self->scheduleRebuild();
+        }
+    };
+
+    if (accept)
+        inst->discord()->acceptFriendRequest(userId, std::move(callback));
+    else
+        inst->discord()->removeRelationship(userId, std::move(callback));
 }
 
 void FriendsController::updateAddFriendControls()
@@ -365,7 +412,14 @@ void FriendsController::renderHeader(std::string &rml, int onlineCount, int allC
 {
     const std::string onlineClass = (currentTab == Tab::Online) ? " selected" : std::string();
     const std::string allClass = (currentTab == Tab::All) ? " selected" : std::string();
+    const std::string pendingClass = (currentTab == Tab::Pending) ? " selected" : std::string();
     const std::string addClass = (currentTab == Tab::AddFriend) ? " selected" : std::string();
+
+    int pendingCount = 0;
+    auto *inst = shell.currentInstance();
+    if (inst && inst->relationships())
+        pendingCount = inst->relationships()->incomingRequestCount();
+    const std::string pendingCountStr = (pendingCount > 0) ? std::format(" ({0})", pendingCount) : std::string();
 
     rml += std::format(
         "<div class=\"friends-header-title\">"
@@ -375,25 +429,79 @@ void FriendsController::renderHeader(std::string &rml, int onlineCount, int allC
         "<div class=\"friends-header-divider\"></div>"
         "<div class=\"friends-tab{0}\" data-tab=\"online\">Online{1}</div>"
         "<div class=\"friends-tab{2}\" data-tab=\"all\">All{3}</div>"
-        "<div class=\"friends-tab-add{4}\" data-tab=\"add\">Add Friend</div>", onlineClass, onlineCount > 0 ? std::format(" ({0})", onlineCount) : std::string(), allClass, allCount > 0 ? std::format(" ({0})", allCount) : std::string(), addClass);
+        "<div class=\"friends-tab{4}\" data-tab=\"pending\">Pending{5}</div>"
+        "<div class=\"friends-tab-add{6}\" data-tab=\"add\">Add Friend</div>",
+        onlineClass, onlineCount > 0 ? std::format(" ({0})", onlineCount) : std::string(),
+        allClass, allCount > 0 ? std::format(" ({0})", allCount) : std::string(),
+        pendingClass, pendingCountStr,
+        addClass);
+}
+
+FriendsController::FriendItem FriendsController::buildFriendItem(Core::ClientInstance *inst, Snowflake userId, const Discord::Relationship &rel)
+{
+    FriendItem item;
+    item.userId = userId;
+
+    auto userOpt = inst->users()->getUser(userId);
+    Discord::User user;
+    if (userOpt)
+        user = *userOpt;
+    else if (rel.user.hasValue())
+        user = rel.user.get();
+
+    item.displayName = inst->users()->getDisplayName(userId);
+    if (item.displayName.empty())
+        item.displayName = user.globalName.valueOr(user.username.valueOr("Friend"));
+
+    item.username = user.username.valueOr();
+
+    std::string avatarUrl = user.avatar.hasValue()
+                                ? Discord::Cdn::userAvatar(userId, user.avatar.get(), 64)
+                                : Discord::Cdn::defaultUserAvatar(userId);
+    item.avatarSrc = shell.imageSource(avatarUrl, Platform::Size{36, 36});
+    return item;
+}
+
+void FriendsController::renderFriendRow(std::string &rml, const FriendItem &item, std::string_view actionsRml)
+{
+    std::string usernamePart;
+    if (!item.username.empty() && item.username != item.displayName)
+        usernamePart = std::format("<span class=\"friend-username\">@{0}</span>", Rml::escape(item.username));
+
+    rml += std::format(
+        "<div class=\"friend-row\" data-user-id=\"{0}\">"
+        "<div class=\"friend-avatar-wrap\">"
+        "<div class=\"avatar-clip\">"
+        "<img class=\"friend-avatar\" src=\"{1}\"/>"
+        "</div>"
+        "<div class=\"status-dot {2}\"></div>"
+        "</div>"
+        "<div class=\"friend-info\">"
+        "<div class=\"friend-name-line\">"
+        "<span class=\"friend-display-name\">{3}</span>"
+        "{4}"
+        "</div>"
+        "<div class=\"friend-subtext\">{5}</div>"
+        "</div>"
+        "<div class=\"friend-actions\">"
+        "{6}"
+        "</div>"
+        "</div>",
+        item.userId.toString(),
+        Rml::escape(item.avatarSrc),
+        item.statusClass,
+        Rml::escape(item.displayName),
+        usernamePart,
+        Rml::escape(item.subtext),
+        actionsRml);
 }
 
 void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int allCount)
 {
     auto *inst = shell.currentInstance();
-    if (!inst || !inst->relationships() || !inst->presences())
+    if (!inst || !inst->relationships() || !inst->presences() || !inst->users())
         return;
     const auto &allRels = inst->relationships()->all();
-
-    struct FriendItem {
-        Snowflake userId;
-        std::string displayName;
-        std::string username;
-        std::string avatarSrc;
-        std::string statusClass;
-        std::string subtext;
-        bool isOnline = false;
-    };
 
     std::vector<FriendItem> items;
     items.reserve(allRels.size());
@@ -401,81 +509,98 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
     const std::string searchFilter = Platform::unicodeLower(Platform::trim(searchText));
 
     for (const auto &[userId, rel] : allRels) {
-        if (!rel.type.hasValue() || rel.type.get() != Discord::RelationshipType::FRIEND)
-            continue;
-        auto badge = inst->presences()->badge(userId);
-        const bool isOnline = (badge.status != Discord::StatusType::OFFLINE);
-
-        if (currentTab == Tab::Online && !isOnline)
+        if (!rel.type.hasValue())
             continue;
 
-        auto userOpt = inst->users()->getUser(userId);
-        Discord::User user;
-        if (userOpt)
-            user = *userOpt;
-        else if (rel.user.hasValue())
-            user = rel.user.get();
-
-        std::string displayName = inst->users()->getDisplayName(userId);
-        if (displayName.empty())
-            displayName = user.globalName.valueOr(user.username.valueOr("Friend"));
-
-        std::string username = user.username.valueOr();
-
-        if (!searchFilter.empty()) {
-            if (Platform::unicodeLower(displayName).find(searchFilter) == std::string::npos && Platform::unicodeLower(username).find(searchFilter) == std::string::npos)
+        Core::PresenceBadge badge;
+        if (currentTab == Tab::Pending) {
+            const auto type = rel.type.get();
+            if (type != Discord::RelationshipType::INCOMING_REQUEST && type != Discord::RelationshipType::OUTGOING_REQUEST)
+                continue;
+            if (rel.isSpamRequest.valueOr(false))
+                continue;
+        } else {
+            if (rel.type.get() != Discord::RelationshipType::FRIEND)
+                continue;
+            badge = inst->presences()->badge(userId);
+            if (currentTab == Tab::Online && badge.status == Discord::StatusType::OFFLINE)
                 continue;
         }
 
-        std::string avatarUrl = user.avatar.hasValue()
-                             ? Discord::Cdn::userAvatar(userId, user.avatar.get(), 64)
-                             : Discord::Cdn::defaultUserAvatar(userId);
-        std::string avatarSrc = shell.imageSource(avatarUrl, Platform::Size{36, 36});
+        FriendItem item = buildFriendItem(inst, userId, rel);
 
-        std::string statusClass;
-        switch (badge.status) {
-        case Discord::StatusType::ONLINE: statusClass = "status-online"; break;
-        case Discord::StatusType::IDLE: statusClass = "status-idle"; break;
-        case Discord::StatusType::DND: statusClass = "status-dnd"; break;
-        case Discord::StatusType::OFFLINE:
-        default: statusClass = "status-offline"; break;
+        if (!searchFilter.empty()) {
+            if (Platform::unicodeLower(item.displayName).find(searchFilter) == std::string::npos &&
+                Platform::unicodeLower(item.username).find(searchFilter) == std::string::npos)
+                continue;
         }
-        if (badge.streaming)
-            statusClass = "status-streaming";
 
-        auto acts = inst->presences()->activities(userId);
-        auto sorted = Core::ActivityFormat::sortAndFilter(acts);
-        const auto *custom = Core::ActivityFormat::custom(acts);
-        const auto *prim = Core::ActivityFormat::primary(sorted);
-
-        std::string subtext;
-        if (custom && !custom->stateText().empty()) {
-            subtext = custom->stateText();
-        } else if (prim) {
-            subtext = Core::ActivityFormat::cardHeading(*prim);
-            std::string sec = Core::ActivityFormat::secondaryText(*prim);
-            if (!sec.empty())
-                subtext += ": " + sec;
+        if (currentTab == Tab::Pending) {
+            item.relationshipType = rel.type.get();
+            item.statusClass = "status-offline";
+            item.subtext = (item.relationshipType == Discord::RelationshipType::INCOMING_REQUEST)
+                               ? "Incoming Friend Request"
+                               : "Outgoing Friend Request";
         } else {
+            item.isOnline = (badge.status != Discord::StatusType::OFFLINE);
             switch (badge.status) {
-            case Discord::StatusType::ONLINE: subtext = "Online"; break;
-            case Discord::StatusType::IDLE: subtext = "Idle"; break;
-            case Discord::StatusType::DND: subtext = "Do Not Disturb"; break;
+            case Discord::StatusType::ONLINE: item.statusClass = "status-online"; break;
+            case Discord::StatusType::IDLE: item.statusClass = "status-idle"; break;
+            case Discord::StatusType::DND: item.statusClass = "status-dnd"; break;
             case Discord::StatusType::OFFLINE:
-            default: subtext = "Offline"; break;
+            default: item.statusClass = "status-offline"; break;
+            }
+            if (badge.streaming)
+                item.statusClass = "status-streaming";
+
+            auto acts = inst->presences()->activities(userId);
+            auto sorted = Core::ActivityFormat::sortAndFilter(acts);
+            const auto *custom = Core::ActivityFormat::custom(acts);
+            const auto *prim = Core::ActivityFormat::primary(sorted);
+
+            if (custom && !custom->stateText().empty()) {
+                item.subtext = custom->stateText();
+            } else if (prim) {
+                item.subtext = Core::ActivityFormat::cardHeading(*prim);
+                std::string sec = Core::ActivityFormat::secondaryText(*prim);
+                if (!sec.empty())
+                    item.subtext += ": " + sec;
+            } else {
+                switch (badge.status) {
+                case Discord::StatusType::ONLINE: item.subtext = "Online"; break;
+                case Discord::StatusType::IDLE: item.subtext = "Idle"; break;
+                case Discord::StatusType::DND: item.subtext = "Do Not Disturb"; break;
+                case Discord::StatusType::OFFLINE:
+                default: item.subtext = "Offline"; break;
+                }
             }
         }
 
-        items.push_back({ userId, displayName, username, avatarSrc, statusClass, subtext, isOnline });
+        items.push_back(std::move(item));
     }
 
-    std::sort(items.begin(), items.end(), [](const FriendItem &a, const FriendItem &b) {
-        return Platform::unicodeLower(a.displayName) < Platform::unicodeLower(b.displayName);
-    });
+    if (currentTab == Tab::Pending) {
+        std::sort(items.begin(), items.end(), [](const FriendItem &a, const FriendItem &b) {
+            if (a.relationshipType != b.relationshipType)
+                return a.relationshipType == Discord::RelationshipType::INCOMING_REQUEST;
+            return Platform::unicodeLower(a.displayName) < Platform::unicodeLower(b.displayName);
+        });
+    } else {
+        std::sort(items.begin(), items.end(), [](const FriendItem &a, const FriendItem &b) {
+            return Platform::unicodeLower(a.displayName) < Platform::unicodeLower(b.displayName);
+        });
+    }
 
-    const std::string sectionTitle = (currentTab == Tab::Online)
-                                     ? std::format("Online — {0}", items.size())
-                                     : std::format("All friends — {0}", items.size());
+    std::string sectionTitle;
+    if (currentTab == Tab::Pending)
+        sectionTitle = std::format("Pending — {0}", items.size());
+    else if (currentTab == Tab::Online)
+        sectionTitle = std::format("Online — {0}", items.size());
+    else
+        sectionTitle = std::format("All friends — {0}", items.size());
+
+    if (currentTab == Tab::Pending && !pendingError.empty())
+        rml += std::format("<div class=\"friends-pending-error\">{0}</div>", Rml::escape(pendingError));
 
     rml += std::format("<div class=\"friends-section-title\">{0}</div>", sectionTitle);
     rml += "<div id=\"friends-list\">";
@@ -486,6 +611,9 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
         if (!searchText.empty()) {
             emptyTitle = "No friends found";
             emptySubtitle = std::format("No friends found matching \"{0}\".", Rml::escape(searchText));
+        } else if (currentTab == Tab::Pending) {
+            emptyTitle = "There are no pending friend requests.";
+            emptySubtitle = "Here's Wumpus for now.";
         } else if (currentTab == Tab::Online) {
             emptyTitle = "No one's around to play with Wumpus.";
             emptySubtitle = "None of your friends are currently online.";
@@ -502,35 +630,30 @@ void FriendsController::renderFriendsList(std::string &rml, int onlineCount, int
             "</div>", emptyTitle, emptySubtitle);
     } else {
         for (const auto &item : items) {
-            std::string usernamePart;
-            if (!item.username.empty() && item.username != item.displayName) {
-                usernamePart = std::format("<span class=\"friend-username\">@{0}</span>", Rml::escape(item.username));
+            std::string actions;
+            const std::string idStr = item.userId.toString();
+            if (currentTab == Tab::Pending) {
+                const bool isIncoming = (item.relationshipType == Discord::RelationshipType::INCOMING_REQUEST);
+                if (isIncoming) {
+                    actions += std::format(
+                        "<div class=\"friend-action-btn friend-action-accept\" data-action=\"accept-request\" data-user-id=\"{0}\" title=\"Accept\">"
+                        "<img class=\"icon\" src=\"icon:check\"/>"
+                        "</div>", idStr);
+                }
+                actions += std::format(
+                    "<div class=\"friend-action-btn friend-action-decline\" data-action=\"remove-request\" data-user-id=\"{0}\" title=\"{1}\">"
+                    "<img class=\"icon\" src=\"icon:x\"/>"
+                    "</div>", idStr, isIncoming ? "Ignore" : "Cancel");
+            } else {
+                actions = std::format(
+                    "<div class=\"friend-action-btn\" data-action=\"message\" data-user-id=\"{0}\" title=\"Message\">"
+                    "<img class=\"icon\" src=\"icon:message-circle\"/>"
+                    "</div>"
+                    "<div class=\"friend-action-btn friend-action-more\" data-action=\"more\" data-user-id=\"{0}\" title=\"More\">"
+                    "<img class=\"icon\" src=\"icon:ellipsis\"/>"
+                    "</div>", idStr);
             }
-
-            rml += std::format(
-                "<div class=\"friend-row\" data-user-id=\"{0}\">"
-                "<div class=\"friend-avatar-wrap\">"
-                "<div class=\"avatar-clip\">"
-                "<img class=\"friend-avatar\" src=\"{1}\"/>"
-                "</div>"
-                "<div class=\"status-dot {2}\"></div>"
-                "</div>"
-                "<div class=\"friend-info\">"
-                "<div class=\"friend-name-line\">"
-                "<span class=\"friend-display-name\">{3}</span>"
-                "{4}"
-                "</div>"
-                "<div class=\"friend-subtext\">{5}</div>"
-                "</div>"
-                "<div class=\"friend-actions\">"
-                "<div class=\"friend-action-btn\" data-action=\"message\" data-user-id=\"{0}\" title=\"Message\">"
-                "<img class=\"icon\" src=\"icon:message-circle\"/>"
-                "</div>"
-                "<div class=\"friend-action-btn friend-action-more\" data-action=\"more\" data-user-id=\"{0}\" title=\"More\">"
-                "<img class=\"icon\" src=\"icon:ellipsis\"/>"
-                "</div>"
-                "</div>"
-                "</div>", item.userId.toString(), escape(item.avatarSrc), item.statusClass, escape(item.displayName), usernamePart, escape(item.subtext));
+            renderFriendRow(rml, item, actions);
         }
     }
 

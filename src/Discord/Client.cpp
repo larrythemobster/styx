@@ -723,6 +723,16 @@ void Client::sendFriendRequest(const std::string &username, ActionCallback callb
     httpClient->post("/users/@me/relationships", body, actionHandler("Sending a friend request", std::move(callback)));
 }
 
+void Client::acceptFriendRequest(Snowflake userId, ActionCallback callback)
+{
+    httpClient->put("/users/@me/relationships/" + userId.toString(), nlohmann::json::object(), actionHandler("Accepting a friend request", std::move(callback)));
+}
+
+void Client::removeRelationship(Snowflake userId, ActionCallback callback)
+{
+    httpClient->delete_("/users/@me/relationships/" + userId.toString(), actionHandler("Removing a relationship", std::move(callback)));
+}
+
 
 void Client::setState(Core::ConnectionState state)
 {

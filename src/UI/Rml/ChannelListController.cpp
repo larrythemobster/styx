@@ -174,6 +174,11 @@ void ChannelListController::connectInstanceVoice(Core::ClientInstance *instance)
     instanceConnections.push_back(instance->presences()->presencesChanged.connect([this](auto) {
         if (shell.location().isHome()) scheduleRebuild();
     }));
+    if (auto *relationships = instance->relationships()) {
+        auto refresh = [this] { if (shell.location().isHome()) scheduleRebuild(); };
+        instanceConnections.push_back(relationships->relationshipChanged.connect([refresh](auto) { refresh(); }));
+        instanceConnections.push_back(relationships->relationshipsReset.connect(refresh));
+    }
 #ifndef STYX_NO_VOICE
     if (auto *voice = instance->voice()) {
         instanceConnections.push_back(voice->channelVoiceMemberChanged.connect([this](auto, auto, auto) { scheduleRebuild(); }));
@@ -205,7 +210,11 @@ void ChannelListController::renderHomeSidebar()
     if (auto *clear = sidebarHeader->GetElementById("sidebar-search-clear"))
         clear->SetProperty("display", dmFilterText.empty() ? "none" : "block");
     bool friendsSelected = shell.isFriendsOpen();
-    std::string rml = "<div class=\"channel-row dm-friends-row" + std::string(friendsSelected ? " selected" : "") + "\" data-action=\"friends\"><img class=\"channel-icon\" src=\"icon:user-plus\"/><span class=\"channel-name\">Friends</span></div><div class=\"section-header\">Direct Messages</div>";
+    std::string rml = "<div class=\"channel-row dm-friends-row" + std::string(friendsSelected ? " selected" : "") + "\" data-action=\"friends\"><img class=\"channel-icon\" src=\"icon:user-plus\"/><span class=\"channel-name\">Friends</span>";
+    // Incoming friend requests, as the official client badges this row.
+    if (auto *inst = shell.currentInstance(); inst && inst->relationships())
+        appendMention(rml, inst->relationships()->incomingRequestCount());
+    rml += "</div><div class=\"section-header\">Direct Messages</div>";
     auto *tree = shell.channelTree();
     auto *filter = shell.channelFilter();
     if (tree && filter) {

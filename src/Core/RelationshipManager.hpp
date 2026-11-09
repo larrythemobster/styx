@@ -26,6 +26,9 @@ public:
 
     [[nodiscard]] bool isFriend(Snowflake userId) const;
     [[nodiscard]] bool isBlockedOrIgnored(Snowflake userId) const;
+    // Incoming friend requests, leaving out the ones Discord filed as spam, as the official
+    // client's Friends badge counts them.
+    [[nodiscard]] int incomingRequestCount() const;
     [[nodiscard]] const std::unordered_map<Snowflake, Discord::Relationship> &all() const { return store; }
 
     void onRelationshipAdded(const Discord::Relationship &rel);

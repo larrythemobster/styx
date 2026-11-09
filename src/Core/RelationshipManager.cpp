@@ -41,6 +41,15 @@ bool RelationshipManager::isFriend(Snowflake userId) const
     return it->second.type.get() == Discord::RelationshipType::FRIEND;
 }
 
+int RelationshipManager::incomingRequestCount() const
+{
+    int count = 0;
+    for (const auto &[id, rel] : store)
+        if (rel.type.hasValue() && rel.type.get() == Discord::RelationshipType::INCOMING_REQUEST && !rel.isSpamRequest.valueOr(false))
+            ++count;
+    return count;
+}
+
 bool RelationshipManager::isBlockedOrIgnored(Snowflake userId) const
 {
     auto it = store.find(userId);

@@ -195,6 +195,13 @@ body.friends-open #friends { display: flex; }
     flex-direction: column;
 }
 
+.friends-pending-error
+{
+	color: #f23f43;
+	font-size: 13dp;
+	padding: 4dp 0 8dp 0;
+}
+
 .friends-section-title
 {
 	font-size: 12dp;
@@ -358,6 +365,16 @@ body.friends-open #friends { display: flex; }
 .friend-action-btn:hover .icon
 {
 	image-color: #ffffff;
+}
+
+.friend-action-accept:hover .icon
+{
+	image-color: #23a55a;
+}
+
+.friend-action-decline:hover .icon
+{
+	image-color: #f23f43;
 }
 
 /* Empty states */
