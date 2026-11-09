@@ -764,6 +764,90 @@ void Client::modifyGuild(Snowflake guildId, const GuildEdit &edit, const std::ma
             actionHandler("Saving guild settings", std::move(callback))));
 }
 
+void Client::modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<User> callback)
+{
+    RequestOptions options;
+    options.originalMd5 = originalMd5Header(originalMd5s);
+
+    Platform::Guard<Client> self(this);
+    httpClient->send(HttpClient::Method::PATCH, "/users/@me", edit.toJson().toBytes(), options,
+        [self, callback = std::move(callback)](const HttpResponse &response) {
+            if (!response.success) {
+                const ApiError error = ApiError::fromResponse(response);
+                if (callback)
+                    callback(Core::Result<User>::makeError(error.message, error.code));
+                return;
+            }
+
+            const auto document = nlohmann::json::parse(response.body, nullptr, false);
+            if (!document.is_object()) {
+                if (callback)
+                    callback(Core::Result<User>::makeError("Invalid JSON response"));
+                return;
+            }
+
+            User user;
+            try {
+                user = User::fromJson(document);
+            } catch (const nlohmann::json::exception &) {
+                if (callback)
+                    callback(Core::Result<User>::makeError("Invalid user response"));
+                return;
+            }
+            if (!self || !user.id->isValid() || user.id.get() != self->me.id.get()) {
+                if (callback)
+                    callback(Core::Result<User>::makeError("User ID mismatch or invalid"));
+                return;
+            }
+
+            self->me = user;
+            self->currentUserUpdated.publish(self->me);
+
+            if (callback)
+                callback(Core::Result<User>::makeOk(std::move(user)));
+        });
+}
+
+void Client::modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback)
+{
+    RequestOptions options;
+    options.originalMd5 = originalMd5Header(originalMd5s);
+
+    Platform::Guard<Client> self(this);
+    httpClient->send(HttpClient::Method::PATCH, "/users/@me/profile", edit.toJson().toBytes(), options,
+        [self, callback = std::move(callback)](const HttpResponse &response) {
+            if (!response.success) {
+                const ApiError error = ApiError::fromResponse(response);
+                if (callback)
+                    callback(Core::Result<UserProfileData>::makeError(error.message, error.code));
+                return;
+            }
+
+            const auto document = nlohmann::json::parse(response.body, nullptr, false);
+            if (!document.is_object() || !document.contains("pronouns") || !document["pronouns"].is_string()) {
+                if (callback)
+                    callback(Core::Result<UserProfileData>::makeError("Invalid JSON response"));
+                return;
+            }
+
+            UserProfileData metadata;
+            try {
+                metadata = UserProfileData::fromJson(document);
+            } catch (const nlohmann::json::exception &) {
+                if (callback)
+                    callback(Core::Result<UserProfileData>::makeError("Invalid profile response"));
+                return;
+            }
+            if (!metadata.banner.isUndefined() && self) {
+                self->me.banner = metadata.banner;
+                self->currentUserUpdated.publish(self->me);
+            }
+
+            if (callback)
+                callback(Core::Result<UserProfileData>::makeOk(std::move(metadata)));
+        });
+}
+
 
 void Client::sendFriendRequest(const std::string &username, ActionCallback callback)
 {

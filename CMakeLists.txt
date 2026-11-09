@@ -284,6 +284,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/MemberListController.cpp
     src/UI/Rml/FriendsController.cpp
     src/UI/Rml/SettingsController.cpp
+    src/UI/Rml/ProfileEditorController.cpp
     src/UI/Rml/AccountsController.cpp
     src/UI/Rml/ConfirmModal.cpp
     src/UI/Rml/UserProfileController.cpp
@@ -416,6 +417,7 @@ if(BUILD_TESTS)
     styx_test(TestBlockedRuns BlockedRunsTests tests/tst_BlockedRuns.cpp src/UI/Chat/BlockedRuns.cpp)
     styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)
     styx_test(TestGuildCreate GuildCreateTests tests/tst_GuildCreate.cpp src/Discord/GuildCreate.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
+    styx_test(TestUserEdits UserEditsTests tests/tst_UserEdits.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestTransmitGate TransmitGateTests tests/tst_TransmitGate.cpp src/Core/Audio/TransmitGate.cpp)
     styx_test(TestWindowsPttHook WindowsPttHookTests tests/tst_WindowsPttHook.cpp src/UI/WindowsPttHook.cpp)
     target_link_libraries(TestWindowsPttHook PRIVATE RmlUi::RmlUi)

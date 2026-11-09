@@ -1,5 +1,6 @@
 #include "SettingsController.hpp"
 
+#include "ProfileEditorController.hpp"
 #include "Shell.hpp"
 #include "ShortcutController.hpp"
 #include "Shortcuts.hpp"
@@ -120,6 +121,8 @@ void SettingsController::onSettingsOpenChanged(bool open)
         regionRoot->SetClass("open", true);
         requestRender(200);
     } else {
+        if (profileEditor)
+            profileEditor->close();
         stopRecordingKeybind();
         regionRoot->SetClass("open", false);
         hideTransitionTimer.start(std::chrono::milliseconds(160), false, [this] {
@@ -305,9 +308,14 @@ void SettingsController::renderMyAccount(std::string &rml)
     rml += std::string("</div>");
 
     rml += std::string(
-        "<button class=\"settings-btn settings-btn-primary\" data-action=\"manage-accounts\">"
+        "<div class=\"settings-button-group\">"
+        "<button class=\"settings-btn settings-btn-primary\" data-action=\"edit-profile\" style=\"tab-index: auto;\">"
+        "Edit Profile"
+        "</button>"
+        "<button class=\"settings-btn settings-btn-secondary\" data-action=\"manage-accounts\" style=\"tab-index: auto;\">"
         "Switch / Manage Accounts"
-        "</button>");
+        "</button>"
+        "</div>");
     rml += std::string("</div>"); // .my-account-card
 }
 
@@ -1091,6 +1099,17 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         applyPushToTalk();
         stopRecordingKeybind();
         refreshKeybinds();
+    } else if (action == std::string("edit-profile")) {
+        if (!profileEditor) {
+            profileEditor = std::make_unique<ProfileEditorController>(shell);
+            track(profileEditor->closed.connect([this] {
+                if (this->shell.isSettingsOpen()) {
+                    render();
+                    requestRender();
+                }
+            }));
+        }
+        profileEditor->open();
     } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
     } else if (action == std::string("open-acheron")) {

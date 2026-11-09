@@ -41,6 +41,12 @@ The smile button in the user panel edits custom status text, Unicode or server
 emoji, and expiry. Save, remove the emoji, or clear the whole status. Updates keep
 the current presence and activity-visibility settings.
 
+My Account's Edit Profile dialog changes your display name, pronouns, bio, avatar
+and banner. Images use the same crop and preview pipeline as server settings.
+Reset discards unsaved edits. If only part of a save succeeds, retry sends the
+remaining changes without uploading the saved avatar again. Banner changes
+require an eligible Nitro subscription.
+
 Native platform services provide file dialogs, the system tray, credential
 storage and startup error dialogs.
 

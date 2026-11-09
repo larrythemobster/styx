@@ -27,6 +27,7 @@
 #include "MessageSearch.hpp"
 #include "InviteLink.hpp"
 #include "GuildRequests.hpp"
+#include "UserEdits.hpp"
 #include "HttpClient.hpp"
 #include "ClientIdentity.hpp"
 
@@ -212,6 +213,8 @@ public:
     template <typename T>
     using ResultCallback = std::function<void(const Core::Result<T> &)>;
     using ActionCallback = ResultCallback<void>;
+    void modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<User> callback = {});
+    void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
     void setCustomStatus(const std::optional<Proto::CustomStatus> &customStatus, ActionCallback callback = {});
 
     void fetchReactors(Snowflake channelId, Snowflake messageId, const std::string &reactionKey, bool isBurst, int limit, std::optional<Snowflake> after, ResultCallback<std::vector<User>> callback);
@@ -297,6 +300,7 @@ public:
     Platform::Signal<Core::ConnectionState> stateChanged;
     Platform::Signal<const Ready &> ready;
     Platform::Signal<const ReadySupplemental &> readySupplemental;
+    Platform::Signal<const User &> currentUserUpdated;
     Platform::Signal<const Message &> messageCreated;
     Platform::Signal<const Message &> messageUpdated;
     Platform::Signal<const MessageDelete &> messageDeleted;

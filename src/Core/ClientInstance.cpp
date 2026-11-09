@@ -106,6 +106,15 @@ ClientInstance::ClientInstance(const AccountInfo &info,
     track(client->stateChanged.connect([this](auto &&...args) { stateChanged.publish(args...); }));
     track(client->reconnecting.connect([this](auto &&...args) { reconnecting.publish(args...); }));
     track(client->authenticationFailed.connect([this]() { authenticationFailed.publish(account); }));
+    track(client->currentUserUpdated.connect([this](const Discord::User &user) {
+        if (user.id != account.id)
+            return;
+        userManager->saveUser(user);
+        account.username = user.username.valueOr();
+        account.displayName = user.globalName.valueOr();
+        account.avatar = user.avatar.valueOr();
+        detailsUpdated.publish(account);
+    }));
 
     track(client->ready.connect([this](const Discord::Ready &ready) {
         auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));

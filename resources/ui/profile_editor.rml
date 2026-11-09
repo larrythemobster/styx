@@ -1,0 +1,69 @@
+<rml>
+<head>
+    <title>Edit Profile</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="profile_editor.rcss"/>
+</head>
+<body id="profile-editor-body">
+    <div class="profile-editor-backdrop" data-action="close"></div>
+    <div class="profile-editor-card">
+        <div class="profile-editor-header">
+            <div class="profile-editor-title">Edit Profile</div>
+            <div id="profile-edit-state" class="profile-edit-state" style="display: none;"></div>
+        </div>
+        <div id="profile-edit-error" class="profile-edit-error" style="display: none;"></div>
+        <div class="profile-editor-content">
+            <div class="profile-edit-section">
+                <div class="profile-edit-label">Profile Banner</div>
+                <div class="profile-edit-banner-wrap">
+                    <img id="profile-edit-banner-preview" class="profile-edit-banner-img"/>
+                    <div id="profile-edit-banner-unavailable" class="profile-edit-unavailable" style="display: none;">Preview unavailable</div>
+                </div>
+                <div class="profile-edit-banner-note">Changing your banner requires an eligible Nitro subscription.</div>
+                <div class="profile-edit-btn-row">
+                    <button id="profile-edit-choose-banner" class="profile-editor-btn profile-editor-btn-secondary" data-action="choose-banner">Change Banner</button>
+                    <button id="profile-edit-remove-banner" class="profile-editor-btn profile-editor-btn-secondary" data-action="remove-banner">Remove Banner</button>
+                </div>
+            </div>
+
+            <div class="profile-edit-section">
+                <div class="profile-edit-label">Avatar</div>
+                <div class="profile-edit-avatar-row">
+                    <div class="profile-edit-avatar-wrap">
+                        <img id="profile-edit-avatar-preview" class="profile-edit-avatar-img"/>
+                        <div id="profile-edit-avatar-unavailable" class="profile-edit-unavailable" style="display: none;">Preview unavailable</div>
+                    </div>
+                    <div class="profile-edit-btn-row profile-edit-avatar-btns">
+                        <button id="profile-edit-choose-avatar" class="profile-editor-btn profile-editor-btn-secondary" data-action="choose-avatar">Change Avatar</button>
+                        <button id="profile-edit-remove-avatar" class="profile-editor-btn profile-editor-btn-secondary" data-action="remove-avatar">Remove Avatar</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="profile-edit-section">
+                <div class="profile-edit-label">Display Name</div>
+                <input id="profile-edit-name" class="profile-edit-input" type="text" maxlength="32" placeholder="Display Name"/>
+            </div>
+
+            <div class="profile-edit-section">
+                <div class="profile-edit-label">Pronouns</div>
+                <input id="profile-edit-pronouns" class="profile-edit-input" type="text" maxlength="40" placeholder="Pronouns"/>
+            </div>
+
+            <div class="profile-edit-section">
+                <div class="profile-edit-label">About Me</div>
+                <textarea id="profile-edit-bio" class="profile-edit-textarea" maxlength="190" placeholder="Tell us about yourself"></textarea>
+            </div>
+
+        </div>
+        <div class="profile-editor-footer">
+            <button id="profile-edit-reset" class="profile-editor-btn profile-editor-btn-secondary" data-action="reset">Reset</button>
+            <div class="profile-editor-footer-right">
+                <button class="profile-editor-btn profile-editor-btn-secondary" data-action="close">Cancel</button>
+                <button id="profile-edit-save" class="profile-editor-btn profile-editor-btn-primary" data-action="save">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

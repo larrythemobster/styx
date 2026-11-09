@@ -4,6 +4,7 @@
 #include "Keybinds.hpp"
 #include "Platform/Native.hpp"
 #include "Platform/Timer.hpp"
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -13,6 +14,8 @@ class ClientInstance;
 }
 namespace UI {
 namespace Rml {
+class ProfileEditorController;
+
 
 class SettingsController final : public Controller
 {
@@ -72,6 +75,7 @@ private:
     bool themeDarkMode = true;
     std::optional<KeybindAction> recordingKeybind;
     std::string keybindError;
+    std::unique_ptr<ProfileEditorController> profileEditor;
 };
 
 } // namespace Rml
