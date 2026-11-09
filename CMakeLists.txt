@@ -247,6 +247,7 @@ set(PROJECT_SOURCES
     src/Discord/ClientMessages.cpp
     src/Discord/MessageSearch.cpp
     src/Discord/InviteLink.cpp
+    src/Discord/GuildCreate.cpp
     src/Discord/ClientGuild.cpp
     src/Discord/ClientUploads.cpp
     src/Discord/Gateway.cpp
@@ -291,6 +292,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/ShortcutController.cpp
     src/UI/Rml/ShortcutsHelpController.cpp
     src/UI/Rml/JoinServerController.cpp
+    src/UI/Rml/CreateServerController.cpp
     src/UI/Rml/ExpressionPickerController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )
@@ -405,6 +407,7 @@ if(BUILD_TESTS)
     styx_test(TestNavigation NavigationTests tests/tst_Navigation.cpp src/UI/ChannelList/Navigation.cpp src/Core/Snowflake.cpp)
     styx_test(TestBlockedRuns BlockedRunsTests tests/tst_BlockedRuns.cpp src/UI/Chat/BlockedRuns.cpp)
     styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)
+    styx_test(TestGuildCreate GuildCreateTests tests/tst_GuildCreate.cpp src/Discord/GuildCreate.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestSounds SoundsTests tests/tst_Sounds.cpp src/Core/Audio/Sounds.cpp src/Core/Audio/SoundMixer.cpp)
     styx_test(TestUnicodeEmoji UnicodeEmojiTests tests/tst_UnicodeEmoji.cpp
         src/Core/Emoji/UnicodeEmojiIndex.cpp src/Core/Logging.cpp)

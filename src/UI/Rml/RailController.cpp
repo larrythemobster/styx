@@ -39,7 +39,7 @@ RailController::RailController(Shell &shell, ::Rml::Element *root)
         if (kind == "home") this->shell.openHome(accountId);
         else if (kind == "folder") { if (auto *rail = this->shell.rail()) rail->toggleFolder(accountId, id); }
         else if (kind == "server") this->shell.openGuild(accountId, id);
-        else if (kind == "add") this->shell.openJoinServer({}, "Join Guild");
+        else if (kind == "add") this->shell.openCreateServer();
     });
     listen("mousedown", [this](::Rml::Event &event) {
         if (event.GetParameter<int>("button", 0) != 1) return;
@@ -173,7 +173,7 @@ void RailController::renderRail()
     }
     if (auto *doc = shell.document()) doc->SetClass("rail-folder-open", !expanded.empty());
     primary += "<div class=\"rail-separator\"></div><div class=\"rail-item kind-add\" data-kind=\"add\"><div class=\"pill\"></div>"
-               "<div class=\"rail-btn\"><img class=\"rail-icon\" src=\"icon:plus\"/></div><div class=\"rail-tooltip\">Join a Server</div></div>";
+               "<div class=\"rail-btn\"><img class=\"rail-icon\" src=\"icon:plus\"/></div><div class=\"rail-tooltip\">Add a Server</div></div>";
     std::string rml = "<div class=\"rail-primary\">" + primary + "</div>";
     if (!expanded.empty()) rml += "<div class=\"rail-expanded\">" + expanded + "</div>";
     regionRoot->SetInnerRML(rml);

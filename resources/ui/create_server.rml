@@ -1,0 +1,23 @@
+<rml>
+<head>
+    <title>Customize Your Server</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="create_server.rcss"/>
+</head>
+<body id="create-server-body">
+    <div class="create-server-backdrop" data-action="close"></div>
+    <div class="create-server-popover">
+        <div class="create-server-title">Customize Your Server</div>
+        <div class="create-server-subtitle">Give your new server a personality with a name and an icon. You can always change it later.</div>
+        <div id="create-server-icon" class="create-server-icon" data-action="pick-icon"></div>
+        <div class="create-server-label">SERVER NAME</div>
+        <input id="create-server-name" class="create-server-input" type="text"/>
+        <div id="create-server-error" class="create-server-error" style="display: none;"></div>
+        <div class="create-server-buttons">
+            <button class="create-server-join" data-action="join">Have an invite already? Join a Server</button>
+            <button id="create-server-confirm" class="create-server-confirm" data-action="create">Create</button>
+        </div>
+    </div>
+</body>
+</rml>

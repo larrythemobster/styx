@@ -1,0 +1,164 @@
+body#create-server-body {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: transparent;
+    z-index: 200;
+}
+
+.create-server-backdrop {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000000a0;
+    z-index: 201;
+}
+
+.create-server-popover {
+    position: absolute;
+    top: 80dp;
+    left: 50%;
+    margin-left: -220dp;
+    width: 440dp;
+    background-color: #111214;
+    border: 1dp #202024;
+    border-radius: 8dp;
+    padding: 20dp;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    z-index: 202;
+}
+
+.create-server-title {
+    font-size: 20dp;
+    font-weight: bold;
+    color: #f2f3f5;
+    text-align: center;
+}
+
+.create-server-subtitle {
+    font-size: 14dp;
+    color: #949ba4;
+    text-align: center;
+    margin-top: 8dp;
+    margin-bottom: 16dp;
+}
+
+.create-server-icon {
+    width: 80dp;
+    height: 80dp;
+    border-radius: 40dp;
+    border: 2dp dashed #80848e;
+    margin-left: auto;
+    margin-right: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.create-server-icon.picked {
+    border-width: 0;
+}
+
+.create-server-camera {
+    width: 24dp;
+    height: 24dp;
+    image-color: #b5bac1;
+}
+
+.create-server-upload {
+    font-size: 10dp;
+    font-weight: bold;
+    color: #b5bac1;
+    margin-top: 4dp;
+    text-align: center;
+}
+
+.create-server-picked {
+    width: 80dp;
+    height: 80dp;
+    border-radius: 40dp;
+    display: block;
+}
+
+.create-server-label {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #b5bac1;
+    margin-top: 16dp;
+    margin-bottom: 8dp;
+}
+
+.create-server-input {
+    width: 100%;
+    height: 40dp;
+    background-color: #1e1f22;
+    border: 1dp #202024;
+    border-radius: 4dp;
+    padding: 0 8dp;
+    color: #dbdee1;
+    font-size: 16dp;
+    box-sizing: border-box;
+}
+
+.create-server-input:focus {
+    border-color: #5865f2;
+}
+
+.create-server-error {
+    font-size: 13dp;
+    color: #f23f43;
+    margin-top: 8dp;
+}
+
+.create-server-buttons {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 16dp;
+}
+
+.create-server-join {
+    background-color: transparent;
+    color: #00a8fc;
+    font-size: 14dp;
+    font-weight: 500;
+    padding: 0;
+    border-width: 0;
+    cursor: pointer;
+}
+
+.create-server-join:hover {
+    text-decoration: underline;
+}
+
+.create-server-confirm {
+    background-color: #5865f2;
+    color: #ffffff;
+    font-size: 14dp;
+    font-weight: 500;
+    padding: 8dp 16dp;
+    border-radius: 4dp;
+    border-width: 0;
+    cursor: pointer;
+}
+
+.create-server-confirm:hover {
+    background-color: #4752c4;
+}
+
+.create-server-confirm:disabled {
+    opacity: 0.5;
+    cursor: default;
+    background-color: #5865f2;
+}

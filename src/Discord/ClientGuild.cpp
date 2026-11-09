@@ -1,4 +1,5 @@
 #include "Client.hpp"
+#include "GuildCreate.hpp"
 #include "InviteLink.hpp"
 #include "ApiError.hpp"
 #include "Core/Logging.hpp"
@@ -173,6 +174,13 @@ void Client::acceptInvite(const std::string &code, const std::string &location, 
             if (doc.contains("guild") && doc["guild"].is_object() && doc["guild"].contains("id") && doc["guild"]["id"].is_string()) return snowflake(doc["guild"]["id"].get<std::string>());
             if (doc.contains("guild_id") && doc["guild_id"].is_string()) return snowflake(doc["guild_id"].get<std::string>());
         }
+        return Snowflake::Invalid;
+    }));
+}
+void Client::createGuild(const std::string &name, const std::string &iconDataUri, ResultCallback<Snowflake> callback) {
+    RequestOptions options;
+    httpClient->send(HttpClient::Method::POST, "/guilds", guildCreateBody(name, iconDataUri).toBytes(), options, valueHandler<Snowflake>("Creating a server", std::move(callback), [](const Json &doc) {
+        if (doc.is_object() && doc.contains("id") && doc["id"].is_string()) return snowflake(doc["id"].get<std::string>());
         return Snowflake::Invalid;
     }));
 }

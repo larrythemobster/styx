@@ -259,6 +259,8 @@ public:
     // sends for where the invite was opened, e.g. "Markdown Link" or "Join Guild". The result is the
     // server's id.
     void acceptInvite(const std::string &code, const std::string &location, ResultCallback<Snowflake> callback);
+    // Creates a server owned by this account; iconDataUri may be empty. The result is its id.
+    void createGuild(const std::string &name, const std::string &iconDataUri, ResultCallback<Snowflake> callback);
     void setIncidentActions(Snowflake guildId, const Platform::DateTime &invitesDisabledUntil, const Platform::DateTime &dmsDisabledUntil,
                             std::optional<int> lockdownHours, ActionCallback callback);
 

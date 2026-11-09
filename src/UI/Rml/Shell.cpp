@@ -21,6 +21,7 @@
 #include "ThreadBrowserController.hpp"
 #include "SearchController.hpp"
 #include "JoinServerController.hpp"
+#include "CreateServerController.hpp"
 #include "SwitcherController.hpp"
 #include "ShortcutController.hpp"
 #include "ShortcutsHelpController.hpp"
@@ -721,6 +722,28 @@ void Shell::openJoinServer(const std::string &code, const std::string &location)
     if (!instance) return;
     if (!joinServerController) joinServerController = std::make_unique<Rml::JoinServerController>(*this);
     joinServerController->open(code, location);
+}
+void Shell::openCreateServer()
+{
+    if (!instance) return;
+    if (!createServerController) createServerController = std::make_unique<Rml::CreateServerController>(*this);
+    createServerController->open();
+}
+void Shell::openGuildWhenReady(Snowflake account, Snowflake guild)
+{
+    pendingGuildOpen.disconnect();
+    auto *client = instanceFor(account);
+    if (!client || !guild.isValid()) return;
+    if (channelTreeModel->serverNode(account, guild)) {
+        openGuild(account, guild);
+        return;
+    }
+    // The tree's own guildCreated connection was made first, so the server is in it by now.
+    pendingGuildOpen = client->guildCreated.connect([this, account, guild](const Discord::GatewayGuild &created) {
+        if (!created.properties.hasValue() || created.properties->id != guild) return;
+        pendingGuildOpen.disconnect();
+        openGuild(account, guild);
+    });
 }
 std::vector<NavigationEntry> Shell::channelNavigation() const
 {

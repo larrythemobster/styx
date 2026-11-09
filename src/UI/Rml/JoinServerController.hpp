@@ -3,7 +3,6 @@
 #include "Controller.hpp"
 #include "Core/Snowflake.hpp"
 #include "Discord/InviteLink.hpp"
-#include "Platform/Signal.hpp"
 
 #include <optional>
 #include <string>
@@ -46,8 +45,6 @@ private:
     void showError(std::string message);
     // Join, or open the server when the account is already in it.
     void confirm();
-    // Opens the server once the gateway has delivered it; joining only returns its id.
-    void openWhenReady(Core::Snowflake guildId);
     [[nodiscard]] bool alreadyMember() const;
     [[nodiscard]] ::Rml::ElementFormControlInput *input() const;
 
@@ -59,7 +56,6 @@ private:
     std::string error;
     // Drops replies to a lookup or join from an earlier opening of the dialog.
     int generation = 0;
-    Platform::Connection guildReady;
 };
 
 } // namespace Rml

@@ -8,7 +8,6 @@
 #include "Discord/ApiError.hpp"
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Client.hpp"
-#include "Discord/Entities.hpp"
 #include "Discord/InviteLink.hpp"
 #include "Platform/Native.hpp"
 #include "UI/ChannelList/ChannelTreeModel.hpp"
@@ -49,7 +48,6 @@ void JoinServerController::open(const std::string &code, const std::string &loca
     ++generation;
     preview.reset();
     error.clear();
-    guildReady.disconnect();
 
     visible = true;
     joinDocument->Show(::Rml::ModalFlag::None);
@@ -261,7 +259,7 @@ void JoinServerController::confirm()
 
     const int gen = ++generation;
     const Core::Snowflake previewGuildId = preview->guildId;
-    instance->discord()->acceptInvite(preview->code, location, [this, guard = lifetime(), gen, previewGuildId](const Core::Result<Core::Snowflake> &result) {
+    instance->discord()->acceptInvite(preview->code, location, [this, guard = lifetime(), gen, accountId = instance->accountId(), previewGuildId](const Core::Result<Core::Snowflake> &result) {
         if (guard.expired() || gen != generation)
             return;
         if (!result.success()) {
@@ -271,31 +269,8 @@ void JoinServerController::confirm()
             return;
         }
         const Core::Snowflake joined = result.value.value_or(Core::Snowflake::Invalid);
-        openWhenReady(joined.isValid() ? joined : previewGuildId);
+        shell.openGuildWhenReady(accountId, joined.isValid() ? joined : previewGuildId);
         close();
-    });
-}
-
-void JoinServerController::openWhenReady(Core::Snowflake guildId)
-{
-    auto *instance = shell.currentInstance();
-    if (!instance || !guildId.isValid())
-        return;
-
-    const Core::Snowflake accountId = instance->accountId();
-    auto *tree = shell.channelTree();
-    if (tree && tree->serverNode(accountId, guildId)) {
-        shell.openGuild(accountId, guildId);
-        return;
-    }
-
-    // Shell adds the server to the tree from its own, earlier guildCreated connection, so it's
-    // there by the time this runs. guildReady disconnects with the controller.
-    guildReady = instance->guildCreated.connect([this, accountId, guildId](const Discord::GatewayGuild &guild) {
-        if (!guild.properties.hasValue() || guild.properties->id != guildId)
-            return;
-        guildReady.disconnect();
-        shell.openGuild(accountId, guildId);
     });
 }
 

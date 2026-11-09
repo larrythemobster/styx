@@ -40,6 +40,7 @@ class SearchController;
 class ExpressionPickerController;
 class ShortcutController;
 class JoinServerController;
+class CreateServerController;
 }
 struct Location {
     Core::Snowflake accountId, guildId, channelId;
@@ -121,6 +122,11 @@ public:
     // The Join a Server dialog, looking code up at once unless it's empty. location is where the
     // invite was opened, sent to Discord as context ("Join Guild", "Markdown Link").
     void openJoinServer(const std::string &code, const std::string &location);
+    // The rail's "Add a Server": create one, with a way across to joining by invite.
+    void openCreateServer();
+    // Opens a server the account just joined or created, now if it's in the tree, otherwise
+    // when the gateway delivers it. A later call replaces an earlier wait.
+    void openGuildWhenReady(Core::Snowflake accountId, Core::Snowflake guildId);
     void applyCloseToTray();
     // Shows the current mention count on the taskbar, or clears it when the setting is off.
     void refreshTaskbarBadge();
@@ -174,6 +180,7 @@ private:
     std::unordered_map<Core::Snowflake, Platform::Color> roleColorCache;
     Core::Snowflake roleColorGuild;
     std::vector<Platform::Connection> activeConnections;
+    Platform::Connection pendingGuildOpen;
     std::unique_ptr<Rml::AccountsController> accountsController;
 #ifdef STYX_HAVE_SCREENSHARE
     std::unique_ptr<Rml::GoLiveController> goLiveController;
@@ -184,6 +191,7 @@ private:
     std::unique_ptr<Rml::ForumController> forumController;
     std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;
     std::unique_ptr<Rml::SearchController> searchController;
+    std::unique_ptr<Rml::CreateServerController> createServerController;
     std::unique_ptr<Rml::JoinServerController> joinServerController;
     // Declared after the controllers so it, and the handlers pointing into them, goes first.
     std::unique_ptr<Rml::ShortcutController> shortcutController;
