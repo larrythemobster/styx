@@ -52,6 +52,9 @@ private:
     void openSearch();
     // Scrolls the messages one page up (-1) or down (1); false when the chat isn't showing.
     bool scrollMessagesByPage(int direction);
+    // Marks the open channel read; false when it's already read or the composer wants Escape.
+    bool markCurrentChannelRead();
+    [[nodiscard]] bool chatCovered() const;
     void updateTyping();
     void updateComposer();
     void updateComposerPlaceholder();

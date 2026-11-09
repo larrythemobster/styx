@@ -138,6 +138,7 @@ ChatController::ChatController(Shell &shell, ::Rml::Element *root)
         shortcuts->setHandler(ShortcutAction::Search, [this] { openSearch(); return true; });
         shortcuts->setHandler(ShortcutAction::ScrollUp, [this] { return scrollMessagesByPage(-1); });
         shortcuts->setHandler(ShortcutAction::ScrollDown, [this] { return scrollMessagesByPage(1); });
+        shortcuts->setHandler(ShortcutAction::MarkChannelRead, [this] { return markCurrentChannelRead(); });
     }
 
     currentChannelId = shell.location().channelId;
@@ -147,14 +148,33 @@ ChatController::ChatController(Shell &shell, ::Rml::Element *root)
     onInstanceChanged(shell.currentInstance());
 }
 
-bool ChatController::scrollMessagesByPage(int direction)
+bool ChatController::chatCovered() const
 {
     // The settings overlay and Friends page cover the chat; their own text boxes keep the key.
-    if (!messagesEl || shell.isSettingsOpen() || shell.isFriendsOpen())
+    return shell.isSettingsOpen() || shell.isFriendsOpen();
+}
+
+bool ChatController::scrollMessagesByPage(int direction)
+{
+    if (!messagesEl || chatCovered())
         return false;
     // A little overlap so the line at the edge stays in view, as browsers do.
     messagesEl->SetScrollTop(messagesEl->GetScrollTop() + direction * messagesEl->GetClientHeight() * 0.9f);
     requestRender();
+    return true;
+}
+
+bool ChatController::markCurrentChannelRead()
+{
+    // The composer's own Escape cancels an edit, a reply or attachments first.
+    if (chatCovered() || editingMessageId.isValid() || replyTargetId.isValid() || !pendingAttachments.empty())
+        return false;
+    auto *tree = shell.channelTree();
+    const auto *node = tree ? tree->findChannelTreeNode(currentChannelId, currentAccountId) : nullptr;
+    // An already-read channel leaves Escape to whatever else wants it.
+    if (!node || !node->isUnread)
+        return false;
+    shell.markChannelRead(currentChannelId);
     return true;
 }
 

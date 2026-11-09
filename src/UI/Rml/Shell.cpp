@@ -261,6 +261,9 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     shortcutController->setHandler(ShortcutAction::NextUnreadChannel, [this] { stepChannel(1, true); return true; });
     shortcutController->setHandler(ShortcutAction::PreviousServer, [this] { stepServer(-1); return true; });
     shortcutController->setHandler(ShortcutAction::NextServer, [this] { stepServer(1); return true; });
+    // The same toggles as the user panel's buttons, so the choice carries into the next call too.
+    shortcutController->setHandler(ShortcutAction::ToggleMute, [this] { setSelfMute(!selfMute); return true; });
+    shortcutController->setHandler(ShortcutAction::ToggleDeafen, [this] { setSelfDeaf(!selfDeaf); return true; });
     controllers.push_back(std::move(switcher));
     accountsController = std::make_unique<Rml::AccountsController>(*this);
     if (accountsModel->rowCount() == 0) accountsController->showLogin();
