@@ -78,8 +78,8 @@ Ubuntu/WSL under Xvfb with software OpenGL, with `ENABLE_VOICE=OFF`,
 and the native macOS UI, have not been verified.
 
 Message parsing retains typed legacy and Components V2 trees, including replies
-and forwarded snapshots. Partial updates preserve omitted components and clear
-them on an empty array. Component rendering and disk persistence are not yet
+and forwarded snapshots, through cache reloads. Partial updates preserve omitted
+components and clear them on an empty array. Component rendering is not yet
 supported.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used

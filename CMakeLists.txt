@@ -461,6 +461,10 @@ if(BUILD_TESTS)
     styx_test(TestEmbeds EmbedTests tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageComponents MessageComponentTests tests/tst_MessageComponents.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageSearch MessageSearchTests tests/tst_MessageSearch.cpp src/Discord/MessageSearch.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
+    styx_test(TestMessageCache MessageCacheTests tests/tst_MessageCache.cpp
+        src/Storage/DatabaseManager.cpp src/Storage/BaseRepository.cpp
+        src/Storage/Transaction.cpp src/Storage/UserRepository.cpp
+        src/Storage/MessageRepository.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp)
     styx_test(TestFavoriteGifs FavoriteGifTests tests/tst_FavoriteGifs.cpp
         src/Core/Gifs/FavoriteGifRules.cpp src/UI/Gifs/GifMasonryLayout.cpp
         src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)

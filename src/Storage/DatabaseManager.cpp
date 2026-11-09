@@ -241,6 +241,7 @@ void DatabaseManager::setupCacheTables(Platform::Database &db)
             "embeds" TEXT,
             "reactions" TEXT,
             "stickers" TEXT,
+            "components" TEXT,
             "deleted" INTEGER NOT NULL,
             "referenced_message_id" INTEGER,
             "reference_type" INTEGER,
@@ -251,6 +252,9 @@ void DatabaseManager::setupCacheTables(Platform::Database &db)
             PRIMARY KEY("id")
         );
     )");
+
+    if (!columnExists(db, "messages", "components"))
+        db.execute("ALTER TABLE messages ADD COLUMN components TEXT");
 
     db.execute(R"(
         CREATE TABLE IF NOT EXISTS "users" (
