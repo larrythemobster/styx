@@ -342,8 +342,14 @@ void ChatController::setupEventListeners()
             requestRender();
         } else if (action == std::string("component-button")) {
             if (::Rml::Element *msgEl = closest(actionEl, "data-message-id"))
-                clickComponentButton(Core::Snowflake(parseNumber(attribute(msgEl, "data-message-id"))),
-                                     attribute(actionEl, "data-component-path"));
+                useComponent(Core::Snowflake(parseNumber(attribute(msgEl, "data-message-id"))),
+                             attribute(actionEl, "data-component-path"));
+        } else if (action == std::string("component-select-toggle") || action == std::string("component-select-option")
+                   || action == std::string("component-select-apply")) {
+            if (::Rml::Element *msgEl = closest(actionEl, "data-message-id"))
+                handleSelectAction(action, Core::Snowflake(parseNumber(attribute(msgEl, "data-message-id"))),
+                                   attribute(actionEl, "data-component-path"),
+                                   static_cast<int>(parseNumber(attribute(actionEl, "data-option-index"))));
         } else if (action == std::string("toggle-reaction")) {
             Core::ClientInstance *instance = shell.currentInstance();
             if (instance && instance->messages()) {
@@ -565,6 +571,7 @@ void ChatController::onLocationChanged(const Location &location)
         expandedBlockedRuns.clear();
     revealedComponentSpoilers.clear();
     interactions.clear();
+    openSelect.reset();
     currentChannelId = location.channelId;
     currentGuildId = location.guildId;
     currentAccountId = location.accountId;
@@ -587,6 +594,7 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
 {
     revealedComponentSpoilers.clear();
     interactions.clear();
+    openSelect.reset();
     for (auto &connection : instanceConnections)
         connection.disconnect();
     instanceConnections.clear();
@@ -813,7 +821,7 @@ void ChatController::refreshMessage(Core::Snowflake messageId)
     requestRender();
 }
 
-void ChatController::clickComponentButton(Core::Snowflake messageId, const std::string &path)
+void ChatController::useComponent(Core::Snowflake messageId, const std::string &path, std::vector<std::string> values)
 {
     ChatModel *model = shell.chat();
     Core::ClientInstance *instance = shell.currentInstance();
@@ -821,10 +829,12 @@ void ChatController::clickComponentButton(Core::Snowflake messageId, const std::
     if (row < 0 || !instance || !instance->discord())
         return;
     const Discord::Message &message = *model->messageAt(row);
-    const Discord::MessageComponent *button = componentAtPath(message, path);
+    const Discord::MessageComponent *component = componentAtPath(message, path);
     const Core::Snowflake applicationId = applicationIdFor(message);
-    if (message.isForwarded() || !button || button->type.get() != Discord::MessageComponentType::BUTTON
-        || !button->customId.hasValue() || !applicationId.isValid())
+    if (message.isForwarded() || !component || !component->customId.hasValue() || !applicationId.isValid())
+        return;
+    const auto type = component->type.get();
+    if (type != Discord::MessageComponentType::BUTTON && type != Discord::MessageComponentType::STRING_SELECT)
         return;
 
     Discord::ComponentInteractionRequest request;
@@ -833,9 +843,10 @@ void ChatController::clickComponentButton(Core::Snowflake messageId, const std::
     request.channelId = message.channelId;
     request.messageId = messageId;
     request.messageFlags = static_cast<std::uint64_t>(message.flags.get().toInt());
-    request.componentType = Discord::MessageComponentType::BUTTON;
-    request.customId = button->customId.get();
+    request.componentType = type;
+    request.customId = component->customId.get();
     request.nonce = Core::Snowflake::generateNonce().toString();
+    request.values = std::move(values);
     if (!interactions.begin(request.nonce, messageId, path))
         return;
     refreshMessage(messageId);
@@ -847,6 +858,55 @@ void ChatController::clickComponentButton(Core::Snowflake messageId, const std::
         if (auto failedMessage = self->interactions.rejected(nonce))
             self->refreshMessage(*failedMessage);
     });
+}
+
+void ChatController::handleSelectAction(const std::string &action, Core::Snowflake messageId, const std::string &path, int optionIndex)
+{
+    ChatModel *model = shell.chat();
+    const int row = model ? model->rowForMessage(messageId) : -1;
+    if (row < 0)
+        return;
+    const Discord::MessageComponent *select = componentAtPath(*model->messageAt(row), path);
+    if (!select || select->type.get() != Discord::MessageComponentType::STRING_SELECT || !select->options.hasValue())
+        return;
+    const auto &options = select->options.get();
+    const SelectLimits limits = stringSelectLimits(*select);
+    const bool sameSelect = openSelect && openSelect->messageId == messageId && openSelect->path == path;
+
+    if (action == "component-select-toggle") {
+        const Core::Snowflake previous = openSelect ? openSelect->messageId : Core::Snowflake::Invalid;
+        if (sameSelect) {
+            openSelect.reset();
+        } else {
+            OpenSelect opened{ messageId, path, {} };
+            for (const auto &option : options)
+                if (option.isDefault.valueOr(false))
+                    opened.values.push_back(option.value.get());
+            openSelect = std::move(opened);
+        }
+        if (previous.isValid() && previous != messageId)
+            refreshMessage(previous);
+        refreshMessage(messageId);
+        return;
+    }
+    if (!sameSelect)
+        return;
+
+    if (action == "component-select-option") {
+        if (optionIndex < 0 || optionIndex >= static_cast<int>(options.size()))
+            return;
+        if (!toggleSelectValue(openSelect->values, options[optionIndex].value.get(), limits)) {
+            refreshMessage(messageId);
+            return;
+        }
+    } else if (!canSubmitSelect(openSelect->values, limits)) {
+        return;
+    }
+
+    std::vector<std::string> values = std::move(openSelect->values);
+    openSelect.reset();
+    refreshMessage(messageId);
+    useComponent(messageId, path, std::move(values));
 }
 
 void ChatController::refreshBlockedRun(int row)
@@ -982,6 +1042,10 @@ std::string ChatController::buildMessageHtml(int row)
             ctx.revealedSpoilers = revealedPaths;
             ctx.interactive = !rawMsg->isForwarded() && applicationIdFor(*rawMsg).isValid();
             ctx.pendingPath = interactions.pendingPath(msgId);
+            if (openSelect && openSelect->messageId == msgId) {
+                ctx.openSelectPath = openSelect->path;
+                ctx.openSelectValues = &openSelect->values;
+            }
             componentsHtml = renderMessageComponents(*rawMsg, ctx);
         }
     }

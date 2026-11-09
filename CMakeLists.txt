@@ -231,6 +231,7 @@ set(PROJECT_SOURCES
     src/UI/ChannelList/Navigation.cpp
     src/UI/Chat/BlockedRuns.cpp
     src/UI/Chat/InteractionTracker.cpp
+    src/UI/Chat/SelectDraft.cpp
     src/UI/ChannelList/ServerRailModel.cpp
     src/UI/Chat/ChatModel.cpp
     src/UI/Chat/GifPlayback.cpp
@@ -422,6 +423,7 @@ if(BUILD_TESTS)
     styx_test(TestNavigation NavigationTests tests/tst_Navigation.cpp src/UI/ChannelList/Navigation.cpp src/Core/Snowflake.cpp)
     styx_test(TestBlockedRuns BlockedRunsTests tests/tst_BlockedRuns.cpp src/UI/Chat/BlockedRuns.cpp)
     styx_test(TestInteractionTracker InteractionTrackerTests tests/tst_InteractionTracker.cpp src/UI/Chat/InteractionTracker.cpp src/Core/Snowflake.cpp)
+    styx_test(TestSelectDraft SelectDraftTests tests/tst_SelectDraft.cpp src/UI/Chat/SelectDraft.cpp)
     styx_test(TestInviteLink InviteLinkTests tests/tst_InviteLink.cpp src/Discord/InviteLink.cpp src/Core/Snowflake.cpp)
     styx_test(TestGuildCreate GuildCreateTests tests/tst_GuildCreate.cpp src/Discord/GuildCreate.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestUserEdits UserEditsTests tests/tst_UserEdits.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
@@ -455,7 +457,7 @@ if(BUILD_TESTS)
         src/UI/Rml/EmojiGridModel.cpp src/Core/Snowflake.cpp)
     styx_test(TestCdnUrls CdnUrlTests tests/tst_CdnUrls.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestRmlRender RmlRenderTests tests/tst_RmlRender.cpp tests/tst_MessageComponentRendering.cpp
-        src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp src/UI/Rml/ComponentRenderer.cpp
+        src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp src/UI/Rml/ComponentRenderer.cpp src/UI/Chat/SelectDraft.cpp
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)

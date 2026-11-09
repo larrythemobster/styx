@@ -7,6 +7,7 @@
 #include "UI/Chat/BlockedRuns.hpp"
 #include "UI/Chat/InteractionTracker.hpp"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -75,7 +76,9 @@ private:
     [[nodiscard]] std::vector<bool> blockedRows() const;
     void refreshBlockedRun(int row);
     void refreshMessage(Core::Snowflake messageId);
-    void clickComponentButton(Core::Snowflake messageId, const std::string &path);
+    // Sends a button click (no values) or a string select choice.
+    void useComponent(Core::Snowflake messageId, const std::string &path, std::vector<std::string> values = {});
+    void handleSelectAction(const std::string &action, Core::Snowflake messageId, const std::string &path, int optionIndex);
     void checkAndLoadOlder();
     void checkAndLoadNewer();
     void setReplyTarget(Core::Snowflake messageId, const std::string &authorName, const std::string &snippet);
@@ -116,6 +119,12 @@ private:
     };
     std::unordered_map<Core::Snowflake, ComponentSpoilerState> revealedComponentSpoilers;
     InteractionTracker interactions;
+    struct OpenSelect {
+        Core::Snowflake messageId;
+        std::string path;
+        std::vector<std::string> values;
+    };
+    std::optional<OpenSelect> openSelect;
 
     std::vector<Platform::Connection> instanceConnections;
     Platform::Connection emojiConnection;

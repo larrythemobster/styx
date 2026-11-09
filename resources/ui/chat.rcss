@@ -1291,6 +1291,64 @@ a.component-button.component-link:focus
 	image-color: #949ba4;
 }
 
+/* Usable string selects */
+.component-select.component-select-active
+{
+	cursor: pointer;
+	tab-index: auto;
+}
+.component-select.component-select-active:hover,
+.component-select.component-select-active:focus
+{
+	border-color: #4e5058;
+}
+.component-select.component-pending { opacity: 0.6; }
+
+.component-select-menu
+{
+	display: block;
+	width: 100%;
+	max-width: 400dp;
+	max-height: 320dp;
+	overflow-y: auto;
+	box-sizing: border-box;
+	margin-top: -2dp;
+	margin-bottom: 6dp;
+	padding: 4dp;
+	background-color: #2b2d31;
+	border: 1dp #1e1f22;
+	border-radius: 4dp;
+}
+
+.component-select-option
+{
+	display: block;
+	padding: 8dp 10dp;
+	border-radius: 4dp;
+	font-size: 14dp;
+	line-height: 20dp;
+	color: #dbdee1;
+	cursor: pointer;
+	tab-index: auto;
+	word-break: break-word;
+}
+.component-select-option:hover,
+.component-select-option:focus { background-color: #35373c; }
+.component-select-option.selected { background-color: #404249; color: #ffffff; }
+
+.component-select-option-description
+{
+	font-size: 12dp;
+	line-height: 16dp;
+	color: #949ba4;
+}
+
+.component-select-apply
+{
+	margin-top: 6dp;
+	margin-bottom: 2dp;
+}
+
 /* Sections */
 .component-section
 {

@@ -756,3 +756,52 @@ TEST_CASE("Interactive messages make only custom_id buttons clickable and resolv
     doc->QuerySelectorAll(readOnly, "button[data-action='component-button']");
     CHECK(readOnly.empty());
 }
+
+TEST_CASE("An open string select lists options, marks the draft and gates Apply on min values", "[components][interactions]")
+{
+    TestViewFixture fixture;
+    std::vector<std::string> requestedUrls;
+    auto ctx = makeContext(requestedUrls);
+    ctx.interactive = true;
+    const std::vector<std::string> draft = { "b" };
+    ctx.openSelectPath = "0.0";
+    ctx.openSelectValues = &draft;
+
+    const Message message = parseMessage({ { "components", {
+        { { "type", 1 }, { "id", 1 }, { "components", {
+            { { "type", 3 }, { "id", 2 }, { "custom_id", "pick" }, { "min_values", 2 }, { "max_values", 3 }, { "options", {
+                { { "label", "Alpha" }, { "value", "a" }, { "default", true } },
+                { { "label", "Beta" }, { "value", "b" }, { "description", "Second" } },
+                { { "label", "Gamma" }, { "value", "c" } } } } } } } },
+        { { "type", 1 }, { "id", 3 }, { "components", {
+            { { "type", 3 }, { "id", 4 }, { "custom_id", "one" }, { "options", {
+                { { "label", "Only" }, { "value", "x" } } } } } } } } } } });
+
+    auto *doc = fixture.loadComponents(renderMessageComponents(message, ctx));
+    ::Rml::ElementList options;
+    doc->QuerySelectorAll(options, ".component-select-option");
+    REQUIRE(options.size() == 3);
+    CHECK_FALSE(options[0]->IsClassSet("selected"));
+    CHECK(options[1]->IsClassSet("selected"));
+    CHECK(options[1]->GetAttribute<::Rml::String>("data-option-index", "") == "1");
+    auto *apply = doc->QuerySelector(".component-select-apply");
+    REQUIRE(apply != nullptr);
+    CHECK(apply->HasAttribute("disabled"));
+    // The other, closed select keeps its own toggle.
+    ::Rml::ElementList toggles;
+    doc->QuerySelectorAll(toggles, "[data-action='component-select-toggle']");
+    REQUIRE(toggles.size() == 2);
+    CHECK(toggles[1]->GetAttribute<::Rml::String>("data-component-path", "") == "1.0");
+
+    const std::vector<std::string> enough = { "a", "c" };
+    ctx.openSelectValues = &enough;
+    doc = fixture.loadComponents(renderMessageComponents(message, ctx));
+    REQUIRE(doc->QuerySelector(".component-select-apply") != nullptr);
+    CHECK_FALSE(doc->QuerySelector(".component-select-apply")->HasAttribute("disabled"));
+
+    ctx.openSelectPath = "1.0";
+    ctx.openSelectValues = &draft;
+    doc = fixture.loadComponents(renderMessageComponents(message, ctx));
+    CHECK(doc->QuerySelector(".component-select-apply") == nullptr);
+    CHECK(doc->QuerySelector(".component-select-option") != nullptr);
+}
