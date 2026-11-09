@@ -37,6 +37,10 @@ Mute and deafen work while Styx is focused. Their default keys are Ctrl+Shift+M
 and Ctrl+Shift+D, or Cmd+Shift+M and Cmd+Shift+D on macOS. Rebinding or removing
 them disables the old keys. The shortcut help dialog shows the current bindings.
 
+The smile button in the user panel edits custom status text, Unicode or server
+emoji, and expiry. Save, remove the emoji, or clear the whole status. Updates keep
+the current presence and activity-visibility settings.
+
 Native platform services provide file dialogs, the system tray, credential
 storage and startup error dialogs.
 

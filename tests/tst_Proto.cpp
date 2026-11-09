@@ -2,6 +2,7 @@
 
 #include "Proto/FrecencySettings.hpp"
 #include "Proto/ProtoReader.hpp"
+#include "Proto/UserSettings.hpp"
 #include "Proto/ProtoWriter.hpp"
 #include "Platform/Base64.hpp"
 
@@ -343,4 +344,156 @@ TEST_CASE("Proto: Guild and channel frecency skips non-fixed64 key", "[proto]")
     REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.contains(validId));
     REQUIRE_FALSE(decoded.guildAndChannelFrecency->guildAndChannels.contains(skippedVarintId));
     REQUIRE(decoded.guildAndChannelFrecency->guildAndChannels.at(validId).totalUses == 3u);
+}
+
+TEST_CASE("Proto: Custom status patch clear on empty is literal 5a00", "[proto]")
+{
+    StatusSettings current;
+    const std::string patch = customStatusPatch(current, std::nullopt);
+    REQUIRE(toHex(patch) == "5a00");
+
+    const std::vector<uint8_t> patchBytes = fromHex("5a00");
+    ProtoReader reader(patchBytes);
+    const PreloadedUserSettings decoded = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(decoded.status.has_value());
+    REQUIRE_FALSE(decoded.status->customStatus.has_value());
+    REQUIRE_FALSE(decoded.status->status.has_value());
+    REQUIRE_FALSE(decoded.status->showCurrentGame.has_value());
+    REQUIRE(decoded.status->statusExpiresAtMs == 0u);
+    REQUIRE(decoded.status->unknownFields.empty());
+    REQUIRE_FALSE(decoded.guildFolders.has_value());
+    REQUIRE_FALSE(decoded.localization.has_value());
+}
+
+TEST_CASE("Proto: Custom status patch set with unicode emoji matches literal bytes", "[proto]")
+{
+    StatusSettings current;
+    CustomStatus custom;
+    custom.text = "Busy";
+    custom.emojiName = "\xf0\x9f\x94\xa5";
+
+    const std::string patch = customStatusPatch(current, custom);
+    REQUIRE(toHex(patch) == "5a0e120c0a04427573791a04f09f94a5");
+
+    const std::vector<uint8_t> patchBytes = fromHex("5a0e120c0a04427573791a04f09f94a5");
+    ProtoReader reader(patchBytes);
+    const PreloadedUserSettings decoded = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(decoded.status.has_value());
+    REQUIRE(decoded.status->customStatus.has_value());
+    REQUIRE(decoded.status->customStatus->text == "Busy");
+    REQUIRE(decoded.status->customStatus->emojiName == "\xf0\x9f\x94\xa5");
+    REQUIRE(decoded.status->customStatus->emojiId == 0u);
+    REQUIRE(decoded.status->customStatus->expiresAtMs == 0u);
+    REQUIRE(decoded.status->customStatus->createdAtMs == 0u);
+    REQUIRE_FALSE(decoded.status->status.has_value());
+    REQUIRE_FALSE(decoded.guildFolders.has_value());
+    REQUIRE_FALSE(decoded.localization.has_value());
+}
+
+TEST_CASE("Proto: Custom status patch clear preserves DND, false showCurrentGame, expiry and unknown fields", "[proto]")
+{
+    const auto original = fromHex("0a050a03646e6412050a034f6c641a020800210068e5cf8b0100002a02082a98062a");
+    const auto current = StatusSettings::fromProto(original);
+
+    const std::string patch = customStatusPatch(current, std::nullopt);
+    REQUIRE(toHex(patch) == "5a1b0a050a03646e641a020800210068e5cf8b0100002a02082a98062a");
+
+    const std::vector<uint8_t> patchBytes = fromHex("5a1b0a050a03646e641a020800210068e5cf8b0100002a02082a98062a");
+    ProtoReader reader(patchBytes);
+    const PreloadedUserSettings decoded = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(decoded.status.has_value());
+    REQUIRE(decoded.status->status == "dnd");
+    REQUIRE_FALSE(decoded.status->customStatus.has_value());
+    REQUIRE(decoded.status->showCurrentGame.has_value());
+    REQUIRE(decoded.status->showCurrentGame == false);
+    REQUIRE(decoded.status->statusExpiresAtMs == 1700000000000ULL);
+    REQUIRE(decoded.status->unknownFields == "\x2a\x02\x08\x2a\x98\x06\x2a");
+    REQUIRE_FALSE(decoded.guildFolders.has_value());
+    REQUIRE_FALSE(decoded.localization.has_value());
+}
+
+TEST_CASE("Proto: Custom status patch set with custom emoji ID and fixed64 timestamps", "[proto]")
+{
+    StatusSettings current;
+    current.status = "online";
+    current.unknownFields = "\x30\x01";
+
+    CustomStatus custom;
+    custom.text = "In a meeting";
+    custom.emojiId = 0x0102030405060708ULL;
+    custom.expiresAtMs = 0x0203040506070809ULL;
+    custom.createdAtMs = 0x030405060708090aULL;
+
+    const std::string patch = customStatusPatch(current, custom);
+    REQUIRE(toHex(patch) == "5a370a080a066f6e6c696e6512290a0c496e2061206d656574696e67110807060504030201210908070605040302290a090807060504033001");
+
+    const std::vector<uint8_t> patchBytes = fromHex("5a370a080a066f6e6c696e6512290a0c496e2061206d656574696e67110807060504030201210908070605040302290a090807060504033001");
+    ProtoReader reader(patchBytes);
+    const PreloadedUserSettings decoded = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(decoded.status.has_value());
+    REQUIRE(decoded.status->status == "online");
+    REQUIRE(decoded.status->customStatus.has_value());
+    REQUIRE(decoded.status->customStatus->text == "In a meeting");
+    REQUIRE(decoded.status->customStatus->emojiId == 0x0102030405060708ULL);
+    REQUIRE(decoded.status->customStatus->emojiName.empty());
+    REQUIRE(decoded.status->customStatus->expiresAtMs == 0x0203040506070809ULL);
+    REQUIRE(decoded.status->customStatus->createdAtMs == 0x030405060708090aULL);
+    REQUIRE(decoded.status->unknownFields == "\x30\x01");
+    REQUIRE_FALSE(decoded.guildFolders.has_value());
+    REQUIRE_FALSE(decoded.localization.has_value());
+}
+
+TEST_CASE("Proto: StatusSettings unknown field handling and clean failure recovery", "[proto]")
+{
+    // Keep the field 5 UInt64Value wrapper and future field 99 intact.
+    const std::vector<uint8_t> rawStatus = fromHex("0a050a03646e642a02082a98062a");
+    const StatusSettings parsed = StatusSettings::fromProto(rawStatus);
+    REQUIRE(parsed.status == "dnd");
+    REQUIRE(parsed.unknownFields == "\x2a\x02\x08\x2a\x98\x06\x2a");
+
+    // Truncated unknown field stops cleanly without throwing
+    const std::vector<uint8_t> truncated = fromHex("0a050a03646e64ba010a01");
+    const StatusSettings parsedTruncated = StatusSettings::fromProto(truncated);
+    REQUIRE(parsedTruncated.status == "dnd");
+    REQUIRE(parsedTruncated.unknownFields.empty());
+}
+
+TEST_CASE("Proto: PreloadedUserSettings mergeFrom replaces full status", "[proto]")
+{
+    PreloadedUserSettings local;
+    StatusSettings localStatus;
+    localStatus.status = "online";
+    CustomStatus localCustom;
+    localCustom.text = "Focusing";
+    localStatus.customStatus = localCustom;
+    local.status = localStatus;
+
+    LocalizationSettings localLoc;
+    localLoc.locale = "en-US";
+    local.localization = localLoc;
+
+    // Incoming partial update has status with "dnd" but custom_status is omitted (server cleared it)
+    PreloadedUserSettings serverUpdate;
+    StatusSettings updateStatus;
+    updateStatus.status = "dnd";
+    serverUpdate.status = updateStatus;
+
+    local.mergeFrom(serverUpdate);
+    REQUIRE(local.status.has_value());
+    REQUIRE(local.status->status == "dnd");
+    REQUIRE_FALSE(local.status->customStatus.has_value());
+    REQUIRE(local.localization.has_value());
+    REQUIRE(local.localization->locale == "en-US");
+
+    // Incoming partial update without status preserves existing status
+    PreloadedUserSettings locOnlyUpdate;
+    LocalizationSettings newLoc;
+    newLoc.locale = "fr";
+    locOnlyUpdate.localization = newLoc;
+
+    local.mergeFrom(locOnlyUpdate);
+    REQUIRE(local.status.has_value());
+    REQUIRE(local.status->status == "dnd");
+    REQUIRE(local.localization.has_value());
+    REQUIRE(local.localization->locale == "fr");
 }

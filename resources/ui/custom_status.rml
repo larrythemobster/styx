@@ -1,0 +1,42 @@
+<rml>
+<head>
+    <title>Set a custom status</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="custom_status.rcss"/>
+</head>
+<body id="custom-status-body">
+    <div class="custom-status-backdrop" data-action="close"></div>
+    <div class="custom-status-popover">
+        <div class="custom-status-title">Set a custom status</div>
+        <div class="custom-status-input-row">
+            <button id="custom-status-emoji" class="custom-status-emoji-btn" data-action="choose-emoji" title="Choose emoji">
+                <img class="custom-status-emoji-icon" src="icon:smile" alt="Choose emoji" title="Choose emoji"/>
+            </button>
+            <input id="custom-status-text" class="custom-status-input" type="text" maxlength="128" placeholder="What's on your mind?"/>
+            <button id="custom-status-remove-emoji" class="custom-status-remove-btn" data-action="remove-emoji" title="Remove emoji">
+                <img class="custom-status-remove-icon" src="icon:x" alt="Remove emoji" title="Remove emoji"/>
+            </button>
+        </div>
+        <div class="custom-status-expiry-wrap">
+            <div class="custom-status-label">Clear after</div>
+            <select id="custom-status-expiry" class="custom-status-select">
+                <option value="keep">Keep current expiry</option>
+                <option value="never">Don't clear</option>
+                <option value="30m">30 minutes</option>
+                <option value="1h">1 hour</option>
+                <option value="4h">4 hours</option>
+                <option value="today">Today</option>
+            </select>
+        </div>
+        <div id="custom-status-error" class="custom-status-error" style="display: none;"></div>
+        <div class="custom-status-buttons">
+            <button id="custom-status-clear" class="custom-status-clear" data-action="clear">Clear Status</button>
+            <div class="custom-status-buttons-right">
+                <button class="custom-status-cancel" data-action="close">Cancel</button>
+                <button id="custom-status-save" class="custom-status-save" data-action="save">Save</button>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

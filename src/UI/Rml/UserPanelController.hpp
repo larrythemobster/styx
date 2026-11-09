@@ -6,6 +6,7 @@
 #include "Platform/Timer.hpp"
 #include "Platform/Trackable.hpp"
 #include <vector>
+#include <memory>
 
 namespace Styx {
 namespace Core {
@@ -13,11 +14,14 @@ class ClientInstance;
 }
 namespace UI {
 namespace Rml {
+class CustomStatusController;
+
 
 class UserPanelController final : public Controller
 {
 public:
     UserPanelController(Shell &shell, ::Rml::Element *root);
+    ~UserPanelController() override;
 
 private:
     void rebuild();
@@ -35,6 +39,7 @@ private:
     Platform::Timer rebuildTimer;
     Platform::Guard<Core::ClientInstance> lastInstance;
     std::vector<Platform::Connection> instanceConnections;
+    std::unique_ptr<CustomStatusController> customStatusController;
 };
 
 } // namespace Rml

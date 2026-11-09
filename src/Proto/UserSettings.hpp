@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -40,6 +41,7 @@ struct CustomStatus
     uint64_t createdAtMs = 0;
 
     static CustomStatus fromProto(ProtoReader &reader);
+    std::string toProto() const;
 };
 
 struct StatusSettings
@@ -48,9 +50,9 @@ struct StatusSettings
     std::optional<CustomStatus> customStatus;
     std::optional<bool> showCurrentGame;
     uint64_t statusExpiresAtMs = 0;
+    std::string unknownFields; // Preserve untouched siblings when replacing the status message.
 
-    static StatusSettings fromProto(ProtoReader &reader);
-    void mergeFrom(const StatusSettings &other);
+    static StatusSettings fromProto(std::span<const uint8_t> bytes);
 };
 
 struct LocalizationSettings
@@ -72,6 +74,9 @@ struct PreloadedUserSettings
 
     void mergeFrom(const PreloadedUserSettings &other);
 };
+
+// The API replaces the whole status group; nullopt clears custom status without resetting its siblings.
+std::string customStatusPatch(const StatusSettings &current, const std::optional<CustomStatus> &customStatus);
 
 } // namespace Proto
 } // namespace Styx

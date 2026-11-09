@@ -279,6 +279,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/RailController.cpp
     src/UI/Rml/ChannelListController.cpp
     src/UI/Rml/UserPanelController.cpp
+    src/UI/Rml/CustomStatusController.cpp
     src/UI/Rml/ChatController.cpp
     src/UI/Rml/MemberListController.cpp
     src/UI/Rml/FriendsController.cpp
@@ -432,7 +433,8 @@ if(BUILD_TESTS)
     styx_test(TestVoicePayloads VoicePayloadTests tests/tst_VoicePayloads.cpp
         src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestProto ProtoTests tests/tst_Proto.cpp src/Proto/ProtoReader.cpp
-        src/Proto/ProtoWriter.cpp src/Proto/FrecencySettings.cpp)
+        src/Proto/ProtoWriter.cpp src/Proto/FrecencySettings.cpp src/Proto/UserSettings.cpp
+        src/Core/Snowflake.cpp)
     styx_test(TestProxy ProxyTests tests/tst_Proxy.cpp src/Core/ProxyConfig.cpp
         src/Core/Logging.cpp src/Core/ImageManager.cpp src/Core/Snowflake.cpp
         src/Discord/Voice/Socks5UdpAssociation.cpp src/Discord/CdnUrls.cpp)

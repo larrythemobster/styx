@@ -48,6 +48,10 @@ public:
                          Core::Snowflake messageId,
                          const Platform::Rect &anchor = {});
 
+    void openForStatus(Core::EmojiManager *emojiManager,
+                       Core::Snowflake accountId,
+                       const Platform::Rect &anchor = {});
+
     void close();
     [[nodiscard]] bool isOpen() const { return visible; }
     [[nodiscard]] Tab currentTab() const { return activeTab; }
@@ -58,6 +62,20 @@ public:
     Platform::Signal<> closed;
 
 private:
+    enum class Mode {
+        Chat,
+        Reaction,
+        Status,
+    };
+
+    void openPicker(Core::EmojiManager *emojiManager,
+                    Core::FavoriteGifs *favoriteGifs,
+                    Core::Snowflake accountId,
+                    Core::Snowflake channelId,
+                    Core::Snowflake messageId,
+                    Mode mode,
+                    Tab tab,
+                    const Platform::Rect &anchor);
     void ensureDocument();
     void setupEventListeners();
     void showTab(Tab tab);
@@ -97,7 +115,7 @@ private:
 
     Tab activeTab = Tab::Emoji;
     bool visible = false;
-    bool isReaction = false;
+    Mode mode = Mode::Chat;
     bool searching = false;
     std::string searchQuery;
 

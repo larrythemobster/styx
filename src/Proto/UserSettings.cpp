@@ -1,6 +1,7 @@
 #include "UserSettings.hpp"
 
 #include "ProtoReader.hpp"
+#include "ProtoWriter.hpp"
 #include "Platform/Base64.hpp"
 
 namespace Styx {
@@ -187,64 +188,61 @@ CustomStatus CustomStatus::fromProto(ProtoReader &reader)
     return custom;
 }
 
-StatusSettings StatusSettings::fromProto(ProtoReader &reader)
+std::string CustomStatus::toProto() const
+{
+    ProtoWriter writer;
+    if (!text.empty())
+        writer.writeString(1, text);
+    if (emojiId != 0)
+        writer.writeFixed64(2, emojiId);
+    if (!emojiName.empty())
+        writer.writeString(3, emojiName);
+    if (expiresAtMs != 0)
+        writer.writeFixed64(4, expiresAtMs);
+    if (createdAtMs != 0)
+        writer.writeFixed64(5, createdAtMs);
+    return writer.takeBytes();
+}
+
+StatusSettings StatusSettings::fromProto(std::span<const uint8_t> bytes)
 {
     StatusSettings settings;
+    ProtoReader reader(bytes);
     Tag tag;
 
-    while (reader.readTag(tag)) {
-        switch (tag.fieldNumber) {
-        // optional google.protobuf.StringValue status
-        case 1: {
-            if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                std::span<const uint8_t> nested;
-                if (reader.readLengthDelimited(nested)) {
-                    ProtoReader nestedReader(nested);
-                    settings.status = readStringValue(nestedReader);
-                }
-            } else {
-                reader.skipField(tag.wireType);
-            }
+    for (;;) {
+        const size_t fieldStart = reader.position();
+        if (!reader.readTag(tag))
             break;
-        }
-        // optional CustomStatus custom_status
-        case 2: {
-            if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                std::span<const uint8_t> nested;
-                if (reader.readLengthDelimited(nested)) {
-                    ProtoReader nestedReader(nested);
-                    settings.customStatus = CustomStatus::fromProto(nestedReader);
-                }
-            } else {
-                reader.skipField(tag.wireType);
-            }
-            break;
-        }
-        // optional google.protobuf.BoolValue show_current_game
-        case 3: {
-            if (tag.wireType == WireType::LENGTH_DELIMITED) {
-                std::span<const uint8_t> nested;
-                if (reader.readLengthDelimited(nested)) {
-                    ProtoReader nestedReader(nested);
-                    settings.showCurrentGame = readBoolValue(nestedReader);
-                }
-            } else {
-                reader.skipField(tag.wireType);
-            }
-            break;
-        }
-        // fixed64 status_expires_at_ms
-        case 4: {
-            uint64_t value;
-            if (tag.wireType == WireType::FIXED64 && reader.readFixed64(value))
-                settings.statusExpiresAtMs = value;
-            else
-                reader.skipField(tag.wireType);
-            break;
-        }
-        default:
-            reader.skipField(tag.wireType);
-            break;
+
+        if (tag.fieldNumber == 1 && tag.wireType == WireType::LENGTH_DELIMITED) {
+            std::span<const uint8_t> nested;
+            if (!reader.readLengthDelimited(nested))
+                break;
+            ProtoReader nestedReader(nested);
+            settings.status = readStringValue(nestedReader);
+        } else if (tag.fieldNumber == 2 && tag.wireType == WireType::LENGTH_DELIMITED) {
+            std::span<const uint8_t> nested;
+            if (!reader.readLengthDelimited(nested))
+                break;
+            ProtoReader nestedReader(nested);
+            settings.customStatus = CustomStatus::fromProto(nestedReader);
+        } else if (tag.fieldNumber == 3 && tag.wireType == WireType::LENGTH_DELIMITED) {
+            std::span<const uint8_t> nested;
+            if (!reader.readLengthDelimited(nested))
+                break;
+            ProtoReader nestedReader(nested);
+            settings.showCurrentGame = readBoolValue(nestedReader);
+        } else if (tag.fieldNumber == 4 && tag.wireType == WireType::FIXED64) {
+            uint64_t value = 0;
+            if (!reader.readFixed64(value))
+                break;
+            settings.statusExpiresAtMs = value;
+        } else {
+            if (!reader.skipField(tag.wireType))
+                break;
+            const size_t fieldLen = reader.position() - fieldStart;
+            settings.unknownFields.append(reinterpret_cast<const char *>(bytes.data() + fieldStart), fieldLen);
         }
     }
 
@@ -291,10 +289,8 @@ PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
         case 11: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
                 std::span<const uint8_t> nested;
-                if (reader.readLengthDelimited(nested)) {
-                    ProtoReader nestedReader(nested);
-                    settings.status = StatusSettings::fromProto(nestedReader);
-                }
+                if (reader.readLengthDelimited(nested))
+                    settings.status = StatusSettings::fromProto(nested);
             } else {
                 reader.skipField(tag.wireType);
             }
@@ -345,17 +341,6 @@ PreloadedUserSettings PreloadedUserSettings::fromBase64(std::string_view base64)
     return fromProto(reader);
 }
 
-void StatusSettings::mergeFrom(const StatusSettings &other)
-{
-    if (other.status.has_value())
-        status = other.status;
-    if (other.customStatus.has_value())
-        customStatus = other.customStatus;
-    if (other.showCurrentGame.has_value())
-        showCurrentGame = other.showCurrentGame;
-    if (other.statusExpiresAtMs != 0)
-        statusExpiresAtMs = other.statusExpiresAtMs;
-}
 
 void LocalizationSettings::mergeFrom(const LocalizationSettings &other)
 {
@@ -375,13 +360,39 @@ void PreloadedUserSettings::mergeFrom(const PreloadedUserSettings &other)
             localization = other.localization;
     }
 
-    if (!other.status.has_value())
-        return;
-
-    if (status.has_value())
-        status->mergeFrom(other.status.value());
-    else
+    if (other.status.has_value())
         status = other.status;
+}
+
+
+std::string customStatusPatch(const StatusSettings &current, const std::optional<CustomStatus> &customStatus)
+{
+    ProtoWriter statusWriter;
+
+    if (current.status.has_value()) {
+        ProtoWriter stringVal;
+        stringVal.writeString(1, *current.status);
+        statusWriter.writeBytes(1, stringVal.bytes());
+    }
+
+    if (customStatus.has_value())
+        statusWriter.writeBytes(2, customStatus->toProto());
+
+    if (current.showCurrentGame.has_value()) {
+        ProtoWriter boolVal;
+        boolVal.writeVarint(1, *current.showCurrentGame ? 1 : 0);
+        statusWriter.writeBytes(3, boolVal.bytes());
+    }
+
+    if (current.statusExpiresAtMs != 0)
+        statusWriter.writeFixed64(4, current.statusExpiresAtMs);
+
+    std::string statusBytes = statusWriter.takeBytes();
+    statusBytes.append(current.unknownFields);
+
+    ProtoWriter root;
+    root.writeBytes(11, statusBytes);
+    return root.takeBytes();
 }
 
 } // namespace Proto

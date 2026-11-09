@@ -1,4 +1,5 @@
 #include "UserPanelController.hpp"
+#include "CustomStatusController.hpp"
 
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
@@ -33,6 +34,8 @@ namespace Rml {
 
 using Core::Snowflake;
 
+UserPanelController::~UserPanelController() = default;
+
 UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root)
     : Controller(shell, root)
 {
@@ -57,6 +60,10 @@ UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root)
                     if (auto *inst = this->shell.currentInstance()) {
                         this->shell.showUserProfile(inst->accountId(), this->shell.location().guildId);
                     }
+                } else if (action == std::string_view("custom-status")) {
+                    if (!customStatusController)
+                        customStatusController = std::make_unique<CustomStatusController>(this->shell);
+                    customStatusController->open();
                 }
             }
         }, userPanel);
@@ -252,13 +259,33 @@ void UserPanelController::renderUserPanel()
 
     // Sub-name: display custom status if active, otherwise username
     auto *pres = inst->presences();
-    std::string customStatus;
+    std::string customStatusText;
+    std::string emojiSrc;
     if (pres) {
         const auto activities = pres->activities(accountId);
-        if (const auto *activity = Core::ActivityFormat::custom(activities))
-            customStatus = activity->stateText();
+        if (const auto *activity = Core::ActivityFormat::custom(activities)) {
+            customStatusText = activity->stateText();
+            if (activity->emoji.hasValue()) {
+                const auto &emoji = activity->emoji.get();
+                if (!emoji.isUnicode() && emoji.id.hasValue())
+                    emojiSrc = shell.imageSource(emoji.stillImageUrl(32), {14, 14});
+                else if (!emoji.nameText().empty())
+                    emojiSrc = Runtime::emojiSource(emoji.nameText());
+            }
+        }
     }
-    std::string subName = !customStatus.empty() ? customStatus : (me ? "@" + me->username.get() : "@" + info.username);
+
+    const bool hasCustomStatus = !customStatusText.empty() || !emojiSrc.empty();
+    std::string subName;
+    if (hasCustomStatus) {
+        if (!emojiSrc.empty())
+            subName += std::format("<img class=\"user-status-emoji\" src=\"{0}\"/>", Rml::escape(emojiSrc));
+        if (!customStatusText.empty())
+            subName += std::format("<span class=\"user-status-text\">{0}</span>", Rml::escape(customStatusText));
+    } else {
+        const std::string fallback = me ? "@" + me->username.get() : "@" + info.username;
+        subName = Rml::escape(fallback);
+    }
 
     std::string avatarHash = (me && me->avatar.hasValue()) ? *me->avatar : info.avatar;
     std::string avatarUrl = !avatarHash.empty()
@@ -313,11 +340,12 @@ void UserPanelController::renderUserPanel()
 
     rml += "<div class=\"user-names\">";
     rml += std::format("<span class=\"user-display-name\">{0}</span>", Rml::escape(displayName));
-    rml += std::format("<span class=\"user-sub-name\">{0}</span>", Rml::escape(subName));
+    rml += std::format("<span class=\"user-sub-name\">{0}</span>", subName);
     rml += "</div>"; // .user-names
     rml += "</div>"; // .user-panel-info
 
     rml += "<div class=\"user-panel-buttons\">";
+    rml += "<button class=\"panel-btn custom-status-btn\" data-action=\"custom-status\" title=\"Set a custom status\"><img src=\"icon:smile\"/></button>";
     rml += std::format("<div class=\"{0}\" data-action=\"toggle-mute\" title=\"{1}\">", muteClass, Rml::escape(muteTip));
     rml += std::format("<img src=\"{0}\"/>", muteIcon);
     rml += "</div>"; // mute-btn

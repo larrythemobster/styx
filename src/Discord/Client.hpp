@@ -212,6 +212,7 @@ public:
     template <typename T>
     using ResultCallback = std::function<void(const Core::Result<T> &)>;
     using ActionCallback = ResultCallback<void>;
+    void setCustomStatus(const std::optional<Proto::CustomStatus> &customStatus, ActionCallback callback = {});
 
     void fetchReactors(Snowflake channelId, Snowflake messageId, const std::string &reactionKey, bool isBurst, int limit, std::optional<Snowflake> after, ResultCallback<std::vector<User>> callback);
 

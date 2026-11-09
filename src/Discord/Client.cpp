@@ -674,6 +674,61 @@ void Client::patchFrecencySettings(const std::string &partialProto, std::optiona
     });
 }
 
+void Client::setCustomStatus(const std::optional<Proto::CustomStatus> &customStatus, ActionCallback callback)
+{
+    const Proto::StatusSettings emptyStatus;
+    const auto &currentStatus = settings.status ? *settings.status : emptyStatus;
+    const std::string patchBytes = Proto::customStatusPatch(currentStatus, customStatus);
+    const nlohmann::json payload{{"settings", Platform::toBase64(patchBytes)}};
+
+    Platform::Guard<Client> self(this);
+    httpClient->patch("/users/@me/settings-proto/1", payload, [self, callback = std::move(callback)](const HttpResponse &response) {
+        if (!response.success) {
+            const ApiError error = ApiError::fromResponse(response);
+            if (callback)
+                callback(Core::Result<void>::makeError(error.message, error.code));
+            return;
+        }
+
+        const auto document = nlohmann::json::parse(response.body, nullptr, false);
+        if (!document.is_object()) {
+            if (callback)
+                callback(Core::Result<void>::makeError("Invalid JSON response"));
+            return;
+        }
+
+        if (document.value("out_of_date", false)) {
+            if (callback)
+                callback(Core::Result<void>::makeError("Settings are out of date"));
+            return;
+        }
+
+        if (!document.contains("settings") || !document["settings"].is_string()) {
+            if (callback)
+                callback(Core::Result<void>::makeError("Missing settings field"));
+            return;
+        }
+
+        const auto decoded = Platform::fromBase64(document["settings"].get_ref<const std::string &>());
+        if (!decoded) {
+            if (callback)
+                callback(Core::Result<void>::makeError("Invalid base64 in settings"));
+            return;
+        }
+
+        Proto::ProtoReader reader(*decoded);
+        const auto returnedSettings = Proto::PreloadedUserSettings::fromProto(reader);
+
+        if (self) {
+            self->settings.status = returnedSettings.status;
+            self->settingsChanged.publish();
+        }
+
+        if (callback)
+            callback(Core::Result<void>::makeOk());
+    });
+}
+
 HttpCallback Client::applyThen(std::function<void(const nlohmann::json &)> apply, HttpCallback finish)
 {
     Platform::Guard<Client> self(this);

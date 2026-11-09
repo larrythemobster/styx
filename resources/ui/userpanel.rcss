@@ -217,6 +217,9 @@ body.rail-folder-open #user-panel
 
 .user-sub-name
 {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
 	font-size: 12dp;
 	color: #b5bac1;
 	overflow: hidden;
@@ -224,10 +227,26 @@ body.rail-folder-open #user-panel
 	line-height: 14dp;
 }
 
+.user-status-emoji
+{
+	width: 14dp;
+	height: 14dp;
+	margin-right: 4dp;
+	flex-shrink: 0;
+	display: inline-block;
+}
+
+.user-status-text
+{
+	overflow: hidden;
+	white-space: nowrap;
+}
+
 .user-panel-buttons
 {
 	display: flex;
 	flex-direction: row;
+	align-items: center;
 	gap: 2dp;
 	flex-shrink: 0;
 }
@@ -267,4 +286,24 @@ body.rail-folder-open #user-panel
 .panel-btn.deafened img
 {
 	image-color: #f23f43;
+}
+
+.custom-status-btn
+{
+	tab-index: auto;
+	width: 40dp;
+	height: 40dp;
+	padding: 0;
+	border-width: 0;
+	background-color: transparent;
+}
+
+.custom-status-btn:focus
+{
+	background-color: #19191c;
+}
+
+.custom-status-btn:focus img
+{
+	image-color: #dbdee1;
 }

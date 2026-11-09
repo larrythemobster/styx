@@ -174,7 +174,7 @@ void ExpressionPickerController::setupEventListeners()
                 showTab(Tab::Emoji);
                 event.StopPropagation();
                 return;
-            } else if (key == KI::KI_G && !isReaction) {
+            } else if (key == KI::KI_G && mode == Mode::Chat) {
                 showTab(Tab::Gifs);
                 event.StopPropagation();
                 return;
@@ -287,20 +287,46 @@ void ExpressionPickerController::openForChat(Core::EmojiManager *emojiManager,
                                              Tab tab,
                                              const Platform::Rect &anchor)
 {
+    openPicker(emojiManager, favoriteGifs, accountId, channelId, Core::Snowflake::Invalid, Mode::Chat, tab, anchor);
+}
+
+void ExpressionPickerController::openForReaction(Core::EmojiManager *emojiManager,
+                                                 Core::Snowflake accountId,
+                                                 Core::Snowflake channelId,
+                                                 Core::Snowflake messageId,
+                                                 const Platform::Rect &anchor)
+{
+    openPicker(emojiManager, nullptr, accountId, channelId, messageId, Mode::Reaction, Tab::Emoji, anchor);
+}
+
+void ExpressionPickerController::openForStatus(Core::EmojiManager *emojiManager,
+                                               Core::Snowflake accountId,
+                                               const Platform::Rect &anchor)
+{
+    openPicker(emojiManager, nullptr, accountId, Core::Snowflake::Invalid, Core::Snowflake::Invalid, Mode::Status, Tab::Emoji, anchor);
+}
+
+void ExpressionPickerController::openPicker(Core::EmojiManager *emojiManager,
+                                            Core::FavoriteGifs *favoriteGifs,
+                                            Core::Snowflake accountId,
+                                            Core::Snowflake channelId,
+                                            Core::Snowflake messageId,
+                                            Mode mode,
+                                            Tab tab,
+                                            const Platform::Rect &anchor)
+{
     openTimer = std::chrono::steady_clock::now();
     ensureDocument();
     if (!pickerDoc)
         return;
 
+    this->mode = mode;
     emojis = emojiManager;
     this->favoriteGifs = favoriteGifs;
     currentAccountId = accountId;
     currentChannelId = channelId;
-    intention = Core::EmojiIntention::Chat;
-    isReaction = false;
-
-    if (tabsEl)
-        tabsEl->SetProperty("display", "flex");
+    reactionMessageId = messageId;
+    intention = (mode == Mode::Reaction) ? Core::EmojiIntention::Reaction : Core::EmojiIntention::Chat;
 
     browseSections = emojis ? emojis->pickerSections(channelId, intention) : std::vector<Core::PickerSection>();
     guildNames.clear();
@@ -311,15 +337,24 @@ void ExpressionPickerController::openForChat(Core::EmojiManager *emojiManager,
 
     placeCard(anchor);
 
+    const char *placeholder = "Find the perfect emoji";
+    if (mode == Mode::Reaction)
+        placeholder = "Find the perfect reaction";
+    else if (mode == Mode::Status)
+        placeholder = "Choose a status emoji";
+
     if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(searchInputEl)) {
         input->SetValue("");
-        input->SetAttribute("placeholder", "Find the perfect emoji");
+        input->SetAttribute("placeholder", placeholder);
     }
     if (searchClearBtn)
         searchClearBtn->SetProperty("display", "none");
 
     searchQuery.clear();
     searching = false;
+
+    if (tabsEl)
+        tabsEl->SetProperty("display", mode == Mode::Chat ? "flex" : "none");
 
     showTab(tab);
 
@@ -333,62 +368,10 @@ void ExpressionPickerController::openForChat(Core::EmojiManager *emojiManager,
         searchInputEl->Focus();
 
     requestRender();
-    Core::log(Core::LogLevel::Info, LogUI) << "ExpressionPicker opened for chat in" << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - openTimer).count() << "ms";
-}
-
-void ExpressionPickerController::openForReaction(Core::EmojiManager *emojiManager,
-                                                 Core::Snowflake accountId,
-                                                 Core::Snowflake channelId,
-                                                 Core::Snowflake messageId,
-                                                 const Platform::Rect &anchor)
-{
-    openTimer = std::chrono::steady_clock::now();
-    ensureDocument();
-    if (!pickerDoc)
-        return;
-
-    emojis = emojiManager;
-    currentAccountId = accountId;
-    currentChannelId = channelId;
-    reactionMessageId = messageId;
-    intention = Core::EmojiIntention::Reaction;
-    isReaction = true;
-
-    if (tabsEl)
-        tabsEl->SetProperty("display", "none");
-
-    browseSections = emojis ? emojis->pickerSections(channelId, intention) : std::vector<Core::PickerSection>();
-    guildNames.clear();
-    for (const auto &sec : browseSections) {
-        if (sec.guildId.isValid())
-            guildNames[sec.guildId] = sec.title;
-    }
-
-    placeCard(anchor);
-
-    if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(searchInputEl)) {
-        input->SetValue("");
-        input->SetAttribute("placeholder", "Find the perfect reaction");
-    }
-    if (searchClearBtn)
-        searchClearBtn->SetProperty("display", "none");
-
-    searchQuery.clear();
-    searching = false;
-
-    showTab(Tab::Emoji);
-
-    pickerDoc->Show();
-    pickerDoc->PullToFront();
-    if (backdropEl)
-        backdropEl->SetClass("open", true);
-    visible = true;
-
-    if (searchInputEl)
-        searchInputEl->Focus();
-
-    requestRender();
-    Core::log(Core::LogLevel::Info, LogUI) << "ExpressionPicker opened for reaction in" << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - openTimer).count() << "ms";
+    const char *modeLabel = (mode == Mode::Reaction) ? "reaction" : (mode == Mode::Status) ? "status" : "chat";
+    Core::log(Core::LogLevel::Info, LogUI) << "ExpressionPicker opened for" << modeLabel << "in"
+                                           << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - openTimer).count()
+                                           << "ms";
 }
 
 void ExpressionPickerController::close()
@@ -408,6 +391,9 @@ void ExpressionPickerController::close()
 
 void ExpressionPickerController::showTab(Tab tab)
 {
+    if (mode != Mode::Chat)
+        tab = Tab::Emoji;
+
     activeTab = tab;
     if (tabEmojiBtn)
         tabEmojiBtn->SetClass("active", tab == Tab::Emoji);
@@ -618,7 +604,7 @@ void ExpressionPickerController::placeCard(const Platform::Rect &anchor)
     if (!cardEl)
         return;
 
-    if (isReaction && !anchor.empty()) {
+    if (mode != Mode::Chat && !anchor.empty()) {
         const int x = std::clamp(static_cast<int>(anchor.x + anchor.width - 1 - 440), 20, 1200);
         const int y = std::clamp(static_cast<int>(anchor.y - 480 - 8), 20, 700);
         cardEl->SetProperty("left", ::Rml::String(std::to_string(x) + "dp"));

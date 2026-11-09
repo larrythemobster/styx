@@ -1,0 +1,328 @@
+body#custom-status-body {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: transparent;
+    z-index: 200;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 80dp;
+    box-sizing: border-box;
+}
+
+.custom-status-backdrop {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000000a0;
+    z-index: 201;
+}
+
+.custom-status-popover {
+    position: relative;
+    width: 440dp;
+    max-width: 90%;
+    flex-shrink: 0;
+    background-color: #111214;
+    border: 1dp #202024;
+    border-radius: 8dp;
+    padding: 20dp;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    z-index: 202;
+}
+
+.custom-status-popover button {
+    tab-index: auto;
+}
+
+.custom-status-popover button:disabled {
+    tab-index: none;
+    focus: none;
+}
+
+.custom-status-title {
+    font-size: 20dp;
+    font-weight: bold;
+    color: #f2f3f5;
+    margin-bottom: 16dp;
+}
+
+.custom-status-input-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 16dp;
+    box-sizing: border-box;
+}
+
+.custom-status-emoji-btn {
+    width: 40dp;
+    height: 40dp;
+    background-color: #1e1f22;
+    border: 1dp #202024;
+    border-radius: 4dp;
+    margin-right: 8dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    padding: 0;
+}
+
+.custom-status-emoji-btn:hover {
+    background-color: #2b2d31;
+}
+
+.custom-status-emoji-btn:focus {
+    border-color: #5865f2;
+}
+
+.custom-status-emoji-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.custom-status-emoji-icon {
+    width: 20dp;
+    height: 20dp;
+    image-color: #b5bac1;
+}
+
+.custom-status-emoji-btn:hover .custom-status-emoji-icon {
+    image-color: #dbdee1;
+}
+
+.custom-status-emoji-img {
+    width: 24dp;
+    height: 24dp;
+}
+
+.custom-status-input {
+    flex: 1;
+    min-width: 0;
+    height: 40dp;
+    background-color: #1e1f22;
+    border: 1dp #202024;
+    border-radius: 4dp;
+    padding: 0 10dp;
+    color: #dbdee1;
+    font-size: 14dp;
+    box-sizing: border-box;
+}
+
+.custom-status-input:focus {
+    border-color: #5865f2;
+}
+
+.custom-status-input:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.custom-status-remove-btn {
+    width: 40dp;
+    height: 40dp;
+    background-color: #1e1f22;
+    border: 1dp #202024;
+    border-radius: 4dp;
+    margin-left: 8dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    padding: 0;
+}
+
+.custom-status-remove-btn:hover {
+    background-color: #2b2d31;
+}
+
+.custom-status-remove-btn:focus {
+    border-color: #5865f2;
+}
+
+.custom-status-remove-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.custom-status-remove-icon {
+    width: 16dp;
+    height: 16dp;
+    image-color: #b5bac1;
+}
+
+.custom-status-remove-btn:hover .custom-status-remove-icon {
+    image-color: #dbdee1;
+}
+
+.custom-status-expiry-wrap {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12dp;
+}
+
+.custom-status-label {
+    font-size: 12dp;
+    font-weight: 700;
+    color: #b5bac1;
+    margin-bottom: 8dp;
+}
+
+select.custom-status-select {
+    width: 100%;
+    height: 40dp;
+    background-color: #1e1f22;
+    border: 1dp #202024;
+    border-radius: 4dp;
+    box-sizing: border-box;
+    font-size: 14dp;
+    color: #dbdee1;
+}
+
+select.custom-status-select:focus {
+    border-color: #5865f2;
+}
+
+select.custom-status-select:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+select.custom-status-select selectvalue {
+    padding: 10dp 12dp;
+    color: #dbdee1;
+    font-size: 14dp;
+}
+
+select.custom-status-select selectarrow {
+    width: 30dp;
+    height: 40dp;
+}
+
+select.custom-status-select selectbox {
+    background-color: #111214;
+    border: 1dp #202024;
+    border-radius: 4dp;
+    padding: 4dp;
+    z-index: 205;
+    max-height: 220dp;
+    overflow-y: auto;
+}
+
+select.custom-status-select selectbox option {
+    padding: 8dp 10dp;
+    border-radius: 4dp;
+    color: #dbdee1;
+    font-size: 14dp;
+}
+
+select.custom-status-select selectbox option:hover {
+    background-color: #242428;
+    color: #ffffff;
+}
+
+.custom-status-error {
+    font-size: 13dp;
+    color: #f23f43;
+    margin-bottom: 12dp;
+}
+
+.custom-status-buttons {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8dp;
+}
+
+.custom-status-clear {
+    background-color: transparent;
+    color: #f23f43;
+    font-size: 14dp;
+    font-weight: 500;
+    padding: 0 8dp;
+    height: 40dp;
+    border-width: 0;
+    cursor: pointer;
+}
+
+.custom-status-clear:hover {
+    text-decoration: underline;
+    color: #d83a3e;
+}
+
+.custom-status-clear:focus {
+    text-decoration: underline;
+}
+
+.custom-status-clear:disabled {
+    opacity: 0.5;
+    cursor: default;
+    text-decoration: none;
+}
+
+.custom-status-buttons-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.custom-status-cancel {
+    background-color: transparent;
+    color: #dbdee1;
+    font-size: 14dp;
+    font-weight: 500;
+    padding: 0 16dp;
+    height: 40dp;
+    border-width: 0;
+    cursor: pointer;
+    margin-right: 8dp;
+}
+
+.custom-status-cancel:hover {
+    text-decoration: underline;
+    color: #ffffff;
+}
+
+.custom-status-cancel:focus {
+    text-decoration: underline;
+}
+
+.custom-status-save {
+    background-color: #5865f2;
+    color: #ffffff;
+    font-size: 14dp;
+    font-weight: 500;
+    padding: 0 16dp;
+    height: 40dp;
+    border-radius: 4dp;
+    border-width: 0;
+    cursor: pointer;
+}
+
+.custom-status-save:hover {
+    background-color: #4752c4;
+}
+
+.custom-status-save:focus {
+    background-color: #4752c4;
+}
+
+.custom-status-save:disabled {
+    opacity: 0.5;
+    cursor: default;
+    background-color: #5865f2;
+}
