@@ -520,6 +520,26 @@ struct MessageAck : Core::JsonUtils::JsonObject
     }
 };
 
+struct MessagePollVote : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> userId;
+    Field<Core::Snowflake> channelId;
+    Field<Core::Snowflake> messageId;
+    Field<Core::Snowflake, true> guildId;
+    Field<int> answerId;
+
+    static MessagePollVote fromJson(const nlohmann::json &obj)
+    {
+        MessagePollVote vote;
+        get(obj, "user_id", vote.userId);
+        get(obj, "channel_id", vote.channelId);
+        get(obj, "message_id", vote.messageId);
+        get(obj, "guild_id", vote.guildId);
+        get(obj, "answer_id", vote.answerId);
+        return vote;
+    }
+};
+
 struct MessageReactionAdd : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> userId;

@@ -293,6 +293,12 @@ void Gateway::handleDispatch(const Inbound &data)
     case GatewayEvent::MESSAGE_ACK:
         handleMessageAck(data);
         break;
+    case GatewayEvent::MESSAGE_POLL_VOTE_ADD:
+        gatewayMessagePollVoteAdd.publish(data.getData<MessagePollVote>());
+        break;
+    case GatewayEvent::MESSAGE_POLL_VOTE_REMOVE:
+        gatewayMessagePollVoteRemove.publish(data.getData<MessagePollVote>());
+        break;
     case GatewayEvent::MESSAGE_REACTION_ADD:
         handleMessageReactionAdd(data);
         break;

@@ -182,6 +182,8 @@ Client::Client(const std::string &token, const std::string &gatewayUrl, const st
     track(gateway->gatewayGuildBanRemove.connect([this](const auto &v) { guildBanRemoved.publish(v); }));
     track(gateway->gatewayGuildPruneUpdate.connect([this](const auto &v) { guildPruneUpdated.publish(v); }));
     track(gateway->gatewayMessageAck.connect([this](const auto &v) { messageAcked.publish(v); }));
+    track(gateway->gatewayMessagePollVoteAdd.connect([this](const auto &v) { messagePollVoteAdded.publish(v); }));
+    track(gateway->gatewayMessagePollVoteRemove.connect([this](const auto &v) { messagePollVoteRemoved.publish(v); }));
     track(gateway->gatewayMessageReactionAdd.connect([this](const auto &v) { messageReactionAdd.publish(v); }));
     track(gateway->gatewayMessageReactionAddMany.connect([this](const auto &v) { messageReactionAddMany.publish(v); }));
     track(gateway->gatewayMessageReactionRemove.connect([this](const auto &v) { messageReactionRemove.publish(v); }));

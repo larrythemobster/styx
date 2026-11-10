@@ -108,6 +108,8 @@ public:
     Platform::Signal<const GuildBanEvent &> gatewayGuildBanRemove;
     Platform::Signal<const GuildPruneUpdate &> gatewayGuildPruneUpdate;
     Platform::Signal<const MessageAck &> gatewayMessageAck;
+    Platform::Signal<const MessagePollVote &> gatewayMessagePollVoteAdd;
+    Platform::Signal<const MessagePollVote &> gatewayMessagePollVoteRemove;
     Platform::Signal<const MessageReactionAdd &> gatewayMessageReactionAdd;
     Platform::Signal<const MessageReactionAddMany &> gatewayMessageReactionAddMany;
     Platform::Signal<const MessageReactionRemove &> gatewayMessageReactionRemove;

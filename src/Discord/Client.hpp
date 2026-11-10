@@ -223,6 +223,10 @@ public:
     void createComponentInteraction(const ComponentInteractionRequest &request, ActionCallback callback = {});
     // Same admission rules, for a slash command (interaction type 2).
     void createApplicationCommandInteraction(const ApplicationCommandRequest &request, ActionCallback callback = {});
+    // Replaces your selected poll answers; an empty list removes all your votes.
+    void submitPollVote(Snowflake channelId, Snowflake messageId, const std::vector<int> &answerIds, ActionCallback callback = {});
+    // Returns the updated message. Discord permits only the poll's author to end it.
+    void endPoll(Snowflake channelId, Snowflake messageId, ResultCallback<Message> callback = {});
     // Slash command indexes: a server's apps, a DM's or group DM's, and the user's own.
     void fetchGuildCommandIndex(Snowflake guildId, ResultCallback<ApplicationCommandIndex> callback);
     void fetchChannelCommandIndex(Snowflake channelId, ResultCallback<ApplicationCommandIndex> callback);
@@ -349,6 +353,8 @@ public:
     Platform::Signal<const std::string &> inviteRevoked;
     Platform::Signal<const GuildPruneUpdate &> guildPruneUpdated;
     Platform::Signal<const MessageAck &> messageAcked;
+    Platform::Signal<const MessagePollVote &> messagePollVoteAdded;
+    Platform::Signal<const MessagePollVote &> messagePollVoteRemoved;
     Platform::Signal<const MessageReactionAdd &> messageReactionAdd;
     Platform::Signal<const MessageReactionAddMany &> messageReactionAddMany;
     Platform::Signal<const MessageReactionRemove &> messageReactionRemove;

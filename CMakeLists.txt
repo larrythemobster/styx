@@ -255,6 +255,8 @@ set(PROJECT_SOURCES
     src/Discord/Client.cpp
     src/Discord/ClientMessages.cpp
     src/Discord/ClientInteractions.cpp
+    src/Discord/ClientPolls.cpp
+    src/Discord/PollProtocol.cpp
     src/Discord/ComponentInteraction.cpp
     src/Discord/CommandInteraction.cpp
     src/Discord/ApplicationCommands.cpp
@@ -483,6 +485,8 @@ if(BUILD_TESTS)
     styx_test(TestComponentInteractions ComponentInteractionTests
         tests/tst_ComponentInteraction.cpp tests/tst_InteractionEvents.cpp
         src/Discord/ComponentInteraction.cpp src/Core/Snowflake.cpp)
+    styx_test(TestPollProtocol PollProtocolTests tests/tst_PollProtocol.cpp tests/tst_PollEvents.cpp
+        src/Discord/PollProtocol.cpp src/Discord/ApiError.cpp src/Core/Snowflake.cpp)
     styx_test(TestCommandInteraction CommandInteractionTests tests/tst_CommandInteraction.cpp
         src/Discord/CommandInteraction.cpp src/Core/Snowflake.cpp)
     styx_test(TestApplicationCommands ApplicationCommandTests tests/tst_ApplicationCommands.cpp
