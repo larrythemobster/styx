@@ -258,6 +258,7 @@ set(PROJECT_SOURCES
     src/Discord/ClientInteractions.cpp
     src/Discord/ClientPolls.cpp
     src/Discord/PollProtocol.cpp
+    src/Discord/PollCreate.cpp
     src/Discord/ComponentInteraction.cpp
     src/Discord/CommandInteraction.cpp
     src/Discord/ApplicationCommands.cpp
@@ -488,6 +489,9 @@ if(BUILD_TESTS)
         src/Discord/ComponentInteraction.cpp src/Core/Snowflake.cpp)
     styx_test(TestPollProtocol PollProtocolTests tests/tst_PollProtocol.cpp tests/tst_PollEvents.cpp
         src/Discord/PollProtocol.cpp src/Discord/ApiError.cpp src/Core/Snowflake.cpp)
+    styx_test(TestPollCreate PollCreateTests tests/tst_PollCreate.cpp
+        src/Discord/PollCreate.cpp src/Core/Snowflake.cpp)
+    target_link_libraries(TestPollCreate PRIVATE utf8proc)
     styx_test(TestPollVotes PollVoteTests tests/tst_PollVotes.cpp
         src/Core/PollVotes.cpp src/Core/Snowflake.cpp)
     styx_test(TestCommandInteraction CommandInteractionTests tests/tst_CommandInteraction.cpp

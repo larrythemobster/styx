@@ -1,5 +1,6 @@
 #include "Client.hpp"
 #include "PollProtocol.hpp"
+#include "PollCreate.hpp"
 
 #include <utility>
 
@@ -32,6 +33,31 @@ void Client::endPoll(Snowflake channelId, Snowflake messageId, ResultCallback<Me
         if (!callback)
             return;
         callback(endPollResult(response, channelId, messageId));
+    });
+}
+
+void Client::createPoll(Snowflake channelId, const PollCreateRequest &poll, const std::string &nonce,
+                        ResultCallback<Message> callback)
+{
+    auto body = pollCreateBody(poll);
+    if (!body.success()) {
+        if (callback)
+            callback(Core::Result<Message>::makeError(std::move(body.error), body.code));
+        return;
+    }
+
+    nlohmann::json payload;
+    payload["content"] = "";
+    payload["flags"] = 0;
+    payload["mobile_network_type"] = "unknown";
+    payload["nonce"] = nonce;
+    payload["tts"] = false;
+    payload["poll"] = std::move(*body.value);
+    httpClient->post("/channels/" + channelId.toString() + "/messages", payload,
+                     ContextProperties::location("chat_input"),
+                     [channelId, callback = std::move(callback)](const HttpResponse &response) {
+        if (callback)
+            callback(createPollResult(response, channelId));
     });
 }
 

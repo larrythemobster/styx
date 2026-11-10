@@ -22,4 +22,9 @@ struct HttpResponse;
 [[nodiscard]] Core::Result<Message> endPollResult(const HttpResponse &response,
                                                  Core::Snowflake channelId, Core::Snowflake messageId);
 
+// Creating a poll returns HTTP 200 with its message. Validate the complete message and
+// poll schema for the requested channel before a caller updates its cache.
+[[nodiscard]] Core::Result<Message> createPollResult(const HttpResponse &response,
+                                                     Core::Snowflake channelId);
+
 } // namespace Styx::Discord

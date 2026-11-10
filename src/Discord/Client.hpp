@@ -41,6 +41,8 @@ using Styx::Core::Snowflake;
 namespace Styx {
 namespace Discord {
 
+struct PollCreateRequest;
+
 class Client : public Platform::Trackable
 {
 public:
@@ -227,6 +229,9 @@ public:
     void submitPollVote(Snowflake channelId, Snowflake messageId, const std::vector<int> &answerIds, ActionCallback callback = {});
     // Returns the updated message. Discord permits only the poll's author to end it.
     void endPoll(Snowflake channelId, Snowflake messageId, ResultCallback<Message> callback = {});
+    // The caller supplies a nonce for Discord's message deduplication.
+    void createPoll(Snowflake channelId, const PollCreateRequest &poll, const std::string &nonce,
+                    ResultCallback<Message> callback = {});
     // Slash command indexes: a server's apps, a DM's or group DM's, and the user's own.
     void fetchGuildCommandIndex(Snowflake guildId, ResultCallback<ApplicationCommandIndex> callback);
     void fetchChannelCommandIndex(Snowflake channelId, ResultCallback<ApplicationCommandIndex> callback);
