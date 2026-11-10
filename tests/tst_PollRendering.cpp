@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <cmath>
 #include <format>
 #include <string>
 #include <utility>
@@ -46,7 +47,10 @@ public:
     ::Rml::ElementDocument *loadRml(const std::string &rml)
     {
         closeDocument();
-        const std::string fullRml = "<rml><head><style>body { font-family: ui; font-size: 16px; }</style></head><body>" + rml + "</body></rml>";
+        const std::string fullRml = "<rml><head>"
+            "<link type=\"text/rcss\" href=\"resources/ui/theme.rcss\"/>"
+            "<link type=\"text/rcss\" href=\"resources/ui/chat.rcss\"/>"
+            "<style>body { display: block; font-family: ui; font-size: 16px; }</style></head><body>" + rml + "</body></rml>";
         currentDoc = view.context()->LoadDocumentFromMemory(fullRml);
         REQUIRE(currentDoc);
         currentDoc->Show();
@@ -120,6 +124,7 @@ TEST_CASE("pollTimeLeft formats remaining countdown and reports closed polls", "
     CHECK(pollTimeLeft(base.addSeconds(3 * 3600 + 59 * 60), base) == "3h left");
     CHECK(pollTimeLeft(base.addSeconds(12 * 60 + 30), base) == "12m left");
     CHECK(pollTimeLeft(base.addSeconds(30), base) == "Less than a minute left");
+    CHECK(pollTimeLeft(base.addMillis(500), base) == "Less than a minute left");
     CHECK(pollTimeLeft(base, base) == "Poll closed");
     CHECK(pollTimeLeft(base.addSeconds(-10), base) == "Poll closed");
     CHECK(pollTimeLeft(Platform::DateTime{}, base).empty());
@@ -152,16 +157,22 @@ TEST_CASE("Open poll renders answers in order with percentage widths, voter high
     CHECK(answers[1]->GetAttribute<::Rml::String>("data-answer-id", "") == "2");
     CHECK(answers[2]->GetAttribute<::Rml::String>("data-answer-id", "") == "3");
 
-    // RmlUi prints percentages without the sign, so compare the unit and the number.
-    const auto fillPercent = [](::Rml::Element *answer) {
-        const ::Rml::Property *width = requireElement(answer, ".poll-bar-fill")->GetProperty("width");
-        REQUIRE(width != nullptr);
-        REQUIRE(width->unit == ::Rml::Unit::PERCENT);
-        return width->Get<float>();
+    // Exercise layout with the real stylesheet, not just the serialized width property.
+    const auto checkBar = [](::Rml::Element *answer, float fraction) {
+        auto *track = requireElement(answer, ".poll-bar");
+        auto *fill = requireElement(answer, ".poll-bar-fill");
+        REQUIRE(track->GetOffsetWidth() > 0);
+        REQUIRE(track->GetOffsetHeight() > 0);
+        REQUIRE(fill->GetOffsetHeight() > 0);
+        CHECK(std::abs(fill->GetOffsetWidth() - track->GetOffsetWidth() * fraction) < 1.5f);
     };
-    CHECK(fillPercent(answers[0]) == 75.0f);
-    CHECK(fillPercent(answers[1]) == 25.0f);
-    CHECK(fillPercent(answers[2]) == 0.0f);
+    checkBar(answers[0], 0.75f);
+    checkBar(answers[1], 0.25f);
+    checkBar(answers[2], 0.0f);
+    auto *question = requireElement(doc, ".poll-question");
+    auto *hint = requireElement(doc, ".poll-hint");
+    CHECK(hint->GetAbsoluteOffset(::Rml::BoxArea::Border).y
+          >= question->GetAbsoluteOffset(::Rml::BoxArea::Border).y + question->GetOffsetHeight());
 
     CHECK(requireElement(answers[0], ".poll-answer-votes")->GetInnerRML() == "3 votes · 75%");
     CHECK(requireElement(answers[1], ".poll-answer-votes")->GetInnerRML() == "1 vote · 25%");
@@ -348,4 +359,279 @@ TEST_CASE("renderPollResultNotice formats winners, handles decisive outcome ties
 
     auto *hostileDoc = fixture.loadRml(renderPollResultNotice(Discord::Embed::fromJson(hostileEmbedJson), ctx));
     CHECK(hostileDoc->QuerySelector("b") == nullptr);
+}
+
+TEST_CASE("Poll state and choice helpers: pollIsClosed, pollOwnVotes, and togglePollChoice", "[polls][logic]")
+{
+    const auto base = Platform::DateTime::fromUnixMillis(1'700'000'000'000LL);
+    const auto expiry = base.addSeconds(3600);
+
+    const nlohmann::json pollJson = {
+        { "question", makeQuestion("Colors?") },
+        { "answers", { makeAnswer(10, "Red"), makeAnswer(20, "Green"), makeAnswer(30, "Blue") } },
+        { "expiry", expiry.iso8601() },
+        { "allow_multiselect", false },
+        { "results", {
+            { "is_finalized", false },
+            { "answer_counts", {
+                makeCount(20, 2, true),
+                makeCount(10, 5, true),
+                makeCount(20, 1, false),
+                makeCount(99, 1, true)
+            } }
+        } }
+    };
+    const auto poll = Discord::Poll::fromJson(pollJson);
+
+    CHECK_FALSE(pollIsClosed(poll, base));
+    CHECK(pollIsClosed(poll, expiry));
+    CHECK(pollIsClosed(poll, expiry.addSeconds(10)));
+
+    auto finalizedPoll = poll;
+    finalizedPoll.results->isFinalized = true;
+    CHECK(pollIsClosed(finalizedPoll, base));
+
+    const auto own = pollOwnVotes(poll);
+    const std::vector<int> expectedOwn{ 10, 20 };
+    CHECK(own == expectedOwn);
+
+    std::vector<int> singleSelected;
+    CHECK(togglePollChoice(singleSelected, poll, 10));
+    CHECK(singleSelected == std::vector<int>{ 10 });
+    CHECK(togglePollChoice(singleSelected, poll, 20));
+    CHECK(singleSelected == std::vector<int>{ 20 });
+    CHECK(togglePollChoice(singleSelected, poll, 20));
+    CHECK(singleSelected.empty());
+    CHECK_FALSE(togglePollChoice(singleSelected, poll, 99));
+    CHECK(singleSelected.empty());
+
+    auto multiPoll = poll;
+    multiPoll.allowMultiselect = true;
+    std::vector<int> multiSelected;
+    CHECK(togglePollChoice(multiSelected, multiPoll, 10));
+    CHECK(multiSelected == std::vector<int>{ 10 });
+    CHECK(togglePollChoice(multiSelected, multiPoll, 30));
+    const std::vector<int> expectedMulti{ 10, 30 };
+    CHECK(multiSelected == expectedMulti);
+    CHECK(togglePollChoice(multiSelected, multiPoll, 10));
+    CHECK(multiSelected == std::vector<int>{ 30 });
+    CHECK_FALSE(togglePollChoice(multiSelected, multiPoll, 42));
+    CHECK(multiSelected == std::vector<int>{ 30 });
+}
+
+TEST_CASE("Interactive open poll renders native answer buttons, draft selection, and vote actions", "[polls][rml]")
+{
+    TestViewFixture fixture;
+    const auto base = Platform::DateTime::fromUnixMillis(1'700'000'000'000LL);
+    const auto expiry = base.addSeconds(3600);
+
+    const nlohmann::json pollJson = {
+        { "question", makeQuestion("Pick one") },
+        { "answers", { makeAnswer(1, "Alpha"), makeAnswer(2, "Beta") } },
+        { "expiry", expiry.iso8601() },
+        { "allow_multiselect", false },
+        { "results", {
+            { "is_finalized", false },
+            { "answer_counts", { makeCount(1, 1, false), makeCount(2, 0, false) } }
+        } }
+    };
+    const auto poll = Discord::Poll::fromJson(pollJson);
+
+    SECTION("Empty selection renders native buttons and disables Vote button") {
+        auto ctx = makeContext(base);
+        ctx.interactive = true;
+        const std::vector<int> emptySelection;
+        ctx.selectedAnswers = &emptySelection;
+
+        auto *doc = fixture.loadRml(renderPoll(poll, ctx));
+
+        ::Rml::ElementList answerButtons;
+        doc->QuerySelectorAll(answerButtons, "button.poll-answer");
+        REQUIRE(answerButtons.size() == 2);
+        CHECK(answerButtons[0]->GetAttribute<::Rml::String>("data-action", "") == "poll-answer");
+        CHECK(answerButtons[0]->GetAttribute<::Rml::String>("data-answer-id", "") == "1");
+        CHECK_FALSE(answerButtons[0]->IsClassSet("poll-answer-selected"));
+        CHECK_FALSE(answerButtons[1]->IsClassSet("poll-answer-selected"));
+
+        auto *voteBtn = requireElement(doc, "button.poll-vote-submit");
+        CHECK(voteBtn->GetAttribute<::Rml::String>("data-action", "") == "poll-vote");
+        CHECK(voteBtn->HasAttribute("disabled"));
+        CHECK(doc->QuerySelector("button.poll-vote-remove") == nullptr);
+    }
+
+    SECTION("Draft selection marks selected class and enables Vote button") {
+        auto ctx = makeContext(base);
+        ctx.interactive = true;
+        const std::vector<int> selection{ 2 };
+        ctx.selectedAnswers = &selection;
+
+        auto *doc = fixture.loadRml(renderPoll(poll, ctx));
+
+        ::Rml::ElementList answerButtons;
+        doc->QuerySelectorAll(answerButtons, "button.poll-answer");
+        REQUIRE(answerButtons.size() == 2);
+        CHECK_FALSE(answerButtons[0]->IsClassSet("poll-answer-selected"));
+        CHECK(answerButtons[1]->IsClassSet("poll-answer-selected"));
+
+        auto *voteBtn = requireElement(doc, "button.poll-vote-submit");
+        CHECK_FALSE(voteBtn->HasAttribute("disabled"));
+    }
+}
+
+TEST_CASE("Confirmed votes preselect default draft and expose enabled Remove vote button", "[polls][rml]")
+{
+    TestViewFixture fixture;
+    const auto base = Platform::DateTime::fromUnixMillis(1'700'000'000'000LL);
+    const auto expiry = base.addSeconds(3600);
+
+    const nlohmann::json pollJson = {
+        { "question", makeQuestion("Ice cream?") },
+        { "answers", { makeAnswer(1, "Vanilla"), makeAnswer(2, "Chocolate") } },
+        { "expiry", expiry.iso8601() },
+        { "allow_multiselect", false },
+        { "results", {
+            { "is_finalized", false },
+            { "answer_counts", { makeCount(1, 0, false), makeCount(2, 1, true) } }
+        } }
+    };
+
+    auto ctx = makeContext(base);
+    ctx.interactive = true;
+    ctx.selectedAnswers = nullptr;
+
+    auto *doc = fixture.loadRml(renderPoll(Discord::Poll::fromJson(pollJson), ctx));
+
+    ::Rml::ElementList answerButtons;
+    doc->QuerySelectorAll(answerButtons, "button.poll-answer");
+    REQUIRE(answerButtons.size() == 2);
+    CHECK_FALSE(answerButtons[0]->IsClassSet("poll-answer-mine"));
+    CHECK_FALSE(answerButtons[0]->IsClassSet("poll-answer-selected"));
+    CHECK(answerButtons[1]->IsClassSet("poll-answer-mine"));
+    CHECK(answerButtons[1]->IsClassSet("poll-answer-selected"));
+
+    auto *voteBtn = requireElement(doc, "button.poll-vote-submit");
+    CHECK_FALSE(voteBtn->HasAttribute("disabled"));
+
+    auto *removeBtn = requireElement(doc, "button.poll-vote-remove");
+    CHECK(removeBtn->GetAttribute<::Rml::String>("data-action", "") == "poll-remove-vote");
+    CHECK_FALSE(removeBtn->HasAttribute("disabled"));
+}
+
+TEST_CASE("Pending poll disables all interactive controls and emits submission status", "[polls][rml]")
+{
+    TestViewFixture fixture;
+    const auto base = Platform::DateTime::fromUnixMillis(1'700'000'000'000LL);
+    const auto expiry = base.addSeconds(3600);
+
+    const nlohmann::json pollJson = {
+        { "question", makeQuestion("Voting in flight?") },
+        { "answers", { makeAnswer(1, "Yes"), makeAnswer(2, "No") } },
+        { "expiry", expiry.iso8601() },
+        { "allow_multiselect", false },
+        { "results", {
+            { "is_finalized", false },
+            { "answer_counts", { makeCount(1, 1, true), makeCount(2, 0, false) } }
+        } }
+    };
+
+    auto ctx = makeContext(base);
+    ctx.interactive = true;
+    ctx.pending = true;
+
+    auto *doc = fixture.loadRml(renderPoll(Discord::Poll::fromJson(pollJson), ctx));
+
+    ::Rml::ElementList answerButtons;
+    doc->QuerySelectorAll(answerButtons, "button.poll-answer");
+    REQUIRE(answerButtons.size() == 2);
+    for (auto *btn : answerButtons)
+        CHECK(btn->HasAttribute("disabled"));
+
+    auto *voteBtn = requireElement(doc, "button.poll-vote-submit");
+    CHECK(voteBtn->HasAttribute("disabled"));
+
+    auto *removeBtn = requireElement(doc, "button.poll-vote-remove");
+    CHECK(removeBtn->HasAttribute("disabled"));
+
+    auto *statusEl = requireElement(doc, ".poll-vote-status");
+    CHECK(statusEl->GetInnerRML() == "Submitting vote...");
+
+    // Generic button attributes need matching styles; pending controls must leave tab order.
+    doc->Focus();
+    doc->GetContext()->ProcessKeyDown(::Rml::Input::KI_TAB, 0);
+    doc->GetContext()->ProcessKeyUp(::Rml::Input::KI_TAB, 0);
+    const auto *focused = doc->GetContext()->GetFocusElement();
+    CHECK(focused != answerButtons[0]);
+    CHECK(focused != answerButtons[1]);
+    CHECK(focused != voteBtn);
+    CHECK(focused != removeBtn);
+}
+
+TEST_CASE("Non-interactive or closed polls omit data-action controls, error markup is escaped", "[polls][rml]")
+{
+    TestViewFixture fixture;
+    const auto base = Platform::DateTime::fromUnixMillis(1'700'000'000'000LL);
+    const auto expiry = base.addSeconds(3600);
+
+    const nlohmann::json openPollJson = {
+        { "question", makeQuestion("Safe poll?") },
+        { "answers", { makeAnswer(1, "Option 1"), makeAnswer(2, "Option 2") } },
+        { "expiry", expiry.iso8601() },
+        { "allow_multiselect", false }
+    };
+
+    SECTION("Non-interactive open poll has no data-action attributes or vote actions") {
+        auto ctx = makeContext(base);
+        ctx.interactive = false;
+
+        auto *doc = fixture.loadRml(renderPoll(Discord::Poll::fromJson(openPollJson), ctx));
+        CHECK(doc->QuerySelector("[data-action]") == nullptr);
+        CHECK(doc->QuerySelector("button.poll-answer") == nullptr);
+        CHECK(doc->QuerySelector(".poll-vote-actions") == nullptr);
+    }
+
+    SECTION("Closed poll ignores interactive flag and omits data-action controls") {
+        auto closedCtx = makeContext(expiry.addSeconds(60));
+        closedCtx.interactive = true;
+
+        auto *doc = fixture.loadRml(renderPoll(Discord::Poll::fromJson(openPollJson), closedCtx));
+        CHECK(doc->QuerySelector("[data-action]") == nullptr);
+        CHECK(doc->QuerySelector("button.poll-answer") == nullptr);
+        CHECK(doc->QuerySelector(".poll-vote-actions") == nullptr);
+    }
+
+    SECTION("Error string is escaped without injecting HTML tags") {
+        auto ctx = makeContext(base);
+        ctx.interactive = true;
+        ctx.error = "Vote <b>failed</b> & rejected";
+
+        auto *doc = fixture.loadRml(renderPoll(Discord::Poll::fromJson(openPollJson), ctx));
+        CHECK(doc->QuerySelector("b") == nullptr);
+        auto *errEl = requireElement(doc, ".poll-vote-error");
+        CHECK(errEl->GetInnerRML().find("Vote &lt;b&gt;failed&lt;/b&gt; &amp; rejected") != std::string::npos);
+    }
+}
+
+TEST_CASE("Unknown results keeps counts hidden and exposes Remove vote button", "[polls][rml]")
+{
+    TestViewFixture fixture;
+    const auto base = Platform::DateTime::fromUnixMillis(1'700'000'000'000LL);
+    const auto expiry = base.addSeconds(3600);
+
+    const nlohmann::json unknownResultsJson = {
+        { "question", makeQuestion("Mystery poll?") },
+        { "answers", { makeAnswer(1, "Secret A"), makeAnswer(2, "Secret B") } },
+        { "expiry", expiry.iso8601() },
+        { "allow_multiselect", false }
+    };
+
+    auto ctx = makeContext(base);
+    ctx.interactive = true;
+
+    auto *doc = fixture.loadRml(renderPoll(Discord::Poll::fromJson(unknownResultsJson), ctx));
+    CHECK(doc->QuerySelector(".poll-bar") == nullptr);
+    CHECK(requireElement(doc, ".poll-footer")->GetInnerRML().find("Results not loaded") != std::string::npos);
+
+    auto *removeBtn = requireElement(doc, "button.poll-vote-remove");
+    CHECK(removeBtn->GetAttribute<::Rml::String>("data-action", "") == "poll-remove-vote");
+    CHECK_FALSE(removeBtn->HasAttribute("disabled"));
 }

@@ -416,7 +416,7 @@ void ChatModel::handleIncomingMessages(const Core::MessageRequestResult &result)
                 embedCache.erase(previous);
                 forwardOriginCache.erase(previous);
                 rowsChanged.publish(row, std::min(row + 1, rowCount() - 1));
-            } else if (atLatest) {
+            } else if (atLatest && !result.updatesOnly) {
                 if (message.isPendingOutbound && message.nonce.hasValue()) pendingNonces.insert(message.nonce.get());
                 int at = rowCount(); messages.push_back(message); rowsInserted.publish(at, at);
             }

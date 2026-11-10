@@ -14,8 +14,10 @@
 #include <nlohmann/json.hpp>
 
 #include "Core/Snowflake.hpp"
+#include "Core/PollVotes.hpp"
 #include "Discord/Entities.hpp"
 #include "Discord/Enums.hpp"
+#include "Discord/Events.hpp"
 #include "Platform/Paths.hpp"
 #include "Platform/Settings.hpp"
 #include "Platform/Sqlite.hpp"
@@ -803,4 +805,55 @@ TEST_CASE("Message cache: poll round-trip preserves poll data and referenced mes
     REQUIRE(ref.poll->results.hasValue());
     REQUIRE(ref.poll->results->isFinalized.get());
     REQUIRE(nlohmann::json::parse(ref.pollJson) == nlohmann::json::parse(replyPoll));
+}
+
+TEST_CASE("Message cache: poll vote update survives repo persistence and reload", "[message_cache]")
+{
+    SandboxFixture fixture;
+    const Snowflake accountId(10011);
+    fixture.openCache(accountId);
+    MessageRepository repo(accountId);
+
+    const std::string pollText =
+        R"({"question":{"text":"Game?"},"answers":[{"answer_id":7,"poll_media":{"text":"Doom"}},{"answer_id":42,"poll_media":{"text":"Quake"}}],"expiry":"2024-05-02T10:00:02.039342+00:00","allow_multiselect":true,"layout_type":1,"custom_poll_field":"poll_opaque","results":{"answer_counts":[{"id":7,"count":1,"me_voted":false,"custom_count_field":"count_opaque"}],"is_finalized":false,"custom_results_field":777}})";
+
+    auto msgObj = makeMessageJson("710", "200", "9001", "poll_user", "");
+    msgObj["poll"] = nlohmann::json::parse(pollText);
+    repo.saveMessages({ Message::fromJson(msgObj) });
+
+    auto loadedOpt = repo.getMessage(Snowflake(710));
+    REQUIRE(loadedOpt.has_value());
+    auto loadedMsg = *loadedOpt;
+
+    MessagePollVote voteEvent;
+    voteEvent.userId = Snowflake(500);
+    voteEvent.channelId = Snowflake(200);
+    voteEvent.messageId = Snowflake(710);
+    voteEvent.answerId = 7;
+
+    REQUIRE(Styx::Core::applyPollVote(loadedMsg, voteEvent, true, Snowflake(500)));
+
+    repo.updateMessageContent(loadedMsg);
+
+    DatabaseManager::instance().closeCacheDatabase(accountId);
+    fixture.openCache(accountId);
+    MessageRepository reopenedRepo(accountId);
+
+    const auto reloadedOpt = reopenedRepo.getMessage(Snowflake(710));
+    REQUIRE(reloadedOpt.has_value());
+    const auto &reloaded = *reloadedOpt;
+
+    REQUIRE(reloaded.poll.hasValue());
+    REQUIRE(reloaded.poll->results.hasValue());
+    REQUIRE(reloaded.poll->results->answerCounts.hasValue());
+    REQUIRE(reloaded.poll->results->answerCounts->size() == 1);
+    const auto &ac = reloaded.poll->results->answerCounts->front();
+    REQUIRE(ac.id.get() == 7);
+    REQUIRE(ac.count.get() == 2);
+    REQUIRE(ac.meVoted.get());
+
+    const auto doc = nlohmann::json::parse(reloaded.pollJson);
+    REQUIRE(doc["custom_poll_field"] == "poll_opaque");
+    REQUIRE(doc["results"]["custom_results_field"] == 777);
+    REQUIRE(doc["results"]["answer_counts"][0]["custom_count_field"] == "count_opaque");
 }

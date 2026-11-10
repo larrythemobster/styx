@@ -64,9 +64,10 @@ std::string pollTimeLeft(const Platform::DateTime &expiry, const Platform::DateT
 {
     if (!expiry.valid())
         return {};
-    const int64_t seconds = now.secondsUntil(expiry);
-    if (seconds <= 0)
+    const int64_t milliseconds = now.millisUntil(expiry);
+    if (milliseconds <= 0)
         return "Poll closed";
+    const int64_t seconds = milliseconds / 1000;
     if (seconds >= 86400)
         return std::format("{}d left", seconds / 86400);
     if (seconds >= 3600)
@@ -76,12 +77,59 @@ std::string pollTimeLeft(const Platform::DateTime &expiry, const Platform::DateT
     return "Less than a minute left";
 }
 
+bool pollIsClosed(const Discord::Poll &poll, const Platform::DateTime &now)
+{
+    const bool finalized = poll.results.hasValue() && poll.results->isFinalized.valueOr(false);
+    const bool expired = poll.expiry.hasValue() && poll.expiry->valid() && now.valid() && *poll.expiry <= now;
+    return finalized || expired;
+}
+
+std::vector<int> pollOwnVotes(const Discord::Poll &poll)
+{
+    if (!poll.answers.hasValue() || !poll.results.hasValue() || !poll.results->answerCounts.hasValue())
+        return {};
+
+    const auto &counts = poll.results->answerCounts.get();
+    std::vector<int> votes;
+    for (const auto &ans : poll.answers.get()) {
+        const int id = ans.answerId.valueOr(0);
+        const auto count = std::find_if(counts.begin(), counts.end(), [id](const auto &entry) { return entry.id.get() == id; });
+        if (count != counts.end() && count->meVoted.get())
+            votes.push_back(id);
+    }
+    return votes;
+}
+
+bool togglePollChoice(std::vector<int> &selected, const Discord::Poll &poll, int answerId)
+{
+    if (!poll.answers.hasValue())
+        return false;
+
+    const auto &answers = poll.answers.get();
+    const bool isDeclared = std::any_of(answers.begin(), answers.end(), [answerId](const Discord::PollAnswer &ans) {
+        return ans.answerId.valueOr(0) == answerId;
+    });
+    if (!isDeclared)
+        return false;
+
+    if (std::erase(selected, answerId) > 0)
+        return true;
+
+    if (poll.allowMultiselect.valueOr(false))
+        selected.push_back(answerId);
+    else
+        selected = { answerId };
+    return true;
+}
+
 std::string renderPoll(const Discord::Poll &poll, const PollRenderContext &context)
 {
+    const bool closed = pollIsClosed(poll, context.now);
     const bool hasExpiry = poll.expiry.hasValue() && poll.expiry->valid();
-    const int64_t secondsLeft = hasExpiry ? context.now.secondsUntil(*poll.expiry) : 1;
     const bool finalized = poll.results.hasValue() && poll.results->isFinalized.valueOr(false);
-    const bool closed = finalized || (hasExpiry && secondsLeft <= 0);
+    const bool interactive = context.interactive && !closed;
+    const auto confirmed = interactive ? pollOwnVotes(poll) : std::vector<int>{};
+    const std::vector<int> &selection = context.selectedAnswers ? *context.selectedAnswers : confirmed;
 
     // Answers missing from the counts have no votes; a repeated id keeps its first entry.
     std::unordered_map<int, AnswerStats> answerStats;
@@ -120,14 +168,22 @@ std::string renderPoll(const Discord::Poll &poll, const PollRenderContext &conte
             const int id = ans.answerId.valueOr(0);
             const auto [count, meVoted] = statsFor(ans);
             const bool isWinner = closed && maxVotes > 0 && count == maxVotes;
+            const bool isSelected = interactive && std::find(selection.begin(), selection.end(), id) != selection.end();
 
             std::string classes = "poll-answer";
+            if (isSelected)
+                classes += " poll-answer-selected";
             if (meVoted)
                 classes += " poll-answer-mine";
             if (isWinner)
                 classes += " poll-answer-winner";
 
-            rml += std::format("<div class=\"{}\" data-answer-id=\"{}\">", classes, id);
+            if (interactive) {
+                rml += std::format("<button type=\"button\" class=\"{}\" data-action=\"poll-answer\" data-answer-id=\"{}\"{}>",
+                                   classes, id, context.pending ? " disabled" : "");
+            } else {
+                rml += std::format("<div class=\"{}\" data-answer-id=\"{}\">", classes, id);
+            }
 
             std::string emojiHtml;
             if (ans.pollMedia.hasValue() && ans.pollMedia->emoji.hasValue())
@@ -147,9 +203,31 @@ std::string renderPoll(const Discord::Poll &poll, const PollRenderContext &conte
                                    percent);
             }
 
-            rml += "</div>";
+            rml += interactive ? "</button>" : "</div>";
         }
     }
+
+    if (interactive) {
+        rml += "<div class=\"poll-vote-actions\">";
+
+        const bool canVote = !selection.empty() && !context.pending;
+        rml += std::format("<button class=\"poll-vote-submit\" data-action=\"poll-vote\"{}>Vote</button>",
+                           canVote ? "" : " disabled");
+
+        const bool showRemove = !confirmed.empty() || !poll.results.hasValue();
+        if (showRemove) {
+            const bool canRemove = !context.pending;
+            rml += std::format("<button class=\"poll-vote-remove\" data-action=\"poll-remove-vote\"{}>Remove vote</button>",
+                               canRemove ? "" : " disabled");
+        }
+
+        rml += "</div>";
+    }
+
+    if (context.pending)
+        rml += "<div class=\"poll-vote-status\">Submitting vote...</div>";
+    if (!context.error.empty())
+        rml += std::format("<div class=\"poll-vote-error\">{}</div>", Platform::htmlEscape(context.error));
 
     std::string footer = poll.results.hasValue() ? formatVotes(totalVotes) : "Results not loaded";
     const std::string timeLeft = closed ? "Poll closed" : hasExpiry ? pollTimeLeft(*poll.expiry, context.now) : std::string{};

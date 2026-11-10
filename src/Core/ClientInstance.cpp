@@ -260,6 +260,8 @@ ClientInstance::ClientInstance(const AccountInfo &info,
     track(client->messageReactionRemove.connect([this](auto &&...args) { messageManager->onReactionRemove(args...); }));
     track(client->messageReactionRemoveAll.connect([this](auto &&...args) { messageManager->onReactionRemoveAll(args...); }));
     track(client->messageReactionRemoveEmoji.connect([this](auto &&...args) { messageManager->onReactionRemoveEmoji(args...); }));
+    track(client->messagePollVoteAdded.connect([this](const auto &event) { messageManager->onPollVote(event, true); }));
+    track(client->messagePollVoteRemoved.connect([this](const auto &event) { messageManager->onPollVote(event, false); }));
     track(client->relationshipAdded.connect([this](auto &&...args) { relationshipManager->onRelationshipAdded(args...); }));
     track(client->relationshipUpdated.connect([this](auto &&...args) { relationshipManager->onRelationshipUpdated(args...); }));
     track(client->relationshipRemoved.connect([this](auto &&...args) { relationshipManager->onRelationshipRemoved(args...); }));

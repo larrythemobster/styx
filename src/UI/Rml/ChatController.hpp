@@ -15,6 +15,7 @@
 
 #include <optional>
 #include <string>
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -30,6 +31,7 @@ namespace Styx {
 
 namespace Discord {
 struct Emoji;
+struct Message;
 struct MessageComponent;
 }
 
@@ -84,6 +86,9 @@ private:
     [[nodiscard]] std::vector<bool> blockedRows() const;
     void refreshBlockedRun(int row);
     void refreshMessage(Core::Snowflake messageId);
+    [[nodiscard]] const Discord::Message *pollMessage(Core::Snowflake messageId) const;
+    void handlePollAction(const std::string &action, Core::Snowflake messageId, int answerId);
+    void settlePollVote(const Discord::Message &message);
     // Sends a button click (no values) or a select choice.
     void useComponent(Core::Snowflake messageId, const std::string &path, std::vector<std::string> values = {});
     // optionIndex identifies a string select option, value an entity select candidate.
@@ -158,6 +163,16 @@ private:
         std::unordered_set<std::string> paths;
     };
     std::unordered_map<Core::Snowflake, ComponentSpoilerState> revealedComponentSpoilers;
+    struct PollVoteState {
+        std::vector<int> selected;
+        bool pending = false;
+        bool accepted = false;
+        std::string error;
+        std::uint64_t request = 0;
+    };
+    std::unordered_map<Core::Snowflake, PollVoteState> pollVotes;
+    // Never reused across channel/account changes, so a late callback cannot settle a new draft.
+    std::uint64_t pollVoteRequest = 0;
     InteractionTracker interactions;
     struct OpenSelect {
         Core::Snowflake messageId;

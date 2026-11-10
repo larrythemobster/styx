@@ -16,6 +16,7 @@
 #include "Markdown/Parser.hpp"
 #include "Logging.hpp"
 #include "UserManager.hpp"
+#include "Core/PollVotes.hpp"
 
 namespace Styx {
 namespace Core {
@@ -704,12 +705,23 @@ std::vector<Discord::Reaction> MessageManager::reactionsOf(Snowflake messageId)
     return reactionsFromJson(repo.getReactionsJson(messageId));
 }
 
+void MessageManager::publishMessageUpdate(const Discord::Message &message, bool updatesOnly)
+{
+    messageCache.insert(message.id, message);
+    messagesReceived.publish(MessageRequestResult{
+        .success = true,
+        .type = LoadType::Created,
+        .channelId = message.channelId,
+        .messages = { message },
+        .updatesOnly = updatesOnly,
+    });
+}
+
 void MessageManager::emitReactionUpdate(Discord::Message &msg)
 {
     rebuildReactionsJson(msg);
-    messageCache.insert(msg.id, msg);
     repo.saveMessages({ msg });
-    messagesReceived.publish(MessageRequestResult{ true, Discord::Client::MessageLoadType::Created, msg.channelId, { msg } });
+    publishMessageUpdate(msg, false);
     reactionsChanged.publish(msg.id);
 }
 
@@ -960,6 +972,24 @@ void MessageManager::onReactionRemoveEmoji(const Discord::MessageReactionRemoveE
     }
 
     emitReactionUpdate(msg);
+}
+
+void MessageManager::onPollVote(const Discord::MessagePollVote &event, bool added)
+{
+    Discord::Message message;
+    if (auto *cached = messageCache.object(event.messageId.get())) {
+        message = *cached;
+    } else if (auto existing = repo.getMessage(event.messageId.get())) {
+        message = std::move(*existing);
+    } else {
+        return;
+    }
+
+    if (!applyPollVote(message, event, added, client->getMe().id.get()))
+        return;
+
+    repo.updateMessageContent(message);
+    publishMessageUpdate(message, true);
 }
 
 void MessageManager::receiveEphemeralMessage(Discord::Message message)

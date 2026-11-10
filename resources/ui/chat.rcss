@@ -1898,6 +1898,19 @@ select.command-option-select selectbox option:hover
    Polls
    ========================================================================== */
 
+/* RmlUi has no HTML block defaults for these structural elements. */
+.poll-question, .poll-hint, .poll-footer,
+.poll-bar, .poll-bar-fill, .poll-vote-actions,
+.poll-vote-status, .poll-vote-error
+{
+	display: block;
+}
+
+.poll-hint, .poll-footer
+{
+	margin-top: 4dp;
+}
+
 .poll
 {
 	display: block;
@@ -1925,6 +1938,7 @@ select.command-option-select selectbox option:hover
 .poll-answer
 {
 	display: block;
+	box-sizing: border-box;
 	position: relative;
 	margin: 6dp 0;
 	padding: 8dp 12dp;
@@ -1975,4 +1989,130 @@ select.command-option-select selectbox option:hover
 .poll-result-winner
 {
 	font-weight: bold;
+}
+
+button.poll-answer
+{
+	width: 100%;
+	text-align: left;
+	tab-index: auto;
+	cursor: pointer;
+	background-color: transparent;
+	font-family: ui;
+	font-size: 14dp;
+}
+
+button.poll-answer:hover
+{
+	background-color: #35373c;
+}
+
+button.poll-answer:focus
+{
+	border-color: #f2f3f5;
+}
+
+button.poll-answer[disabled]
+{
+	tab-index: none;
+	focus: none;
+	cursor: default;
+}
+
+button.poll-answer[disabled]:hover
+{
+	background-color: transparent;
+}
+
+button.poll-answer.poll-answer-selected
+{
+	background-color: #35373c;
+}
+
+button.poll-answer.poll-answer-selected[disabled]:hover
+{
+	background-color: #35373c;
+}
+
+button.poll-answer.poll-answer-mine:focus
+{
+	border-color: #5865f2;
+}
+
+.poll-vote-actions
+{
+	margin-top: 8dp;
+}
+
+.poll-vote-actions button
+{
+	display: inline-block;
+	box-sizing: border-box;
+	padding: 6dp 16dp;
+	border-radius: 4dp;
+	border: 1dp transparent;
+	font-family: ui;
+	font-size: 14dp;
+	font-weight: 500;
+	color: #ffffff;
+	cursor: pointer;
+	tab-index: auto;
+	margin-right: 8dp;
+}
+
+.poll-vote-actions button:focus
+{
+	border-color: #f2f3f5;
+}
+
+.poll-vote-actions button[disabled]
+{
+	tab-index: none;
+	focus: none;
+	cursor: default;
+	opacity: 0.5;
+}
+
+.poll-vote-submit
+{
+	background-color: #5865f2;
+}
+
+.poll-vote-submit:hover
+{
+	background-color: #4752c4;
+}
+
+.poll-vote-submit[disabled]:hover
+{
+	background-color: #5865f2;
+}
+
+.poll-vote-remove
+{
+	background-color: #4e5058;
+}
+
+.poll-vote-remove:hover
+{
+	background-color: #6d6f78;
+}
+
+.poll-vote-remove[disabled]:hover
+{
+	background-color: #4e5058;
+}
+
+.poll-vote-status
+{
+	font-size: 12dp;
+	color: #949ba4;
+	margin-top: 6dp;
+}
+
+.poll-vote-error
+{
+	font-size: 12dp;
+	color: #f23f43;
+	margin-top: 6dp;
 }

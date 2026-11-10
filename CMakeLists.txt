@@ -166,6 +166,7 @@ set(PROJECT_SOURCES
     src/Core/Session.cpp
     src/Core/Logging.cpp
     src/Core/MessageManager.cpp
+    src/Core/PollVotes.cpp
     src/Core/EphemeralMessages.cpp
     src/Core/CommandIndexCache.cpp
     src/Core/MessageReactors.cpp
@@ -487,6 +488,8 @@ if(BUILD_TESTS)
         src/Discord/ComponentInteraction.cpp src/Core/Snowflake.cpp)
     styx_test(TestPollProtocol PollProtocolTests tests/tst_PollProtocol.cpp tests/tst_PollEvents.cpp
         src/Discord/PollProtocol.cpp src/Discord/ApiError.cpp src/Core/Snowflake.cpp)
+    styx_test(TestPollVotes PollVoteTests tests/tst_PollVotes.cpp
+        src/Core/PollVotes.cpp src/Core/Snowflake.cpp)
     styx_test(TestCommandInteraction CommandInteractionTests tests/tst_CommandInteraction.cpp
         src/Discord/CommandInteraction.cpp src/Core/Snowflake.cpp)
     styx_test(TestApplicationCommands ApplicationCommandTests tests/tst_ApplicationCommands.cpp
@@ -499,7 +502,7 @@ if(BUILD_TESTS)
     styx_test(TestMessageCache MessageCacheTests tests/tst_MessageCache.cpp
         src/Storage/DatabaseManager.cpp src/Storage/BaseRepository.cpp
         src/Storage/Transaction.cpp src/Storage/UserRepository.cpp
-        src/Storage/MessageRepository.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp)
+        src/Storage/MessageRepository.cpp src/Core/PollVotes.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp)
     styx_test(TestFavoriteGifs FavoriteGifTests tests/tst_FavoriteGifs.cpp
         src/Core/Gifs/FavoriteGifRules.cpp src/UI/Gifs/GifMasonryLayout.cpp
         src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)

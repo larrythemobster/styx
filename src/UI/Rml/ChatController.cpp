@@ -378,6 +378,13 @@ void ChatController::setupEventListeners()
             state.paths.insert(std::move(path));
             onDataChanged(row, row);
             requestRender();
+        } else if (action == std::string("poll-answer") || action == std::string("poll-vote")
+                   || action == std::string("poll-remove-vote")) {
+            if (actionEl->HasAttribute("disabled"))
+                return;
+            if (::Rml::Element *msgEl = closest(actionEl, "data-message-id"))
+                handlePollAction(action, Core::Snowflake(parseNumber(attribute(msgEl, "data-message-id"))),
+                                 static_cast<int>(parseNumber(attribute(actionEl, "data-answer-id"))));
         } else if (action == std::string("component-button")) {
             if (::Rml::Element *msgEl = closest(actionEl, "data-message-id"))
                 useComponent(Core::Snowflake(parseNumber(attribute(msgEl, "data-message-id"))),
@@ -655,6 +662,7 @@ void ChatController::onLocationChanged(const Location &location)
     if (currentChannelId != location.channelId)
         expandedBlockedRuns.clear();
     revealedComponentSpoilers.clear();
+    pollVotes.clear();
     interactions.clear();
     openSelect.reset();
     dropChosenCommand(false);
@@ -684,6 +692,7 @@ void ChatController::onLocationChanged(const Location &location)
 void ChatController::onInstanceChanged(Core::ClientInstance *instance)
 {
     revealedComponentSpoilers.clear();
+    pollVotes.clear();
     interactions.clear();
     openSelect.reset();
     dropChosenCommand(false);
@@ -692,6 +701,13 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
         connection.disconnect();
     instanceConnections.clear();
     if (instance) {
+        instanceConnections.push_back(instance->messages()->messagesReceived.connect(
+            [this](const Core::MessageRequestResult &result) {
+                if (result.channelId != currentChannelId)
+                    return;
+                for (const auto &message : result.messages)
+                    settlePollVote(message);
+            }));
         instanceConnections.push_back(instance->presences()->presencesChanged.connect(
             [this](const std::vector<Core::Snowflake> &users) {
                 if (std::find(users.begin(), users.end(), headerRecipientId) != users.end())
@@ -823,8 +839,32 @@ void ChatController::onDataChanged(int first, int last)
         return;
 
     for (int r = first; r <= last; ++r) {
-        if (r >= 0 && r < messagesEl->GetNumChildren()) {
-            messagesEl->GetChild(r)->SetInnerRML(buildMessageHtml(r));
+        if (r < 0 || r >= messagesEl->GetNumChildren())
+            continue;
+        auto *element = messagesEl->GetChild(r);
+        auto *focused = messagesEl->GetContext()->GetFocusElement();
+        std::string focusSelector;
+        if (focused == element) {
+            focusSelector = attribute(element, "data-poll-focus");
+        } else if (auto *action = closest(focused, "data-action")) {
+            const std::string name = attribute(action, "data-action");
+            if (name == "poll-answer" || name == "poll-vote" || name == "poll-remove-vote") {
+                focusSelector = "[data-action=\"" + name + "\"]";
+                if (name == "poll-answer")
+                    focusSelector += "[data-answer-id=\"" + attribute(action, "data-answer-id") + "\"]";
+                if (element->QuerySelector(focusSelector) != action)
+                    focusSelector.clear();
+            }
+        }
+        element->RemoveAttribute("data-poll-focus");
+        element->SetInnerRML(buildMessageHtml(r));
+        // Live counts and selection clicks rebuild the row, but keyboard navigation stays
+        // on its poll control. While disabled, the row remembers where to return focus.
+        if (!focusSelector.empty()) {
+            if (auto *replacement = element->QuerySelector(focusSelector); replacement && !replacement->Focus()) {
+                element->SetAttribute("data-poll-focus", focusSelector);
+                element->Focus();
+            }
         }
     }
     requestRender();
@@ -930,6 +970,82 @@ void ChatController::refreshMessage(Core::Snowflake messageId)
         return;
     onDataChanged(row, row);
     requestRender();
+}
+
+const Discord::Message *ChatController::pollMessage(Core::Snowflake messageId) const
+{
+    ChatModel *model = shell.chat();
+    const int row = model ? model->rowForMessage(messageId) : -1;
+    return row >= 0 ? model->messageAt(row) : nullptr;
+}
+
+void ChatController::settlePollVote(const Discord::Message &message)
+{
+    const auto it = pollVotes.find(message.id);
+    if (it == pollVotes.end() || !it->second.accepted || !message.poll.hasValue())
+        return;
+    const auto confirmed = pollOwnVotes(message.poll.get());
+    if (!std::ranges::is_permutation(confirmed, it->second.selected))
+        return;
+    pollVotes.erase(it);
+    refreshMessage(message.id);
+}
+
+void ChatController::handlePollAction(const std::string &action, Core::Snowflake messageId, int answerId)
+{
+    const Discord::Message *message = pollMessage(messageId);
+    Core::ClientInstance *instance = shell.currentInstance();
+    if (!message || message->isForwarded() || !message->poll.hasValue() || !instance || !instance->discord()
+        || !instance->discord()->getMe().id.get().isValid()
+        || pollIsClosed(message->poll.get(), Platform::DateTime::now()))
+        return;
+
+    auto [it, inserted] = pollVotes.try_emplace(messageId);
+    auto &state = it->second;
+    if (inserted)
+        state.selected = pollOwnVotes(message->poll.get());
+    if (state.pending)
+        return;
+
+    if (action == "poll-answer") {
+        if (togglePollChoice(state.selected, message->poll.get(), answerId)) {
+            state.error.clear();
+            state.accepted = false;
+            refreshMessage(messageId);
+        }
+        return;
+    }
+    if (action == "poll-remove-vote")
+        state.selected.clear();
+    else if (action != "poll-vote" || state.selected.empty())
+        return;
+
+    state.pending = true;
+    state.accepted = false;
+    state.error.clear();
+    const auto request = state.request = ++pollVoteRequest;
+    const auto accountId = currentAccountId;
+    const auto channelId = currentChannelId;
+    refreshMessage(messageId);
+
+    Platform::Guard<ChatController> self(this);
+    instance->discord()->submitPollVote(channelId, messageId, state.selected,
+        [self, accountId, channelId, messageId, request](const Core::Result<void> &result) {
+            if (!self || self->currentAccountId != accountId || self->currentChannelId != channelId)
+                return;
+            const auto current = self->pollVotes.find(messageId);
+            if (current == self->pollVotes.end() || current->second.request != request)
+                return;
+            auto &draft = current->second;
+            draft.pending = false;
+            draft.accepted = result.success();
+            if (!result.success())
+                draft.error = result.error.empty() ? "The vote could not be submitted. Try again." : result.error;
+            self->refreshMessage(messageId);
+            // A Gateway event can arrive before or after REST admission.
+            if (const Discord::Message *updated = self->pollMessage(messageId))
+                self->settlePollVote(*updated);
+        });
 }
 
 void ChatController::useComponent(Core::Snowflake messageId, const std::string &path, std::vector<std::string> values)
@@ -1468,8 +1584,18 @@ std::string ChatController::buildMessageHtml(int row)
     }
 
     // Poll
-    if (rawMsg && rawMsg->contentMessage().poll.hasValue())
-        out += renderPoll(rawMsg->contentMessage().poll.get(), pollContext());
+    if (rawMsg && rawMsg->contentMessage().poll.hasValue()) {
+        auto context = pollContext();
+        Core::ClientInstance *instance = shell.currentInstance();
+        context.interactive = !rawMsg->isForwarded() && instance && instance->discord()
+            && instance->discord()->getMe().id.get().isValid();
+        if (auto it = pollVotes.find(msgId); it != pollVotes.end()) {
+            context.selectedAnswers = &it->second.selected;
+            context.pending = it->second.pending;
+            context.error = it->second.error;
+        }
+        out += renderPoll(rawMsg->contentMessage().poll.get(), context);
+    }
 
     // Stickers
     for (const auto &sticker : stickers) {

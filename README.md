@@ -94,11 +94,12 @@ Chat displays poll questions, answer emoji, vote counts and percentages, your vo
 and closed-poll winners. Polls and known results survive cache reloads and partial
 message updates. Finalized results mark a poll closed even when the local clock
 lags behind Discord. Countdown labels refresh when the message redraws.
-Voting controls and poll creation are not available yet. The client API can submit
-or clear votes with `submitPollVote` and end an author's poll with `endPoll`.
-Vote requests require HTTP 204; ending a poll returns its message after checking
-the response's channel and message IDs. `messagePollVoteAdded` and
-`messagePollVoteRemoved` expose typed Gateway events, including optional guild IDs.
+Open polls let you choose one or several answers, submit a vote, or remove your votes.
+Requests show a pending state and inline errors. Gateway events update known counts
+and your vote marks in memory and on disk; missing results stay unknown rather than
+becoming zero votes. Closed polls and forwarded snapshots stay read-only.
+The client API also supports ending an author's poll with `endPoll`, but the End poll
+action and poll creation are not available in the interface yet.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.
