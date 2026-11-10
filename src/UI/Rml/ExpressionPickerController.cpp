@@ -306,6 +306,14 @@ void ExpressionPickerController::openForStatus(Core::EmojiManager *emojiManager,
     openPicker(emojiManager, nullptr, accountId, Core::Snowflake::Invalid, Core::Snowflake::Invalid, Mode::Status, Tab::Emoji, anchor);
 }
 
+void ExpressionPickerController::openForPoll(Core::EmojiManager *emojiManager,
+                                            Core::Snowflake accountId,
+                                            Core::Snowflake channelId,
+                                            const Platform::Rect &anchor)
+{
+    openPicker(emojiManager, nullptr, accountId, channelId, Core::Snowflake::Invalid, Mode::Poll, Tab::Emoji, anchor);
+}
+
 void ExpressionPickerController::openPicker(Core::EmojiManager *emojiManager,
                                             Core::FavoriteGifs *favoriteGifs,
                                             Core::Snowflake accountId,
@@ -342,6 +350,8 @@ void ExpressionPickerController::openPicker(Core::EmojiManager *emojiManager,
         placeholder = "Find the perfect reaction";
     else if (mode == Mode::Status)
         placeholder = "Choose a status emoji";
+    else if (mode == Mode::Poll)
+        placeholder = "Choose an answer emoji";
 
     if (auto *input = dynamic_cast<::Rml::ElementFormControlInput *>(searchInputEl)) {
         input->SetValue("");
@@ -368,7 +378,7 @@ void ExpressionPickerController::openPicker(Core::EmojiManager *emojiManager,
         searchInputEl->Focus();
 
     requestRender();
-    const char *modeLabel = (mode == Mode::Reaction) ? "reaction" : (mode == Mode::Status) ? "status" : "chat";
+    const char *modeLabel = (mode == Mode::Reaction) ? "reaction" : (mode == Mode::Status) ? "status" : (mode == Mode::Poll) ? "poll" : "chat";
     Core::log(Core::LogLevel::Info, LogUI) << "ExpressionPicker opened for" << modeLabel << "in"
                                            << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - openTimer).count()
                                            << "ms";
@@ -603,6 +613,25 @@ void ExpressionPickerController::placeCard(const Platform::Rect &anchor)
 {
     if (!cardEl)
         return;
+
+    if (mode == Mode::Poll) {
+        const auto dimensions = cardEl->GetContext()->GetDimensions();
+        const int width = std::min(440, std::max(1, dimensions.x - 32));
+        const int height = std::min(480, std::max(1, dimensions.y - 32));
+        const int maxX = std::max(0, dimensions.x - width - 16);
+        const int maxY = std::max(0, dimensions.y - height - 16);
+        const int x = std::clamp(static_cast<int>(anchor.x + anchor.width) - width, std::min(16, maxX), maxX);
+        const int y = std::clamp(static_cast<int>(anchor.y) - height - 8, std::min(16, maxY), maxY);
+        cardEl->SetProperty("width", std::to_string(width) + "dp");
+        cardEl->SetProperty("height", std::to_string(height) + "dp");
+        cardEl->SetProperty("left", std::to_string(x) + "dp");
+        cardEl->SetProperty("top", std::to_string(y) + "dp");
+        cardEl->RemoveProperty("right");
+        cardEl->RemoveProperty("bottom");
+        return;
+    }
+    cardEl->RemoveProperty("width");
+    cardEl->RemoveProperty("height");
 
     if (mode != Mode::Chat && !anchor.empty()) {
         const int x = std::clamp(static_cast<int>(anchor.x + anchor.width - 1 - 440), 20, 1200);

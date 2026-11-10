@@ -1,0 +1,55 @@
+<rml>
+<head>
+    <title>Create poll</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="create_poll.rcss"/>
+</head>
+<body id="create-poll-body">
+    <div class="create-poll-backdrop" data-action="poll-cancel"></div>
+    <div id="create-poll-card" class="create-poll-card">
+        <div class="create-poll-header">
+            <div class="create-poll-title">Create poll</div>
+            <button class="create-poll-close" data-action="poll-cancel" title="Close">
+                <img class="create-poll-close-icon" src="icon:x" alt="Close"/>
+            </button>
+        </div>
+        <div id="create-poll-fields" class="create-poll-fields">
+            <div class="create-poll-field-group">
+                <div class="create-poll-label">Question</div>
+                <textarea id="create-poll-question" class="create-poll-question" maxlength="300" placeholder="Ask a question…"></textarea>
+            </div>
+            <div class="create-poll-field-group">
+                <div class="create-poll-label">Answers</div>
+                <div id="create-poll-answers" class="create-poll-answers"></div>
+                <button id="create-poll-add" class="create-poll-add" data-action="poll-add-answer">Add answer</button>
+            </div>
+            <div class="create-poll-field-group">
+                <div class="create-poll-label">Duration</div>
+                <select id="create-poll-duration" class="create-poll-duration">
+                    <option value="1">1 hour</option>
+                    <option value="4">4 hours</option>
+                    <option value="8">8 hours</option>
+                    <option value="24" selected>24 hours</option>
+                    <option value="72">3 days</option>
+                    <option value="168">1 week</option>
+                    <option value="336">2 weeks</option>
+                    <option value="768">32 days</option>
+                </select>
+            </div>
+            <div class="create-poll-field-group create-poll-multiselect-group">
+                <input type="checkbox" id="create-poll-multiselect" class="create-poll-multiselect"/>
+                <div class="create-poll-multiselect-label">Allow multiple answers</div>
+            </div>
+        </div>
+        <div class="create-poll-footer">
+            <div id="create-poll-error" class="create-poll-error" style="display: none;"></div>
+            <div id="create-poll-status" class="create-poll-status" style="display: none;"></div>
+            <div class="create-poll-footer-buttons">
+                <button id="create-poll-cancel" class="create-poll-cancel" data-action="poll-cancel">Cancel</button>
+                <button id="create-poll-submit" class="create-poll-submit" data-action="poll-create" disabled>Create poll</button>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

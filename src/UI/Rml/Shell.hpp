@@ -42,6 +42,7 @@ class ExpressionPickerController;
 class ShortcutController;
 class JoinServerController;
 class CreateServerController;
+class CreatePollController;
 }
 struct Location {
     Core::Snowflake accountId, guildId, channelId;
@@ -126,6 +127,7 @@ public:
     void openJoinServer(const std::string &code, const std::string &location);
     // The rail's "Add a Server": create one, with a way across to joining by invite.
     void openCreateServer();
+    void openCreatePoll();
     // Opens a server the account just joined or created, now if it's in the tree, otherwise
     // when the gateway delivers it. A later call replaces an earlier wait.
     void openGuildWhenReady(Core::Snowflake accountId, Core::Snowflake guildId);
@@ -195,6 +197,7 @@ private:
     std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;
     std::unique_ptr<Rml::SearchController> searchController;
     std::unique_ptr<Rml::CreateServerController> createServerController;
+    std::unique_ptr<Rml::CreatePollController> createPollController;
     std::unique_ptr<Rml::JoinServerController> joinServerController;
     // Declared after the controllers so it, and the handlers pointing into them, goes first.
     std::unique_ptr<Rml::ShortcutController> shortcutController;

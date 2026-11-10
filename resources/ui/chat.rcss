@@ -1114,6 +1114,19 @@
 	image-color: #dbdee1;
 }
 
+.composer-poll-btn
+{
+    tab-index: auto;
+    background-color: transparent;
+    border-width: 0;
+    padding: 0;
+}
+
+.composer-poll-btn:focus
+{
+    background-color: #3f4147;
+}
+
 .composer-input-wrap
 {
     flex: 1;

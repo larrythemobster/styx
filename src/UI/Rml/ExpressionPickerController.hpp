@@ -52,6 +52,11 @@ public:
                        Core::Snowflake accountId,
                        const Platform::Rect &anchor = {});
 
+    void openForPoll(Core::EmojiManager *emojiManager,
+                     Core::Snowflake accountId,
+                     Core::Snowflake channelId,
+                     const Platform::Rect &anchor = {});
+
     void close();
     [[nodiscard]] bool isOpen() const { return visible; }
     [[nodiscard]] Tab currentTab() const { return activeTab; }
@@ -66,6 +71,7 @@ private:
         Chat,
         Reaction,
         Status,
+        Poll,
     };
 
     void openPicker(Core::EmojiManager *emojiManager,

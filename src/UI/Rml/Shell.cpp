@@ -22,6 +22,7 @@
 #include "SearchController.hpp"
 #include "JoinServerController.hpp"
 #include "CreateServerController.hpp"
+#include "CreatePollController.hpp"
 #include "SwitcherController.hpp"
 #include "ShortcutController.hpp"
 #include "ShortcutsHelpController.hpp"
@@ -730,6 +731,12 @@ void Shell::openCreateServer()
     if (!instance) return;
     if (!createServerController) createServerController = std::make_unique<Rml::CreateServerController>(*this);
     createServerController->open();
+}
+void Shell::openCreatePoll()
+{
+    if (!createPollController)
+        createPollController = std::make_unique<Rml::CreatePollController>(*this);
+    createPollController->open();
 }
 void Shell::openGuildWhenReady(Snowflake account, Snowflake guild)
 {

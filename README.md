@@ -100,8 +100,9 @@ and your vote marks in memory and on disk; missing results stay unknown rather t
 becoming zero votes. Closed polls and forwarded snapshots stay read-only.
 You can end your own open polls after confirmation, with pending and inline error
 feedback. The response updates memory and disk without appending off-screen messages.
-The client API can create poll messages with validated text, emoji, duration and
-multiselect settings. The composer dialog is not available yet.
+The composer can create polls where you have Send Polls permission. Add a question,
+2 to 10 answers with optional emoji, a duration and a multiselect setting.
+Creation preserves your composer draft and shows pending state and retryable errors.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.

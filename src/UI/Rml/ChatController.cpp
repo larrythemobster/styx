@@ -26,6 +26,7 @@
 #include "Discord/CdnUrls.hpp"
 #include "UI/Chat/ChatModel.hpp"
 #include "ConfirmModal.hpp"
+#include "CreatePollController.hpp"
 #include "ExpressionPickerController.hpp"
 #include "UI/ChannelList/ChannelNode.hpp"
 #include "UI/ChannelList/ChannelTreeModel.hpp"
@@ -442,6 +443,8 @@ void ChatController::setupEventListeners()
         } else if (action == std::string("composer-reply-close")) {
             clearReplyTarget();
             clearEditTarget();
+        } else if (action == std::string("composer-poll")) {
+            shell.openCreatePoll();
         } else if (action == std::string("composer-attach")) {
             Platform::Guard<ChatController> self(this);
             Platform::Desktop::openFiles("Select Files", {{"All Files", "*.*"}}, [self](std::vector<std::string> files) {
@@ -719,6 +722,22 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
                     updateHeader();
                     updateComposer();
                 }
+            }));
+        instanceConnections.push_back(instance->permissions()->channelPermissionsChanged.connect(
+            [this](Core::Snowflake channelId) {
+                if (channelId == currentChannelId) {
+                    updateComposer();
+                } else if (auto *current = shell.currentInstance()) {
+                    const auto channel = current->getChannel(currentChannelId);
+                    if (channel && channel->isThread() && channel->parentId.hasValue()
+                        && channel->parentId.get() == channelId)
+                        updateComposer();
+                }
+            }));
+        instanceConnections.push_back(instance->permissions()->guildPermissionsChanged.connect(
+            [this](Core::Snowflake guildId) {
+                if (guildId == currentGuildId)
+                    updateComposer();
             }));
         if (auto *relationships = instance->relationships()) {
             instanceConnections.push_back(relationships->relationshipChanged.connect(
@@ -1971,19 +1990,25 @@ void ChatController::updateComposer()
         slowmodeHtml = std::format("<div class=\"slowmode-notice\"><img src=\"icon:clock\" style=\"width:14dp;height:14dp;image-color:#f0b232;\" /> Slowmode is active ({0}s)</div>", channelRateLimit);
     }
 
+    const std::string pollButton = !editingMessageId.isValid()
+        && CreatePollController::canCreate(instance, currentChannelId)
+        ? "<button type=\"button\" class=\"composer-btn composer-poll-btn\" data-action=\"composer-poll\" title=\"Create poll\"><img src=\"icon:chart-column\" /></button>"
+        : "";
+
     std::string composerHtml = std::format("{0}"
         "{1}"
         "<div id=\"command-picker\" class=\"command-picker\"></div>"
         "<div id=\"command-options\" class=\"command-options\"></div>"
         "<div class=\"composer-main-row\">"
         "<div class=\"composer-btn\" data-action=\"composer-attach\" title=\"Attach file\"><img src=\"icon:image\" /></div>"
+        "{6}"
         "<div class=\"composer-input-wrap\">"
         "<span id=\"composer-placeholder\" class=\"composer-placeholder\">{3}</span>"
         "<textarea id=\"composer-input\" class=\"composer-textarea{2}\" rows=\"1\"{4}></textarea>"
         "</div>"
         "<div class=\"composer-btn\" data-action=\"composer-emoji\" title=\"Select emoji\"><img src=\"icon:smile\" /></div>"
         "</div>"
-        "{5}", replyBarHtml, attachmentsHtml, hasSendPermission ? std::string() : std::string(" composer-disabled"), Platform::htmlEscape(placeholder), hasSendPermission ? std::string() : std::string(" disabled"), slowmodeHtml);
+        "{5}", replyBarHtml, attachmentsHtml, hasSendPermission ? std::string() : std::string(" composer-disabled"), Platform::htmlEscape(placeholder), hasSendPermission ? std::string() : std::string(" disabled"), slowmodeHtml, pollButton);
 
     textareaEl = nullptr;
     commandPicker.setHost(nullptr);

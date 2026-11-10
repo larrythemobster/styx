@@ -318,6 +318,8 @@ set(PROJECT_SOURCES
     src/UI/Rml/ShortcutsHelpController.cpp
     src/UI/Rml/JoinServerController.cpp
     src/UI/Rml/CreateServerController.cpp
+    src/UI/Rml/CreatePollController.cpp
+    src/UI/Rml/PollCreateForm.cpp
     src/UI/Rml/ExpressionPickerController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )
@@ -472,6 +474,7 @@ if(BUILD_TESTS)
     styx_test(TestCdnUrls CdnUrlTests tests/tst_CdnUrls.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestRmlRender RmlRenderTests tests/tst_RmlRender.cpp tests/tst_MessageComponentRendering.cpp tests/tst_CommandOptionsBar.cpp
         tests/tst_PollRendering.cpp
+        tests/tst_PollCreateForm.cpp src/UI/Rml/PollCreateForm.cpp
         src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp src/UI/Rml/ComponentRenderer.cpp src/UI/Chat/SelectDraft.cpp
         src/UI/Rml/CommandOptionsBar.cpp src/UI/Rml/PollRenderer.cpp
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
