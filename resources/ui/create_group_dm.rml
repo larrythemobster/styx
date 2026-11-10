@@ -1,0 +1,38 @@
+<rml>
+<head>
+    <title>Create group DM</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="create_group_dm.rcss"/>
+</head>
+<body id="create-group-dm-body">
+    <div class="create-group-dm-backdrop" data-action="group-dm-cancel"></div>
+    <div id="group-dm-card" class="group-dm-card">
+        <div class="group-dm-header">
+            <div class="group-dm-title">Create group DM</div>
+            <button class="group-dm-close" data-action="group-dm-cancel" title="Close">
+                <img class="group-dm-close-icon" src="icon:x" alt="Close"/>
+            </button>
+        </div>
+        <div class="group-dm-content">
+            <div id="group-dm-context" class="group-dm-context"></div>
+            <div class="group-dm-search-container">
+                <div class="group-dm-search-label">Search friends</div>
+                <input type="text" id="group-dm-search" class="group-dm-search" placeholder="Search friends" />
+            </div>
+            <div id="group-dm-friends" class="group-dm-friends"></div>
+        </div>
+        <div class="group-dm-footer">
+            <div id="group-dm-error" class="group-dm-error" style="display: none;"></div>
+            <div id="group-dm-status" class="group-dm-status" style="display: none;"></div>
+            <div class="group-dm-footer-bar">
+                <div id="group-dm-count" class="group-dm-count"></div>
+                <div class="group-dm-footer-buttons">
+                    <button id="group-dm-cancel" class="group-dm-cancel" data-action="group-dm-cancel">Cancel</button>
+                    <button id="group-dm-submit" class="group-dm-submit" data-action="group-dm-create" disabled>Create group DM</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

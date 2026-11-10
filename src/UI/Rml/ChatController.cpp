@@ -27,6 +27,7 @@
 #include "UI/Chat/ChatModel.hpp"
 #include "ConfirmModal.hpp"
 #include "CreatePollController.hpp"
+#include "CreateGroupDmController.hpp"
 #include "ExpressionPickerController.hpp"
 #include "UI/ChannelList/ChannelNode.hpp"
 #include "UI/ChannelList/ChannelTreeModel.hpp"
@@ -445,6 +446,8 @@ void ChatController::setupEventListeners()
             clearEditTarget();
         } else if (action == std::string("composer-poll")) {
             shell.openCreatePoll();
+        } else if (action == std::string("create-group-dm")) {
+            shell.openCreateGroupDm(currentChannelId);
         } else if (action == std::string("composer-attach")) {
             Platform::Guard<ChatController> self(this);
             Platform::Desktop::openFiles("Select Files", {{"All Files", "*.*"}}, [self](std::vector<std::string> files) {
@@ -1864,11 +1867,14 @@ void ChatController::updateHeader()
     }
 
     const std::string threads = isDm ? std::string() : std::string("<div class=\"header-btn\" data-action=\"open-threads\" title=\"Threads\"><img src=\"icon:messages-square\"/></div>");
+    const std::string groupDmButton = isDm && CreateGroupDmController::canOpen(instance, currentChannelId)
+        ? "<button class=\"header-btn group-dm-create\" data-action=\"create-group-dm\" title=\"Create group DM\"><img src=\"icon:user-plus\"/></button>"
+        : "";
     const std::string members = std::format("<div class=\"header-btn{0}\" data-action=\"toggle-members\" title=\"{1}\"><img src=\"icon:id-card\"/></div>", shell.isMemberListVisible() ? std::string(" active") : std::string(), isDm ? std::string("Conversation profile") : std::string("Member list"));
     const std::string html = std::string("<div class=\"header-left\">") + leadingIcon
         + std::string("<span class=\"header-title\">") + escape(name) + std::string("</span>")
         + presenceDot + topicHtml + std::string("</div><div class=\"header-right\">")
-        + threads + members + std::string("<div class=\"header-btn\" data-action=\"open-search\" title=\"Search\"><img src=\"icon:search\"/></div></div>");
+        + threads + groupDmButton + members + std::string("<div class=\"header-btn\" data-action=\"open-search\" title=\"Search\"><img src=\"icon:search\"/></div></div>");
     headerEl->SetInnerRML(html);
     requestRender();
 }

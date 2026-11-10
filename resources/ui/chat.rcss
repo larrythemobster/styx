@@ -116,6 +116,20 @@
 	image-color: #ffffff;
 }
 
+.group-dm-create
+{
+    tab-index: auto;
+    padding: 0;
+    border-width: 0;
+    background-color: transparent;
+    flex-shrink: 0;
+}
+
+.group-dm-create:focus
+{
+    background-color: #19191c;
+}
+
 .header-avatar-clip
 {
     width: 24dp;

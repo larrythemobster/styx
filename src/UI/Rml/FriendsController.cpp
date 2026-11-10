@@ -1,4 +1,5 @@
 #include "FriendsController.hpp"
+#include "CreateGroupDmController.hpp"
 
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
@@ -168,6 +169,10 @@ void FriendsController::setupEventListeners()
             }
             if (action == std::string_view("send-friend-request")) {
                 sendFriendRequest();
+                return;
+            }
+            if (action == std::string_view("create-group-dm")) {
+                this->shell.openCreateGroupDm();
                 return;
             }
         }
@@ -440,6 +445,9 @@ void FriendsController::renderHeader(std::string &rml, int onlineCount, int allC
         pendingClass, pendingCountStr,
         blockedClass,
         addClass);
+
+    if (CreateGroupDmController::canOpen(inst))
+        rml += "<button class=\"header-btn group-dm-create\" data-action=\"create-group-dm\" title=\"New group DM\" style=\"margin-left: auto;\"><img src=\"icon:user-plus\"/></button>";
 }
 
 FriendsController::FriendItem FriendsController::buildFriendItem(Core::ClientInstance *inst, Snowflake userId, const Discord::Relationship &rel)

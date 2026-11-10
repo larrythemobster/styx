@@ -108,7 +108,9 @@ The client API supports group DM creation, recipient changes, name/icon edits an
 leaving through the [channel API](https://docs.discord.food/resources/channel).
 Metadata and recipient changes update the originating account's cache and disk.
 Deleted groups clear their read state and cannot reopen from an older REST response.
-Group DM creation and management controls are not exposed in the UI yet.
+Create groups from Friends or a DM header with searchable friend selection.
+The dialog shows pending requests and retryable errors without changing the source DM
+or its composer draft. Group management controls are not exposed in the UI yet.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.
