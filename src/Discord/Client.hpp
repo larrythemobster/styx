@@ -42,6 +42,7 @@ namespace Styx {
 namespace Discord {
 
 struct PollCreateRequest;
+struct GroupDmEdit;
 
 class Client : public Platform::Trackable
 {
@@ -220,6 +221,13 @@ public:
     template <typename T>
     using ResultCallback = std::function<void(const Core::Result<T> &)>;
     using ActionCallback = ResultCallback<void>;
+
+    void createGroupDm(const std::vector<Snowflake> &recipients, ResultCallback<Channel> callback = {});
+    // Adding to a DM returns a new group; adding to a group returns no channel.
+    void addDmRecipient(Snowflake channelId, Snowflake userId, ResultCallback<std::optional<Channel>> callback = {});
+    void removeGroupDmRecipient(Snowflake channelId, Snowflake userId, ActionCallback callback = {});
+    void modifyGroupDm(Snowflake channelId, const GroupDmEdit &edit, ResultCallback<Channel> callback = {});
+    void leaveGroupDm(Snowflake channelId, bool silent = false, ResultCallback<Channel> callback = {});
 
     // REST admission only; interactionSucceeded/interactionFailed report the application's result.
     void createComponentInteraction(const ComponentInteractionRequest &request, ActionCallback callback = {});

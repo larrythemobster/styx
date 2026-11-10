@@ -104,6 +104,10 @@ The composer can create polls where you have Send Polls permission. Add a questi
 2 to 10 answers with optional emoji, a duration and a multiselect setting.
 Creation preserves your composer draft and shows pending state and retryable errors.
 
+The client API supports group DM creation, recipient changes, name/icon edits and
+leaving through the [channel API](https://docs.discord.food/resources/channel).
+Group DM creation and management controls are not exposed in the UI yet.
+
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.
 

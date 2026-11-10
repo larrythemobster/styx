@@ -259,6 +259,8 @@ set(PROJECT_SOURCES
     src/Discord/ClientPolls.cpp
     src/Discord/PollProtocol.cpp
     src/Discord/PollCreate.cpp
+    src/Discord/ClientGroupDms.cpp
+    src/Discord/GroupDm.cpp
     src/Discord/ComponentInteraction.cpp
     src/Discord/CommandInteraction.cpp
     src/Discord/ApplicationCommands.cpp
@@ -495,6 +497,8 @@ if(BUILD_TESTS)
     styx_test(TestPollCreate PollCreateTests tests/tst_PollCreate.cpp
         src/Discord/PollCreate.cpp src/Core/Snowflake.cpp)
     target_link_libraries(TestPollCreate PRIVATE utf8proc)
+    styx_test(TestGroupDm GroupDmTests tests/tst_GroupDm.cpp
+        src/Discord/GroupDm.cpp src/Discord/ApiError.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
     styx_test(TestPollVotes PollVoteTests tests/tst_PollVotes.cpp
         src/Core/PollVotes.cpp src/Core/Snowflake.cpp)
     styx_test(TestCommandInteraction CommandInteractionTests tests/tst_CommandInteraction.cpp
