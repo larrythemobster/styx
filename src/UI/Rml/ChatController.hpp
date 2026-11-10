@@ -87,7 +87,12 @@ private:
     void refreshBlockedRun(int row);
     void refreshMessage(Core::Snowflake messageId);
     [[nodiscard]] const Discord::Message *pollMessage(Core::Snowflake messageId) const;
+    enum class PollRequest { Vote, Remove, End };
     void handlePollAction(const std::string &action, Core::Snowflake messageId, int answerId);
+    void confirmEndPoll(Core::Snowflake messageId);
+    void submitPollRequest(Core::Snowflake messageId, PollRequest action);
+    void finishPollRequest(Core::Snowflake accountId, Core::Snowflake channelId, Core::Snowflake messageId,
+                           std::uint64_t request, bool success, const std::string &error);
     void settlePollVote(const Discord::Message &message);
     // Sends a button click (no values) or a select choice.
     void useComponent(Core::Snowflake messageId, const std::string &path, std::vector<std::string> values = {});
@@ -166,6 +171,7 @@ private:
     struct PollVoteState {
         std::vector<int> selected;
         bool pending = false;
+        bool ending = false;
         bool accepted = false;
         std::string error;
         std::uint64_t request = 0;

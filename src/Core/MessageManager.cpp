@@ -413,6 +413,16 @@ void MessageManager::onMessageCreated(const Discord::Message &message)
 
 void MessageManager::onMessageUpdated(const Discord::Message &message)
 {
+    applyMessageUpdate(message, false);
+}
+
+void MessageManager::onPollEnded(const Discord::Message &message)
+{
+    applyMessageUpdate(message, true);
+}
+
+void MessageManager::applyMessageUpdate(const Discord::Message &message, bool updatesOnly)
+{
     if (ephemeralMessages.isDismissed(message.id))
         return;
 
@@ -457,13 +467,12 @@ void MessageManager::onMessageUpdated(const Discord::Message &message)
 
     parseMessageContent(merged);
 
-    messageCache.insert(merged.id, merged);
     repo.updateMessageContent(merged);
 
     if (message.presentKeys.contains("reactions"))
         repo.updateReactionsJson(merged.id, merged.reactionsJson);
 
-    messagesReceived.publish(MessageRequestResult{ true, Discord::Client::MessageLoadType::Created, merged.channelId, { merged } });
+    publishMessageUpdate(merged, updatesOnly);
 }
 
 void MessageManager::onMessageDeleted(const Discord::MessageDelete &event)

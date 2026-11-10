@@ -17,6 +17,7 @@
 #include <vector>
 
 using namespace Styx::UI::Rml;
+namespace Core = Styx::Core;
 namespace Discord = Styx::Discord;
 namespace Platform = Styx::Platform;
 
@@ -537,8 +538,10 @@ TEST_CASE("Pending poll disables all interactive controls and emits submission s
     auto ctx = makeContext(base);
     ctx.interactive = true;
     ctx.pending = true;
+    ctx.canEnd = true;
 
-    auto *doc = fixture.loadRml(renderPoll(Discord::Poll::fromJson(pollJson), ctx));
+    auto *doc = fixture.loadRml(renderPoll(Discord::Poll::fromJson(pollJson), ctx)
+        + "<button id=\"after-poll\" style=\"tab-index: auto;\">After poll</button>");
 
     ::Rml::ElementList answerButtons;
     doc->QuerySelectorAll(answerButtons, "button.poll-answer");
@@ -552,18 +555,16 @@ TEST_CASE("Pending poll disables all interactive controls and emits submission s
     auto *removeBtn = requireElement(doc, "button.poll-vote-remove");
     CHECK(removeBtn->HasAttribute("disabled"));
 
-    auto *statusEl = requireElement(doc, ".poll-vote-status");
-    CHECK(statusEl->GetInnerRML() == "Submitting vote...");
+    auto *endBtn = requireElement(doc, "button.poll-end");
+    CHECK(endBtn->HasAttribute("disabled"));
+    CHECK(requireElement(doc, ".poll-vote-status")->IsVisible());
 
     // Generic button attributes need matching styles; pending controls must leave tab order.
-    doc->Focus();
+    auto *after = doc->GetElementById("after-poll");
+    after->Focus();
     doc->GetContext()->ProcessKeyDown(::Rml::Input::KI_TAB, 0);
     doc->GetContext()->ProcessKeyUp(::Rml::Input::KI_TAB, 0);
-    const auto *focused = doc->GetContext()->GetFocusElement();
-    CHECK(focused != answerButtons[0]);
-    CHECK(focused != answerButtons[1]);
-    CHECK(focused != voteBtn);
-    CHECK(focused != removeBtn);
+    CHECK(doc->GetContext()->GetFocusElement() == after);
 }
 
 TEST_CASE("Non-interactive or closed polls omit data-action controls, error markup is escaped", "[polls][rml]")
@@ -634,4 +635,146 @@ TEST_CASE("Unknown results keeps counts hidden and exposes Remove vote button", 
     auto *removeBtn = requireElement(doc, "button.poll-vote-remove");
     CHECK(removeBtn->GetAttribute<::Rml::String>("data-action", "") == "poll-remove-vote");
     CHECK_FALSE(removeBtn->HasAttribute("disabled"));
+}
+
+TEST_CASE("Poll termination predicate: pollCanEnd", "[polls][logic]")
+{
+    const auto base = Platform::DateTime::fromUnixMillis(1'700'000'000'000LL);
+    const auto expiry = base.addSeconds(3600);
+
+    const nlohmann::json pollJson = {
+        { "question", makeQuestion("Close early?") },
+        { "answers", { makeAnswer(1, "Yes"), makeAnswer(2, "No") } },
+        { "expiry", expiry.iso8601() },
+        { "allow_multiselect", false },
+        { "results", { { "is_finalized", false } } }
+    };
+
+    const Core::Snowflake selfId(12345);
+    const Core::Snowflake otherId(67890);
+
+    Discord::Message msg;
+    msg.id = Core::Snowflake(1001);
+    Discord::User author;
+    author.id = selfId;
+    author.username = "owner";
+    msg.author = author;
+    msg.poll = Discord::Poll::fromJson(pollJson);
+
+    SECTION("Own open poll can be ended") {
+        CHECK(pollCanEnd(msg, selfId, base));
+        CHECK(pollCanVote(msg, selfId, base));
+    }
+
+    SECTION("Unknown identity cannot vote or end a poll") {
+        msg.author->id = Core::Snowflake::Invalid;
+        CHECK_FALSE(pollCanEnd(msg, Core::Snowflake::Invalid, base));
+        CHECK_FALSE(pollCanVote(msg, Core::Snowflake::Invalid, base));
+    }
+
+    SECTION("Unknown author cannot end a poll") {
+        msg.author = Discord::User{};
+        CHECK_FALSE(pollCanEnd(msg, selfId, base));
+    }
+
+    SECTION("Other author is rejected") {
+        auto otherAuthor = msg;
+        otherAuthor.author->id = otherId;
+        CHECK_FALSE(pollCanEnd(otherAuthor, selfId, base));
+        CHECK(pollCanVote(otherAuthor, selfId, base));
+    }
+
+    SECTION("Forwarded message is rejected") {
+        auto forwarded = msg;
+        Discord::MessageReference ref;
+        ref.type = Discord::MessageReferenceType::FORWARD;
+        forwarded.messageReference = ref;
+        CHECK_FALSE(pollCanEnd(forwarded, selfId, base));
+    }
+
+    SECTION("Missing poll is rejected") {
+        auto noPoll = msg;
+        noPoll.poll.undefine();
+        CHECK_FALSE(pollCanEnd(noPoll, selfId, base));
+    }
+
+    SECTION("Elapsed expiry or finalized poll is rejected") {
+        CHECK_FALSE(pollCanEnd(msg, selfId, expiry));
+
+        auto finalized = msg;
+        finalized.poll->results->isFinalized = true;
+        CHECK_FALSE(pollCanEnd(finalized, selfId, base));
+    }
+}
+
+TEST_CASE("End poll control requires an eligible interactive poll", "[polls][rml]")
+{
+    TestViewFixture fixture;
+    const auto base = Platform::DateTime::fromUnixMillis(1'700'000'000'000LL);
+    const auto expiry = base.addSeconds(3600);
+
+    const nlohmann::json pollJson = {
+        { "question", makeQuestion("Should we wrap up?") },
+        { "answers", { makeAnswer(1, "Yes"), makeAnswer(2, "No") } },
+        { "expiry", expiry.iso8601() },
+        { "allow_multiselect", false },
+        { "results", {
+            { "is_finalized", false },
+            { "answer_counts", { makeCount(1, 1, true), makeCount(2, 0, false) } }
+        } }
+    };
+    const auto poll = Discord::Poll::fromJson(pollJson);
+
+    SECTION("End poll button absent in read-only context even if canEnd is set") {
+        auto ctx = makeContext(base);
+        ctx.interactive = false;
+        ctx.canEnd = true;
+
+        auto *doc = fixture.loadRml(renderPoll(poll, ctx));
+        CHECK(doc->QuerySelector("button.poll-end") == nullptr);
+    }
+
+    SECTION("End poll button absent when poll is closed even if canEnd is set") {
+        auto ctx = makeContext(expiry.addSeconds(10));
+        ctx.interactive = true;
+        ctx.canEnd = true;
+
+        auto *doc = fixture.loadRml(renderPoll(poll, ctx));
+        CHECK(doc->QuerySelector("button.poll-end") == nullptr);
+    }
+
+    SECTION("End poll button absent when canEnd is false") {
+        auto ctx = makeContext(base);
+        ctx.interactive = true;
+        ctx.canEnd = false;
+
+        auto *doc = fixture.loadRml(renderPoll(poll, ctx));
+        CHECK(doc->QuerySelector("button.poll-end") == nullptr);
+    }
+
+    SECTION("Enabled End poll button is visible, in-bounds, and keyboard focusable") {
+        auto ctx = makeContext(base);
+        ctx.interactive = true;
+        ctx.canEnd = true;
+
+        auto *doc = fixture.loadRml(renderPoll(poll, ctx));
+        auto *endBtn = requireElement(doc, "button.poll-end");
+        CHECK_FALSE(endBtn->HasAttribute("disabled"));
+        CHECK(endBtn->IsVisible());
+
+        auto *pollEl = requireElement(doc, ".poll");
+        const auto endOffset = endBtn->GetAbsoluteOffset(::Rml::BoxArea::Border);
+        const auto pollOffset = pollEl->GetAbsoluteOffset(::Rml::BoxArea::Border);
+        CHECK(endBtn->GetOffsetWidth() > 0);
+        CHECK(endBtn->GetOffsetHeight() > 0);
+        CHECK(endOffset.x >= pollOffset.x);
+        CHECK(endOffset.y >= pollOffset.y);
+        CHECK(endOffset.x + endBtn->GetOffsetWidth() <= pollOffset.x + pollEl->GetOffsetWidth() + 1.0f);
+        CHECK(endOffset.y + endBtn->GetOffsetHeight() <= pollOffset.y + pollEl->GetOffsetHeight() + 1.0f);
+
+
+        endBtn->Focus();
+        CHECK(doc->GetContext()->GetFocusElement() == endBtn);
+    }
+
 }

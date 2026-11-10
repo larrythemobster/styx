@@ -98,8 +98,9 @@ Open polls let you choose one or several answers, submit a vote, or remove your 
 Requests show a pending state and inline errors. Gateway events update known counts
 and your vote marks in memory and on disk; missing results stay unknown rather than
 becoming zero votes. Closed polls and forwarded snapshots stay read-only.
-The client API also supports ending an author's poll with `endPoll`, but the End poll
-action and poll creation are not available in the interface yet.
+You can end your own open polls after confirmation, with pending and inline error
+feedback. The response updates memory and disk without appending off-screen messages.
+Poll creation is not available in the interface yet.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.

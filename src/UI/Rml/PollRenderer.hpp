@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Snowflake.hpp"
 #include "Platform/Native.hpp"
 
 #include <cstdint>
@@ -8,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace Styx::Discord { struct Poll; struct Embed; }
+namespace Styx::Discord { struct Poll; struct Embed; struct Message; }
 
 namespace Styx::UI::Rml {
 
@@ -20,6 +21,8 @@ struct PollRenderContext {
     // Forwarded snapshots and previews leave this false.
     bool interactive = false;
     bool pending = false;
+    bool canEnd = false;
+    bool ending = false;
     // Null uses the confirmed votes; otherwise show this unsent selection.
     const std::vector<int> *selectedAnswers = nullptr;
     std::string_view error;
@@ -30,6 +33,8 @@ struct PollRenderContext {
 [[nodiscard]] std::string pollTimeLeft(const Platform::DateTime &expiry, const Platform::DateTime &now);
 
 [[nodiscard]] bool pollIsClosed(const Discord::Poll &poll, const Platform::DateTime &now);
+[[nodiscard]] bool pollCanVote(const Discord::Message &message, Core::Snowflake selfId, const Platform::DateTime &now);
+[[nodiscard]] bool pollCanEnd(const Discord::Message &message, Core::Snowflake selfId, const Platform::DateTime &now);
 // Confirmed votes in declared answer order, ignoring unknown answer IDs.
 [[nodiscard]] std::vector<int> pollOwnVotes(const Discord::Poll &poll);
 // Toggle one declared answer. Single-answer polls replace the previous selection.
@@ -53,8 +58,10 @@ bool togglePollChoice(std::vector<int> &selected, const Discord::Poll &poll, int
 // With interactive=true on an open poll, answers are native buttons carrying
 // data-action="poll-answer" and data-answer-id; selected answers get
 // poll-answer-selected. Vote (poll-vote) requires a nonempty selection. Remove vote
-// (poll-remove-vote) is offered when you have confirmed votes or results are unknown. Pending disables
-// all controls and shows "Submitting vote..."; errors are escaped in poll-vote-error.
+// (poll-remove-vote) is offered when you have confirmed votes or results are unknown.
+// Open interactive polls with canEnd set also expose an End poll button (poll-end) after Remove vote.
+// Pending disables all controls and shows "Ending poll..." when ending is set or "Submitting vote...";
+// errors are escaped in poll-vote-error.
 [[nodiscard]] std::string renderPoll(const Discord::Poll &poll, const PollRenderContext &context);
 
 // The text of a POLL_RESULT notice from its "poll_result" embed fields, as RML that follows

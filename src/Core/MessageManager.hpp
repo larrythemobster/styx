@@ -39,7 +39,7 @@ struct MessageRequestResult
     std::vector<Discord::Message> messages;
     bool reachedLatest = false;
     Snowflake anchorId = Snowflake::Invalid;
-    // Gateway changes to existing messages must not append older cached rows to chat.
+    // Updates to existing messages must not append older cached rows to chat.
     bool updatesOnly = false;
 };
 
@@ -90,6 +90,7 @@ public:
 
     void onMessageCreated(const Discord::Message &message);
     void onMessageUpdated(const Discord::Message &message);
+    void onPollEnded(const Discord::Message &message);
     void onMessageDeleted(const Discord::MessageDelete &event);
     void onMessageSendFailed(const std::string &nonce, const std::string &error);
     void onReactionAdd(const Discord::MessageReactionAdd &event);
@@ -113,6 +114,7 @@ private:
                                                                      int from, int to);
     void emitReactionUpdate(Discord::Message &msg);
     void publishMessageUpdate(const Discord::Message &message, bool updatesOnly);
+    void applyMessageUpdate(const Discord::Message &message, bool updatesOnly);
 
     struct ReactionChange
     {

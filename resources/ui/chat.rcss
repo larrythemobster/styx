@@ -2088,17 +2088,20 @@ button.poll-answer.poll-answer-mine:focus
 	background-color: #5865f2;
 }
 
-.poll-vote-remove
+.poll-vote-remove,
+.poll-end
 {
 	background-color: #4e5058;
 }
 
-.poll-vote-remove:hover
+.poll-vote-remove:hover,
+.poll-end:hover
 {
 	background-color: #6d6f78;
 }
 
-.poll-vote-remove[disabled]:hover
+.poll-vote-remove[disabled]:hover,
+.poll-end[disabled]:hover
 {
 	background-color: #4e5058;
 }

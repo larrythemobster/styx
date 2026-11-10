@@ -379,7 +379,7 @@ void ChatController::setupEventListeners()
             onDataChanged(row, row);
             requestRender();
         } else if (action == std::string("poll-answer") || action == std::string("poll-vote")
-                   || action == std::string("poll-remove-vote")) {
+                   || action == std::string("poll-remove-vote") || action == std::string("poll-end")) {
             if (actionEl->HasAttribute("disabled"))
                 return;
             if (::Rml::Element *msgEl = closest(actionEl, "data-message-id"))
@@ -848,7 +848,7 @@ void ChatController::onDataChanged(int first, int last)
             focusSelector = attribute(element, "data-poll-focus");
         } else if (auto *action = closest(focused, "data-action")) {
             const std::string name = attribute(action, "data-action");
-            if (name == "poll-answer" || name == "poll-vote" || name == "poll-remove-vote") {
+            if (name == "poll-answer" || name == "poll-vote" || name == "poll-remove-vote" || name == "poll-end") {
                 focusSelector = "[data-action=\"" + name + "\"]";
                 if (name == "poll-answer")
                     focusSelector += "[data-answer-id=\"" + attribute(action, "data-answer-id") + "\"]";
@@ -991,13 +991,151 @@ void ChatController::settlePollVote(const Discord::Message &message)
     refreshMessage(message.id);
 }
 
-void ChatController::handlePollAction(const std::string &action, Core::Snowflake messageId, int answerId)
+void ChatController::confirmEndPoll(Core::Snowflake messageId)
 {
     const Discord::Message *message = pollMessage(messageId);
     Core::ClientInstance *instance = shell.currentInstance();
-    if (!message || message->isForwarded() || !message->poll.hasValue() || !instance || !instance->discord()
-        || !instance->discord()->getMe().id.get().isValid()
-        || pollIsClosed(message->poll.get(), Platform::DateTime::now()))
+    if (!message || !instance || !instance->discord())
+        return;
+    const auto selfId = instance->discord()->getMe().id.get();
+    if (!pollCanEnd(*message, selfId, Platform::DateTime::now()))
+        return;
+    const auto it = pollVotes.find(messageId);
+    if (it != pollVotes.end() && it->second.pending)
+        return;
+
+    const auto &question = message->poll->question;
+    const std::string body = question.hasValue() && question->text.hasValue() && !question->text->empty()
+        ? std::format("Are you sure you want to end the poll <b>{}</b>? Nobody will be able to vote anymore.",
+                      escape(question->text.get()))
+        : std::string("Are you sure you want to end this poll? Nobody will be able to vote anymore.");
+
+    const auto accountId = currentAccountId;
+    const auto channelId = currentChannelId;
+    Platform::Guard<ChatController> self(this);
+    Platform::Guard<Core::ClientInstance> instanceGuard(instance);
+    showConfirmModal(
+        shell,
+        std::string("End poll"),
+        body,
+        std::string("End poll"),
+        [self, instanceGuard, accountId, channelId, messageId] {
+            if (!self || !instanceGuard || self->currentAccountId != accountId
+                || self->currentChannelId != channelId
+                || self->shell.currentInstance() != instanceGuard.get())
+                return;
+            self->submitPollRequest(messageId, PollRequest::End);
+        },
+        nullptr,
+        true);
+}
+
+void ChatController::submitPollRequest(Core::Snowflake messageId, PollRequest action)
+{
+    const Discord::Message *message = pollMessage(messageId);
+    Core::ClientInstance *instance = shell.currentInstance();
+    if (!message || !instance || !instance->discord())
+        return;
+    const bool ending = action == PollRequest::End;
+    const auto selfId = instance->discord()->getMe().id.get();
+    const auto now = Platform::DateTime::now();
+    if (ending ? !pollCanEnd(*message, selfId, now) : !pollCanVote(*message, selfId, now))
+        return;
+
+    auto [it, inserted] = pollVotes.try_emplace(messageId);
+    auto &draft = it->second;
+    if (inserted)
+        draft.selected = pollOwnVotes(message->poll.get());
+    if (draft.pending)
+        return;
+    if (action == PollRequest::Remove)
+        draft.selected.clear();
+    else if (action == PollRequest::Vote && draft.selected.empty())
+        return;
+
+    draft.pending = true;
+    draft.accepted = false;
+    draft.ending = ending;
+    draft.error.clear();
+    const auto request = draft.request = ++pollVoteRequest;
+    const auto accountId = currentAccountId;
+    const auto channelId = currentChannelId;
+    refreshMessage(messageId);
+
+    Platform::Guard<ChatController> self(this);
+    if (ending) {
+        Platform::Guard<Core::ClientInstance> origin(instance);
+        instance->discord()->endPoll(
+            channelId, messageId,
+            [self, origin, accountId, channelId, messageId, request](const Core::Result<Discord::Message> &result) {
+                if (result.success() && origin)
+                    origin->messages()->onPollEnded(*result.value);
+                if (self)
+                    self->finishPollRequest(accountId, channelId, messageId, request, result.success(), result.error);
+            });
+        return;
+    }
+
+    instance->discord()->submitPollVote(
+        channelId, messageId, draft.selected,
+        [self, accountId, channelId, messageId, request](const Core::Result<void> &result) {
+            if (self)
+                self->finishPollRequest(accountId, channelId, messageId, request, result.success(), result.error);
+        });
+}
+
+void ChatController::finishPollRequest(Core::Snowflake accountId, Core::Snowflake channelId, Core::Snowflake messageId,
+                                       std::uint64_t request, bool success, const std::string &error)
+{
+    if (currentAccountId != accountId || currentChannelId != channelId)
+        return;
+    const auto it = pollVotes.find(messageId);
+    if (it == pollVotes.end() || it->second.request != request)
+        return;
+
+    auto &draft = it->second;
+    draft.pending = false;
+
+    if (draft.ending) {
+        if (success) {
+            pollVotes.erase(it);
+        } else {
+            draft.accepted = false;
+            draft.ending = false;
+            draft.error = error.empty() ? "The poll could not be ended. Try again." : error;
+        }
+        refreshMessage(messageId);
+        return;
+    }
+
+    draft.accepted = success;
+    if (!success) {
+        draft.ending = false;
+        draft.error = error.empty() ? "The vote could not be submitted. Try again." : error;
+    }
+    refreshMessage(messageId);
+    if (success) {
+        // A Gateway event can arrive before or after REST admission.
+        if (const Discord::Message *updated = pollMessage(messageId))
+            settlePollVote(*updated);
+    }
+}
+
+void ChatController::handlePollAction(const std::string &action, Core::Snowflake messageId, int answerId)
+{
+    if (action == "poll-end") {
+        confirmEndPoll(messageId);
+        return;
+    }
+    if (action == "poll-vote" || action == "poll-remove-vote") {
+        submitPollRequest(messageId, action == "poll-vote" ? PollRequest::Vote : PollRequest::Remove);
+        return;
+    }
+
+    const Discord::Message *message = pollMessage(messageId);
+    Core::ClientInstance *instance = shell.currentInstance();
+    if (!message || !instance || !instance->discord()
+        || !pollCanVote(*message, instance->discord()->getMe().id.get(), Platform::DateTime::now()))
         return;
 
     auto [it, inserted] = pollVotes.try_emplace(messageId);
@@ -1007,45 +1145,11 @@ void ChatController::handlePollAction(const std::string &action, Core::Snowflake
     if (state.pending)
         return;
 
-    if (action == "poll-answer") {
-        if (togglePollChoice(state.selected, message->poll.get(), answerId)) {
-            state.error.clear();
-            state.accepted = false;
-            refreshMessage(messageId);
-        }
-        return;
+    if (togglePollChoice(state.selected, message->poll.get(), answerId)) {
+        state.error.clear();
+        state.accepted = false;
+        refreshMessage(messageId);
     }
-    if (action == "poll-remove-vote")
-        state.selected.clear();
-    else if (action != "poll-vote" || state.selected.empty())
-        return;
-
-    state.pending = true;
-    state.accepted = false;
-    state.error.clear();
-    const auto request = state.request = ++pollVoteRequest;
-    const auto accountId = currentAccountId;
-    const auto channelId = currentChannelId;
-    refreshMessage(messageId);
-
-    Platform::Guard<ChatController> self(this);
-    instance->discord()->submitPollVote(channelId, messageId, state.selected,
-        [self, accountId, channelId, messageId, request](const Core::Result<void> &result) {
-            if (!self || self->currentAccountId != accountId || self->currentChannelId != channelId)
-                return;
-            const auto current = self->pollVotes.find(messageId);
-            if (current == self->pollVotes.end() || current->second.request != request)
-                return;
-            auto &draft = current->second;
-            draft.pending = false;
-            draft.accepted = result.success();
-            if (!result.success())
-                draft.error = result.error.empty() ? "The vote could not be submitted. Try again." : result.error;
-            self->refreshMessage(messageId);
-            // A Gateway event can arrive before or after REST admission.
-            if (const Discord::Message *updated = self->pollMessage(messageId))
-                self->settlePollVote(*updated);
-        });
 }
 
 void ChatController::useComponent(Core::Snowflake messageId, const std::string &path, std::vector<std::string> values)
@@ -1587,11 +1691,14 @@ std::string ChatController::buildMessageHtml(int row)
     if (rawMsg && rawMsg->contentMessage().poll.hasValue()) {
         auto context = pollContext();
         Core::ClientInstance *instance = shell.currentInstance();
-        context.interactive = !rawMsg->isForwarded() && instance && instance->discord()
-            && instance->discord()->getMe().id.get().isValid();
+        const bool hasClient = instance && instance->discord() && instance->discord()->getMe().id.get().isValid();
+        context.interactive = !rawMsg->isForwarded() && hasClient;
+        if (hasClient)
+            context.canEnd = pollCanEnd(*rawMsg, instance->discord()->getMe().id.get(), context.now);
         if (auto it = pollVotes.find(msgId); it != pollVotes.end()) {
             context.selectedAnswers = &it->second.selected;
             context.pending = it->second.pending;
+            context.ending = it->second.ending;
             context.error = it->second.error;
         }
         out += renderPoll(rawMsg->contentMessage().poll.get(), context);

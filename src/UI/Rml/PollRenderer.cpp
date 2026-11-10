@@ -84,6 +84,17 @@ bool pollIsClosed(const Discord::Poll &poll, const Platform::DateTime &now)
     return finalized || expired;
 }
 
+bool pollCanVote(const Discord::Message &message, Core::Snowflake selfId, const Platform::DateTime &now)
+{
+    return selfId.isValid() && !message.isForwarded() && message.poll.hasValue()
+        && !pollIsClosed(message.poll.get(), now);
+}
+
+bool pollCanEnd(const Discord::Message &message, Core::Snowflake selfId, const Platform::DateTime &now)
+{
+    return message.author->id.get() == selfId && pollCanVote(message, selfId, now);
+}
+
 std::vector<int> pollOwnVotes(const Discord::Poll &poll)
 {
     if (!poll.answers.hasValue() || !poll.results.hasValue() || !poll.results->answerCounts.hasValue())
@@ -221,11 +232,18 @@ std::string renderPoll(const Discord::Poll &poll, const PollRenderContext &conte
                                canRemove ? "" : " disabled");
         }
 
+        if (context.canEnd)
+            rml += std::format("<button class=\"poll-end\" data-action=\"poll-end\"{}>End poll</button>",
+                               context.pending ? " disabled" : "");
+
         rml += "</div>";
     }
 
-    if (context.pending)
-        rml += "<div class=\"poll-vote-status\">Submitting vote...</div>";
+    if (context.pending) {
+        rml += "<div class=\"poll-vote-status\">";
+        rml += context.ending ? "Ending poll..." : "Submitting vote...";
+        rml += "</div>";
+    }
     if (!context.error.empty())
         rml += std::format("<div class=\"poll-vote-error\">{}</div>", Platform::htmlEscape(context.error));
 
