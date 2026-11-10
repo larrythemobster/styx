@@ -90,6 +90,12 @@ with the current Gateway session and a caller-supplied nonce. REST success means
 admission, not completion. `interactionCreated`, `interactionSucceeded` and
 `interactionFailed` carry Gateway correlation and outcomes.
 
+Chat displays poll questions, answer emoji, vote counts and percentages, your votes,
+and closed-poll winners. Polls and known results survive cache reloads and partial
+message updates. Finalized results mark a poll closed even when the local clock
+lags behind Discord. Countdown labels refresh when the message redraws.
+Voting and poll creation are not available yet.
+
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.
 

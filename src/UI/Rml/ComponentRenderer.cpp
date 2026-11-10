@@ -234,12 +234,13 @@ std::string renderSpoilerButton(const std::string &path)
         "Spoiler — click to reveal</button>",
         Platform::htmlEscape(path));
 }
+} // namespace
 
-std::string renderButtonEmoji(const Discord::Emoji &emoji, const ComponentRenderContext &context)
+std::string renderInlineEmoji(const Discord::Emoji &emoji, const std::function<std::string(const std::string &, Platform::Size)> &imageSource)
 {
     if (emoji.id.hasValue() && emoji.id.get().isValid()) {
         const std::string url = Discord::Cdn::emoji(emoji.id.get(), 20, emoji.animated.valueOr(false));
-        const std::string src = context.imageSource(url, {16, 16});
+        const std::string src = imageSource(url, {16, 16});
         const std::string &name = stringOrEmpty(emoji.name);
         return std::format("<img class=\"emoji\" src=\"{0}\" alt=\":{1}:\" />",
                            Platform::htmlEscape(src),
@@ -250,11 +251,13 @@ std::string renderButtonEmoji(const Discord::Emoji &emoji, const ComponentRender
     return {};
 }
 
+namespace {
+
 std::string buildButtonContent(const Discord::MessageComponent &comp, const ComponentRenderContext &context)
 {
     std::string content;
     if (comp.emoji.hasValue())
-        content += renderButtonEmoji(comp.emoji.get(), context);
+        content += renderInlineEmoji(comp.emoji.get(), context.imageSource);
 
     if (comp.label.hasValue() && !comp.label.get().empty()) {
         if (!content.empty())
@@ -328,7 +331,7 @@ std::string renderOptionDisplay(const Discord::ComponentSelectOption &option, co
 {
     std::string display;
     if (option.emoji.hasValue())
-        display = renderButtonEmoji(option.emoji.get(), context) + " ";
+        display = renderInlineEmoji(option.emoji.get(), context.imageSource) + " ";
     return display + richText(option.label.get());
 }
 

@@ -243,6 +243,7 @@ void DatabaseManager::setupCacheTables(Platform::Database &db)
             "reactions" TEXT,
             "stickers" TEXT,
             "components" TEXT,
+            "poll" TEXT,
             "deleted" INTEGER NOT NULL,
             "referenced_message_id" INTEGER,
             "reference_type" INTEGER,
@@ -256,6 +257,9 @@ void DatabaseManager::setupCacheTables(Platform::Database &db)
 
     if (!columnExists(db, "messages", "components"))
         db.execute("ALTER TABLE messages ADD COLUMN components TEXT");
+
+    if (!columnExists(db, "messages", "poll"))
+        db.execute("ALTER TABLE messages ADD COLUMN poll TEXT");
 
     db.execute(R"(
         CREATE TABLE IF NOT EXISTS "users" (

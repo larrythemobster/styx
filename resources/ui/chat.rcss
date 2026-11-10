@@ -1893,3 +1893,86 @@ select.command-option-select selectbox option:hover
 {
 	background-color: #2b2d31;
 }
+
+/* ==========================================================================
+   Polls
+   ========================================================================== */
+
+.poll
+{
+	display: block;
+	max-width: 440dp;
+	background: #2b2d31;
+	border-radius: 8dp;
+	padding: 12dp 16dp;
+	margin-top: 4dp;
+}
+
+.poll-question
+{
+	font-weight: bold;
+	font-size: 16dp;
+	color: #f2f3f5;
+}
+
+.poll-hint,
+.poll-footer
+{
+	font-size: 12dp;
+	color: #949ba4;
+}
+
+.poll-answer
+{
+	display: block;
+	position: relative;
+	margin: 6dp 0;
+	padding: 8dp 12dp;
+	border: 1dp #3f4147;
+	border-radius: 6dp;
+	color: #dbdee1;
+}
+
+.poll-answer-mine
+{
+	border-color: #5865f2;
+}
+
+.poll-answer-winner .poll-answer-text
+{
+	font-weight: bold;
+}
+
+.poll-bar
+{
+	height: 6dp;
+	background: #1e1f22;
+	border-radius: 3dp;
+	margin-top: 6dp;
+}
+
+.poll-bar-fill
+{
+	height: 100%;
+	background: #5865f2;
+	border-radius: 3dp;
+}
+
+.poll-answer-votes
+{
+	float: right;
+	font-size: 12dp;
+	color: #b5bac1;
+}
+
+.poll .emoji, .poll-result-winner .emoji
+{
+	width: 16dp;
+	height: 16dp;
+	vertical-align: middle;
+}
+
+.poll-result-winner
+{
+	font-weight: bold;
+}

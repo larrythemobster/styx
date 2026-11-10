@@ -11,12 +11,12 @@
 namespace Styx {
 namespace Storage {
 
-static void bindComponents(Platform::Statement &stmt, const std::string &componentsJson)
+static void bindJsonText(Platform::Statement &stmt, std::string_view name, const std::string &json)
 {
-    if (!componentsJson.empty())
-        stmt.bind(":components", std::string_view(componentsJson));
+    if (!json.empty())
+        stmt.bind(name, std::string_view(json));
     else
-        stmt.bindNull(":components");
+        stmt.bindNull(name);
 }
 
 static bool isPrivateSnapshot(const Discord::Message &message)
@@ -70,9 +70,9 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
     try {
         auto qMsg = db.prepare(R"(
             INSERT OR REPLACE INTO messages
-            (id, channel_id, author_id, content, timestamp, edited_timestamp, type, flags, embeds, reactions, stickers, components, deleted,
+            (id, channel_id, author_id, content, timestamp, edited_timestamp, type, flags, embeds, reactions, stickers, components, poll, deleted,
              referenced_message_id, reference_type, reference_channel_id, reference_guild_id, snapshot, context_only)
-            VALUES (:id, :channel_id, :author_id, :content, :timestamp, :edited_timestamp, :type, :flags, :embeds, :reactions, :stickers, :components, 0,
+            VALUES (:id, :channel_id, :author_id, :content, :timestamp, :edited_timestamp, :type, :flags, :embeds, :reactions, :stickers, :components, :poll, 0,
                     :ref_msg_id, :ref_type, :ref_channel_id, :ref_guild_id, :snapshot, 0)
         )");
 
@@ -130,7 +130,8 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
                 qMsg.bindNull(":stickers");
             }
 
-            bindComponents(qMsg, message.componentsJson);
+            bindJsonText(qMsg, ":components", message.componentsJson);
+            bindJsonText(qMsg, ":poll", message.pollJson);
 
             if (message.referencedMessage) {
                 qMsg.bind(":ref_msg_id", static_cast<int64_t>(message.referencedMessage->id.get()));
@@ -198,9 +199,9 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
         if (!referencedMessages.empty()) {
             auto qRef = db.prepare(R"(
                 INSERT OR IGNORE INTO messages
-                (id, channel_id, author_id, content, timestamp, edited_timestamp, type, flags, embeds, stickers, components, deleted,
+                (id, channel_id, author_id, content, timestamp, edited_timestamp, type, flags, embeds, stickers, components, poll, deleted,
                  reference_type, snapshot, context_only)
-                VALUES (:id, :channel_id, :author_id, :content, :timestamp, :edited_timestamp, :type, :flags, :embeds, :stickers, :components, 0,
+                VALUES (:id, :channel_id, :author_id, :content, :timestamp, :edited_timestamp, :type, :flags, :embeds, :stickers, :components, :poll, 0,
                         :ref_type, :snapshot, 1)
             )");
 
@@ -242,7 +243,8 @@ void MessageRepository::saveMessages(const std::vector<Discord::Message> &messag
                     qRef.bindNull(":stickers");
                 }
 
-                bindComponents(qRef, ref.componentsJson);
+                bindJsonText(qRef, ":components", ref.componentsJson);
+                bindJsonText(qRef, ":poll", ref.pollJson);
 
                 if (ref.messageReference.hasValue() && ref.messageReference->type.hasValue())
                     qRef.bind(":ref_type", static_cast<int>(ref.messageReference->type.get()));
@@ -292,7 +294,7 @@ void MessageRepository::updateMessageContent(const Discord::Message &message)
     try {
         auto q = db.prepare(R"(
             UPDATE messages
-            SET content = :content, edited_timestamp = :edited_timestamp, embeds = :embeds, flags = :flags, snapshot = :snapshot, components = :components
+            SET content = :content, edited_timestamp = :edited_timestamp, embeds = :embeds, flags = :flags, snapshot = :snapshot, components = :components, poll = :poll
             WHERE id = :id
         )");
 
@@ -317,7 +319,8 @@ void MessageRepository::updateMessageContent(const Discord::Message &message)
 
         bindSnapshot(q, message);
 
-        bindComponents(q, message.componentsJson);
+        bindJsonText(q, ":components", message.componentsJson);
+        bindJsonText(q, ":poll", message.pollJson);
 
         q.bind(":id", static_cast<int64_t>(message.id.get()));
 
@@ -375,7 +378,8 @@ std::optional<Discord::Message> MessageRepository::getMessage(Core::Snowflake me
                    ru.id, ru.username, ru.global_name, ru.avatar, ru.bot,
                    m.reference_type, m.reference_channel_id, m.reference_guild_id, m.snapshot, rm.reference_type, rm.snapshot,
                    m.stickers, rm.stickers,
-                   m.components, rm.components
+                   m.components, rm.components,
+                   m.poll, rm.poll
             FROM messages m
             INNER JOIN users u ON m.author_id = u.id
             LEFT JOIN messages rm ON m.referenced_message_id = rm.id
@@ -410,7 +414,8 @@ std::vector<Discord::Message> MessageRepository::getMessagesInRange(Core::Snowfl
                    ru.id, ru.username, ru.global_name, ru.avatar, ru.bot,
                    m.reference_type, m.reference_channel_id, m.reference_guild_id, m.snapshot, rm.reference_type, rm.snapshot,
                    m.stickers, rm.stickers,
-                   m.components, rm.components
+                   m.components, rm.components,
+                   m.poll, rm.poll
             FROM messages m
             INNER JOIN users u ON m.author_id = u.id
             LEFT JOIN messages rm ON m.referenced_message_id = rm.id
@@ -480,6 +485,16 @@ static void readComponents(Discord::Message &message, std::string componentsJson
     message.components = parseEntityArray<Discord::MessageComponent>(message.componentsJson);
 }
 
+static void readPoll(Discord::Message &message, std::string pollJson)
+{
+    if (pollJson.empty())
+        return;
+    message.pollJson = std::move(pollJson);
+    auto doc = nlohmann::json::parse(message.pollJson, nullptr, false);
+    if (doc.is_object())
+        message.poll = Discord::Poll::fromJson(doc);
+}
+
 Discord::Message MessageRepository::readMessageFromQuery(const Platform::Statement &q)
 {
     // Columns 0-8: m.id, m.channel_id, m.author_id, m.content, m.timestamp, m.edited_timestamp, m.type, m.flags, m.embeds
@@ -491,6 +506,7 @@ Discord::Message MessageRepository::readMessageFromQuery(const Platform::Stateme
     // Columns 30-35: m.reference_type, m.reference_channel_id, m.reference_guild_id, m.snapshot, rm.reference_type, rm.snapshot
     // Columns 36-37: m.stickers, rm.stickers
     // Columns 38-39: m.components, rm.components
+    // Columns 40-41: m.poll, rm.poll
 
     Discord::Message message;
     message.id = static_cast<Core::Snowflake>(q.getInt64(0));
@@ -510,6 +526,8 @@ Discord::Message MessageRepository::readMessageFromQuery(const Platform::Stateme
         readStickers(message, q.getText(36));
     if (!q.isNull(38))
         readComponents(message, q.getText(38));
+    if (!q.isNull(40))
+        readPoll(message, q.getText(40));
 
     message.author->id = static_cast<Core::Snowflake>(q.getInt64(10));
     message.author->username = q.getText(11);
@@ -559,6 +577,8 @@ Discord::Message MessageRepository::readMessageFromQuery(const Platform::Stateme
                 readStickers(*refMsg, q.getText(37));
             if (!q.isNull(39))
                 readComponents(*refMsg, q.getText(39));
+            if (!q.isNull(41))
+                readPoll(*refMsg, q.getText(41));
 
             if (!q.isNull(25)) {
                 refMsg->author->id = static_cast<Core::Snowflake>(q.getInt64(25));

@@ -11,7 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Styx::Discord { struct Message; struct MessageComponent; }
+namespace Styx::Discord { struct Message; struct MessageComponent; struct Emoji; }
 
 namespace Styx::UI::Rml {
 
@@ -39,6 +39,8 @@ struct ComponentRenderContext {
 // Uses the visible (possibly forwarded) message; markdown returns trusted RML.
 [[nodiscard]] std::string renderMessageComponents(const Discord::Message &message,
                                                 const ComponentRenderContext &context);
+[[nodiscard]] std::string renderInlineEmoji(const Discord::Emoji &emoji,
+                                           const std::function<std::string(const std::string &, Platform::Size)> &imageSource);
 
 // The component a rendered data-component-path names, in the visible message; null for
 // gallery items or a path the message no longer has.

@@ -295,6 +295,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/SlashCommandPicker.cpp
     src/UI/Rml/CommandOptionsBar.cpp
     src/UI/Rml/ComponentRenderer.cpp
+    src/UI/Rml/PollRenderer.cpp
     src/UI/Rml/MemberListController.cpp
     src/UI/Rml/FriendsController.cpp
     src/UI/Rml/SettingsController.cpp
@@ -466,8 +467,9 @@ if(BUILD_TESTS)
         src/UI/Rml/EmojiGridModel.cpp src/Core/Snowflake.cpp)
     styx_test(TestCdnUrls CdnUrlTests tests/tst_CdnUrls.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestRmlRender RmlRenderTests tests/tst_RmlRender.cpp tests/tst_MessageComponentRendering.cpp tests/tst_CommandOptionsBar.cpp
+        tests/tst_PollRendering.cpp
         src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp src/UI/Rml/ComponentRenderer.cpp src/UI/Chat/SelectDraft.cpp
-        src/UI/Rml/CommandOptionsBar.cpp
+        src/UI/Rml/CommandOptionsBar.cpp src/UI/Rml/PollRenderer.cpp
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)
@@ -477,7 +479,7 @@ if(BUILD_TESTS)
         target_link_libraries(TestRmlRender PRIVATE user32 gdi32)
     endif()
     styx_test(TestEmbeds EmbedTests tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
-    styx_test(TestMessageComponents MessageComponentTests tests/tst_MessageComponents.cpp src/Core/Snowflake.cpp)
+    styx_test(TestMessageComponents MessageComponentTests tests/tst_MessageComponents.cpp tests/tst_Polls.cpp src/Core/Snowflake.cpp)
     styx_test(TestComponentInteractions ComponentInteractionTests
         tests/tst_ComponentInteraction.cpp tests/tst_InteractionEvents.cpp
         src/Discord/ComponentInteraction.cpp src/Core/Snowflake.cpp)

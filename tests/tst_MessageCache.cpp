@@ -753,3 +753,54 @@ TEST_CASE("Message cache: legacy private messages and attachments are purged on 
         REQUIRE(countRows(db, "SELECT count(*) FROM attachments WHERE message_id IN (631, 632)") == 0);
     }
 }
+
+TEST_CASE("Message cache: poll round-trip preserves poll data and referenced message poll", "[message_cache]")
+{
+    SandboxFixture fixture;
+    const Snowflake accountId(10010);
+    fixture.openCache(accountId);
+    MessageRepository repo(accountId);
+
+    const std::string mainPoll =
+        R"({"question":{"text":"Aliens?"},"answers":[{"answer_id":1,"poll_media":{"text":"Alien"}},{"answer_id":2,"poll_media":{"text":"Alien 2","emoji":{"id":null,"name":"👽"}}}],"expiry":"2024-05-02T10:00:02.039342+00:00","allow_multiselect":true,"layout_type":1,"results":{"answer_counts":[{"id":1,"count":1,"me_voted":false}],"is_finalized":false}})";
+    const std::string replyPoll =
+        R"({"question":{"text":"Pizza or tacos?"},"answers":[{"answer_id":1,"poll_media":{"text":"Pizza"}},{"answer_id":2,"poll_media":{"text":"Tacos"}}],"expiry":"2024-05-03T10:00:02.039342+00:00","allow_multiselect":false,"layout_type":1,"results":{"answer_counts":[],"is_finalized":true}})";
+
+    auto mainObj = makeMessageJson("700", "200", "9001", "poll_user", "");
+    mainObj["poll"] = nlohmann::json::parse(mainPoll);
+
+    auto replyObj = makeMessageJson("701", "200", "9002", "reply_user", "Replying to poll");
+    replyObj["poll"] = nlohmann::json::parse(replyPoll);
+    mainObj["referenced_message"] = replyObj;
+
+    repo.saveMessages({ Message::fromJson(mainObj) });
+
+    DatabaseManager::instance().closeCacheDatabase(accountId);
+    fixture.openCache(accountId);
+    MessageRepository reopenedRepo(accountId);
+
+    const auto loadedOpt = reopenedRepo.getMessage(700);
+    REQUIRE(loadedOpt.has_value());
+    const auto &loaded = *loadedOpt;
+
+    REQUIRE(loaded.id.get() == Snowflake(700));
+    REQUIRE(loaded.poll.hasValue());
+    REQUIRE(loaded.poll->question.hasValue());
+    REQUIRE(loaded.poll->question->text.valueOr("") == "Aliens?");
+    REQUIRE(loaded.poll->results.hasValue());
+    REQUIRE_FALSE(loaded.poll->results->isFinalized.get());
+    REQUIRE(loaded.poll->results->answerCounts.hasValue());
+    REQUIRE(loaded.poll->results->answerCounts->size() == 1);
+    REQUIRE(loaded.poll->results->answerCounts->front().count.get() == 1);
+    REQUIRE(nlohmann::json::parse(loaded.pollJson) == nlohmann::json::parse(mainPoll));
+
+    REQUIRE(loaded.referencedMessage != nullptr);
+    const auto &ref = *loaded.referencedMessage;
+    REQUIRE(ref.id.get() == Snowflake(701));
+    REQUIRE(ref.poll.hasValue());
+    REQUIRE(ref.poll->question.hasValue());
+    REQUIRE(ref.poll->question->text.valueOr("") == "Pizza or tacos?");
+    REQUIRE(ref.poll->results.hasValue());
+    REQUIRE(ref.poll->results->isFinalized.get());
+    REQUIRE(nlohmann::json::parse(ref.pollJson) == nlohmann::json::parse(replyPoll));
+}

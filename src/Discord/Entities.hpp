@@ -1471,6 +1471,92 @@ struct MessageComponent : Core::JsonUtils::JsonObject
     }
 };
 
+// The question or one answer of a poll. Questions only carry text; answers may add an emoji.
+struct PollMedia : Core::JsonUtils::JsonObject
+{
+    Field<std::string, true> text;
+    Field<Emoji, true> emoji;
+
+    static PollMedia fromJson(const nlohmann::json &obj)
+    {
+        PollMedia media;
+        get(obj, "text", media.text);
+        get(obj, "emoji", media.emoji);
+        return media;
+    }
+};
+
+struct PollAnswer : Core::JsonUtils::JsonObject
+{
+    Field<int> answerId;
+    Field<PollMedia> pollMedia;
+
+    static PollAnswer fromJson(const nlohmann::json &obj)
+    {
+        PollAnswer answer;
+        get(obj, "answer_id", answer.answerId);
+        get(obj, "poll_media", answer.pollMedia);
+        return answer;
+    }
+};
+
+struct PollAnswerCount : Core::JsonUtils::JsonObject
+{
+    Field<int> id;
+    Field<int> count;
+    Field<bool> meVoted;
+
+    static PollAnswerCount fromJson(const nlohmann::json &obj)
+    {
+        PollAnswerCount answerCount;
+        get(obj, "id", answerCount.id);
+        get(obj, "count", answerCount.count);
+        get(obj, "me_voted", answerCount.meVoted);
+        return answerCount;
+    }
+};
+
+struct PollResults : Core::JsonUtils::JsonObject
+{
+    // False while the poll runs and until Discord's final exact count after it ends.
+    Field<bool> isFinalized;
+    // Answers missing here have no votes.
+    Field<std::vector<PollAnswerCount>> answerCounts;
+
+    static PollResults fromJson(const nlohmann::json &obj)
+    {
+        PollResults results;
+        get(obj, "is_finalized", results.isFinalized);
+        get(obj, "answer_counts", results.answerCounts);
+        return results;
+    }
+};
+
+struct Poll : Core::JsonUtils::JsonObject
+{
+    Field<PollMedia> question;
+    Field<std::vector<PollAnswer>> answers;
+    // Null would mean a poll that never ends; Discord doesn't make those yet.
+    Field<Platform::DateTime, false, true> expiry;
+    Field<bool> allowMultiselect;
+    Field<int, true> layoutType;
+    // Missing means Discord didn't load the counts for this response ("unknown"), not
+    // "no votes"; Message::applyUpdate keeps the counts it already had.
+    Field<PollResults, true> results;
+
+    static Poll fromJson(const nlohmann::json &obj)
+    {
+        Poll poll;
+        get(obj, "question", poll.question);
+        get(obj, "answers", poll.answers);
+        get(obj, "expiry", poll.expiry);
+        get(obj, "allow_multiselect", poll.allowMultiselect);
+        get(obj, "layout_type", poll.layoutType);
+        get(obj, "results", poll.results);
+        return poll;
+    }
+};
+
 struct Message : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> id;
@@ -1491,6 +1577,7 @@ struct Message : Core::JsonUtils::JsonObject
     Field<std::vector<Reaction>, true> reactions;
     Field<std::vector<StickerItem>, true> stickerItems;
     Field<std::vector<MessageComponent>, true> components;
+    Field<Poll, true> poll;
     // Set on interaction replies and app-owned webhooks; a bot's own messages leave it out
     // and its user ID doubles as the application ID.
     Field<Core::Snowflake, true> applicationId;
@@ -1518,6 +1605,8 @@ struct Message : Core::JsonUtils::JsonObject
     std::string stickersJson;
     std::string snapshotJson;
     std::string componentsJson;
+    // The poll as received (compact JSON), for the message cache; empty without a poll.
+    std::string pollJson;
 
     // sent
     bool isPendingOutbound = false;
@@ -1561,6 +1650,14 @@ struct Message : Core::JsonUtils::JsonObject
         return found->is_array() ? found->dump() : "[]";
     }
 
+    static std::string compactObjectJson(const nlohmann::json &obj, const std::string &key)
+    {
+        const auto found = obj.find(key);
+        if (found == obj.end() || !found->is_object())
+            return {};
+        return found->dump();
+    }
+
     static Message fromJson(const nlohmann::json &obj)
     {
         Message message;
@@ -1591,6 +1688,7 @@ struct Message : Core::JsonUtils::JsonObject
         get(obj, "reactions", message.reactions);
         get(obj, "sticker_items", message.stickerItems);
         get(obj, "components", message.components);
+        get(obj, "poll", message.poll);
         get(obj, "message_reference", message.messageReference);
         get(obj, "guild_id", message.guildId);
         get(obj, "channel_type", message.channelType);
@@ -1617,6 +1715,7 @@ struct Message : Core::JsonUtils::JsonObject
         message.reactionsJson = compactArrayJson(obj, "reactions");
         message.stickersJson = compactArrayJson(obj, "sticker_items");
         message.componentsJson = compactArrayJson(obj, "components");
+        message.pollJson = compactObjectJson(obj, "poll");
 
         return message;
     }
@@ -1675,6 +1774,30 @@ struct Message : Core::JsonUtils::JsonObject
         if (present.contains("sticker_items")) {
             stickerItems = update.stickerItems;
             stickersJson = update.stickersJson;
+        }
+
+        if (present.contains("poll")) {
+            const bool keepResults = poll.hasValue() && poll->results.hasValue()
+                && update.poll.hasValue() && !update.poll->results.hasValue();
+            const auto prevResults = poll.hasValue() ? poll->results : decltype(poll->results){};
+            const std::string prevPollJson = pollJson;
+
+            poll = update.poll;
+            pollJson = update.pollJson;
+
+            if (keepResults) {
+                // Discord omits results when they are not loaded ("unknown"), not "no votes".
+                // Retain previously known results when the incoming update does not carry them.
+                poll->results = prevResults;
+                if (!prevPollJson.empty() && !pollJson.empty()) {
+                    auto prev = nlohmann::json::parse(prevPollJson, nullptr, false);
+                    auto next = nlohmann::json::parse(pollJson, nullptr, false);
+                    if (!prev.is_discarded() && !next.is_discarded() && prev.contains("results")) {
+                        next["results"] = prev["results"];
+                        pollJson = next.dump();
+                    }
+                }
+            }
         }
     }
 };

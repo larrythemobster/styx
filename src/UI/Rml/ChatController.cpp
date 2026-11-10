@@ -1,6 +1,7 @@
 #include "ChatController.hpp"
 #include "ChatMarkdown.hpp"
 #include "ComponentRenderer.hpp"
+#include "PollRenderer.hpp"
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
 #include "ShortcutController.hpp"
@@ -104,6 +105,8 @@ std::string systemMessageIcon(Discord::MessageType type)
     case Discord::MessageType::THREAD_CREATED:
     case Discord::MessageType::THREAD_STARTER_MESSAGE:
         return std::string("icon:messages-square");
+    case Discord::MessageType::POLL_RESULT:
+        return std::string("icon:chart-column");
     default:
         return std::string("icon:message-circle");
     }
@@ -132,6 +135,18 @@ std::string systemMessageClass(Discord::MessageType type)
     default:
         return std::string("generic");
     }
+}
+
+// The "poll_result" embed a POLL_RESULT notice carries its numbers in.
+const Discord::Embed *pollResultEmbed(const Discord::Message *message)
+{
+    if (!message || !message->embeds.hasValue())
+        return nullptr;
+    for (const auto &embed : message->embeds.get()) {
+        if (embed.type.hasValue() && embed.type.get() == "poll_result")
+            return &embed;
+    }
+    return nullptr;
 }
 
 void dismissEphemeral(Shell &shell, Core::Snowflake channelId, Core::Snowflake messageId)
@@ -1108,6 +1123,14 @@ void ChatController::refreshBlockedRun(int row)
         onDataChanged(run.first, run.first + run.count - 1);
 }
 
+PollRenderContext ChatController::pollContext()
+{
+    PollRenderContext context;
+    context.imageSource = [this](const std::string &url, Platform::Size size) { return shell.imageSource(url, size); };
+    context.now = Platform::DateTime::now();
+    return context;
+}
+
 std::string ChatController::buildMessageHtml(int row)
 {
     ChatModel *model = shell.chat();
@@ -1165,10 +1188,15 @@ std::string ChatController::buildMessageHtml(int row)
     if (isSystem) {
         std::string icon = systemMessageIcon(msgType);
         std::string cls = systemMessageClass(msgType);
-        std::string content = Platform::htmlEscape(rawContent);
+        // Most notices read "<name> <text>"; a poll result reads "<name>'s poll …".
+        std::string content = " " + Platform::htmlEscape(rawContent);
+        if (msgType == Discord::MessageType::POLL_RESULT) {
+            if (const Discord::Embed *embed = pollResultEmbed(model->messageAt(row)))
+                content = renderPollResultNotice(*embed, pollContext());
+        }
         out += std::format("<div class=\"system-message\">"
             "<img class=\"system-icon {0}\" src=\"{1}\" />"
-            "<span class=\"system-text\"><strong>{2}</strong> {3}</span>"
+            "<span class=\"system-text\"><strong>{2}</strong>{3}</span>"
             "<span class=\"system-timestamp\">{4}</span>"
             "</div>", cls, icon, Platform::htmlEscape(authorName), content, formatGutterTimestamp(timestamp));
         return out;
@@ -1438,6 +1466,10 @@ std::string ChatController::buildMessageHtml(int row)
         if (interactions.hasFailed(msgId))
             out += std::string("<div class=\"component-interaction-failed\">This interaction failed</div>");
     }
+
+    // Poll
+    if (rawMsg && rawMsg->contentMessage().poll.hasValue())
+        out += renderPoll(rawMsg->contentMessage().poll.get(), pollContext());
 
     // Stickers
     for (const auto &sticker : stickers) {

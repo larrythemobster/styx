@@ -4,6 +4,7 @@
 #include "Shell.hpp"
 #include "SlashCommandPicker.hpp"
 #include "CommandOptionsBar.hpp"
+#include "PollRenderer.hpp"
 #include "Core/PendingAttachment.hpp"
 #include "Core/Snowflake.hpp"
 #include "Discord/CommandInteraction.hpp"
@@ -125,6 +126,8 @@ private:
     void finishTrackedInteraction(Core::Snowflake trackedId);
     void openReactionPickerForMessage(Core::Snowflake messageId);
     void openEmojiPickerForComposer();
+    // Custom emoji go through the image cache; countdowns are measured from now.
+    [[nodiscard]] PollRenderContext pollContext();
 
     ::Rml::Element *headerEl = nullptr;
     ::Rml::Element *messagesEl = nullptr;
