@@ -1,0 +1,44 @@
+<rml>
+<head>
+    <title>Group members</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="group_dm_members.rcss"/>
+</head>
+<body id="group-dm-members-body">
+    <div class="gdm-members-backdrop" data-action="gdm-members-close"></div>
+    <div id="gdm-members-card" class="gdm-members-card">
+        <div class="gdm-members-header">
+            <div class="gdm-members-header-title-row">
+                <div class="gdm-members-title">Group members</div>
+                <div id="gdm-members-count" class="gdm-members-count"></div>
+            </div>
+            <button id="gdm-members-close" class="gdm-members-close" data-action="gdm-members-close" title="Close">
+                <img class="gdm-members-close-icon" src="icon:x" alt="Close"/>
+            </button>
+        </div>
+        <div class="gdm-members-content">
+            <div id="gdm-members-hint" class="gdm-members-hint"></div>
+            <div class="gdm-members-section">
+                <div class="gdm-members-section-heading">MEMBERS</div>
+                <div id="gdm-members-list" class="gdm-members-list"></div>
+            </div>
+            <div class="gdm-members-section">
+                <div class="gdm-members-section-heading">ADD FRIENDS</div>
+                <div class="gdm-members-search-container">
+                    <div class="gdm-members-search-label">Search friends</div>
+                    <input type="text" id="gdm-members-search" class="gdm-members-search" placeholder="Search friends" />
+                </div>
+                <div id="gdm-members-friends" class="gdm-members-friends"></div>
+            </div>
+        </div>
+        <div class="gdm-members-footer">
+            <div id="gdm-members-error" class="gdm-members-error" style="display: none;"></div>
+            <div id="gdm-members-status" class="gdm-members-status" style="display: none;"></div>
+            <div class="gdm-members-footer-bar">
+                <button id="gdm-members-done" class="gdm-members-done-btn" data-action="gdm-members-close">Done</button>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

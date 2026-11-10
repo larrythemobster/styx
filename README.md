@@ -110,7 +110,10 @@ Metadata and recipient changes update the originating account's cache and disk.
 Deleted groups clear their read state and cannot reopen from an older REST response.
 Create groups from Friends or a DM header with searchable friend selection.
 The dialog shows pending requests and retryable errors without changing the source DM
-or its composer draft. Group management controls are not exposed in the UI yet.
+or its composer draft. Group headers also open member management with searchable
+friend additions, the 10-person limit, and owner-only removal of other members.
+Membership and ownership refresh live, with pending controls and retryable errors.
+Name/icon editing and confirmed leave are not exposed in the UI yet.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.
