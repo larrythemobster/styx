@@ -162,6 +162,8 @@ set(PROJECT_SOURCES
     src/Core/OrderedJson.cpp
     src/Core/ProxyConfig.cpp
     src/Core/ClientInstance.cpp
+    src/Core/ClientInstanceGroupDms.cpp
+    src/Core/PrivateChannels.cpp
     src/Core/Calls/CallStore.cpp
     src/Core/Session.cpp
     src/Core/Logging.cpp
@@ -497,8 +499,10 @@ if(BUILD_TESTS)
     styx_test(TestPollCreate PollCreateTests tests/tst_PollCreate.cpp
         src/Discord/PollCreate.cpp src/Core/Snowflake.cpp)
     target_link_libraries(TestPollCreate PRIVATE utf8proc)
-    styx_test(TestGroupDm GroupDmTests tests/tst_GroupDm.cpp
+    styx_test(TestGroupDm GroupDmTests tests/tst_GroupDm.cpp tests/tst_GroupDmEvents.cpp
         src/Discord/GroupDm.cpp src/Discord/ApiError.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)
+    styx_test(TestPrivateChannels PrivateChannelTests tests/tst_PrivateChannels.cpp
+        src/Core/PrivateChannels.cpp src/Core/Snowflake.cpp)
     styx_test(TestPollVotes PollVoteTests tests/tst_PollVotes.cpp
         src/Core/PollVotes.cpp src/Core/Snowflake.cpp)
     styx_test(TestCommandInteraction CommandInteractionTests tests/tst_CommandInteraction.cpp
@@ -513,6 +517,7 @@ if(BUILD_TESTS)
     styx_test(TestMessageCache MessageCacheTests tests/tst_MessageCache.cpp
         src/Storage/DatabaseManager.cpp src/Storage/BaseRepository.cpp
         src/Storage/Transaction.cpp src/Storage/UserRepository.cpp
+        src/Storage/ChannelRepository.cpp
         src/Storage/MessageRepository.cpp src/Core/PollVotes.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp)
     styx_test(TestFavoriteGifs FavoriteGifTests tests/tst_FavoriteGifs.cpp
         src/Core/Gifs/FavoriteGifRules.cpp src/UI/Gifs/GifMasonryLayout.cpp

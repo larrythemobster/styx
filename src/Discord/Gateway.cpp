@@ -224,6 +224,12 @@ void Gateway::handleDispatch(const Inbound &data)
     case GatewayEvent::CHANNEL_DELETE:
         handleChannelDelete(data);
         break;
+    case GatewayEvent::CHANNEL_RECIPIENT_ADD:
+        handleChannelRecipientAdd(data);
+        break;
+    case GatewayEvent::CHANNEL_RECIPIENT_REMOVE:
+        handleChannelRecipientRemove(data);
+        break;
     case GatewayEvent::THREAD_CREATE:
         handleThreadCreate(data);
         break;
@@ -475,6 +481,20 @@ void Gateway::handleChannelDelete(const Inbound &data)
     ChannelDelete event = data.getData<ChannelDelete>();
 
     gatewayChannelDelete.publish(event);
+}
+
+void Gateway::handleChannelRecipientAdd(const Inbound &data)
+{
+    ChannelRecipient event = data.getData<ChannelRecipient>();
+
+    gatewayChannelRecipientAdded.publish(event);
+}
+
+void Gateway::handleChannelRecipientRemove(const Inbound &data)
+{
+    ChannelRecipient event = data.getData<ChannelRecipient>();
+
+    gatewayChannelRecipientRemoved.publish(event);
 }
 
 void Gateway::handleThreadCreate(const Inbound &data)

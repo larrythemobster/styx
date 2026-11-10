@@ -85,6 +85,8 @@ public:
     Platform::Signal<const ChannelCreate &> gatewayChannelCreate;
     Platform::Signal<const ChannelUpdate &> gatewayChannelUpdate;
     Platform::Signal<const ChannelDelete &> gatewayChannelDelete;
+    Platform::Signal<const ChannelRecipient &> gatewayChannelRecipientAdded;
+    Platform::Signal<const ChannelRecipient &> gatewayChannelRecipientRemoved;
     Platform::Signal<const ChannelCreate &> gatewayThreadCreate;
     Platform::Signal<const ChannelUpdate &> gatewayThreadUpdate;
     Platform::Signal<const ThreadDelete &> gatewayThreadDelete;
@@ -156,6 +158,8 @@ private:
     void handleChannelCreate(const Inbound &data);
     void handleChannelUpdate(const Inbound &data);
     void handleChannelDelete(const Inbound &data);
+    void handleChannelRecipientAdd(const Inbound &data);
+    void handleChannelRecipientRemove(const Inbound &data);
     void handleThreadCreate(const Inbound &data);
     void handleThreadUpdate(const Inbound &data);
     void handleThreadDelete(const Inbound &data);

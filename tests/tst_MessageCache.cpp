@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #include "Platform/Sqlite.hpp"
 #include "Storage/DatabaseManager.hpp"
 #include "Storage/MessageRepository.hpp"
+#include "Storage/ChannelRepository.hpp"
 
 using Styx::Core::Snowflake;
 using namespace Styx::Discord;
@@ -221,6 +223,28 @@ static int64_t countRows(Styx::Platform::Database &db, const std::string &sql)
     auto q = db.prepare(sql);
     REQUIRE(q.step());
     return q.getInt64(0);
+}
+
+static void saveFixtureUser(Styx::Platform::Database &db, Snowflake userId, const std::string &username = "user")
+{
+    auto q = db.prepare("INSERT OR REPLACE INTO users (id, username) VALUES (:id, :username)");
+    q.bind(":id", static_cast<int64_t>(userId));
+    q.bind(":username", std::string_view(username));
+    q.execute();
+}
+
+static Channel makeFixtureChannel(Snowflake id, ChannelType type = ChannelType::GROUP_DM, const std::string &name = "group")
+{
+    Channel ch;
+    ch.id = id;
+    ch.type = type;
+    ch.name = name;
+    return ch;
+}
+
+static Styx::Platform::Database &channelCacheDb(Snowflake accountId)
+{
+    return DatabaseManager::instance().getDatabase(DatabaseManager::getCacheConnectionName(accountId));
 }
 
 } // namespace
@@ -856,4 +880,136 @@ TEST_CASE("Message cache: poll vote update survives repo persistence and reload"
     REQUIRE(doc["custom_poll_field"] == "poll_opaque");
     REQUIRE(doc["results"]["custom_results_field"] == 777);
     REQUIRE(doc["results"]["answer_counts"][0]["custom_count_field"] == "count_opaque");
+}
+
+TEST_CASE("Channel repository: saving updated channel row preserves existing membership and empty list clears it", "[message_cache]")
+{
+    SandboxFixture fixture;
+    const Snowflake accountId(10050);
+    fixture.openCache(accountId);
+    ChannelRepository repo(accountId);
+
+    const Snowflake channelId(6001);
+    const Snowflake userA(7001);
+    const Snowflake userB(7002);
+
+    Channel ch = makeFixtureChannel(channelId, ChannelType::GROUP_DM, "Initial Group");
+    repo.saveChannel(ch);
+
+    {
+        auto &db = channelCacheDb(accountId);
+        saveFixtureUser(db, userA, "userA");
+        saveFixtureUser(db, userB, "userB");
+        repo.saveChannelRecipients(channelId, { userA, userB }, db);
+    }
+
+    auto loadedOpt = repo.getChannel(channelId);
+    REQUIRE(loadedOpt.has_value());
+    REQUIRE(loadedOpt->name.valueOr("") == "Initial Group");
+    REQUIRE(loadedOpt->recipientIds.hasValue());
+    REQUIRE(loadedOpt->recipientIds->size() == 2);
+    REQUIRE(loadedOpt->recipientIds->at(0) == userA);
+    REQUIRE(loadedOpt->recipientIds->at(1) == userB);
+
+    ch.name = "Renamed Group";
+    ch.topic = "Updated Topic";
+    repo.saveChannel(ch);
+    DatabaseManager::instance().closeCacheDatabase(accountId);
+    fixture.openCache(accountId);
+
+    auto updatedOpt = repo.getChannel(channelId);
+    REQUIRE(updatedOpt.has_value());
+    REQUIRE(updatedOpt->name.valueOr("") == "Renamed Group");
+    REQUIRE(updatedOpt->topic.valueOr("") == "Updated Topic");
+    REQUIRE(updatedOpt->recipientIds.hasValue());
+    REQUIRE(updatedOpt->recipientIds->size() == 2);
+    REQUIRE(updatedOpt->recipientIds->at(0) == userA);
+    REQUIRE(updatedOpt->recipientIds->at(1) == userB);
+
+    {
+        auto &db = channelCacheDb(accountId);
+        repo.saveChannelRecipients(channelId, {}, db);
+    }
+
+    auto clearedOpt = repo.getChannel(channelId);
+    REQUIRE(clearedOpt.has_value());
+    REQUIRE(clearedOpt->recipientIds.hasValue());
+    REQUIRE(clearedOpt->recipientIds->empty());
+    REQUIRE(repo.getChannelRecipientIds(channelId).empty());
+}
+
+TEST_CASE("Channel repository: accounts sharing channel IDs remain isolated and deletion persists without cross-account removal", "[message_cache]")
+{
+    SandboxFixture fixture;
+    const Snowflake accountA(10060);
+    const Snowflake accountB(10061);
+
+    fixture.openCache(accountA);
+    fixture.openCache(accountB);
+
+    ChannelRepository repoA(accountA);
+    ChannelRepository repoB(accountB);
+
+    const Snowflake sharedChannelId(6100);
+    const Snowflake userA1(8001);
+    const Snowflake userA2(8002);
+    const Snowflake userB1(8003);
+
+    Channel chA = makeFixtureChannel(sharedChannelId, ChannelType::GROUP_DM, "Account A Group");
+    Channel chB = makeFixtureChannel(sharedChannelId, ChannelType::GROUP_DM, "Account B Group");
+
+    repoA.saveChannel(chA);
+    repoB.saveChannel(chB);
+
+    {
+        auto &dbA = channelCacheDb(accountA);
+        saveFixtureUser(dbA, userA1, "userA1");
+        saveFixtureUser(dbA, userA2, "userA2");
+        repoA.saveChannelRecipients(sharedChannelId, { userA1, userA2 }, dbA);
+    }
+
+    {
+        auto &dbB = channelCacheDb(accountB);
+        saveFixtureUser(dbB, userB1, "userB1");
+        repoB.saveChannelRecipients(sharedChannelId, { userB1 }, dbB);
+    }
+
+    auto loadedA = repoA.getChannel(sharedChannelId);
+    auto loadedB = repoB.getChannel(sharedChannelId);
+    REQUIRE(loadedA.has_value());
+    REQUIRE(loadedB.has_value());
+    REQUIRE(loadedA->name.valueOr("") == "Account A Group");
+    REQUIRE(loadedB->name.valueOr("") == "Account B Group");
+    REQUIRE(loadedA->recipientIds.hasValue());
+    REQUIRE(loadedB->recipientIds.hasValue());
+    REQUIRE(loadedA->recipientIds->size() == 2);
+    REQUIRE(loadedA->recipientIds->at(0) == userA1);
+    REQUIRE(loadedA->recipientIds->at(1) == userA2);
+    REQUIRE(loadedB->recipientIds->size() == 1);
+    REQUIRE(loadedB->recipientIds->front() == userB1);
+
+    repoA.deleteChannel(sharedChannelId);
+
+    REQUIRE_FALSE(repoA.getChannel(sharedChannelId).has_value());
+    REQUIRE(repoA.getChannelRecipientIds(sharedChannelId).empty());
+
+    auto stillB = repoB.getChannel(sharedChannelId);
+    REQUIRE(stillB.has_value());
+    REQUIRE(stillB->name.valueOr("") == "Account B Group");
+    REQUIRE(stillB->recipientIds.hasValue());
+    REQUIRE(stillB->recipientIds->size() == 1);
+    REQUIRE(stillB->recipientIds->front() == userB1);
+
+    DatabaseManager::instance().closeCacheDatabase(accountA);
+    fixture.openCache(accountA);
+    ChannelRepository reopenedA(accountA);
+    REQUIRE_FALSE(reopenedA.getChannel(sharedChannelId).has_value());
+    REQUIRE(reopenedA.getChannelRecipientIds(sharedChannelId).empty());
+
+    auto persistentB = repoB.getChannel(sharedChannelId);
+    REQUIRE(persistentB.has_value());
+    REQUIRE(persistentB->name.valueOr("") == "Account B Group");
+    REQUIRE(persistentB->recipientIds.hasValue());
+    REQUIRE(persistentB->recipientIds->size() == 1);
+    REQUIRE(persistentB->recipientIds->front() == userB1);
 }

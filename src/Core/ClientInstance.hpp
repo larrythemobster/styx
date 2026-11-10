@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Platform/Trackable.hpp"
+#include <cstdint>
 #include <map>
 #include <set>
 #include <string>
@@ -90,6 +91,11 @@ public:
     using DmChannelCallback = std::function<void(const Result<Snowflake> &)>;
     void noteChannelSelected(Snowflake channelId);
     void openDmChannel(Snowflake userId, DmChannelCallback callback);
+    void createGroupDm(const std::vector<Snowflake> &recipients, Discord::Client::ResultCallback<Discord::Channel> callback = {});
+    void addDmRecipient(Snowflake channelId, Snowflake userId, Discord::Client::ResultCallback<std::optional<Discord::Channel>> callback = {});
+    void removeGroupDmRecipient(Snowflake channelId, Snowflake userId, Discord::Client::ActionCallback callback = {});
+    void modifyGroupDm(Snowflake channelId, const Discord::GroupDmEdit &edit, Discord::Client::ResultCallback<Discord::Channel> callback = {});
+    void leaveGroupDm(Snowflake channelId, bool silent = false, Discord::Client::ResultCallback<Discord::Channel> callback = {});
     [[nodiscard]] int getChannelRateLimit(Snowflake channelId);
 
     [[nodiscard]] bool isThreadJoined(Snowflake threadId) const;
@@ -208,6 +214,28 @@ private:
     [[nodiscard]] std::vector<Snowflake> markableChannelIds(Snowflake guildId, Snowflake categoryId);
     void sendNextBulkAckBatch();
 
+    struct ChannelLifecycle
+    {
+        std::uint64_t revision = 0;
+        std::uint64_t lifetime = 0;
+        bool deleted = false;
+    };
+
+    bool handlePrivateChannelCreated(const Discord::Channel &channel);
+    bool handlePrivateChannelUpdated(const Discord::Channel &channel);
+    void onChannelRecipientAdded(const Discord::ChannelRecipient &event);
+    void onChannelRecipientRemoved(const Discord::ChannelRecipient &event);
+
+    void onPrivateRecipient(const Discord::ChannelRecipient &event, bool added);
+    std::optional<Discord::Channel> availablePrivateChannel(Snowflake channelId, bool groupOnly);
+    Result<Discord::Channel> ingestCreatedGroup(const Discord::Channel &channel);
+    // A null update commits an already-normalized membership snapshot.
+    Discord::Channel applyPrivateChannel(std::optional<Discord::Channel> baseline, const Discord::Channel *update = nullptr);
+    Discord::Channel persistPrivateChannel(std::optional<Discord::Channel> baseline, const Discord::Channel *update, Platform::Database &db);
+    void cachePrivateUser(const Discord::User &user);
+    void deletePrivateChannel(Snowflake channelId);
+    void ensureUserStub(Snowflake userId);
+
     AccountInfo account;
 
     std::unique_ptr<MessageManager> messageManager;
@@ -255,6 +283,8 @@ private:
 
     std::vector<Discord::Client::AckEntry> queuedBulkAcks;
     bool bulkAckInFlight = false;
+    std::unordered_map<Snowflake, ChannelLifecycle> privateChannelLifecycles;
+    std::uint64_t sessionGeneration = 0;
 };
 
 } // namespace Core

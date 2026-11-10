@@ -62,6 +62,30 @@ static std::string getDMDisplayName(const Discord::Channel &channel, Core::UserM
     return result;
 }
 
+static void updatePrivateChannelNode(ChannelNode &node, const Discord::Channel &channel, Core::UserManager *users)
+{
+    node.name = getDMDisplayName(channel, users);
+    node.lastMessageId = channel.lastMessageId.hasValue() ? channel.lastMessageId.get() : channel.id.get();
+    node.recipientIds.clear();
+    if (channel.recipients.hasValue()) {
+        node.recipientIds.reserve(channel.recipients->size());
+        for (const auto &user : channel.recipients.get())
+            node.recipientIds.push_back(user.id.get());
+    } else if (channel.recipientIds.hasValue()) {
+        node.recipientIds = channel.recipientIds.get();
+    }
+    node.dmRecipientId = Snowflake::Invalid;
+    node.dmAvatarHash.clear();
+    node.TEMP_iconHash.clear();
+    if (channel.type == Discord::ChannelType::DM && node.recipientIds.size() == 1) {
+        node.dmRecipientId = node.recipientIds.front();
+        if (auto user = users->getUser(node.dmRecipientId); user && user->avatar.hasValue())
+            node.dmAvatarHash = user->avatar.get();
+    } else if (channel.type == Discord::ChannelType::GROUP_DM && channel.icon.hasValue()) {
+        node.TEMP_iconHash = channel.icon.get();
+    }
+}
+
 static std::optional<ChannelNode::Type> nodeTypeForChannel(Discord::ChannelType type)
 {
     switch (type) {
@@ -1002,41 +1026,10 @@ void ChannelTreeModel::addChannel(const Discord::ChannelCreate &event, Snowflake
         if (!instance)
             return;
 
-        Storage::UserRepository userRepo(accountId);
-
         auto dmNode = std::make_unique<ChannelNode>();
         dmNode->id = channel.id;
         dmNode->type = ChannelNode::Type::DMChannel;
-        dmNode->name = getDMDisplayName(channel, instance->users());
-        dmNode->lastMessageId = channel.lastMessageId.hasValue()
-                                        ? channel.lastMessageId.get()
-                                        : channel.id.get();
-
-        if (channel.recipients.hasValue()) {
-            for (const auto &user : channel.recipients.get())
-                dmNode->recipientIds.push_back(user.id.get());
-        } else if (channel.recipientIds.hasValue()) {
-            dmNode->recipientIds = channel.recipientIds.get();
-        }
-
-        if (channel.type == Discord::ChannelType::DM && dmNode->recipientIds.size() == 1) {
-            dmNode->dmRecipientId = dmNode->recipientIds.front();
-
-            if (channel.recipients.hasValue() && !channel.recipients->empty()) {
-                const auto &user = channel.recipients->front();
-                if (user.avatar.hasValue())
-                    dmNode->dmAvatarHash = user.avatar.get();
-            }
-
-            if (dmNode->dmAvatarHash.empty()) {
-                auto userOpt = userRepo.getUser(dmNode->dmRecipientId);
-                if (userOpt.has_value() && userOpt->avatar.hasValue())
-                    dmNode->dmAvatarHash = userOpt->avatar.get();
-            }
-        } else if (channel.type == Discord::ChannelType::GROUP_DM) {
-            if (channel.icon.hasValue())
-                dmNode->TEMP_iconHash = channel.icon.get();
-        }
+        updatePrivateChannelNode(*dmNode, channel, instance->users());
 
         insertChildAt(dmHeader, 0, std::move(dmNode));
 
@@ -1104,6 +1097,12 @@ void ChannelTreeModel::updateChannel(const Discord::ChannelUpdate &update, Snowf
     auto *instance = session->client(accountId);
     if (!instance)
         return;
+
+    if (channelNode->type == ChannelNode::Type::DMChannel) {
+        updatePrivateChannelNode(*channelNode, channel, instance->users());
+        changed.publish(channelNode);
+        return;
+    }
 
     Core::Snowflake oldParentId = channelNode->parentId;
     Core::Snowflake newParentId =

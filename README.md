@@ -106,6 +106,8 @@ Creation preserves your composer draft and shows pending state and retryable err
 
 The client API supports group DM creation, recipient changes, name/icon edits and
 leaving through the [channel API](https://docs.discord.food/resources/channel).
+Metadata and recipient changes update the originating account's cache and disk.
+Deleted groups clear their read state and cannot reopen from an older REST response.
 Group DM creation and management controls are not exposed in the UI yet.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used

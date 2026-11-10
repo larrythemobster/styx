@@ -38,9 +38,16 @@ struct User : Core::JsonUtils::JsonObject
     Field<std::string, true> discriminator;
     Field<bool, true> mfaEnabled;
 
+    // Required identity fields may be omitted in private-channel user updates.
+    unsigned char identityFieldsPresent = 7;
+
     static User fromJson(const nlohmann::json &obj)
     {
         User user;
+        user.identityFieldsPresent = static_cast<unsigned char>(
+            (obj.contains("username") ? 1 : 0) |
+            (obj.contains("global_name") ? 2 : 0) |
+            (obj.contains("avatar") ? 4 : 0));
         get(obj, "id", user.id);
         get(obj, "username", user.username);
         get(obj, "global_name", user.globalName);

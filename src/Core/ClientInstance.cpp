@@ -135,6 +135,8 @@ ClientInstance::ClientInstance(const AccountInfo &info,
     track(client->ready.connect([this](const Discord::Ready &ready) {
         auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
         gatewaySessionId = ready.sessionId.valueOr(std::string());
+        sessionGeneration++;
+        privateChannelLifecycles.clear();
         callStore->reset();
         connectSelectedCall(true);
 
@@ -164,23 +166,11 @@ ClientInstance::ClientInstance(const AccountInfo &info,
             relationshipManager->loadFromReady(ready.relationships.get());
         userManager->loadNotesFromReady(ready.notes.get());
 
+        std::vector<Discord::Channel> privateChannels;
         if (ready.privateChannels.hasValue()) {
-            for (const auto &channel : ready.privateChannels.get()) {
-                channelRepo.saveChannel(channel, db);
-
-                std::vector<Core::Snowflake> recipientIds;
-                if (channel.recipients.hasValue()) {
-                    for (const auto &user : channel.recipients.get()) {
-                        userManager->saveUser(user);
-                        recipientIds.push_back(user.id.get());
-                    }
-                } else if (channel.recipientIds.hasValue()) {
-                    recipientIds = channel.recipientIds.get();
-                }
-
-                if (!recipientIds.empty())
-                    channelRepo.saveChannelRecipients(channel.id.get(), recipientIds, db);
-            }
+            privateChannels.reserve(ready.privateChannels->size());
+            for (const auto &channel : ready.privateChannels.get())
+                privateChannels.push_back(persistPrivateChannel(channelRepo.getChannel(channel.id.get()), &channel, db));
         }
 
         txn.commit();
@@ -205,10 +195,8 @@ ClientInstance::ClientInstance(const AccountInfo &info,
 
         forumManager->loadFromReady(ready.guilds.get());
 
-        if (ready.privateChannels.hasValue()) {
-            for (const auto &channel : ready.privateChannels.get())
-                readStateManager->registerPrivateChannel(channel);
-        }
+        for (const auto &channel : privateChannels)
+            readStateManager->registerPrivateChannel(channel);
 
         detailsUpdated.publish(account);
         this->ready.publish(ready);
@@ -290,6 +278,8 @@ ClientInstance::ClientInstance(const AccountInfo &info,
     track(client->channelCreated.connect([this](auto &&...args) { onChannelCreated(args...); }));
     track(client->channelUpdated.connect([this](auto &&...args) { onChannelUpdated(args...); }));
     track(client->channelDeleted.connect([this](auto &&...args) { onChannelDeleted(args...); }));
+    track(client->channelRecipientAdded.connect([this](const Discord::ChannelRecipient &event) { onChannelRecipientAdded(event); }));
+    track(client->channelRecipientRemoved.connect([this](const Discord::ChannelRecipient &event) { onChannelRecipientRemoved(event); }));
     track(client->guildRoleCreated.connect([this](auto &&...args) { onGuildRoleCreated(args...); }));
     track(client->guildRoleUpdated.connect([this](auto &&...args) { onGuildRoleUpdated(args...); }));
     track(client->guildRoleDeleted.connect([this](auto &&...args) { onGuildRoleDeleted(args...); }));
@@ -593,6 +583,9 @@ void ClientInstance::onChannelCreated(const Discord::ChannelCreate &event)
         return;
 
     const Discord::Channel &channel = event.channel.get();
+    if (handlePrivateChannelCreated(channel))
+        return;
+
     Core::Snowflake channelId = channel.id.get();
 
     auto &db = Storage::DatabaseManager::instance().getDatabase(Storage::DatabaseManager::instance().getCacheConnectionName(account.id));
@@ -604,31 +597,12 @@ void ClientInstance::onChannelCreated(const Discord::ChannelCreate &event)
     if (channel.permissionOverwrites.hasValue())
         channelRepo.savePermissionOverwrites(channelId, channel.permissionOverwrites.get(), db);
 
-    if (channel.type == Discord::ChannelType::DM || channel.type == Discord::ChannelType::GROUP_DM) {
-        std::vector<Core::Snowflake> recipientIds;
-        if (channel.recipients.hasValue()) {
-            for (const auto &user : channel.recipients.get()) {
-                userManager->saveUser(user);
-                recipientIds.push_back(user.id.get());
-            }
-        } else if (channel.recipientIds.hasValue()) {
-            recipientIds = channel.recipientIds.get();
-        }
-
-        if (!recipientIds.empty())
-            channelRepo.saveChannelRecipients(channelId, recipientIds, db);
-    }
-
     txn.commit();
 
-    if (channel.type == Discord::ChannelType::DM || channel.type == Discord::ChannelType::GROUP_DM) {
-        readStateManager->registerPrivateChannel(channel);
-    } else {
-        if (channel.guildId.hasValue())
-            readStateManager->registerChannel(channel, channel.guildId.get());
-        if (channel.lastMessageId.hasValue())
-            readStateManager->updateChannelLastMessageId(channelId, channel.lastMessageId.get());
-    }
+    if (channel.guildId.hasValue())
+        readStateManager->registerChannel(channel, channel.guildId.get());
+    if (channel.lastMessageId.hasValue())
+        readStateManager->updateChannelLastMessageId(channelId, channel.lastMessageId.get());
 
     forumParentCache.erase(channelId);
 
@@ -641,6 +615,9 @@ void ClientInstance::onChannelUpdated(const Discord::ChannelUpdate &event)
         return;
 
     const Discord::Channel &channel = event.channel.get();
+    if (handlePrivateChannelUpdated(channel))
+        return;
+
     Core::Snowflake channelId = channel.id.get();
 
     log(LogLevel::Debug, LogCore) << "Channel updated:" << channelId;
@@ -662,9 +639,6 @@ void ClientInstance::onChannelUpdated(const Discord::ChannelUpdate &event)
     if (channel.guildId.hasValue()) {
         readStateManager->registerChannel(channel, channel.guildId.get());
         readStateChanged.publish(channelId);
-    } else if (channel.type == Discord::ChannelType::DM || channel.type == Discord::ChannelType::GROUP_DM) {
-        readStateManager->registerPrivateChannel(channel);
-        readStateChanged.publish(channelId);
     }
 
     channelUpdated.publish(event);
@@ -676,7 +650,22 @@ void ClientInstance::onChannelDeleted(const Discord::ChannelDelete &event)
         return;
 
     Core::Snowflake channelId = event.id.get();
+
+    bool privateDeletion = !event.guildId.hasValue() || !event.guildId.get().isValid();
+    if (!privateDeletion) {
+        auto existing = channelRepo.getChannel(channelId);
+        privateDeletion = existing && (existing->type.get() == Discord::ChannelType::DM ||
+                                      existing->type.get() == Discord::ChannelType::GROUP_DM);
+    }
+    if (privateDeletion) {
+        auto &lc = privateChannelLifecycles[channelId];
+        lc.revision++;
+        lc.lifetime++;
+        lc.deleted = true;
+    }
+
     callStore->forget(channelId);
+    readStateManager->removeChannel(channelId);
 
     log(LogLevel::Debug, LogCore) << "Channel deleted:" << channelId;
 

@@ -115,6 +115,13 @@ void MemberListController::connectCurrentManager()
     }
     if (currentPresenceManager)
         managerConnections.push_back(currentPresenceManager->presencesChanged.connect([this](const auto &) { scheduleUpdate(); }));
+    if (currentInstance) {
+        managerConnections.push_back(currentInstance->channelUpdated.connect(
+            [this](const Discord::ChannelUpdate &event) {
+                if (event.channel->id == activeChannelId)
+                    scheduleUpdate();
+            }));
+    }
 }
 
 void MemberListController::disconnectCurrentManager()

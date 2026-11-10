@@ -494,25 +494,35 @@ void ReadStateManager::registerPrivateChannel(const Discord::Channel &channel)
         updateChannelLastMessageId(channelId, channel.lastMessageId.get());
 }
 
+void ReadStateManager::removeChannel(Snowflake channelId)
+{
+    channelReadStates.erase(channelId);
+    channelLastMessageIds.erase(channelId);
+    ackIdAtSelect.erase(channelId);
+    channelOverrideCache.erase(channelId);
+    auto guild = channelGuildMap.find(channelId);
+    const auto settingsKey = guild != channelGuildMap.end() ? guild->second : Snowflake(0);
+    if (auto overrides = guildOverrideChannels.find(settingsKey); overrides != guildOverrideChannels.end())
+        overrides->second.erase(channelId);
+    if (guild != channelGuildMap.end())
+        channelGuildMap.erase(guild);
+    resourceChannels.erase(channelId);
+    voiceChannels.erase(channelId);
+    forumChannels.erase(channelId);
+    messageRequestChannels.erase(channelId);
+    outgoingAcks.erase(channelId);
+    if (activeChannelId == channelId)
+        activeChannelId = Snowflake();
+}
+
 void ReadStateManager::removeGuild(Snowflake guildId)
 {
     std::vector<Snowflake> channels;
     for (const auto &[channelId, channelGuildId] : channelGuildMap)
         if (channelGuildId == guildId)
             channels.push_back(channelId);
-    for (Snowflake channelId : channels) {
-        channelReadStates.erase(channelId);
-        channelLastMessageIds.erase(channelId);
-        ackIdAtSelect.erase(channelId);
-        channelOverrideCache.erase(channelId);
-        channelGuildMap.erase(channelId);
-        resourceChannels.erase(channelId);
-        voiceChannels.erase(channelId);
-        forumChannels.erase(channelId);
-        outgoingAcks.erase(channelId);
-        if (activeChannelId == channelId)
-            activeChannelId = Snowflake();
-    }
+    for (Snowflake channelId : channels)
+        removeChannel(channelId);
 
     guildInfo.erase(guildId);
     guildSettingsMap.erase(guildId);

@@ -180,6 +180,22 @@ struct ChannelDelete : Core::JsonUtils::JsonObject
     }
 };
 
+struct ChannelRecipient : Core::JsonUtils::JsonObject
+{
+    Field<Core::Snowflake> channelId;
+    Field<User> user;
+    Field<std::string, true> nick;
+
+    static ChannelRecipient fromJson(const nlohmann::json &obj)
+    {
+        ChannelRecipient event;
+        get(obj, "channel_id", event.channelId);
+        get(obj, "user", event.user);
+        get(obj, "nick", event.nick);
+        return event;
+    }
+};
+
 struct ThreadDelete : Core::JsonUtils::JsonObject
 {
     Field<Core::Snowflake> id;

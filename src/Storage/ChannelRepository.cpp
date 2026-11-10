@@ -72,9 +72,23 @@ void ChannelRepository::saveChannel(const Discord::Channel &channel, Platform::D
 {
     try {
         auto q = db.prepare(R"(
-            INSERT OR REPLACE INTO channels
+            INSERT INTO channels
             (id, type, position, name, guild_id, parent_id, last_message_id, icon, owner_id, rate_limit_per_user, available_tags, default_sort_order, flags, topic)
             VALUES (:id, :type, :position, :name, :guild_id, :parent_id, :last_message_id, :icon, :owner_id, :rate_limit_per_user, :available_tags, :default_sort_order, :flags, :topic)
+            ON CONFLICT(id) DO UPDATE SET
+                type = excluded.type,
+                position = excluded.position,
+                name = excluded.name,
+                guild_id = excluded.guild_id,
+                parent_id = excluded.parent_id,
+                last_message_id = excluded.last_message_id,
+                icon = excluded.icon,
+                owner_id = excluded.owner_id,
+                rate_limit_per_user = excluded.rate_limit_per_user,
+                available_tags = excluded.available_tags,
+                default_sort_order = excluded.default_sort_order,
+                flags = excluded.flags,
+                topic = excluded.topic
         )");
 
         q.bind(":id", static_cast<int64_t>(channel.id.get()));

@@ -340,6 +340,8 @@ public:
     Platform::Signal<const ChannelCreate &> channelCreated;
     Platform::Signal<const ChannelUpdate &> channelUpdated;
     Platform::Signal<const ChannelDelete &> channelDeleted;
+    Platform::Signal<const ChannelRecipient &> channelRecipientAdded;
+    Platform::Signal<const ChannelRecipient &> channelRecipientRemoved;
     Platform::Signal<const ChannelCreate &> threadCreated;
     Platform::Signal<const ChannelUpdate &> threadUpdated;
     Platform::Signal<const ThreadDelete &> threadDeleted;

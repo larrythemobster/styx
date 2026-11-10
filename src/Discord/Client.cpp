@@ -159,6 +159,8 @@ Client::Client(const std::string &token, const std::string &gatewayUrl, const st
     track(gateway->gatewayChannelCreate.connect([this](const auto &v) { onGatewayChannelCreate(v); }));
     track(gateway->gatewayChannelUpdate.connect([this](const auto &v) { onGatewayChannelUpdate(v); }));
     track(gateway->gatewayChannelDelete.connect([this](const auto &v) { onGatewayChannelDelete(v); }));
+    track(gateway->gatewayChannelRecipientAdded.connect([this](const auto &v) { channelRecipientAdded.publish(v); }));
+    track(gateway->gatewayChannelRecipientRemoved.connect([this](const auto &v) { channelRecipientRemoved.publish(v); }));
     track(gateway->gatewayThreadCreate.connect([this](const auto &v) { onGatewayThreadCreate(v); }));
     track(gateway->gatewayThreadUpdate.connect([this](const auto &v) { onGatewayThreadUpdate(v); }));
     track(gateway->gatewayThreadDelete.connect([this](const auto &v) { onGatewayThreadDelete(v); }));

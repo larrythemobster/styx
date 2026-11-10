@@ -37,6 +37,7 @@ public:
     void registerChannel(const Discord::Channel &channel, Snowflake guildId);
     void registerPrivateChannel(const Discord::Channel &channel);
     void removeGuild(Snowflake guildId);
+    void removeChannel(Snowflake channelId);
 
     [[nodiscard]] ChannelReadState computeChannelReadState(Snowflake channelId, Snowflake guildId, Snowflake parentId) const;
     [[nodiscard]] ChannelReadState computeDMReadState(Snowflake channelId) const;

@@ -388,7 +388,11 @@ void Shell::setupPermanentConnections(ClientInstance *client)
     }));
     track(client->channelCreated.connect([this, client](const Discord::ChannelCreate &event) { channelTreeModel->addChannel(event, client->accountId()); }));
     track(client->channelUpdated.connect([this, client](const Discord::ChannelUpdate &event) { channelTreeModel->updateChannel(event, client->accountId()); }));
-    track(client->channelDeleted.connect([this, client](const Discord::ChannelDelete &event) { channelTreeModel->deleteChannel(event, client->accountId()); }));
+    track(client->channelDeleted.connect([this, client](const Discord::ChannelDelete &event) {
+        channelTreeModel->deleteChannel(event, client->accountId());
+        if (current.accountId == client->accountId() && current.channelId == event.id.get() && current.isHome())
+            openFriends(client->accountId());
+    }));
     track(client->threadCreated.connect([this, client](const Discord::Channel &event) { channelTreeModel->addThread(event, client->accountId()); }));
     track(client->threadUpdated.connect([this, client](const Discord::Channel &event) { channelTreeModel->updateThread(event, client->accountId()); }));
     track(client->threadDeleted.connect([this, client](Snowflake id, Snowflake, Snowflake) { channelTreeModel->removeThread(id, client->accountId()); }));
