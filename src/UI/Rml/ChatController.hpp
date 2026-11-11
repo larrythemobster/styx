@@ -63,6 +63,7 @@ private:
 
     // Rendering regions
     void updateHeader();
+    void maybeRingStartedCall();
     // Message search for this server, or for this DM at home.
     void openSearch();
     // Invite links open the Join a Server dialog; other links ask before opening the browser.
@@ -149,6 +150,9 @@ private:
     Core::Snowflake currentGuildId;
     Core::Snowflake currentAccountId;
     Core::Snowflake headerRecipientId;
+    Core::Snowflake pendingCallAccountId;
+    Core::Snowflake pendingCallChannelId;
+    bool pendingCallShouldRing = false;
 
     bool wasAtBottom = true;
     bool loadingHistory = false;

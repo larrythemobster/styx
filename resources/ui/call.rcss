@@ -1,4 +1,4 @@
-/* call.rcss - Discord call view styling */
+/* Discord call view */
 
 #call {
     width: 100%;
@@ -14,17 +14,37 @@ body.call-open #call {
     display: flex;
 }
 
-/* Call Header */
+body.call-open #header { display: none; }
+
+.call-header-btn,
+.call-btn,
+.call-btn-disconnect,
+.call-watch-btn,
+.call-stop-watch-btn {
+    tab-index: auto;
+}
+
+.call-header-btn:focus,
+.call-btn:focus,
+.call-watch-btn:focus,
+.call-stop-watch-btn:focus {
+    background-color: #303034;
+}
+
+.call-btn-disconnect:focus {
+    background-color: #f23f43;
+}
+
 .call-header {
-    height: 48dp;
+    min-height: 56dp;
     flex-shrink: 0;
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16dp;
+    padding: 0 20dp;
+    background-color: #08080a;
     border-bottom: 1dp #202024;
-    background-color: #000000;
     z-index: 10;
 }
 
@@ -38,17 +58,29 @@ body.call-open #call {
 .call-header-icon {
     width: 20dp;
     height: 20dp;
-    image-color: #80848e;
-    margin-right: 8dp;
+    image-color: #949ba4;
+    margin-right: 10dp;
     flex-shrink: 0;
 }
 
+.call-header-heading {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
 .call-header-title {
-    font-size: 16dp;
+    font-size: 15dp;
     font-weight: 600;
     color: #f2f3f5;
     white-space: nowrap;
     overflow: hidden;
+}
+
+.call-header-status {
+    font-size: 11dp;
+    color: #23a55a;
+    margin-top: 1dp;
 }
 
 .call-header-right {
@@ -58,14 +90,16 @@ body.call-open #call {
 }
 
 .call-header-btn {
-    width: 32dp;
-    height: 32dp;
+    width: 40dp;
+    height: 40dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 4dp;
+    background-color: transparent;
+    border-width: 0;
+    border-radius: 6dp;
     cursor: pointer;
-    margin-left: 8dp;
+    margin-left: 6dp;
 }
 
 .call-header-btn:hover {
@@ -82,18 +116,16 @@ body.call-open #call {
     image-color: #dbdee1;
 }
 
-/* Main Grid & Focus Area */
 .call-body {
     flex: 1;
     min-height: 0;
-    padding: 16dp;
+    padding: 24dp;
     display: flex;
     flex-direction: column;
     position: relative;
     overflow: hidden;
 }
 
-/* Grid layout modes */
 .call-grid {
     flex: 1;
     min-height: 0;
@@ -102,47 +134,43 @@ body.call-open #call {
     flex-wrap: wrap;
     align-content: center;
     justify-content: center;
+    padding: 8dp;
+    box-sizing: border-box;
 }
 
-/* 1 Participant: Full / large tile */
 .call-grid.tiles-1 .call-tile {
-    width: 80%;
-    height: 85%;
-    max-width: 960dp;
-    max-height: 540dp;
+    width: 82%;
+    height: 82%;
+    max-width: 1040dp;
+    max-height: 600dp;
 }
 
-/* 2 Participants: Side by side */
 .call-grid.tiles-2 .call-tile {
     width: 46%;
-    height: 70%;
-    max-width: 580dp;
-    max-height: 400dp;
+    height: 72%;
+    max-width: 620dp;
+    max-height: 440dp;
     margin: 8dp;
 }
 
-/* 3-4 Participants: 2x2 */
 .call-grid.tiles-3 .call-tile,
 .call-grid.tiles-4 .call-tile {
     width: 46%;
     height: 44%;
-    max-width: 540dp;
-    max-height: 320dp;
+    max-width: 560dp;
+    max-height: 340dp;
     margin: 8dp;
 }
 
-/* 5-6 Participants: 3x2 */
 .call-grid.tiles-5 .call-tile,
 .call-grid.tiles-6 .call-tile,
 .call-grid.tiles-more .call-tile {
     width: 30%;
     height: 44%;
-    max-width: 420dp;
-    max-height: 280dp;
+    max-width: 440dp;
+    max-height: 300dp;
     margin: 6dp;
 }
-
-/* Focus Mode: Large tile on top/center + thumbnail strip at bottom */
 .call-focus-view {
     flex: 1;
     min-height: 0;
@@ -182,10 +210,9 @@ body.call-open #call {
     flex-shrink: 0;
 }
 
-/* Individual Tile */
 .call-tile {
     background-color: #111214;
-    border-radius: 8dp;
+    border-radius: 10dp;
     position: relative;
     overflow: hidden;
     display: flex;
@@ -194,6 +221,7 @@ body.call-open #call {
     cursor: pointer;
     box-sizing: border-box;
     border: 3dp transparent;
+    transition: background-color 0.12s;
 }
 
 .call-tile.speaking {
@@ -248,7 +276,6 @@ body.call-open #call {
     line-height: 48dp;
 }
 
-/* Video Frame in Tile */
 .call-video-frame {
     width: auto;
     height: auto;
@@ -258,15 +285,14 @@ body.call-open #call {
     background-color: #000000;
 }
 
-/* Name Pill (Bottom Left) */
 .call-tile-pill {
     position: absolute;
-    bottom: 8dp;
-    left: 8dp;
-    height: 24dp;
+    bottom: 10dp;
+    left: 10dp;
+    min-height: 30dp;
     background-color: #000000b3;
-    border-radius: 4dp;
-    padding: 0 8dp;
+    border-radius: 6dp;
+    padding: 0 10dp;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -279,7 +305,7 @@ body.call-open #call {
     color: #f2f3f5;
     white-space: nowrap;
     overflow: hidden;
-    max-width: 160dp;
+    max-width: 180dp;
 }
 
 .call-tile-icons {
@@ -296,43 +322,171 @@ body.call-open #call {
     margin-left: 4dp;
 }
 
-/* Badges (Top Left / Right) */
 .call-badge-live {
     position: absolute;
-    top: 10dp;
-    left: 10dp;
+    top: 12dp;
+    left: 12dp;
     background-color: #f23f43;
     color: #ffffff;
     font-size: 11dp;
     font-weight: 700;
-    padding: 2dp 6dp;
+    padding: 3dp 7dp;
     border-radius: 4dp;
     letter-spacing: 0.5px;
     z-index: 5;
 }
 
-/* Watch Stream Overlay */
-.call-stream-overlay {
+.call-self-preview-text {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #00000099;
+    color: #949ba4;
+    font-size: 13dp;
+    font-weight: 500;
+    bottom: 48dp;
+    text-align: center;
+    z-index: 5;
+}
+
+.call-controls {
+    min-height: 96dp;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    background-color: #08080a;
+    border-top: 1dp #202024;
+    z-index: 10;
+    padding: 10dp 12dp;
+    box-sizing: border-box;
+}
+
+.call-control-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 6dp;
+    border-radius: 12dp;
+    background-color: #111214;
+    margin-right: 10dp;
+}
+
+.call-btn {
+    min-width: 64dp;
+    height: 60dp;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    z-index: 6;
+    background-color: transparent;
+    color: #dbdee1;
+    border-width: 0;
+    border-radius: 8dp;
+    cursor: pointer;
+    margin: 0 2dp;
+    padding: 4dp 6dp;
+}
+
+.call-btn:hover {
+    background-color: #242428;
+}
+
+.call-btn img {
+    width: 22dp;
+    height: 22dp;
+    image-color: #dbdee1;
+}
+
+.call-btn span {
+    font-size: 11dp;
+    color: #b5bac1;
+    margin-top: 4dp;
+}
+
+.call-btn.active {
+    background-color: #da373c;
+}
+
+.call-btn.active img,
+.call-btn.active span {
+    image-color: #ffffff;
+    color: #ffffff;
+}
+
+.call-btn.active:hover {
+    background-color: #f23f43;
+}
+
+.call-btn-disconnect {
+    min-width: 108dp;
+    height: 60dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    background-color: #da373c;
+    color: #ffffff;
+    border-width: 0;
+    border-radius: 8dp;
+    cursor: pointer;
+    padding: 0 12dp;
+}
+
+.call-btn-disconnect:hover {
+    background-color: #f23f43;
+}
+
+.call-btn-disconnect img {
+    width: 20dp;
+    height: 20dp;
+    image-color: #ffffff;
+    margin-right: 8dp;
+}
+
+.call-btn-disconnect span {
+    font-size: 13dp;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.call-empty {
+    width: 82%;
+    height: 76%;
+    max-width: 1040dp;
+    max-height: 540dp;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: #111214;
+    border: 1dp #202024;
+    border-radius: 12dp;
+}
+
+.call-empty-title {
+    font-size: 20dp;
+    font-weight: 600;
+    color: #f2f3f5;
+    margin-bottom: 6dp;
+}
+
+.call-empty-description {
+    font-size: 13dp;
+    color: #949ba4;
 }
 
 .call-watch-btn {
+    position: absolute;
+    top: 12dp;
+    right: 12dp;
+    z-index: 6;
+    min-height: 40dp;
     background-color: #5865f2;
     color: #ffffff;
-    font-size: 14dp;
+    border-width: 0;
+    border-radius: 6dp;
+    padding: 0 14dp;
+    font-size: 13dp;
     font-weight: 600;
-    padding: 8dp 16dp;
-    border-radius: 4dp;
     cursor: pointer;
 }
 
@@ -344,95 +498,17 @@ body.call-open #call {
     position: absolute;
     top: 10dp;
     right: 10dp;
-    background-color: #00000099;
-    color: #ffffff;
-    font-size: 12dp;
-    font-weight: 600;
-    padding: 4dp 8dp;
-    border-radius: 4dp;
-    cursor: pointer;
     z-index: 7;
+    min-height: 40dp;
+    background-color: #19191c;
+    color: #ffffff;
+    border-width: 0;
+    border-radius: 6dp;
+    padding: 0 12dp;
+    font-size: 12dp;
+    cursor: pointer;
 }
 
 .call-stop-watch-btn:hover {
-    background-color: #f23f43;
-}
-
-.call-self-preview-text {
-    position: absolute;
-    color: #949ba4;
-    font-size: 13dp;
-    font-weight: 500;
-    bottom: 38dp;
-    text-align: center;
-    z-index: 5;
-}
-
-/* Bottom Control Bar */
-.call-controls {
-    height: 80dp;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-    background-color: #08080a;
-    border-top: 1dp #202024;
-    z-index: 10;
-}
-
-.call-btn {
-    width: 52dp;
-    height: 52dp;
-    border-radius: 26dp;
-    background-color: #19191c;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 8dp;
-    cursor: pointer;
-}
-
-.call-btn:hover {
-    background-color: #242428;
-}
-
-.call-btn img {
-    width: 24dp;
-    height: 24dp;
-    image-color: #dbdee1;
-}
-
-.call-btn.active {
-    background-color: #f23f43;
-}
-
-.call-btn.active img {
-    image-color: #ffffff;
-}
-
-.call-btn.active:hover {
     background-color: #da373c;
-}
-
-.call-btn-disconnect {
-    width: 56dp;
-    height: 56dp;
-    border-radius: 28dp;
-    background-color: #f23f43;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 12dp;
-    cursor: pointer;
-}
-
-.call-btn-disconnect:hover {
-    background-color: #da373c;
-}
-
-.call-btn-disconnect img {
-    width: 26dp;
-    height: 26dp;
-    image-color: #ffffff;
 }

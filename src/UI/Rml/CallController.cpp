@@ -15,6 +15,7 @@
 
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/Event.h>
+#include <RmlUi/Core/Input.h>
 
 #include <algorithm>
 #include <format>
@@ -100,6 +101,15 @@ CallController::CallController(Shell &shell, ::Rml::Element *root)
                 onTileClicked(parseUserId(idStr));
                 return;
             }
+        }
+    });
+    listen("keydown", [](::Rml::Event &event) {
+        auto *target = event.GetTargetElement();
+        const int key = event.GetParameter<int>("key_identifier", 0);
+        if (target && target->GetTagName() == "button"
+            && (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER || key == ::Rml::Input::KI_SPACE)) {
+            event.StopPropagation();
+            target->DispatchEvent("click", {});
         }
     });
 
@@ -332,10 +342,14 @@ void CallController::updateCallView()
 
     bool isSelfStreaming = false;
 #ifdef STYX_HAVE_SCREENSHARE
-    if (currentStreamManager) {
+    if (currentStreamManager)
         isSelfStreaming = currentStreamManager->isStreaming();
-    }
 #endif
+    const auto voiceState = currentVoiceManager ? currentVoiceManager->clientState() : Discord::Voice::VoiceClient::State::Disconnected;
+    const bool isConnected = voiceState == Discord::Voice::VoiceClient::State::Connected;
+    const bool isConnecting = !isConnected && (voiceState != Discord::Voice::VoiceClient::State::Disconnected
+        || (currentInstance && currentInstance->isInVoice()));
+    const char *connectionLabel = isConnected ? "Connected" : isConnecting ? "Connecting" : "Disconnected";
 
     // Helper lambda to render a single participant tile
     auto renderTile = [&](const Core::Audio::VoiceParticipant &p, bool inStrip) -> std::string {
@@ -369,60 +383,35 @@ void CallController::updateCallView()
         std::string tileClasses = "call-tile";
         if (isSpeaking)
             tileClasses += " speaking";
+        if (isSelf)
+            tileClasses += " self";
 
         std::string tileContent;
-
         if (isWatching) {
-            // Render the live video frame
             tileContent += std::format("<img class=\"call-video-frame\" src=\"frame:{0}\"/>", uid.toString());
-            tileContent += std::format(
-                "<div class=\"call-stop-watch-btn\" data-action-stop-watch=\"{0}\">Stop Watching</div>"
-            , uid.toString());
+            tileContent += std::format("<button class=\"call-stop-watch-btn\" data-action-stop-watch=\"{0}\">Stop watching</button>", uid.toString());
         } else {
-            // Avatar centred on background
-            tileContent += std::format(
-                "<div class=\"call-tile-avatar-center\">"
-                "  <img class=\"call-tile-avatar\" src=\"{0}\"/>"
-                "</div>"
-            , avatarSrc);
-
-            if (isSelf && isSelfStreaming) {
-                tileContent += "<div class=\"call-self-preview-text\">You are streaming</div>";
-            }
+            tileContent += std::format("<div class=\"call-tile-avatar-center\"><img class=\"call-tile-avatar\" src=\"{0}\"/></div>", Rml::escape(avatarSrc));
+            if (isSelf && isSelfStreaming)
+                tileContent += "<div class=\"call-self-preview-text\">You are sharing your screen</div>";
         }
 
-        // Live badge
         if (isStreaming) {
             tileContent += "<div class=\"call-badge-live\">LIVE</div>";
-            if (!isWatching && !isSelf && !inStrip) {
-                // Watch stream overlay button
-                tileContent += std::format(
-                    "<div class=\"call-stream-overlay\">"
-                    "  <div class=\"call-watch-btn\" data-action-watch=\"{0}\">Watch Stream</div>"
-                    "</div>"
-                , uid.toString());
-            }
+            if (!isWatching && !isSelf && !inStrip)
+                tileContent += std::format("<button class=\"call-watch-btn\" data-action-watch=\"{0}\">Watch stream</button>", uid.toString());
         }
 
-        // Name pill bottom-left
-        std::string muteIcons;
-        if (p.selfMute || p.serverMute) {
-            muteIcons += "<img class=\"call-tile-icon\" src=\"icon:mic-off\"/>";
-        }
-        if (p.selfDeaf || p.serverDeaf) {
-            muteIcons += "<img class=\"call-tile-icon\" src=\"icon:headphone-off\"/>";
-        }
+        std::string statusIcons;
+        if (p.selfMute || p.serverMute)
+            statusIcons += std::format("<img class=\"call-tile-icon\" src=\"icon:mic-off\" title=\"{0}\"/>", p.serverMute ? "Server muted" : "Muted");
+        if (p.selfDeaf || p.serverDeaf)
+            statusIcons += std::format("<img class=\"call-tile-icon\" src=\"icon:headphone-off\" title=\"{0}\"/>", p.serverDeaf ? "Server deafened" : "Deafened");
+        if (isSelf)
+            name = "You";
 
-        tileContent += std::format(
-            "<div class=\"call-tile-pill\">"
-            "  <div class=\"call-tile-name\">{0}</div>"
-            "  <div class=\"call-tile-icons\">{1}</div>"
-            "</div>"
-        , escape(name), muteIcons);
-
-        return std::format(
-            "<div class=\"{0}\" data-user-id=\"{1}\">{2}</div>"
-        , tileClasses, uid.toString(), tileContent);
+        tileContent += std::format("<div class=\"call-tile-pill\"><div class=\"call-tile-name\">{0}</div><div class=\"call-tile-icons\">{1}</div></div>", escape(name), statusIcons);
+        return std::format("<div class=\"{0}\" data-user-id=\"{1}\">{2}</div>", tileClasses, uid.toString(), tileContent);
     };
 
     // 3. Assemble Tiles (Grid vs Focus Mode)
@@ -460,28 +449,25 @@ void CallController::updateCallView()
             "</div>"
         , mainTile, stripTiles);
     } else {
-        // Grid mode: responsive class tiles-1, tiles-2, tiles-3, etc.
-        int count = participants.size();
-        std::string gridClass = "call-grid";
-        if (count <= 1)
-            gridClass += " tiles-1";
-        else if (count == 2)
-            gridClass += " tiles-2";
-        else if (count <= 4)
-            gridClass += " tiles-4";
-        else if (count <= 6)
-            gridClass += " tiles-6";
-        else
-            gridClass += " tiles-more";
-
+        const int count = static_cast<int>(participants.size());
         std::string tilesHtml;
-        for (const auto &p : participants) {
+        for (const auto &p : participants)
             tilesHtml += renderTile(p, false);
+
+        if (participants.empty()) {
+            tilesHtml = std::format(
+                "<div class=\"call-empty\"><div class=\"call-empty-title\">{0}</div><div class=\"call-empty-description\">{1}</div></div>",
+                isConnecting ? "Joining voice…" : isConnected ? "You are the only one here" : "Not connected",
+                isConnecting ? "Connecting to the voice server" : isConnected ? "Wait for someone to join" : "Close this view and join a call to reconnect");
         }
 
-        bodyHtml = std::format(
-            "<div class=\"{0}\">{1}</div>"
-        , gridClass, tilesHtml);
+        std::string gridClass = "call-grid";
+        if (count <= 1) gridClass += " tiles-1";
+        else if (count == 2) gridClass += " tiles-2";
+        else if (count <= 4) gridClass += " tiles-4";
+        else if (count <= 6) gridClass += " tiles-6";
+        else gridClass += " tiles-more";
+        bodyHtml = std::format("<div class=\"{0}\">{1}</div>", gridClass, tilesHtml);
     }
 
     // 4. Header & Controls
@@ -494,36 +480,41 @@ void CallController::updateCallView()
         }
     }
 
-    std::string muteBtnClass = selfMuted ? "call-btn active" : "call-btn";
-    std::string muteIcon = selfMuted ? "icon:mic-off" : "icon:mic";
+    const std::string muteBtnClass = selfMuted ? "call-btn active" : "call-btn";
+    const std::string muteIcon = selfMuted ? "icon:mic-off" : "icon:mic";
+    const std::string deafBtnClass = selfDeafened ? "call-btn active" : "call-btn";
+    const std::string deafIcon = selfDeafened ? "icon:headphone-off" : "icon:headphones";
+    const std::string shareBtnClass = isSelfStreaming ? "call-btn active" : "call-btn";
+    const std::string fullscreenIcon = isFullscreen ? "icon:minimize" : "icon:maximize";
 
-    std::string deafBtnClass = selfDeafened ? "call-btn active" : "call-btn";
-    std::string deafIcon = selfDeafened ? "icon:headphone-off" : "icon:headphones";
-
-    std::string shareBtnClass = isSelfStreaming ? "call-btn active" : "call-btn";
-    std::string fullscreenIcon = isFullscreen ? "icon:minimize" : "icon:maximize";
+    std::string shareButton;
+#ifdef STYX_HAVE_SCREENSHARE
+    shareButton = std::format(
+        "<button class=\"{0}\" data-action-share=\"1\" title=\"{1}\" aria-label=\"{1}\"><img src=\"icon:monitor\"/><span>{1}</span></button>",
+        shareBtnClass, isSelfStreaming ? "Stop sharing" : "Share screen");
+#endif
 
     std::string rml = std::format(
         "<div class=\"call-header\">"
-        "  <div class=\"call-header-left\">"
-        "    <img class=\"call-header-icon\" src=\"icon:volume-2\"/>"
-        "    <div class=\"call-header-title\">{0}</div>"
-        "  </div>"
+        "  <div class=\"call-header-left\"><img class=\"call-header-icon\" src=\"icon:volume-2\"/><div class=\"call-header-heading\"><div class=\"call-header-title\">{0}</div><div class=\"call-header-status\">{1}</div></div></div>"
         "  <div class=\"call-header-right\">"
-        "    <div class=\"call-header-btn\" data-action-fullscreen=\"1\"><img src=\"{1}\"/></div>"
-        "    <div class=\"call-header-btn\" data-action-close=\"1\"><img src=\"icon:x\"/></div>"
+        "    <button class=\"call-header-btn\" data-action-fullscreen=\"1\" title=\"Toggle fullscreen\" aria-label=\"Toggle fullscreen\"><img src=\"{2}\"/></button>"
+        "    <button class=\"call-header-btn\" data-action-close=\"1\" title=\"Close call view\" aria-label=\"Close call view\"><img src=\"icon:x\"/></button>"
         "  </div>"
         "</div>"
-        "<div class=\"call-body\">"
-        "  {2}"
-        "</div>"
+        "<div class=\"call-body\">{3}</div>"
         "<div class=\"call-controls\">"
-        "  <div class=\"{3}\" data-action-mute=\"1\"><img src=\"{4}\"/></div>"
-        "  <div class=\"{5}\" data-action-deaf=\"1\"><img src=\"{6}\"/></div>"
-        "  <div class=\"{7}\" data-action-share=\"1\"><img src=\"icon:monitor\"/></div>"
-        "  <div class=\"call-btn-disconnect\" data-action-disconnect=\"1\"><img src=\"icon:phone-off\"/></div>"
-        "</div>"
-    , escape(channelName), fullscreenIcon, bodyHtml, muteBtnClass, muteIcon, deafBtnClass, deafIcon, shareBtnClass);
+        "  <div class=\"call-control-group\">"
+        "    <button class=\"{4}\" data-action-mute=\"1\" title=\"{5}\" aria-label=\"{5}\"><img src=\"{6}\"/><span>{5}</span></button>"
+        "    <button class=\"{7}\" data-action-deaf=\"1\" title=\"{8}\" aria-label=\"{8}\"><img src=\"{9}\"/><span>{8}</span></button>"
+        "    {10}"
+        "  </div>"
+        "  <button class=\"call-btn-disconnect\" data-action-disconnect=\"1\" title=\"Disconnect from voice\" aria-label=\"Disconnect from voice\"><img src=\"icon:phone-off\"/><span>Disconnect</span></button>"
+        "</div>",
+        escape(channelName), connectionLabel, fullscreenIcon, bodyHtml,
+        muteBtnClass, selfMuted ? "Unmute" : "Mute", muteIcon,
+        deafBtnClass, selfDeafened ? "Undeafen" : "Deafen", deafIcon,
+        shareButton);
 
     regionRoot->SetInnerRML(rml.c_str());
     requestRender();

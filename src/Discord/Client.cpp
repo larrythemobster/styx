@@ -991,6 +991,12 @@ void Client::modifyCurrentUserProfile(const UserProfileEdit &edit, const std::ma
 }
 
 
+void Client::ringChannelRecipients(Snowflake channelId, ActionCallback callback)
+{
+    httpClient->post("/channels/" + channelId.toString() + "/call/ring",
+                     nlohmann::json::object(), actionHandler("Ringing call recipients", std::move(callback)));
+}
+
 void Client::sendFriendRequest(const std::string &username, ActionCallback callback)
 {
     nlohmann::json body;

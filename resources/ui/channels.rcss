@@ -192,7 +192,7 @@
 /* Section headers (e.g. DIRECT MESSAGES) */
 .section-header
 {
-	padding: 16dp 16dp 4dp 16dp;
+	padding: 12dp 16dp 4dp 16dp;
 	font-size: 12dp;
 	font-weight: 700;
 	color: #949ba4;
@@ -375,7 +375,7 @@
 .dm-friends-row
 {
 	height: 42dp;
-	margin: 1dp 8dp 8dp 8dp;
+	margin: 1dp 8dp 4dp 8dp;
 	padding: 0 10dp;
 	border-radius: 6dp;
 	display: flex;
@@ -409,7 +409,7 @@
 
 .dm-row
 {
-	height: 44dp;
+	height: 40dp;
 	margin: 1dp 8dp;
 	padding: 0 8dp;
 	border-radius: 6dp;
@@ -436,7 +436,7 @@
 	position: relative;
 	width: 32dp;
 	height: 32dp;
-	margin-right: 12dp;
+	margin-right: 8dp;
 	border-radius: 16dp;
 	overflow: hidden;
 	flex-shrink: 0;

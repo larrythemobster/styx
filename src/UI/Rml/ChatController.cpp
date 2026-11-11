@@ -6,6 +6,7 @@
 #include "Shell.hpp"
 #include "ShortcutController.hpp"
 
+#include "Core/Calls/CallStore.hpp"
 #include "Core/ClientInstance.hpp"
 #include "Core/Emoji/PickerEmoji.hpp"
 #include "Core/Emoji/UnicodeEmojiIndex.hpp"
@@ -57,6 +58,54 @@ namespace UI {
 namespace Rml {
 
 namespace {
+
+#ifndef STYX_NO_VOICE
+bool canCallDm(Core::ClientInstance *instance, Core::Snowflake channelId)
+{
+    if (!instance || !channelId.isValid())
+        return false;
+    const auto channel = instance->getChannel(channelId);
+    if (!channel || (channel->guildId.hasValue() && channel->guildId->isValid()))
+        return false;
+    if (channel->type.get() == Discord::ChannelType::GROUP_DM)
+        return true;
+    if (channel->type.get() != Discord::ChannelType::DM)
+        return false;
+
+    Core::Snowflake recipient;
+    const auto take = [&](Core::Snowflake id) {
+        if (!id.isValid())
+            return false;
+        if (id != instance->accountId()) {
+            if (recipient.isValid() && recipient != id)
+                return false;
+            recipient = id;
+        }
+        return true;
+    };
+    if (channel->recipientIds.hasValue()) {
+        for (const auto id : channel->recipientIds.get())
+            if (!take(id))
+                return false;
+    } else if (channel->recipients.hasValue()) {
+        for (const auto &user : channel->recipients.get())
+            if (!take(user.id.get()))
+                return false;
+    }
+    if (!recipient.isValid())
+        return false;
+    if (channel->recipients.hasValue())
+        for (const auto &user : channel->recipients.get())
+            if (user.id.get() == recipient && user.bot.valueOr(false))
+                return false;
+    if (instance->users()) {
+        const auto user = instance->users()->getUser(recipient);
+        if (user && user->bot.valueOr(false))
+            return false;
+    }
+    return true;
+}
+#endif
 
 template<class T = uint64_t> T parseNumber(std::string_view text)
 {
@@ -297,7 +346,23 @@ void ChatController::setupEventListeners()
         std::string action = attribute(actionEl, "data-action");
         if (action == std::string("toggle-members")) {
             shell.setMemberListVisible(!shell.isMemberListVisible());
-            updateHeader();
+        } else if (action == std::string("open-dm-call")) {
+#ifndef STYX_NO_VOICE
+            auto *instance = shell.instanceFor(currentAccountId);
+            if (shell.location().isHome() && canCallDm(instance, currentChannelId)) {
+                const bool connected = instance->isInVoice() && instance->voiceChannelId() == currentChannelId;
+                const bool pending = pendingCallAccountId == currentAccountId && pendingCallChannelId == currentChannelId;
+                if (!connected && !pending) {
+                    if (instance->discord()->getProxy().canRelayUdp()) {
+                        pendingCallAccountId = currentAccountId;
+                        pendingCallChannelId = currentChannelId;
+                        pendingCallShouldRing = instance->calls() && !instance->calls()->isActive(currentChannelId);
+                    }
+                    shell.joinVoice(currentAccountId, Core::Snowflake::Invalid, currentChannelId);
+                }
+                shell.setCallOpen(true);
+            }
+#endif
         } else if (action == std::string("open-threads")) {
             shell.openThreadBrowser(currentChannelId);
         } else if (action == std::string("open-search")) {
@@ -492,6 +557,20 @@ void ChatController::setupEventListeners()
         }
     });
 
+    // RmlUi's button tag is a generic element and does not synthesize keyboard clicks.
+    if (headerEl) {
+        listen("keydown", [](::Rml::Event &event) {
+            const int key = event.GetParameter<int>("key_identifier", 0);
+            auto *target = event.GetTargetElement();
+            if (target && target->GetTagName() == "button"
+                && (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER
+                    || key == ::Rml::Input::KI_SPACE)) {
+                event.StopPropagation();
+                target->DispatchEvent("click", {});
+            }
+        }, headerEl);
+    }
+
     // Scroll listener on #messages
     if (messagesEl) {
         listen("scroll", [this](::Rml::Event &) {
@@ -656,6 +735,12 @@ void ChatController::setupModelConnections()
     track(shell.locationChanged.connect([this](const Location &location) { onLocationChanged(location); }));
     track(shell.instanceChanged.connect([this](Core::ClientInstance *instance) { onInstanceChanged(instance); }));
     track(shell.memberListVisibleChanged.connect([this](bool) { updateHeader(); }));
+    track(shell.callOpenChanged.connect([this](bool open) {
+        if (!open) {
+            pendingCallAccountId = Core::Snowflake::Invalid;
+            pendingCallChannelId = Core::Snowflake::Invalid;
+        }
+    }));
 
     if (auto *model = shell.chat()) {
         track(model->rowsInserted.connect([this](int first, int last) { onRowsInserted(first, last); }));
@@ -670,6 +755,10 @@ void ChatController::setupModelConnections()
 
 void ChatController::onLocationChanged(const Location &location)
 {
+    if (pendingCallAccountId != location.accountId || pendingCallChannelId != location.channelId) {
+        pendingCallAccountId = Core::Snowflake::Invalid;
+        pendingCallChannelId = Core::Snowflake::Invalid;
+    }
     if (currentChannelId != location.channelId)
         expandedBlockedRuns.clear();
     revealedComponentSpoilers.clear();
@@ -702,6 +791,8 @@ void ChatController::onLocationChanged(const Location &location)
 
 void ChatController::onInstanceChanged(Core::ClientInstance *instance)
 {
+    pendingCallAccountId = Core::Snowflake::Invalid;
+    pendingCallChannelId = Core::Snowflake::Invalid;
     revealedComponentSpoilers.clear();
     pollVotes.clear();
     interactions.clear();
@@ -712,6 +803,29 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
         connection.disconnect();
     instanceConnections.clear();
     if (instance) {
+        if (auto *calls = instance->calls()) {
+            instanceConnections.push_back(calls->callChanged.connect([this](Core::Snowflake channelId) {
+                if (channelId == currentChannelId) {
+                    maybeRingStartedCall();
+                    updateHeader();
+                }
+            }));
+        }
+        instanceConnections.push_back(instance->voiceStateChanged.connect(
+            [this](Core::Snowflake channelId, Core::Snowflake) {
+                if (channelId.isValid() && pendingCallChannelId.isValid() && channelId != pendingCallChannelId) {
+                    pendingCallAccountId = Core::Snowflake::Invalid;
+                    pendingCallChannelId = Core::Snowflake::Invalid;
+                }
+                maybeRingStartedCall();
+                updateHeader();
+            }));
+        instanceConnections.push_back(instance->stateChanged.connect([this](Core::ConnectionState state) {
+            if (state != Core::ConnectionState::Connected) {
+                pendingCallAccountId = Core::Snowflake::Invalid;
+                pendingCallChannelId = Core::Snowflake::Invalid;
+            }
+        }));
         instanceConnections.push_back(instance->messages()->messagesReceived.connect(
             [this](const Core::MessageRequestResult &result) {
                 if (result.channelId != currentChannelId)
@@ -1806,6 +1920,36 @@ std::string ChatController::conversationName() const
     return {};
 }
 
+void ChatController::maybeRingStartedCall()
+{
+#ifndef STYX_NO_VOICE
+    if (!pendingCallChannelId.isValid())
+        return;
+    auto *instance = shell.instanceFor(pendingCallAccountId);
+    if (!instance || !instance->isInVoice() || instance->voiceChannelId() != pendingCallChannelId)
+        return;
+    if (pendingCallShouldRing && (!instance->calls() || !instance->calls()->isActive(pendingCallChannelId)))
+        return;
+    const auto accountId = pendingCallAccountId;
+    const auto channelId = pendingCallChannelId;
+    pendingCallAccountId = Core::Snowflake::Invalid;
+    pendingCallChannelId = Core::Snowflake::Invalid;
+    if (!pendingCallShouldRing)
+        return;
+    Platform::Guard<ChatController> self(this);
+    instance->discord()->ringChannelRecipients(channelId, [self, accountId, channelId](const Core::Result<void> &result) {
+        if (!self || result.success() || self->currentAccountId != accountId || self->currentChannelId != channelId)
+            return;
+        ConfirmOptions options;
+        options.title = "Could not ring recipients";
+        options.body = escape(result.error.empty() ? "The call is connected, but recipients could not be notified." : result.error);
+        options.confirmText = "OK";
+        options.cancelText.clear();
+        showConfirmModal(self->shell, options);
+    });
+#endif
+}
+
 void ChatController::updateHeader()
 {
     headerRecipientId = Core::Snowflake::Invalid;
@@ -1879,22 +2023,45 @@ void ChatController::updateHeader()
         leadingIcon = std::format("<img class=\"header-icon\" src=\"{0}\"/>", icon);
     }
 
-    const std::string threads = isDm ? std::string() : std::string("<div class=\"header-btn\" data-action=\"open-threads\" title=\"Threads\"><img src=\"icon:messages-square\"/></div>");
+    const std::string threads = isDm ? std::string() : std::string("<button type=\"button\" class=\"header-btn\" data-action=\"open-threads\" title=\"Threads\" aria-label=\"Threads\"><img src=\"icon:messages-square\"/></button>");
+    std::string callButton;
+#ifndef STYX_NO_VOICE
+    if (isDm && canCallDm(instance, currentChannelId)) {
+        const bool connected = instance->isInVoice() && instance->voiceChannelId() == currentChannelId;
+        const bool active = instance->calls() && instance->calls()->isActive(currentChannelId);
+        const char *label = connected ? "Open call" : active ? "Join call" : "Start voice call";
+        callButton = std::format("<button type=\"button\" class=\"header-btn\" data-action=\"open-dm-call\" title=\"{0}\" aria-label=\"{0}\"><img src=\"icon:phone\"/></button>", label);
+    }
+#endif
     std::string groupDmButton;
     if (isDm) {
         if (CreateGroupDmController::canOpen(instance, currentChannelId))
-            groupDmButton = "<button class=\"header-btn group-dm-create\" data-action=\"create-group-dm\" title=\"Create group DM\"><img src=\"icon:user-plus\"/></button>";
+            groupDmButton = "<button type=\"button\" class=\"header-btn group-dm-create\" data-action=\"create-group-dm\" title=\"Create group DM\" aria-label=\"Create group DM\"><img src=\"icon:user-plus\"/></button>";
         else if (ManageGroupDmController::canOpen(instance, currentChannelId)) {
-            groupDmButton = "<button class=\"header-btn group-dm-create\" data-action=\"manage-group-dm-members\" title=\"Manage members\"><img src=\"icon:user-plus\"/></button>"
-                "<button class=\"header-btn group-dm-create\" data-action=\"edit-group-dm\" title=\"Edit group details\"><img src=\"icon:pencil\"/></button>";
+            groupDmButton = "<button type=\"button\" class=\"header-btn group-dm-create\" data-action=\"manage-group-dm-members\" title=\"Manage members\" aria-label=\"Manage members\"><img src=\"icon:user-plus\"/></button>"
+                "<button type=\"button\" class=\"header-btn group-dm-create\" data-action=\"edit-group-dm\" title=\"Edit group details\" aria-label=\"Edit group details\"><img src=\"icon:pencil\"/></button>";
         }
     }
-    const std::string members = std::format("<div class=\"header-btn{0}\" data-action=\"toggle-members\" title=\"{1}\"><img src=\"icon:id-card\"/></div>", shell.isMemberListVisible() ? std::string(" active") : std::string(), isDm ? std::string("Conversation profile") : std::string("Member list"));
+    const std::string members = std::format("<button type=\"button\" class=\"header-btn{0}\" data-action=\"toggle-members\" title=\"{1}\" aria-label=\"{1}\" aria-pressed=\"{2}\"><img src=\"icon:id-card\"/></button>", shell.isMemberListVisible() ? " active" : "", isDm ? "Conversation profile" : "Member list", shell.isMemberListVisible() ? "true" : "false");
     const std::string html = std::string("<div class=\"header-left\">") + leadingIcon
         + std::string("<span class=\"header-title\">") + escape(name) + std::string("</span>")
         + presenceDot + topicHtml + std::string("</div><div class=\"header-right\">")
-        + threads + groupDmButton + members + std::string("<div class=\"header-btn\" data-action=\"open-search\" title=\"Search\"><img src=\"icon:search\"/></div></div>");
+        + threads + callButton + groupDmButton + members + std::string("<button type=\"button\" class=\"header-btn\" data-action=\"open-search\" title=\"Search\" aria-label=\"Search\"><img src=\"icon:search\"/></button></div>");
+    std::string focusSelector;
+    if (auto *context = headerEl->GetContext()) {
+        if (auto *focused = context->GetFocusElement()) {
+            const auto action = attribute(focused, "data-action");
+            if (!action.empty()) {
+                const auto selector = "[data-action=\"" + action + "\"]";
+                if (headerEl->QuerySelector(selector) == focused)
+                    focusSelector = selector;
+            }
+        }
+    }
     headerEl->SetInnerRML(html);
+    if (!focusSelector.empty())
+        if (auto *focused = headerEl->QuerySelector(focusSelector))
+            focused->Focus();
     requestRender();
 }
 

@@ -228,6 +228,8 @@ public:
     void removeGroupDmRecipient(Snowflake channelId, Snowflake userId, ActionCallback callback = {});
     void modifyGroupDm(Snowflake channelId, const GroupDmEdit &edit, ResultCallback<Channel> callback = {});
     void leaveGroupDm(Snowflake channelId, bool silent = false, ResultCallback<Channel> callback = {});
+    // Rings all recipients of an active private-channel call.
+    void ringChannelRecipients(Snowflake channelId, ActionCallback callback = {});
 
     // REST admission only; interactionSucceeded/interactionFailed report the application's result.
     void createComponentInteraction(const ComponentInteractionRequest &request, ActionCallback callback = {});

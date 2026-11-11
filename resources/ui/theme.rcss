@@ -59,7 +59,7 @@ body.rail-folder-open #rail
 
 #sidebar
 {
-	width: 360dp;
+	width: 240dp;
 	height: 100%;
 	flex-shrink: 0;
 	background-color: #0b0b0c;
@@ -74,12 +74,12 @@ body.rail-folder-open #rail
 #sidebar-header { height: 48dp; flex-shrink: 0; background-color: #0b0b0c; border-bottom: 1dp #202024; }
 #channel-list { flex: 1; min-height: 0; overflow-y: auto; background-color: #0b0b0c; }
 #voice-panel { flex-shrink: 0; background-color: #08080a; margin: 0 8dp 8dp 8dp; border: 1dp #202024; border-radius: 8dp; z-index: 90; }
-#user-panel
+body #user-panel
 {
 	position: absolute;
 	left: 8dp;
 	bottom: 8dp;
-	width: 416dp;
+	width: 296dp;
 	height: 56dp;
 	border: 1dp #202024;
 	border-radius: 8dp;
@@ -90,7 +90,7 @@ body.rail-folder-open #rail
 
 body.rail-folder-open #user-panel
 {
-	width: 480dp;
+	width: 360dp;
 }
 #main
 {
@@ -142,7 +142,7 @@ body.rail-folder-open #user-panel
 
 #members
 {
-	width: 240dp;
+	width: 224dp;
 	flex-shrink: 0;
 	background-color: #0b0b0c;
 	border-left: 1dp #202024;

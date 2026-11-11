@@ -13,6 +13,7 @@
 
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/Event.h>
+#include <RmlUi/Core/Input.h>
 
 #include <algorithm>
 #include <charconv>
@@ -59,9 +60,25 @@ MemberListController::MemberListController(Shell &shell, ::Rml::Element *root)
         auto *item = closest(event.GetTargetElement(), "data-user-id");
         if (!item) return;
         const auto userId = parseId(attribute(item, "data-user-id"));
+        if (closest(event.GetTargetElement(), "data-profile-view")) {
+            if (userId.isValid()) {
+                if (auto *button = closest(event.GetTargetElement(), "data-profile-view")) button->Focus();
+                this->shell.showUserProfile(userId, activeGuildId);
+            }
+            return;
+        }
         if (userId.isValid()) {
             Platform::Rect anchor{item->GetAbsoluteLeft(), item->GetAbsoluteTop(), item->GetClientWidth(), item->GetClientHeight()};
             this->shell.showUserProfile(userId, activeGuildId, anchor);
+        }
+    });
+    listen("keydown", [](::Rml::Event &event) {
+        auto *target = event.GetTargetElement();
+        const int key = event.GetParameter<int>("key_identifier", 0);
+        if (target && target->HasAttribute("data-profile-view")
+            && (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER || key == ::Rml::Input::KI_SPACE)) {
+            event.StopPropagation();
+            target->DispatchEvent("click", {});
         }
     });
     listen("contextmenu", [this](::Rml::Event &event) {
@@ -218,7 +235,7 @@ void MemberListController::renderGuildMemberList()
         if (!item || item->type == Core::MemberListItem::Type::Placeholder) {
             rml += "<div class=\"member-item member-row\" style=\"top: " + top + "dp;\"><div class=\"member-avatar-wrap\"><div class=\"member-avatar-fallback\"></div></div><div class=\"member-content\"><div class=\"member-name\" style=\"opacity: 0.3;\">...</div></div></div>";
         } else if (item->type == Core::MemberListItem::Type::Group) {
-            rml += "<div class=\"member-item member-group-header\" style=\"top: " + top + "dp;\">" + escape(Platform::unicodeUpper(item->groupName)) + " — " + std::to_string(item->groupCount) + "</div>";
+            rml += "<div class=\"member-item member-group-header\" style=\"top: " + top + "dp;\">" + escape(Platform::unicodeUpper(item->groupName)) + " â€” " + std::to_string(item->groupCount) + "</div>";
         } else if (item->type == Core::MemberListItem::Type::Member) {
             const auto uid = item->userId;
             std::string userHash;
@@ -248,7 +265,7 @@ void MemberListController::renderGroupDmList(const std::vector<Snowflake> &recip
         return;
     }
     auto *users = currentInstance->users();
-    std::string rml = "<div class=\"member-group-header\">MEMBERS — " + std::to_string(recipients.size()) + "</div>";
+    std::string rml = "<div class=\"member-group-header\">MEMBERS â€” " + std::to_string(recipients.size()) + "</div>";
     for (auto uid : recipients) {
         auto name = users ? users->getDisplayName(uid) : uid.toString();
         if (name.empty()) name = uid.toString();
@@ -276,7 +293,7 @@ void MemberListController::renderSingleDmProfile(Snowflake targetUserId)
     auto *users = currentInstance->users();
     auto user = users ? users->getUser(targetUserId) : std::nullopt;
     std::string displayName = targetUserId.toString(), username = displayName;
-    std::string url, bannerColor = "#5865f2";
+    std::string url, bannerColor = "#19191c";
     if (user) {
         displayName = user->getDisplayName();
         username = user->tag();
@@ -288,7 +305,7 @@ void MemberListController::renderSingleDmProfile(Snowflake targetUserId)
     const auto activity = activityText(currentPresenceManager.get(), targetUserId);
     std::string rml = "<div class=\"dm-profile-panel\" data-user-id=\"" + targetUserId.toString() + "\"><div class=\"dm-profile-banner\" style=\"background-color: " + bannerColor + ";\"></div><div class=\"dm-profile-body\"><div class=\"dm-profile-avatar-wrap\"><div class=\"dm-profile-avatar-clip\"><img class=\"dm-profile-avatar\" src=\"" + escape(shell.imageSource(url, {80, 80})) + "\"/></div><div class=\"dm-profile-status-dot " + statusClass(badge) + "\"></div></div><div class=\"dm-profile-display-name\">" + escape(displayName) + "</div><div class=\"dm-profile-username\">" + escape(username) + "</div>";
     if (!activity.empty()) rml += "<div class=\"dm-profile-divider\"></div><div class=\"dm-profile-section-title\">Activity</div><div class=\"dm-profile-activity\">" + richText(activity) + "</div>";
-    rml += "</div></div>";
+    rml += "<button class=\"dm-profile-view\" data-profile-view=\"true\">View Profile</button></div></div>";
     regionRoot->SetInnerRML(rml);
     requestRender();
 }

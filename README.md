@@ -20,6 +20,18 @@ DAVE end-to-end encryption, multiple accounts and Go Live screen sharing.
   Now panel and an Add Friend form
 - a voice call view
 
+DM headers include a phone button to start a voice call, join an existing call,
+or reopen the connected call. New calls ring recipients after Discord confirms
+the call and your voice membership. Joining a known active call does not ring it
+again. Recipient notifications use the documented
+[ring endpoint](https://docs.discord.food/resources/channel#ring-channel-recipients).
+Camera calling is not implemented.
+
+The DM sidebar and profile panel leave more room for messages. The profile
+panel's View Profile button opens the existing profile view. Call controls
+include labeled mute, deafen, screen sharing where supported, and disconnect
+actions. Header, profile, and call buttons support keyboard activation.
+
 Settings, profiles, account management, server settings, image viewing and
 pickers also use RmlUi. User, server, channel and message context menus render
 in the same view, with keyboard navigation, nested menus and viewport clamping.
