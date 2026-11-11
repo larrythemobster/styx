@@ -21,7 +21,6 @@
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Entities.hpp"
 
-#include "Platform/Desktop.hpp"
 #include "Platform/Notifications.hpp"
 #include <algorithm>
 #include <cmath>
@@ -188,7 +187,7 @@ void SettingsController::renderSidebar(std::string &rml)
     // Footer info
     rml += std::string("<div class=\"settings-sidebar-footer\">");
     rml += std::string("<div class=\"settings-app-version\">Styx v0.1.0</div>");
-    rml += std::string("<a class=\"settings-credit-link\" data-action=\"open-acheron\">Based on Acheron by ouwou</a>");
+    rml += std::string("<div class=\"settings-credit\">Based on Acheron by ouwou</div>");
     rml += std::string("</div>"); // .settings-sidebar-footer
 
     rml += std::string("</div>"); // .settings-sidebar
@@ -326,15 +325,20 @@ void SettingsController::renderAppearance(std::string &rml)
     // Theme Generator card
     rml += std::string("<div class=\"settings-card\">");
     rml += std::string("<div class=\"settings-label\">Theme Generator</div>");
-    rml += std::string("<div class=\"settings-description\">Generate Discord-style themes from an accent seed color.</div>");
+    rml += std::string("<div class=\"settings-description\">Build a color theme from an accent color.</div>");
 
     rml += std::string("<div class=\"settings-color-row\">");
+    rml += std::string("<div class=\"settings-color-field\">");
+    rml += std::string("<label class=\"settings-color-label\" for=\"seed-color-hex\">Accent color</label>");
+    rml += std::string("<div class=\"settings-color-input-row\">");
     rml += formatRml("<div class=\"settings-color-swatch\" style=\"background-color: %1;\"></div>", themeSeedColor.css());
-    rml += formatRml("<input type=\"text\" class=\"settings-text-input\" id=\"seed-color-hex\" value=\"%1\" style=\"width: 120dp;\"/>", themeSeedColor.css());
+    rml += formatRml("<input type=\"text\" class=\"settings-text-input\" id=\"seed-color-hex\" value=\"%1\"/>", themeSeedColor.css());
+    rml += std::string("</div>");
+    rml += std::string("</div>");
     rml += std::string("</div>");
 
     rml += std::string("<div class=\"settings-row\">");
-    rml += std::string("<div class=\"settings-label\">Palette Scheme</div>");
+    rml += std::string("<label class=\"settings-label\" for=\"theme-scheme-select\">Palette Scheme</label>");
     rml += std::string("<select class=\"settings-select\" id=\"theme-scheme-select\">");
     for (int i = 0; i < Core::Theme::schemeCount; ++i) {
         auto s = static_cast<Core::Theme::Scheme>(i);
@@ -345,7 +349,7 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += std::string("</div>");
 
     rml += std::string("<div class=\"settings-row\">");
-    rml += std::string("<div class=\"settings-label\">Mode</div>");
+    rml += std::string("<label class=\"settings-label\" for=\"theme-mode-select\">Mode</label>");
     rml += std::string("<select class=\"settings-select\" id=\"theme-mode-select\">");
     rml += formatRml("<option value=\"dark\"%1>Dark</option>", themeDarkMode ? std::string(" selected") : std::string());
     rml += formatRml("<option value=\"light\"%1>Light</option>", !themeDarkMode ? std::string(" selected") : std::string());
@@ -353,9 +357,9 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += std::string("</div>");
 
     rml += std::string("<div class=\"settings-button-group\">");
-    rml += std::string("<button class=\"settings-btn settings-btn-primary\" data-action=\"generate-theme\">Generate</button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-primary\" data-action=\"generate-theme\">Apply theme</button>");
     rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"random-theme\">Randomize</button>");
-    rml += std::string("<button class=\"settings-btn settings-btn-danger\" data-action=\"reset-theme\">Reset Theme</button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-theme\">Reset Theme</button>");
     rml += std::string("</div>");
     rml += std::string("</div>"); // .settings-card
 
@@ -385,9 +389,11 @@ void SettingsController::renderAppearance(std::string &rml)
         rml += std::string("<div class=\"settings-font-row\">");
         rml += formatRml("<span class=\"settings-font-name\">%1</span>", std::string(fd.label));
         rml += formatRml("<span class=\"settings-font-size\">%1 pt</span>", ptSize);
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary\" data-action=\"font-size-dec\" data-role=\"%1\" style=\"padding: 4dp 10dp; margin-right: 6dp;\">-</button>", static_cast<int>(role));
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary\" data-action=\"font-size-inc\" data-role=\"%1\" style=\"padding: 4dp 10dp; margin-right: 12dp;\">+</button>", static_cast<int>(role));
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-font\" data-role=\"%1\" style=\"padding: 4dp 12dp;\">Reset</button>", static_cast<int>(role));
+        rml += std::string("<div class=\"settings-font-controls\">");
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-adjust\" data-action=\"font-size-dec\" data-role=\"%1\" title=\"Decrease %2 font size\" aria-label=\"Decrease %2 font size\">−</button>", static_cast<int>(role), std::string(fd.label));
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-adjust\" data-action=\"font-size-inc\" data-role=\"%1\" title=\"Increase %2 font size\" aria-label=\"Increase %2 font size\">+</button>", static_cast<int>(role), std::string(fd.label));
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-reset\" data-action=\"reset-font\" data-role=\"%1\">Reset</button>", static_cast<int>(role));
+        rml += std::string("</div>");
         rml += std::string("</div>");
     }
     rml += std::string("</div>"); // .settings-card
@@ -1112,8 +1118,6 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         profileEditor->open();
     } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
-    } else if (action == std::string("open-acheron")) {
-        Platform::Desktop::openUrl("https://github.com/ouwou/acheron");
     } else if (action == std::string("test-notification")) {
         Platform::Notifications::Notification notification;
         notification.title = "Styx";

@@ -98,29 +98,22 @@
 
 .settings-sidebar-footer
 {
-	margin-top: auto;
-	padding: 16dp 10dp 0 10dp;
+    margin-top: auto;
+    padding: 16dp 10dp 0 10dp;
 }
 
 .settings-app-version
 {
-	font-size: 12dp;
-	color: #949ba4;
-	font-weight: 600;
-	margin-bottom: 4dp;
+    font-size: 12dp;
+    color: #949ba4;
+    font-weight: 600;
+    margin-bottom: 4dp;
 }
 
-.settings-credit-link
+.settings-credit
 {
-	font-size: 11dp;
-	color: #00a8fc;
-	cursor: pointer;
-	text-decoration: none;
-}
-
-.settings-credit-link:hover
-{
-	text-decoration: underline;
+    font-size: 11dp;
+    color: #72767d;
 }
 
 /* --- Right Content Pane --- */
@@ -140,9 +133,10 @@
 
 .settings-content-wrapper
 {
-	max-width: 720dp;
-	padding: 40dp 48dp 80dp 48dp;
-	box-sizing: border-box;
+    width: 100%;
+    max-width: 920dp;
+    padding: 40dp 48dp 80dp 48dp;
+    box-sizing: border-box;
 }
 
 .settings-section-title
@@ -703,73 +697,119 @@ select.settings-select selectbox option:hover
 
 .settings-color-row
 {
-	display: flex;
-	flex-direction: row;
-	align-items: center;
-	margin-bottom: 14dp;
+    margin-bottom: 16dp;
+}
+
+.settings-color-field
+{
+    display: flex;
+    flex-direction: column;
+}
+
+.settings-color-label
+{
+    font-size: 12dp;
+    color: #b5bac1;
+    margin-bottom: 6dp;
+}
+
+.settings-color-input-row
+{
+    display: flex;
+    flex-direction: row;
+    align-items: center;
 }
 
 .settings-color-swatch
 {
-	width: 44dp;
-	height: 32dp;
-	border-radius: 4dp;
-	border: 1dp #888888;
-	margin-right: 12dp;
-	cursor: pointer;
+    width: 36dp;
+    height: 36dp;
+    border-radius: 4dp;
+    border: 1dp #4e5058;
+    margin-right: 10dp;
 }
 
 .settings-text-input
 {
-	height: 36dp;
-	background-color: #111214;
-	border: 1dp #202024;
-	border-radius: 4dp;
-	color: #dbdee1;
-	padding: 0 10dp;
-	font-size: 14dp;
-	box-sizing: border-box;
+    width: 176dp;
+    height: 36dp;
+    background-color: #111214;
+    border: 1dp #202024;
+    border-radius: 4dp;
+    color: #dbdee1;
+    padding: 0 10dp;
+    font-size: 14dp;
+    box-sizing: border-box;
 }
 
 .settings-button-group
 {
-	display: flex;
-	flex-direction: row;
-	margin-top: 12dp;
-	margin-bottom: 16dp;
+    display: flex;
+    flex-direction: row;
+    margin-top: 12dp;
 }
 
 .settings-button-group .settings-btn
 {
-	margin-right: 10dp;
+    margin-right: 10dp;
 }
 
-/* Font override row */
+/* Font override rows */
 
 .settings-font-row
 {
-	display: flex;
-	flex-direction: row;
-	align-items: center;
-	padding: 8dp 0;
-	border-bottom: 1dp #202024;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-height: 48dp;
+    padding: 6dp 0;
+    border-bottom: 1dp #202024;
+}
+
+.settings-font-row:last-child
+{
+    border-bottom-width: 0;
 }
 
 .settings-font-name
 {
-	width: 140dp;
-	font-size: 14dp;
-	font-weight: 500;
-	color: #dbdee1;
+    flex: 1;
+    min-width: 0;
+    font-size: 14dp;
+    font-weight: 500;
+    color: #dbdee1;
 }
 
 .settings-font-size
 {
-	font-size: 13dp;
-	color: #949ba4;
-	width: 60dp;
-	text-align: right;
-	margin-right: 12dp;
+    font-size: 13dp;
+    color: #949ba4;
+    width: 56dp;
+    text-align: right;
+    margin-right: 12dp;
+}
+
+.settings-font-controls
+{
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.settings-font-adjust
+{
+    width: 32dp;
+    height: 32dp;
+    padding: 0;
+    margin-right: 6dp;
+    font-size: 16dp;
+}
+
+.settings-font-reset
+{
+    min-width: 56dp;
+    height: 32dp;
+    padding: 0 10dp;
 }
 
 .settings-keybind
