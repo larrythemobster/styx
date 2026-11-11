@@ -996,10 +996,12 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
     if (!input)
         return;
 
-    int val = 0;
-    const auto value = input->GetValue();
-    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), val);
-    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) val = 0;
+    float value = 0;
+    const auto text = input->GetValue();
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !std::isfinite(value))
+        return;
+    const int val = static_cast<int>(std::lround(value));
     setInt(key, val);
 
     // Update display label
