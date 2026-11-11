@@ -562,4 +562,27 @@
 .profile-tab.selected { color: #ffffff; border-bottom: 2dp #f2f3f5; }
 .profile-full-results { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding-top: 18dp; }
 .profile-empty { position: absolute; top: 40%; left: 0; width: 100%; box-sizing: border-box; color: #b5bac1; font-size: 14dp; padding: 0 24dp; text-align: center; }
-.profile-mutual-row { padding: 12dp 8dp; border-bottom: 1dp #292a2e; color: #f2f3f5; font-size: 14dp; }
+.profile-mutual-row
+{
+	display: flex;
+	align-items: center;
+	width: 100%;
+	min-height: 52dp;
+	box-sizing: border-box;
+	padding: 8dp;
+	margin-bottom: 2dp;
+	border: 0;
+	border-radius: 6dp;
+	background-color: transparent;
+	color: #f2f3f5;
+	font-size: 14dp;
+	text-align: left;
+	cursor: pointer;
+	tab-index: auto;
+}
+.profile-mutual-row:hover, .profile-mutual-row:focus { background-color: #202124; }
+.profile-mutual-row:active { background-color: #292b30; }
+.profile-mutual-image { display: block; width: 32dp; height: 32dp; flex-shrink: 0; margin-right: 12dp; border-radius: 16dp; overflow: hidden; background-color: #292b30; }
+.profile-mutual-image img { display: block; width: 32dp; height: 32dp; image-color: #ffffff; }
+.profile-mutual-server { border-radius: 8dp; }
+.profile-mutual-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }

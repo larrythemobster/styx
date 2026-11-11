@@ -30,6 +30,8 @@ Camera calling is not implemented.
 The DM sidebar and profile panel leave more room for messages. View Profile opens
 a centered modal with activity, mutual friends and mutual servers. Avatar clicks
 retain the compact profile popover. Both views support notes and messaging.
+Mutual friend rows show avatars and open full profiles. Mutual server rows show
+server icons and open that server. Both lists support pointer and keyboard navigation.
 Call controls include labeled mute, deafen, screen sharing where supported, and
 disconnect actions. Header, profile, and call buttons support keyboard activation.
 

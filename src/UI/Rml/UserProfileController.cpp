@@ -99,6 +99,27 @@ void UserProfileController::ensureDocument()
         if (auto *tab = closest(target, "data-profile-tab")) {
             event.StopPropagation(); selectFullTab(attribute(tab, "data-profile-tab")); return;
         }
+        if (auto *row = closest(target, "data-profile-user")) {
+            event.StopPropagation();
+            const auto userId = Core::JsonUtils::detail::snowflake(attribute(row, "data-profile-user"));
+            if (!userId.isValid()) return;
+            if (auto *inst = clientInstance(); inst && inst->users() && !inst->users()->getUser(userId)
+                && profile.mutualFriends.hasValue()) {
+                for (const auto &user : profile.mutualFriends.get())
+                    if (user.id.get() == userId) { inst->users()->saveUser(user); break; }
+            }
+            showProfile(userId, Core::Snowflake::Invalid, {}, true);
+            return;
+        }
+        if (auto *row = closest(target, "data-profile-guild")) {
+            event.StopPropagation();
+            const auto guildId = Core::JsonUtils::detail::snowflake(attribute(row, "data-profile-guild"));
+            if (!guildId.isValid()) return;
+            const auto accountId = shell.location().accountId;
+            hide();
+            shell.openGuild(accountId, guildId);
+            return;
+        }
         if (target->GetId() == "profile-message-btn" || closest(target, "profile-message-btn")) {
             event.StopPropagation();
             auto account = shell.location().accountId;
@@ -123,22 +144,20 @@ void UserProfileController::ensureDocument()
             }
         }
         if (!fullMode || key != ::Rml::Input::KI_TAB) return;
-        std::vector<const char *> ids{"profile-more"};
-        auto *inst = clientInstance();
-        if (inst && currentUserId != inst->accountId()) {
-            if (!isBot()) ids.push_back("profile-note-input");
-            ids.push_back("profile-message-btn");
-        }
-        ids.insert(ids.end(), {"profile-tab-activity", "profile-tab-friends", "profile-tab-guilds", "profile-close"});
-        auto *focused = profileDocument->GetContext()->GetFocusElement();
-        int index = -1;
-        for (int i = 0; i < static_cast<int>(ids.size()); ++i)
-            if (profileDocument->GetElementById(ids[i]) == focused) { index = i; break; }
+        ::Rml::ElementList controls;
+        profileDocument->QuerySelectorAll(controls, "button, input");
+        std::erase_if(controls, [](auto *el) { return !el->IsVisible() || el->HasAttribute("disabled"); });
+        if (controls.empty()) return;
+        const auto focused = profileDocument->GetContext()->GetFocusElement();
+        auto position = std::find(controls.begin(), controls.end(), focused);
+        int index = position == controls.end() ? -1 : static_cast<int>(position - controls.begin());
         const bool backwards = event.GetParameter<bool>("shift_key", false);
-        if (index < 0) index = backwards ? 0 : static_cast<int>(ids.size()) - 1;
-        index = (index + (backwards ? -1 : 1) + static_cast<int>(ids.size())) % static_cast<int>(ids.size());
+        const int count = static_cast<int>(controls.size());
+        if (index < 0) index = backwards ? 0 : count - 1;
+        index = (index + (backwards ? -1 : 1) + count) % count;
         event.StopPropagation();
-        if (auto *next = profileDocument->GetElementById(ids[index])) { next->Focus(); next->ScrollIntoView(); }
+        controls[index]->Focus();
+        controls[index]->ScrollIntoView();
     }, profileDocument);
     listen("change", [this](::Rml::Event &event) {
         auto *target = event.GetTargetElement();
@@ -338,8 +357,18 @@ void UserProfileController::renderFullContent()
     if (fullTab == "friends") {
         if (!profile.mutualFriends.hasValue()) rml = "<div class=\"profile-empty\">Mutual friends are unavailable.</div>";
         else {
-            for (const auto &user : profile.mutualFriends.get())
-                rml += "<div class=\"profile-mutual-row\">" + escape(user.getDisplayName()) + "</div>";
+            for (const auto &user : profile.mutualFriends.get()) {
+                const auto userId = user.id.get();
+                if (!userId.isValid()) continue;
+                const auto name = user.getDisplayName();
+                const auto avatar = user.avatar.hasValue() && !user.avatar->empty()
+                    ? Discord::Cdn::userAvatar(userId, user.avatar.get(), 64)
+                    : Discord::Cdn::defaultUserAvatar(userId, 64);
+                rml += "<button class=\"profile-mutual-row\" data-profile-user=\"" + userId.toString()
+                    + "\" title=\"Open profile\" aria-label=\"Open profile for " + escape(name)
+                    + "\"><span class=\"profile-mutual-image\"><img src=\"" + escape(shell.imageSource(avatar, {32, 32}))
+                    + "\"/></span><span class=\"profile-mutual-name\">" + escape(name) + "</span></button>";
+            }
             if (rml.empty()) rml = "<div class=\"profile-empty\">No mutual friends.</div>";
         }
     } else {
@@ -347,9 +376,17 @@ void UserProfileController::renderFullContent()
         else {
             auto *inst = clientInstance();
             for (const auto &entry : profile.mutualGuilds.get()) {
-                auto guild = inst ? inst->getGuild(entry.id.get()) : std::nullopt;
-                auto name = guild ? guild->name.valueOr(entry.id.get().toString()) : entry.id.get().toString();
-                rml += "<div class=\"profile-mutual-row\">" + escape(name) + "</div>";
+                const auto guildId = entry.id.get();
+                if (!guildId.isValid()) continue;
+                const auto guild = inst ? inst->getGuild(guildId) : std::nullopt;
+                const auto name = guild ? guild->name.valueOr(guildId.toString()) : guildId.toString();
+                const auto icon = guild && guild->icon.hasValue() && !guild->icon->empty()
+                    ? shell.imageSource(Discord::Cdn::guildIcon(guildId, guild->icon.get(), 64), {32, 32})
+                    : std::string("icon:users");
+                rml += "<button class=\"profile-mutual-row\" data-profile-guild=\"" + guildId.toString()
+                    + "\" title=\"Open server\" aria-label=\"Open server " + escape(name)
+                    + "\"><span class=\"profile-mutual-image profile-mutual-server\"><img src=\"" + escape(icon)
+                    + "\"/></span><span class=\"profile-mutual-name\">" + escape(name) + "</span></button>";
             }
             if (rml.empty()) rml = "<div class=\"profile-empty\">No mutual servers.</div>";
         }
