@@ -13,6 +13,15 @@
 	<link type="text/rcss" href="settings.rcss"/>
 </head>
 <body>
+	<div id="titlebar">
+		<div class="titlebar-name">Styx</div>
+		<div class="titlebar-controls">
+			<button id="titlebar-minimize" class="titlebar-button" data-window-action="minimize" title="Minimize" aria-label="Minimize"><span class="titlebar-minimize-icon"></span><span class="titlebar-tooltip">Minimize</span></button>
+			<button id="titlebar-maximize" class="titlebar-button" data-window-action="maximize" title="Maximize" aria-label="Maximize"><span class="titlebar-maximize-icon"><span class="titlebar-restore-icon"></span></span><span class="titlebar-tooltip" id="titlebar-maximize-tooltip">Maximize</span></button>
+			<button id="titlebar-close" class="titlebar-button titlebar-close" data-window-action="close" title="Close" aria-label="Close"><img class="titlebar-close-icon" src="icon:x"/><span class="titlebar-tooltip">Close</span></button>
+		</div>
+	</div>
+	<div id="frame">
 	<!-- Each region is filled by one controller (src/UI/Rml/*Controller.cpp). -->
 	<div id="rail"></div>
 	<div id="sidebar">
@@ -33,6 +42,7 @@
 			<div id="members"></div>
 			<div id="friends"></div>
 		</div>
+	</div>
 	</div>
 	<div id="settings-overlay"></div>
 	<div id="overlay"></div>

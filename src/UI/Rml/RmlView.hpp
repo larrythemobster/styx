@@ -46,6 +46,7 @@ public:
     void show();
     void hide();
     void close();
+    void minimize();
     void raise();
     void activateWindow();
     // Flashes the taskbar button until the window is focused.
@@ -53,6 +54,7 @@ public:
     void showMaximized();
     void showFullScreen();
     void showNormal();
+    void setCustomTitleBar(bool enabled, float heightDp = 28, float controlsWidthDp = 132);
     void resize(int width, int height);
     void move(int x, int y);
     int width() const;
@@ -73,6 +75,7 @@ public:
     Platform::Signal<const std::string &> initialisationFailed;
     Platform::Signal<> shown;
     Platform::Signal<> layoutUpdated;
+    Platform::Signal<> windowStateChanged;
     // Every key press and release in this window, before RmlUi sees it: an
     // Rml::Input::KeyIdentifier, the Rml::Input::KeyModifier state, and whether it went down.
     // Repeats while held arrive as further presses.

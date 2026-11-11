@@ -27,6 +27,11 @@ again. Recipient notifications use the documented
 [ring endpoint](https://docs.discord.food/resources/channel#ring-channel-recipients).
 Camera calling is not implemented.
 
+On Windows, the main window has an in-app title strip with minimize,
+maximize/restore and close controls. Drag the strip to move the window or
+double-click to maximize and restore. Window edges remain resizable, and Close
+honors the close-to-tray setting.
+
 The DM sidebar and profile panel leave more room for messages. View Profile opens
 a centered modal with activity, mutual friends and mutual servers. Avatar clicks
 retain the compact profile popover. Both views support notes and messaging.

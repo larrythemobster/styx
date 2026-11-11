@@ -25,6 +25,75 @@ HGLRC sharedNativeContext = nullptr;
 std::unordered_map<SDL_WindowID, View *> windows;
 bool quitting = false;
 
+#ifdef _WIN32
+struct CustomTitleBar {
+    SDL_Window *window;
+    WNDPROC previousProc;
+    float heightDp;
+    float controlsWidthDp;
+};
+std::unordered_map<HWND, CustomTitleBar> customTitleBars;
+
+SDL_HitTestResult titleBarHitTest(SDL_WindowFlags flags, int width, int height, float scale,
+                                  float heightDp, float controlsWidthDp, const SDL_Point &point)
+{
+    if (flags & SDL_WINDOW_FULLSCREEN) return SDL_HITTEST_NORMAL;
+
+    if ((flags & SDL_WINDOW_RESIZABLE) && !(flags & SDL_WINDOW_MAXIMIZED)) {
+        const float edge = 6.f * scale;
+        const bool left = point.x < edge;
+        const bool right = point.x >= width - edge;
+        const bool top = point.y < edge;
+        const bool bottom = point.y >= height - edge;
+        if (top && left) return SDL_HITTEST_RESIZE_TOPLEFT;
+        if (top && right) return SDL_HITTEST_RESIZE_TOPRIGHT;
+        if (bottom && left) return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+        if (bottom && right) return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+        if (top) return SDL_HITTEST_RESIZE_TOP;
+        if (bottom) return SDL_HITTEST_RESIZE_BOTTOM;
+        if (left) return SDL_HITTEST_RESIZE_LEFT;
+        if (right) return SDL_HITTEST_RESIZE_RIGHT;
+    }
+    if (point.y < heightDp * scale && point.x < width - controlsWidthDp * scale)
+        return SDL_HITTEST_DRAGGABLE;
+    return SDL_HITTEST_NORMAL;
+}
+
+SDL_HitTestResult SDLCALL customTitleBarHitTest(SDL_Window *window, const SDL_Point *point, void *data)
+{
+    const auto &titleBar = *static_cast<CustomTitleBar *>(data);
+    int width = 0, height = 0, pixelWidth = 0;
+    SDL_GetWindowSize(window, &width, &height);
+    SDL_GetWindowSizeInPixels(window, &pixelWidth, nullptr);
+    const float pixelDensity = width > 0 ? float(pixelWidth) / width : 1.f;
+    const float displayScale = SDL_GetWindowDisplayScale(window);
+    const float scale = pixelDensity > 0 && displayScale > 0 ? displayScale / pixelDensity : 1.f;
+    return titleBarHitTest(SDL_GetWindowFlags(window), width, height, scale,
+                           titleBar.heightDp, titleBar.controlsWidthDp, *point);
+}
+
+LRESULT CALLBACK customTitleBarProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    auto it = customTitleBars.find(hwnd);
+    if (it == customTitleBars.end()) return DefWindowProcW(hwnd, message, wParam, lParam);
+    const auto previousProc = it->second.previousProc;
+    const auto window = it->second.window;
+    const LRESULT result = CallWindowProcW(previousProc, hwnd, message, wParam, lParam);
+    if (message == WM_GETMINMAXINFO && !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN)) {
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            auto *info = reinterpret_cast<MINMAXINFO *>(lParam);
+            info->ptMaxPosition.x = monitor.rcWork.left - monitor.rcMonitor.left;
+            info->ptMaxPosition.y = monitor.rcWork.top - monitor.rcMonitor.top;
+            info->ptMaxSize.x = monitor.rcWork.right - monitor.rcWork.left;
+            info->ptMaxSize.y = monitor.rcWork.bottom - monitor.rcWork.top;
+        }
+    }
+    return result;
+}
+#endif
+
 int modifiers(SDL_Keymod mod = SDL_GetModState())
 {
     int result = 0;
@@ -133,6 +202,13 @@ View::~View()
         sharedContext = nullptr;
     }
     if (cursor) SDL_DestroyCursor(cursor);
+#ifdef _WIN32
+    if (auto it = customTitleBars.find(static_cast<HWND>(nativeHandle())); it != customTitleBars.end()) {
+        SDL_SetWindowHitTest(nativeWindow, nullptr, nullptr);
+        SetWindowLongPtrW(it->first, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(it->second.previousProc));
+        customTitleBars.erase(it);
+    }
+#endif
     SDL_DestroyWindow(nativeWindow);
 }
 RenderContextScope::RenderContextScope()
@@ -278,6 +354,9 @@ void View::handleEvent(const SDL_Event &event)
         Platform::Desktop::setApplicationActive(SDL_GetKeyboardFocus() != nullptr);
         focusLost.publish();
     }
+    if (event.type == SDL_EVENT_WINDOW_MAXIMIZED || event.type == SDL_EVENT_WINDOW_RESTORED ||
+        event.type == SDL_EVENT_WINDOW_MINIMIZED || event.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN ||
+        event.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN) windowStateChanged.publish();
     if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) updateDimensions();
     if (!rmlContext) return;
     switch (event.type) {
@@ -354,11 +433,53 @@ bool View::quitRequested()
 void View::show() { closed = false; require(SDL_ShowWindow(nativeWindow)); initialise(); shown.publish(); requestRender(); }
 void View::hide() { SDL_HideWindow(nativeWindow); }
 void View::close() { if (closeRequested && !closeRequested()) return; closed = true; hide(); }
+void View::minimize() { SDL_MinimizeWindow(nativeWindow); }
 void View::raise() { SDL_RaiseWindow(nativeWindow); }
 void View::activateWindow() { raise(); }
 void View::requestAttention() { SDL_FlashWindow(nativeWindow, SDL_FLASH_UNTIL_FOCUSED); }
 void View::showMaximized() { SDL_MaximizeWindow(nativeWindow); show(); }
 void View::showNormal() { SDL_SetWindowFullscreen(nativeWindow, false); SDL_RestoreWindow(nativeWindow); show(); }
+void View::setCustomTitleBar(bool enabled, float heightDp, float controlsWidthDp)
+{
+#ifdef _WIN32
+    const auto hwnd = static_cast<HWND>(nativeHandle());
+    auto it = customTitleBars.find(hwnd);
+    if (enabled) {
+        if (it != customTitleBars.end()) {
+            it->second.heightDp = heightDp;
+            it->second.controlsWidthDp = controlsWidthDp;
+            return;
+        }
+        const auto previousProc = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(hwnd, GWLP_WNDPROC));
+        auto inserted = customTitleBars.emplace(hwnd, CustomTitleBar{nativeWindow, previousProc, heightDp, controlsWidthDp});
+        SetLastError(0);
+        if (!SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(customTitleBarProc)) && GetLastError()) {
+            customTitleBars.erase(inserted.first);
+            throw std::runtime_error("Cannot install custom window procedure");
+        }
+        if (!SDL_SetWindowHitTest(nativeWindow, customTitleBarHitTest, &inserted.first->second)) {
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(previousProc));
+            customTitleBars.erase(inserted.first);
+            throw std::runtime_error(SDL_GetError());
+        }
+        if (!SDL_SetWindowBordered(nativeWindow, false)) {
+            SDL_SetWindowHitTest(nativeWindow, nullptr, nullptr);
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(previousProc));
+            customTitleBars.erase(inserted.first);
+            throw std::runtime_error(SDL_GetError());
+        }
+    } else if (it != customTitleBars.end()) {
+        SDL_SetWindowHitTest(nativeWindow, nullptr, nullptr);
+        SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(it->second.previousProc));
+        customTitleBars.erase(it);
+        require(SDL_SetWindowBordered(nativeWindow, true));
+    }
+#else
+    (void)enabled;
+    (void)heightDp;
+    (void)controlsWidthDp;
+#endif
+}
 void View::showFullScreen() { require(SDL_SetWindowFullscreen(nativeWindow, true)); show(); }
 void View::resize(int w, int h) { require(SDL_SetWindowSize(nativeWindow, w, h)); updateDimensions(); }
 void View::move(int x, int y) { require(SDL_SetWindowPosition(nativeWindow, x, y)); }
