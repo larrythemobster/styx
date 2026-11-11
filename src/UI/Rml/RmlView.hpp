@@ -72,6 +72,7 @@ public:
     Platform::Signal<::Rml::ElementDocument *> documentLoaded;
     Platform::Signal<const std::string &> initialisationFailed;
     Platform::Signal<> shown;
+    Platform::Signal<> layoutUpdated;
     // Every key press and release in this window, before RmlUi sees it: an
     // Rml::Input::KeyIdentifier, the Rml::Input::KeyModifier state, and whether it went down.
     // Repeats while held arrive as further presses.

@@ -243,6 +243,7 @@ void View::renderNow()
     }
     dirty = false;
     rmlContext->Update();
+    layoutUpdated.publish();
     renderer->BeginFrame();
     renderer->Clear();
     rmlContext->Render();

@@ -144,6 +144,7 @@ public:
     Platform::Signal<Core::ClientInstance *> instanceChanged;
     Platform::Signal<bool> callOpenChanged, memberListVisibleChanged, selfMuteChanged, selfDeafChanged, settingsOpenChanged;
     Platform::Signal<Core::Snowflake> accountReady;
+    Platform::Signal<Core::Snowflake, Core::Snowflake> jumpRequested;
 private:
     void onDocumentLoaded(::Rml::ElementDocument *document);
     void setupPermanentConnections(Core::ClientInstance *instance);

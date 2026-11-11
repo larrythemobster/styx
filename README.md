@@ -32,6 +32,11 @@ panel's View Profile button opens the existing profile view. Call controls
 include labeled mute, deafen, screen sharing where supported, and disconnect
 actions. Header, profile, and call buttons support keyboard activation.
 
+Opening a DM or server channel starts at the latest message after layout.
+Loading older history preserves the visible position. Incoming messages follow
+the bottom only while you are already there; explicit message jumps retain their
+target position.
+
 Settings, profiles, account management, server settings, image viewing and
 pickers also use RmlUi. User, server, channel and message context menus render
 in the same view, with keyboard navigation, nested menus and viewport clamping.

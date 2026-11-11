@@ -590,6 +590,7 @@ void Shell::jumpToMessage(Snowflake channel, Snowflake message)
         auto *guild = node ? ChannelTreeModel::findGuildNode(node) : nullptr;
         openChannel(account, guild ? guild->id : Snowflake::Invalid, channel);
     }
+    jumpRequested.publish(channel, message);
     instance->messages()->requestLoadAround(channel, message);
 }
 void Shell::joinVoice(Snowflake account, Snowflake guild, Snowflake channel)

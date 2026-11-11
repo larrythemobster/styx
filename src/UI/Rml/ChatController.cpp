@@ -3,6 +3,7 @@
 #include "ComponentRenderer.hpp"
 #include "PollRenderer.hpp"
 #include "RmlRuntime.hpp"
+#include "RmlView.hpp"
 #include "Shell.hpp"
 #include "ShortcutController.hpp"
 
@@ -264,6 +265,9 @@ bool ChatController::scrollMessagesByPage(int direction)
 {
     if (!messagesEl || chatCovered())
         return false;
+    if (direction < 0 && pendingScroll == PendingScroll::Bottom) {
+        pendingScroll = PendingScroll::None;
+    }
     // A little overlap so the line at the edge stays in view, as browsers do.
     messagesEl->SetScrollTop(messagesEl->GetScrollTop() + direction * messagesEl->GetClientHeight() * 0.9f);
     requestRender();
@@ -573,8 +577,16 @@ void ChatController::setupEventListeners()
 
     // Scroll listener on #messages
     if (messagesEl) {
+        listen("mousescroll", [this](::Rml::Event &event) {
+            if (event.GetParameter<float>("wheel_delta_y", 0.0f) < 0.0f
+                && pendingScroll == PendingScroll::Bottom) {
+                pendingScroll = PendingScroll::None;
+            }
+        }, messagesEl);
         listen("scroll", [this](::Rml::Event &) {
-            if (!messagesEl)
+            if (!messagesEl || adjustingScroll)
+                return;
+            if (pendingScroll != PendingScroll::None)
                 return;
 
             float scrollTop = messagesEl->GetScrollTop();
@@ -734,6 +746,15 @@ void ChatController::setupModelConnections()
 {
     track(shell.locationChanged.connect([this](const Location &location) { onLocationChanged(location); }));
     track(shell.instanceChanged.connect([this](Core::ClientInstance *instance) { onInstanceChanged(instance); }));
+    track(shell.jumpRequested.connect([this](Core::Snowflake channel, Core::Snowflake message) {
+        if (channel != currentChannelId)
+            return;
+        jumpTarget = message;
+        jumpReady = false;
+        pendingScroll = PendingScroll::Jump;
+    }));
+    if (auto *view = shell.view())
+        track(view->layoutUpdated.connect([this] { afterLayout(); }));
     track(shell.memberListVisibleChanged.connect([this](bool) { updateHeader(); }));
     track(shell.callOpenChanged.connect([this](bool open) {
         if (!open) {
@@ -781,6 +802,10 @@ void ChatController::onLocationChanged(const Location &location)
     clearEditTarget();
     pendingAttachments.clear();
     loadingHistory = false;
+    pendingScroll = PendingScroll::None;
+    jumpTarget = Core::Snowflake::Invalid;
+    jumpReady = false;
+    lastScrollHeight = 0;
     wasAtBottom = true;
 
     updateHeader();
@@ -830,6 +855,15 @@ void ChatController::onInstanceChanged(Core::ClientInstance *instance)
             [this](const Core::MessageRequestResult &result) {
                 if (result.channelId != currentChannelId)
                     return;
+                if (result.type == Discord::Client::MessageLoadType::Jump && jumpTarget.isValid()) {
+                    if (result.success && !result.messages.empty()) {
+                        jumpReady = true;
+                        requestRender();
+                    } else {
+                        jumpTarget = Core::Snowflake::Invalid;
+                        pendingScroll = PendingScroll::None;
+                    }
+                }
                 for (const auto &message : result.messages)
                     settlePollVote(message);
             }));
@@ -920,10 +954,13 @@ void ChatController::onRowsInserted(int first, int last)
 
     loadingHistory = false;
 
-    if (first == 0) {
-        // Prepending history: preserve scroll position
-        float prevScrollTop = messagesEl->GetScrollTop();
-        float prevScrollHeight = messagesEl->GetScrollHeight();
+    if (first == 0 && model->rowCount() > last + 1) {
+        // Preserve the old viewport after the prepended rows have been laid out.
+        if (pendingScroll == PendingScroll::None) {
+            historyScrollTop = messagesEl->GetScrollTop();
+            historyScrollHeight = messagesEl->GetScrollHeight();
+            pendingScroll = PendingScroll::PreserveHistory;
+        }
 
         ::Rml::Element *refChild = messagesEl->GetNumChildren() > 0 ? messagesEl->GetChild(0) : nullptr;
         for (int r = first; r <= last; ++r) {
@@ -938,8 +975,6 @@ void ChatController::onRowsInserted(int first, int last)
         }
 
         requestRender();
-        float newScrollHeight = messagesEl->GetScrollHeight();
-        messagesEl->SetScrollTop(prevScrollTop + (newScrollHeight - prevScrollHeight));
     } else {
         // Appending new messages
         for (int r = first; r <= last; ++r) {
@@ -952,7 +987,7 @@ void ChatController::onRowsInserted(int first, int last)
 
         requestRender();
         if (wasAtBottom)
-            messagesEl->SetScrollTop(messagesEl->GetScrollHeight());
+            scheduleBottomScroll();
     }
 
     updateJumpBar();
@@ -1008,6 +1043,8 @@ void ChatController::onDataChanged(int first, int last)
             }
         }
     }
+    if (wasAtBottom)
+        scheduleBottomScroll();
     requestRender();
 }
 
@@ -1050,9 +1087,53 @@ void ChatController::renderAllMessages()
     requestRender();
 
     if (wasAtBottom)
-        messagesEl->SetScrollTop(messagesEl->GetScrollHeight());
+        scheduleBottomScroll();
 
     updateJumpBar();
+}
+
+void ChatController::scheduleBottomScroll()
+{
+    if (pendingScroll == PendingScroll::None || pendingScroll == PendingScroll::Bottom)
+        pendingScroll = PendingScroll::Bottom;
+}
+
+void ChatController::afterLayout()
+{
+    if (!messagesEl)
+        return;
+
+    const float height = messagesEl->GetScrollHeight();
+    adjustingScroll = true;
+    if (pendingScroll == PendingScroll::Jump) {
+        if (jumpReady) {
+            if (auto *model = shell.chat()) {
+                const int row = model->rowForMessage(jumpTarget);
+                if (row >= 0 && row < messagesEl->GetNumChildren()) {
+                    messagesEl->GetChild(row)->ScrollIntoView();
+                    pendingScroll = PendingScroll::None;
+                    jumpTarget = Core::Snowflake::Invalid;
+                    jumpReady = false;
+                    wasAtBottom = messagesEl->GetScrollTop() + messagesEl->GetClientHeight()
+                        >= height - 30.0f;
+                    if (auto *instance = shell.currentInstance(); instance && instance->readState())
+                        instance->readState()->setActiveChannelAtBottom(wasAtBottom);
+                }
+            }
+        }
+    } else if (pendingScroll == PendingScroll::PreserveHistory) {
+        messagesEl->SetScrollTop(historyScrollTop + height - historyScrollHeight);
+        pendingScroll = PendingScroll::None;
+        wasAtBottom = messagesEl->GetScrollTop() + messagesEl->GetClientHeight() >= height - 30.0f;
+    } else if (pendingScroll == PendingScroll::Bottom || (wasAtBottom && height != lastScrollHeight)) {
+        messagesEl->SetScrollTop(height);
+        pendingScroll = PendingScroll::None;
+        wasAtBottom = true;
+        if (auto *instance = shell.currentInstance(); instance && instance->readState())
+            instance->readState()->setActiveChannelAtBottom(true);
+    }
+    adjustingScroll = false;
+    lastScrollHeight = height;
 }
 
 void ChatController::checkAndLoadOlder()

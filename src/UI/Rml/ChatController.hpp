@@ -83,6 +83,8 @@ private:
 
     // Message DOM helpers
     void renderAllMessages();
+    void afterLayout();
+    void scheduleBottomScroll();
     std::string buildMessageHtml(int row);
     [[nodiscard]] std::vector<bool> blockedRows() const;
     void refreshBlockedRun(int row);
@@ -155,6 +157,14 @@ private:
     bool pendingCallShouldRing = false;
 
     bool wasAtBottom = true;
+    enum class PendingScroll { None, Bottom, PreserveHistory, Jump };
+    PendingScroll pendingScroll = PendingScroll::None;
+    float historyScrollTop = 0;
+    float historyScrollHeight = 0;
+    float lastScrollHeight = 0;
+    bool adjustingScroll = false;
+    Core::Snowflake jumpTarget;
+    bool jumpReady = false;
     bool loadingHistory = false;
     bool hasSendPermission = true;
     int channelRateLimit = 0;
