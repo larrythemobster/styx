@@ -14,7 +14,17 @@
 </head>
 <body>
 	<div id="titlebar">
-		<div class="titlebar-name">Styx</div>
+		<div class="titlebar-navigation">
+			<button class="titlebar-action" id="titlebar-back" data-toolbar-action="back" title="Back" aria-label="Back"><img src="icon:arrow-left"/><span class="titlebar-tooltip">Back</span></button>
+			<button class="titlebar-action" id="titlebar-forward" data-toolbar-action="forward" title="Forward" aria-label="Forward"><img src="icon:arrow-right"/><span class="titlebar-tooltip">Forward</span></button>
+		</div>
+		<div class="titlebar-center"><img id="titlebar-context-icon" src="icon:gamepad-2"/><span id="titlebar-context">Direct Messages</span></div>
+		<div class="titlebar-app-actions">
+			<button class="titlebar-action" id="titlebar-inbox" data-toolbar-action="inbox" title="Inbox" aria-label="Inbox"><img src="icon:inbox"/><span id="titlebar-inbox-tooltip" class="titlebar-tooltip">Inbox</span></button>
+			<button class="titlebar-action" data-toolbar-action="help" title="Help" aria-label="Help"><img src="icon:circle-question-mark"/><span class="titlebar-tooltip">Keyboard shortcuts</span></button>
+			<button class="titlebar-action" id="titlebar-update" data-toolbar-action="update" title="Updates" aria-label="Updates"><img src="icon:download"/><span class="titlebar-tooltip">Updates</span></button>
+			<div class="titlebar-separator"></div>
+		</div>
 		<div class="titlebar-controls">
 			<button id="titlebar-minimize" class="titlebar-button" data-window-action="minimize" title="Minimize" aria-label="Minimize"><span class="titlebar-minimize-icon"></span><span class="titlebar-tooltip">Minimize</span></button>
 			<button id="titlebar-maximize" class="titlebar-button" data-window-action="maximize" title="Maximize" aria-label="Maximize"><span class="titlebar-maximize-icon"><span class="titlebar-restore-icon"></span></span><span class="titlebar-tooltip" id="titlebar-maximize-tooltip">Maximize</span></button>
@@ -43,6 +53,17 @@
 			<div id="friends"></div>
 		</div>
 	</div>
+	</div>
+	<div id="updates-backdrop" class="updates-backdrop">
+		<div id="updates-panel" class="updates-panel">
+			<div class="updates-heading">Updates <button id="updates-close" data-update-action="close" class="updates-close" aria-label="Close">×</button></div>
+			<div id="updates-current" class="updates-detail"></div>
+			<div id="updates-status" class="updates-status"></div>
+			<div class="updates-actions">
+				<button id="updates-retry" data-update-action="retry" class="updates-button">Check again</button>
+				<button data-update-action="open" class="updates-button updates-primary">View releases</button>
+			</div>
+		</div>
 	</div>
 	<div id="settings-overlay"></div>
 	<div id="overlay"></div>

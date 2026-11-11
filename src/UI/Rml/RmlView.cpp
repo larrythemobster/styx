@@ -31,11 +31,12 @@ struct CustomTitleBar {
     WNDPROC previousProc;
     float heightDp;
     float controlsWidthDp;
+    float leftControlsWidthDp;
 };
 std::unordered_map<HWND, CustomTitleBar> customTitleBars;
 
 SDL_HitTestResult titleBarHitTest(SDL_WindowFlags flags, int width, int height, float scale,
-                                  float heightDp, float controlsWidthDp, const SDL_Point &point)
+                                  float heightDp, float controlsWidthDp, float leftControlsWidthDp, const SDL_Point &point)
 {
     if (flags & SDL_WINDOW_FULLSCREEN) return SDL_HITTEST_NORMAL;
 
@@ -54,7 +55,7 @@ SDL_HitTestResult titleBarHitTest(SDL_WindowFlags flags, int width, int height, 
         if (left) return SDL_HITTEST_RESIZE_LEFT;
         if (right) return SDL_HITTEST_RESIZE_RIGHT;
     }
-    if (point.y < heightDp * scale && point.x < width - controlsWidthDp * scale)
+    if (point.y < heightDp * scale && point.x >= leftControlsWidthDp * scale && point.x < width - controlsWidthDp * scale)
         return SDL_HITTEST_DRAGGABLE;
     return SDL_HITTEST_NORMAL;
 }
@@ -69,7 +70,7 @@ SDL_HitTestResult SDLCALL customTitleBarHitTest(SDL_Window *window, const SDL_Po
     const float displayScale = SDL_GetWindowDisplayScale(window);
     const float scale = pixelDensity > 0 && displayScale > 0 ? displayScale / pixelDensity : 1.f;
     return titleBarHitTest(SDL_GetWindowFlags(window), width, height, scale,
-                           titleBar.heightDp, titleBar.controlsWidthDp, *point);
+                           titleBar.heightDp, titleBar.controlsWidthDp, titleBar.leftControlsWidthDp, *point);
 }
 
 LRESULT CALLBACK customTitleBarProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -439,7 +440,7 @@ void View::activateWindow() { raise(); }
 void View::requestAttention() { SDL_FlashWindow(nativeWindow, SDL_FLASH_UNTIL_FOCUSED); }
 void View::showMaximized() { SDL_MaximizeWindow(nativeWindow); show(); }
 void View::showNormal() { SDL_SetWindowFullscreen(nativeWindow, false); SDL_RestoreWindow(nativeWindow); show(); }
-void View::setCustomTitleBar(bool enabled, float heightDp, float controlsWidthDp)
+void View::setCustomTitleBar(bool enabled, float heightDp, float controlsWidthDp, float leftControlsWidthDp)
 {
 #ifdef _WIN32
     const auto hwnd = static_cast<HWND>(nativeHandle());
@@ -448,10 +449,11 @@ void View::setCustomTitleBar(bool enabled, float heightDp, float controlsWidthDp
         if (it != customTitleBars.end()) {
             it->second.heightDp = heightDp;
             it->second.controlsWidthDp = controlsWidthDp;
+            it->second.leftControlsWidthDp = leftControlsWidthDp;
             return;
         }
         const auto previousProc = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(hwnd, GWLP_WNDPROC));
-        auto inserted = customTitleBars.emplace(hwnd, CustomTitleBar{nativeWindow, previousProc, heightDp, controlsWidthDp});
+        auto inserted = customTitleBars.emplace(hwnd, CustomTitleBar{nativeWindow, previousProc, heightDp, controlsWidthDp, leftControlsWidthDp});
         SetLastError(0);
         if (!SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(customTitleBarProc)) && GetLastError()) {
             customTitleBars.erase(inserted.first);
@@ -478,6 +480,7 @@ void View::setCustomTitleBar(bool enabled, float heightDp, float controlsWidthDp
     (void)enabled;
     (void)heightDp;
     (void)controlsWidthDp;
+    (void)leftControlsWidthDp;
 #endif
 }
 void View::showFullScreen() { require(SDL_SetWindowFullscreen(nativeWindow, true)); show(); }

@@ -3,6 +3,7 @@
 #include "ProfileEditorController.hpp"
 #include "Shell.hpp"
 #include "ShortcutController.hpp"
+#include "ReleaseVersion.hpp"
 #include "Shortcuts.hpp"
 #include "RmlRuntime.hpp"
 #include "UI/PushToTalk.hpp"
@@ -186,7 +187,7 @@ void SettingsController::renderSidebar(std::string &rml)
 
     // Footer info
     rml += std::string("<div class=\"settings-sidebar-footer\">");
-    rml += std::string("<div class=\"settings-app-version\">Styx v0.1.0</div>");
+    rml += std::string("<div class=\"settings-app-version\">Styx v") + std::string(currentVersion) + "</div>";
     rml += std::string("<div class=\"settings-credit\">Based on Acheron by ouwou</div>");
     rml += std::string("</div>"); // .settings-sidebar-footer
 

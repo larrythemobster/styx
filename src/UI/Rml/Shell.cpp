@@ -1,4 +1,7 @@
 #include "Shell.hpp"
+#include "TitleBarController.hpp"
+#include "InboxController.hpp"
+#include "UpdatesController.hpp"
 #ifndef STYX_NO_VOICE
 #include "CallController.hpp"
 #endif
@@ -83,51 +86,6 @@ using Core::Snowflake;
 using Core::ClientInstance;
 namespace {
 Shell *primary = nullptr;
-#ifdef _WIN32
-class TitleBarController final : public Rml::Controller {
-public:
-    TitleBarController(Shell &shell, ::Rml::Element *root) : Controller(shell, root)
-    {
-        listen("click", [this](::Rml::Event &event) {
-            auto *button = closest(event.GetTargetElement(), "data-window-action");
-            if (!button) return;
-            const auto action = attribute(button, "data-window-action");
-            if (action == "minimize") this->shell.minimize();
-            else if (action == "maximize") {
-                if (this->shell.isMaximized()) this->shell.showNormal();
-                else this->shell.showMaximized();
-            } else if (action == "close") this->shell.close();
-        });
-        listen("keydown", [](::Rml::Event &event) {
-            auto *target = event.GetTargetElement();
-            const int key = event.GetParameter<int>("key_identifier", 0);
-            if (target && target->HasAttribute("data-window-action")
-                && (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER || key == ::Rml::Input::KI_SPACE)) {
-                event.StopPropagation();
-                target->DispatchEvent("click", {});
-            }
-        });
-        track(shell.windowStateChanged.connect([this] { updateMaximize(); }));
-        updateMaximize();
-    }
-
-private:
-    void updateMaximize()
-    {
-        auto *button = regionRoot->GetElementById("titlebar-maximize");
-        auto *tooltip = regionRoot->GetElementById("titlebar-maximize-tooltip");
-        const bool maximized = shell.isMaximized();
-        const char *label = maximized ? "Restore" : "Maximize";
-        if (button) {
-            button->SetClass("maximized", maximized);
-            button->SetAttribute("title", label);
-            button->SetAttribute("aria-label", label);
-        }
-        if (tooltip) tooltip->SetInnerRML(label);
-        requestRender();
-    }
-};
-#endif
 std::string guildChannelKey(Snowflake account, Snowflake guild) { return account.toString() + ":" + guild.toString(); }
 
 void showMessageNotification(Shell *shell, Core::ClientInstance *client, const Discord::Message &msg)
@@ -266,7 +224,7 @@ Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
     for (auto *client : session->getClients()) setupPermanentConnections(client);
     setWindowTitle("Styx");
 #ifdef _WIN32
-    setCustomTitleBar(true, 28, 132);
+    setCustomTitleBar(true, 28, 236, 80);
 #endif
     resize(1280, 800);
     restoreWindowState();
@@ -301,7 +259,11 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     auto region = [doc](const char *id) { return doc->GetElementById(id); };
     moderationController = std::make_unique<MemberModeration::Controller>(*this);
 #ifdef _WIN32
-    controllers.push_back(std::make_unique<TitleBarController>(*this, region("titlebar")));
+    auto inbox = std::make_unique<Rml::InboxController>(*this);
+    auto updates = std::make_unique<Rml::UpdatesController>(*this);
+    controllers.push_back(std::make_unique<Rml::TitleBarController>(*this, region("titlebar"), *inbox, *updates));
+    controllers.push_back(std::move(inbox));
+    controllers.push_back(std::move(updates));
 #endif
     controllers.push_back(std::make_unique<Rml::RailController>(*this, region("rail")));
     controllers.push_back(std::make_unique<Rml::ChannelListController>(*this, region("sidebar")));
@@ -335,11 +297,18 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     shortcutController->setHandler(ShortcutAction::ToggleDeafen, [this] { setSelfDeaf(!selfDeaf); return true; });
     controllers.push_back(std::move(switcher));
     auto help = std::make_unique<Rml::ShortcutsHelpController>(*this);
-    shortcutController->setHandler(ShortcutAction::ShortcutsHelp, [h = help.get()] { h->isOpen() ? h->close() : h->open(); return true; });
+    shortcutsHelpController = help.get();
+    shortcutController->setHandler(ShortcutAction::ShortcutsHelp, [this] { toggleShortcutHelp(); return true; });
     controllers.push_back(std::move(help));
     accountsController = std::make_unique<Rml::AccountsController>(*this);
     if (accountsModel->rowCount() == 0) accountsController->showLogin();
     applyBodyClasses();
+}
+void Shell::toggleShortcutHelp()
+{
+    if (!shortcutsHelpController) return;
+    if (shortcutsHelpController->isOpen()) shortcutsHelpController->close();
+    else shortcutsHelpController->open();
 }
 void Shell::applyBodyClasses()
 {

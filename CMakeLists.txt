@@ -296,7 +296,9 @@ set(PROJECT_SOURCES
     src/UI/Rml/Controller.cpp
     src/UI/Rml/ContextMenu.cpp
     src/UI/Rml/Shell.cpp
+    src/UI/Rml/TitleBarController.cpp
     src/UI/Rml/InboxController.cpp
+    src/UI/Rml/UpdatesController.cpp
     src/UI/Rml/RailController.cpp
     src/UI/Rml/ChannelListController.cpp
     src/UI/Rml/UserPanelController.cpp
@@ -448,6 +450,7 @@ if(BUILD_TESTS)
     target_link_libraries(TestKeybinds PRIVATE RmlUi::RmlUi)
     styx_test(TestNavigation NavigationTests tests/tst_Navigation.cpp src/UI/ChannelList/Navigation.cpp src/Core/Snowflake.cpp)
     styx_test(TestNavigationHistory NavigationHistoryTests tests/tst_NavigationHistory.cpp)
+    styx_test(TestReleaseVersion ReleaseVersionTests tests/tst_ReleaseVersion.cpp)
     styx_test(TestBlockedRuns BlockedRunsTests tests/tst_BlockedRuns.cpp src/UI/Chat/BlockedRuns.cpp)
     styx_test(TestInteractionTracker InteractionTrackerTests tests/tst_InteractionTracker.cpp src/UI/Chat/InteractionTracker.cpp src/Core/Snowflake.cpp)
     styx_test(TestSelectDraft SelectDraftTests tests/tst_SelectDraft.cpp src/UI/Chat/SelectDraft.cpp)

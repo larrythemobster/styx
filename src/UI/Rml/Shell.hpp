@@ -41,6 +41,7 @@ class ThreadBrowserController;
 class SearchController;
 class ExpressionPickerController;
 class ShortcutController;
+class ShortcutsHelpController;
 class JoinServerController;
 class CreateServerController;
 class CreatePollController;
@@ -105,6 +106,7 @@ public:
     void markGuildRead(Core::Snowflake accountId, Core::Snowflake guildId);
     void showUserProfile(Core::Snowflake userId, Core::Snowflake guildId, const Platform::Rect &anchor = {});
     void showFullUserProfile(Core::Snowflake userId, Core::Snowflake guildId);
+    void toggleShortcutHelp();
     void openSettings();
     void closeSettings();
     void setSettingsOpen(bool open);
@@ -197,6 +199,7 @@ private:
     Rml::UserProfileController *userProfileController = nullptr;
     Rml::ImageViewerController *imageViewerController = nullptr;
     Rml::ExpressionPickerController *expressionPickerController = nullptr;
+    Rml::ShortcutsHelpController *shortcutsHelpController = nullptr;
     std::unordered_set<Core::Snowflake> connectedInstances;
     int mentionTotal = 0;
     std::unordered_map<std::string, Core::Snowflake> lastViewedChannel;

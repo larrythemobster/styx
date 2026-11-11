@@ -54,7 +54,7 @@ public:
     void showMaximized();
     void showFullScreen();
     void showNormal();
-    void setCustomTitleBar(bool enabled, float heightDp = 28, float controlsWidthDp = 132);
+    void setCustomTitleBar(bool enabled, float heightDp = 28, float controlsWidthDp = 236, float leftControlsWidthDp = 80);
     void resize(int width, int height);
     void move(int x, int y);
     int width() const;

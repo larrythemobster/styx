@@ -27,17 +27,20 @@ again. Recipient notifications use the documented
 [ring endpoint](https://docs.discord.food/resources/channel#ring-channel-recipients).
 Camera calling is not implemented.
 
-Navigation history tracks Friends, DMs and server channels and skips unavailable
-locations.
-
-On Windows, the main window has an in-app title strip with minimize,
-maximize/restore and close controls. Drag the strip to move the window or
-double-click to maximize and restore. Window edges remain resizable, and Close
-honors the close-to-tray setting.
+On Windows, a compact application toolbar replaces the native title bar. Back and
+Forward revisit Friends, DMs and server channels, skipping unavailable locations.
+The centered title follows the current view. Drag the empty strip to move the
+window or double-click to maximize and restore. Window controls stay separate
+from the draggable area, edges remain resizable, and Close honors close-to-tray.
 
 Inbox shows unread channels with cached message previews and recent mentions.
 Load more mentions, fetch recent messages, open a result, or explicitly mark a
 channel read. Opening Inbox alone does not acknowledge messages.
+
+The toolbar also opens keyboard shortcut help and checks GitHub for public Styx
+releases. Updates links to the release page rather than installing automatically.
+Unavailable releases and failed checks report their status instead of claiming
+the client is up to date.
 
 The DM sidebar and profile panel leave more room for messages. View Profile opens
 a centered modal with activity, mutual friends and mutual servers. Avatar clicks
