@@ -215,6 +215,11 @@ Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
     channelFilterProxy = std::make_unique<ChannelFilterProxyModel>(session);
     channelFilterProxy->setSourceModel(channelTreeModel.get());
     track(channelTreeModel->totalMentionCountChanged.connect([this](int total, int) { mentionTotal = total; refreshTaskbarBadge(); }));
+    track(channelTreeModel->changed.connect([this](ChannelNode *) { navigationHistoryChanged.publish(); }));
+    track(channelTreeModel->reset.connect([this] { navigationHistoryChanged.publish(); }));
+    track(locationChanged.connect([this](const Location &location) {
+        if (!replayingHistory && navigationHistory.record(location)) navigationHistoryChanged.publish();
+    }));
     accountsModel = std::make_unique<AccountsModel>(session);
     serverRailModel = std::make_unique<ServerRailModel>(session, channelTreeModel.get());
     typingTracker = std::make_unique<Core::TypingTracker>();
@@ -254,6 +259,7 @@ Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
             connectedInstances.erase(account->id);
             callSounds->forget(account->id);
         }
+        navigationHistoryChanged.publish();
     }));
     callSounds = std::make_unique<CallSounds>();
     pushToTalkKey = std::make_unique<PushToTalk>(*this);
@@ -409,6 +415,64 @@ void Shell::restoreLastLocation(Snowflake account)
     auto guild = Snowflake(settings.get<uint64_t>("ui/rail/lastGuildId", 0));
     if (!settings.getBool("ui/rail/lastIsHome", true) && guild.isValid() && channelTreeModel->serverNode(account, guild)) openGuild(account, guild);
     else openHome(account);
+}
+bool Shell::historyLocationAvailable(const Location &location) const
+{
+    auto *client = instanceFor(location.accountId);
+    if (!client || client->state() != Core::ConnectionState::Connected) return false;
+    if (!location.channelId.isValid()) {
+        if (!location.guildId.isValid()) return true;
+        auto *server = channelTreeModel->serverNode(location.accountId, location.guildId);
+        return server && !server->unavailable;
+    }
+
+    auto *node = channelTreeModel->findChannelTreeNode(location.channelId, location.accountId);
+    if (!location.guildId.isValid()) return node && node->type == ChannelNode::Type::DMChannel;
+    auto *server = channelTreeModel->serverNode(location.accountId, location.guildId);
+    if (!server || server->unavailable) return false;
+    Snowflake permissionChannel = location.channelId;
+    if (!node) {
+        auto thread = client->getChannel(location.channelId);
+        if (!thread || !thread->isThread()) return false;
+        permissionChannel = thread->parentId.valueOr(Snowflake::Invalid);
+        node = channelTreeModel->findChannelTreeNode(permissionChannel, location.accountId);
+    } else if (node->type == ChannelNode::Type::Thread) {
+        permissionChannel = node->parentId;
+    } else if (node->type != ChannelNode::Type::Channel && node->type != ChannelNode::Type::Forum) {
+        return false;
+    }
+    auto *nodeServer = node ? ChannelTreeModel::findGuildNode(node) : nullptr;
+    return nodeServer == server && permissionChannel.isValid() &&
+        (!client->permissions() || client->permissions()->hasChannelPermission(location.accountId, permissionChannel, Discord::Permission::VIEW_CHANNEL));
+}
+bool Shell::canNavigateBack() const
+{
+    return navigationHistory.find(-1, [this](const Location &loc) { return historyLocationAvailable(loc); }).has_value();
+}
+bool Shell::canNavigateForward() const
+{
+    return navigationHistory.find(1, [this](const Location &loc) { return historyLocationAvailable(loc); }).has_value();
+}
+void Shell::navigateBack() { navigateHistory(-1); }
+void Shell::navigateForward() { navigateHistory(1); }
+void Shell::navigateHistory(int direction)
+{
+    auto target = navigationHistory.find(direction, [this](const Location &loc) { return historyLocationAvailable(loc); });
+    if (!target) return;
+    auto location = navigationHistory.at(*target);
+    navigationHistory.select(*target);
+    replayingHistory = true;
+    if (!location.guildId.isValid() && !location.channelId.isValid()) openFriends(location.accountId);
+    else {
+        auto *client = instanceFor(location.accountId);
+        switchActiveInstance(client);
+        serverRailModel->setSelected(location.guildId.isValid() ? ServerRailModel::Kind::Server : ServerRailModel::Kind::AccountHome,
+                                     location.accountId, location.guildId.isValid() ? location.guildId : location.accountId);
+        if (location.channelId.isValid()) openChannel(location.accountId, location.guildId, location.channelId);
+        else openEmptyGuild(client, location.accountId, location.guildId);
+    }
+    replayingHistory = false;
+    navigationHistoryChanged.publish();
 }
 bool Shell::channelReadable(Snowflake account, Snowflake guild, Snowflake channel) const
 {
@@ -579,15 +643,18 @@ void Shell::openGuild(Snowflake account, Snowflake guild)
         channel = node && channelReadable(account, guild, node->rulesChannelId) ? node->rulesChannelId : firstReadableChannel(account, guild);
     }
     if (channel.isValid()) openChannel(account, guild, channel);
-    else {
-        current = {account, guild, Snowflake::Invalid};
-        channelFilterProxy->setSelectedChannel(Snowflake::Invalid, account);
-        chatModel->setActiveChannel(Snowflake::Invalid, guild);
-        client->noteChannelSelected(Snowflake::Invalid);
-        applyBodyClasses(); locationChanged.publish(current);
-    }
+    else openEmptyGuild(client, account, guild);
     auto &settings = Platform::Settings::instance();
     settings.set("ui/rail/lastAccountId", uint64_t(account)); settings.set("ui/rail/lastGuildId", uint64_t(guild)); settings.setBool("ui/rail/lastIsHome", false);
+}
+void Shell::openEmptyGuild(ClientInstance *client, Snowflake account, Snowflake guild)
+{
+    current = {account, guild, Snowflake::Invalid};
+    channelFilterProxy->setSelectedChannel(Snowflake::Invalid, account);
+    chatModel->setActiveChannel(Snowflake::Invalid, guild);
+    client->noteChannelSelected(Snowflake::Invalid);
+    if (forumController) forumController->close();
+    applyBodyClasses(); locationChanged.publish(current);
 }
 void Shell::openChannel(Snowflake account, Snowflake guild, Snowflake channel)
 {

@@ -4,6 +4,7 @@
 #include "ContextMenu.hpp"
 #include "Core/Snowflake.hpp"
 #include "UI/ChannelList/Navigation.hpp"
+#include "NavigationHistory.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -62,6 +63,10 @@ public:
     Core::ClientInstance *currentInstance() const { return instance; }
     Core::ClientInstance *instanceFor(Core::Snowflake accountId) const;
     const Location &location() const { return current; }
+    bool canNavigateBack() const;
+    bool canNavigateForward() const;
+    void navigateBack();
+    void navigateForward();
     Rml::View *view() const { return const_cast<Shell *>(this); }
     ChannelTreeModel *channelTree() const { return channelTreeModel.get(); }
     PushToTalk *pushToTalk() const { return pushToTalkKey.get(); }
@@ -141,6 +146,7 @@ public:
     void applyCloseToTray();
     // Shows the current mention count on the taskbar, or clears it when the setting is off.
     void refreshTaskbarBadge();
+    Platform::Signal<> navigationHistoryChanged;
     Platform::Signal<const Location &> locationChanged;
     Platform::Signal<Core::ClientInstance *> instanceChanged;
     Platform::Signal<bool> callOpenChanged, memberListVisibleChanged, selfMuteChanged, selfDeafChanged, settingsOpenChanged;
@@ -154,6 +160,9 @@ private:
     void saveWindowState();
     void restoreWindowState();
     void restoreLastLocation(Core::Snowflake accountId);
+    bool historyLocationAvailable(const Location &location) const;
+    void navigateHistory(int direction);
+    void openEmptyGuild(Core::ClientInstance *client, Core::Snowflake accountId, Core::Snowflake guildId);
     bool channelReadable(Core::Snowflake accountId, Core::Snowflake guildId, Core::Snowflake channelId) const;
     Core::Snowflake firstReadableChannel(Core::Snowflake accountId, Core::Snowflake guildId) const;
     // The current server's channels, or the DMs at home, in sidebar order; voice channels are
@@ -170,6 +179,8 @@ private:
     Core::Session *coreSession;
     Core::ClientInstance *instance = nullptr;
     Location current;
+    NavigationHistory<Location> navigationHistory;
+    bool replayingHistory = false;
     bool callOpen = false, memberListVisible = true, selfMute = false, selfDeaf = false, settingsOpen = false;
     std::unique_ptr<ChannelTreeModel> channelTreeModel;
     std::unique_ptr<ChannelFilterProxyModel> channelFilterProxy;
