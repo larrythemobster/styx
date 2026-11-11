@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <RmlUi/Core/ObserverPtr.h>
 
 namespace Styx {
 namespace Core {
@@ -59,6 +60,8 @@ private:
     void handleSwitchClick(::Rml::Element *switchEl);
     void handleRadioClick(::Rml::Element *radioEl);
     void handleSliderChange(::Rml::Element *sliderEl);
+    void showSliderHint(::Rml::Element *sliderEl);
+    void clearSliderHint();
     void handleSelectChange(::Rml::Element *selectEl);
     void handleAction(const std::string &action, ::Rml::Element *target);
     void renderKeybindRow(std::string &rml, KeybindAction action);
@@ -69,10 +72,12 @@ private:
 
     Section currentSection = Section::MyAccount;
     Platform::Timer rebuildTimer;
-    Platform::Timer hideTransitionTimer;
     Platform::Color themeSeedColor;
     int themeSchemeIndex = 0;
     bool themeDarkMode = true;
+    ::Rml::Element *hintSlider = nullptr;
+    ::Rml::ObserverPtr<::Rml::Element> previousFocus;
+    bool sliderDragging = false;
     std::optional<KeybindAction> recordingKeybind;
     std::string keybindError;
     std::unique_ptr<ProfileEditorController> profileEditor;

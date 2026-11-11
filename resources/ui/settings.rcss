@@ -1,6 +1,5 @@
 /*
- * Discord-style User Settings Overlay styling for Styx.
- * Theme tokens and colors match theme.rcss.
+ * User settings, using the dark palette shared with theme.rcss.
  */
 
 #settings-overlay
@@ -12,25 +11,54 @@
 	height: 100%;
 	z-index: 1000;
 	display: none;
-	background-color: #000000;
-	opacity: 0;
-	transform: scale(1.02);
-	transition: opacity 0.15s cubic-out, transform 0.15s cubic-out;
+	align-items: center;
+	justify-content: center;
 }
 
 #settings-overlay.open
 {
 	display: flex;
+}
+
+body.custom-titlebar #settings-overlay
+{
+	top: 28dp;
+	bottom: 0;
+	height: auto;
+}
+
+.settings-backdrop
+{
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-color: #000000b8;
+}
+
+.settings-dialog
+{
+	position: relative;
+	display: flex;
 	flex-direction: row;
-	opacity: 1;
-	transform: scale(1.0);
+	width: 94%;
+	height: 90%;
+	max-width: 1120dp;
+	max-height: 900dp;
+	min-height: 0;
+	box-sizing: border-box;
+	background-color: #000000;
+	border: 1dp #303035;
+	border-radius: 8dp;
+	overflow: hidden;
 }
 
 /* --- Left Sidebar --- */
 
 .settings-sidebar
 {
-	width: 240dp;
+	width: 220dp;
 	height: 100%;
 	flex-shrink: 0;
 	background-color: #0b0b0c;
@@ -38,7 +66,7 @@
 	box-sizing: border-box;
 	display: flex;
 	flex-direction: column;
-	padding: 40dp 12dp 32dp 20dp;
+	padding: 24dp 12dp 24dp 16dp;
 	overflow-y: auto;
 }
 
@@ -68,7 +96,7 @@
 	font-size: 14dp;
 	font-weight: 500;
 	cursor: pointer;
-	transition: background-color 0.15s, color 0.15s;
+	tab-index: auto;
 }
 
 .settings-nav-item:hover
@@ -84,9 +112,10 @@
 	font-weight: 600;
 }
 
-.settings-nav-item:active
+.settings-nav-item:focus
 {
-	transform: scale(0.98);
+	background-color: #242428;
+	color: #ffffff;
 }
 
 .settings-divider
@@ -134,17 +163,18 @@
 .settings-content-wrapper
 {
     width: 100%;
-    max-width: 920dp;
-    padding: 40dp 48dp 80dp 48dp;
+    max-width: 760dp;
+    padding: 32dp 40dp 64dp 40dp;
     box-sizing: border-box;
 }
 
 .settings-section-title
 {
-	font-size: 20dp;
+	font-size: 22dp;
 	font-weight: bold;
 	color: #f2f3f5;
 	margin-bottom: 20dp;
+	padding-right: 40dp;
 }
 
 /* Close ESC Button */
@@ -152,8 +182,8 @@
 .settings-close-container
 {
 	position: absolute;
-	top: 36dp;
-	right: 48dp;
+	top: 20dp;
+	right: 24dp;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
@@ -162,28 +192,27 @@
 
 .settings-close-btn
 {
-	width: 36dp;
-	height: 36dp;
-	border: 2dp #4e5058;
-	border-radius: 18dp;
+	width: 32dp;
+	height: 32dp;
+	border: 1dp #000000;
+	border-radius: 4dp;
 	box-sizing: border-box;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
-	background-color: transparent;
-	transition: border-color 0.15s, background-color 0.15s, transform 0.1s;
+	tab-index: auto;
+	background-color: #111214;
 }
 
-.settings-close-btn:hover
+.settings-close-btn:hover, .settings-close-btn:focus
 {
-	border-color: #dbdee1;
-	background-color: #242428;
+	background-color: #303035;
 }
 
 .settings-close-btn:active
 {
-	transform: scale(0.96);
+	background-color: #48484e;
 }
 
 .settings-close-btn img
@@ -198,24 +227,14 @@
 	image-color: #ffffff;
 }
 
-.settings-esc-label
-{
-	font-size: 11dp;
-	font-weight: bold;
-	color: #949ba4;
-	margin-top: 4dp;
-	text-align: center;
-}
 
 /* --- Form Widgets & Controls --- */
 
 .settings-card
 {
-	background-color: #111214;
-	border: 1dp #202024;
-	border-radius: 8dp;
-	padding: 16dp;
-	margin-bottom: 20dp;
+	border-bottom: 1dp #202024;
+	padding: 0 0 24dp 0;
+	margin-bottom: 24dp;
 	box-sizing: border-box;
 }
 
@@ -228,10 +247,9 @@
 {
 	display: block;
 	font-size: 13dp;
-	font-weight: bold;
+	font-weight: 600;
 	color: #b5bac1;
-	text-transform: uppercase;
-	margin-bottom: 6dp;
+	margin-bottom: 8dp;
 }
 
 .settings-description
@@ -264,24 +282,17 @@
 {
 	display: flex;
 	flex-direction: row;
+	flex-wrap: wrap;
+	gap: 16dp;
 	margin-bottom: 20dp;
 }
 
 .settings-grid-col
 {
-	flex: 1;
+	flex: 1 1 220dp;
 	min-width: 0;
 }
 
-.settings-grid-col-left
-{
-	margin-right: 12dp;
-}
-
-.settings-grid-col-right
-{
-	margin-left: 12dp;
-}
 
 /* Toggle Switch Row */
 
@@ -291,7 +302,7 @@
 	flex-direction: row;
 	justify-content: space-between;
 	align-items: center;
-	padding: 12dp 0;
+	padding: 14dp 0;
 	border-bottom: 1dp #202024;
 }
 
@@ -334,10 +345,10 @@
 	position: relative;
 	cursor: pointer;
 	box-sizing: border-box;
-	transition: background-color 0.15s;
+	tab-index: auto;
 }
 
-.settings-switch:hover
+.settings-switch:hover, .settings-switch:focus
 {
 	background-color: #6d6f78;
 }
@@ -347,7 +358,7 @@
 	background-color: #23a55a;
 }
 
-.settings-switch.checked:hover
+.settings-switch.checked:hover, .settings-switch.checked:focus
 {
 	background-color: #2dc76d;
 }
@@ -361,7 +372,6 @@
 	height: 18dp;
 	background-color: #ffffff;
 	border-radius: 9dp;
-	transition: left 0.15s;
 }
 
 .settings-switch.checked .settings-switch-thumb
@@ -373,6 +383,7 @@
 
 .settings-slider-wrap
 {
+	position: relative;
 	margin-bottom: 20dp;
 }
 
@@ -387,9 +398,42 @@
 
 .settings-slider-val
 {
+	min-width: 56dp;
+	margin-left: 12dp;
+	flex-shrink: 0;
+	text-align: right;
 	font-size: 14dp;
 	font-weight: 600;
-	color: #dbdee1;
+	color: #f2f3f5;
+}
+
+.settings-slider-hint
+{
+	position: absolute;
+	top: -8dp;
+	box-sizing: content-box;
+	visibility: hidden;
+	pointer-events: none;
+	z-index: 20;
+	padding: 6dp 8dp;
+	background-color: #111214;
+	border: 1dp #303035;
+	border-radius: 4dp;
+	color: #f2f3f5;
+	font-size: 12dp;
+	font-weight: 600;
+	line-height: 16dp;
+	white-space: nowrap;
+}
+
+.settings-slider-wrap.hint-visible .settings-slider-hint
+{
+	visibility: visible;
+}
+
+.settings-slider-wrap.hint-visible .settings-slider-val
+{
+	visibility: hidden;
 }
 
 input.settings-slider
@@ -401,26 +445,26 @@ input.settings-slider
 input.settings-slider slidertrack
 {
 	background-color: #4e5058;
-	height: 8dp;
-	border-radius: 4dp;
-	margin-top: 8dp;
+	height: 4dp;
+	border-radius: 2dp;
+	margin-top: 10dp;
 }
 
 input.settings-slider sliderprogress
 {
 	background-color: #5865f2;
-	height: 8dp;
-	border-radius: 4dp;
-	margin-top: 8dp;
+	height: 4dp;
+	border-radius: 2dp;
+	margin-top: 0;
 }
 
 input.settings-slider sliderbar
 {
 	background-color: #ffffff;
 	width: 16dp;
-	height: 24dp;
-	border-radius: 4dp;
-	margin-top: 0dp;
+	height: 16dp;
+	border-radius: 8dp;
+	margin-top: 4dp;
 	margin-left: -8dp;
 	margin-right: -8dp;
 }
@@ -449,23 +493,33 @@ select.settings-select
 	width: 100%;
 	height: 40dp;
 	background-color: #111214;
-	border: 1dp #202024;
+	border: 1dp #303035;
 	border-radius: 4dp;
 	color: #dbdee1;
 	font-size: 14dp;
 	box-sizing: border-box;
 }
 
+select.settings-select:hover, select.settings-select:focus
+{
+	border-color: #72767d;
+}
+
 select.settings-select selectvalue
 {
-	padding: 10dp 12dp;
+	padding: 9dp 12dp;
+	line-height: 20dp;
+	white-space: nowrap;
+	overflow: hidden;
 	color: #dbdee1;
 }
 
 select.settings-select selectarrow
 {
-	width: 30dp;
-	height: 40dp;
+	width: 16dp;
+	height: 16dp;
+	margin: 11dp 10dp;
+	decorator: image(icon:chevron-down);
 }
 
 select.settings-select selectbox
@@ -506,17 +560,17 @@ select.settings-select selectbox option:hover
 	display: flex;
 	flex-direction: row;
 	align-items: center;
-	background-color: #111214;
-	border: 1dp #202024;
-	border-radius: 8dp;
-	padding: 12dp 16dp;
-	margin-bottom: 8dp;
+	background-color: transparent;
+	border: 1dp transparent;
+	border-radius: 4dp;
+	padding: 10dp 8dp;
+	margin-bottom: 2dp;
 	cursor: pointer;
 	box-sizing: border-box;
-	transition: background-color 0.15s, border-color 0.15s;
+	tab-index: auto;
 }
 
-.settings-radio-card:hover
+.settings-radio-card:hover, .settings-radio-card:focus
 {
 	background-color: #19191c;
 	border-color: #4e5058;
@@ -524,17 +578,18 @@ select.settings-select selectbox option:hover
 
 .settings-radio-card.active
 {
-	background-color: #242428;
-	border-color: #5865f2;
+	background-color: #19191c;
+	border-color: #4e5058;
 }
 
 .settings-radio-indicator
 {
-	width: 16dp;
-	height: 16dp;
-	border-radius: 8dp;
+	width: 20dp;
+	height: 20dp;
+	border-radius: 10dp;
 	border: 2dp #4e5058;
 	margin-right: 12dp;
+	flex-shrink: 0;
 	box-sizing: border-box;
 	position: relative;
 }
@@ -542,6 +597,20 @@ select.settings-select selectbox option:hover
 .settings-radio-card.active .settings-radio-indicator
 {
 	border-color: #5865f2;
+}
+
+.settings-radio-dot
+{
+	position: absolute;
+	top: 4dp;
+	left: 4dp;
+	width: 8dp;
+	height: 8dp;
+	border-radius: 4dp;
+}
+
+.settings-radio-card.active .settings-radio-dot
+{
 	background-color: #5865f2;
 }
 
@@ -569,21 +638,35 @@ select.settings-select selectbox option:hover
 
 .settings-btn
 {
-	display: inline-block;
-	padding: 10dp 18dp;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	height: 38dp;
+	padding: 0 16dp;
+	border: 1dp #000000;
 	border-radius: 4dp;
 	font-size: 14dp;
 	font-weight: 600;
 	cursor: pointer;
-	border-width: 0;
-	transition: background-color 0.15s, transform 0.1s;
+	tab-index: auto;
 	box-sizing: border-box;
 }
 
-.settings-btn:active
+.settings-btn-label
 {
-	transform: scale(0.96);
+	display: block;
+	white-space: nowrap;
+	text-align: center;
 }
+
+.settings-btn-icon
+{
+	width: 16dp;
+	height: 16dp;
+	image-color: #ffffff;
+}
+
 
 .settings-btn-primary
 {
@@ -591,20 +674,20 @@ select.settings-select selectbox option:hover
 	color: #ffffff;
 }
 
-.settings-btn-primary:hover
+.settings-btn-primary:hover, .settings-btn-primary:focus
 {
 	background-color: #4752c4;
 }
 
 .settings-btn-secondary
 {
-	background-color: #4e5058;
+	background-color: #303035;
 	color: #ffffff;
 }
 
-.settings-btn-secondary:hover
+.settings-btn-secondary:hover, .settings-btn-secondary:focus
 {
-	background-color: #6d6f78;
+	background-color: #48484e;
 }
 
 .settings-btn-danger
@@ -613,9 +696,32 @@ select.settings-select selectbox option:hover
 	color: #ffffff;
 }
 
-.settings-btn-danger:hover
+.settings-btn-danger:hover, .settings-btn-danger:focus
 {
 	background-color: #da373c;
+}
+.settings-keybind [data-action="remove-keybind"]
+{
+    background-color: #111214;
+    color: #f23f43;
+}
+
+.settings-keybind [data-action="remove-keybind"]:hover,
+.settings-keybind [data-action="remove-keybind"]:focus
+{
+    background-color: #303035;
+}
+
+.settings-btn-primary:active, .settings-btn-secondary:active, .settings-btn-danger:active
+{
+	background-color: #242428;
+}
+
+.settings-btn-primary:disabled, .settings-btn-secondary:disabled, .settings-btn-danger:disabled
+{
+	background-color: #242428;
+	color: #72767d;
+	cursor: default;
 }
 
 /* My Account Section */
@@ -624,7 +730,7 @@ select.settings-select selectbox option:hover
 {
 	background-color: #08080a;
 	border: 1dp #202024;
-	border-radius: 8dp;
+	border-radius: 6dp;
 	padding: 20dp;
 	margin-bottom: 20dp;
 	box-sizing: border-box;
@@ -669,10 +775,9 @@ select.settings-select selectbox option:hover
 
 .my-account-field-card
 {
-	background-color: #111214;
-	border-radius: 8dp;
-	padding: 14dp 16dp;
-	margin-bottom: 12dp;
+	border-bottom: 1dp #202024;
+	padding: 12dp 0;
+	margin-bottom: 0;
 	display: flex;
 	flex-direction: column;
 }
@@ -746,13 +851,11 @@ select.settings-select selectbox option:hover
 {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8dp;
     margin-top: 12dp;
 }
 
-.settings-button-group .settings-btn
-{
-    margin-right: 10dp;
-}
 
 /* Font override rows */
 
@@ -785,6 +888,7 @@ select.settings-select selectbox option:hover
     font-size: 13dp;
     color: #949ba4;
     width: 56dp;
+    flex-shrink: 0;
     text-align: right;
     margin-right: 12dp;
 }
@@ -816,12 +920,14 @@ select.settings-select selectbox option:hover
 {
 	display: flex;
 	flex-direction: row;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	background-color: #1e1f22;
+	gap: 8dp;
+	background-color: #111214;
 	border-radius: 4dp;
 	padding: 8dp 8dp 8dp 12dp;
-	margin-bottom: 8dp;
+	margin-bottom: 12dp;
 }
 
 .settings-keybind-label
@@ -833,30 +939,22 @@ select.settings-select selectbox option:hover
 .settings-keybind-actions
 {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
+	gap: 8dp;
 }
 
-.settings-keybind-actions .settings-btn,
-.settings-keybind-actions button
-{
-	margin-left: 8dp;
-}
-
-.settings-keybind-actions .settings-btn:first-child,
-.settings-keybind-actions button:first-child
-{
-	margin-left: 0;
-}
-
-.settings-keybind .settings-btn,
-.settings-keybind button
-{
-	min-height: 40dp;
-}
 
 .settings-keybind-error
 {
 	color: #f23f43;
 	font-size: 13dp;
 	margin-bottom: 12dp;
+}
+
+@media (max-width: 800dp)
+{
+	.settings-sidebar { width: 180dp; padding-left: 10dp; padding-right: 10dp; }
+	.settings-content-wrapper { padding: 28dp 24dp 48dp 24dp; }
+	.settings-close-container { top: 16dp; right: 16dp; }
 }

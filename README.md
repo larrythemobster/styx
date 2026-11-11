@@ -64,6 +64,11 @@ in the same view, with keyboard navigation, nested menus and viewport clamping.
 Member moderation includes kick, ban, timeout, nickname and searchable role
 forms. CAPTCHA prompts use RmlUi while the challenge still opens in your browser.
 
+User settings open in a bounded dialog with independently scrolling navigation
+and content. Buttons use black borders and centered labels or icons. Sliders show
+a value hint above the thumb on hover, focus or drag. Tab stays inside the dialog;
+Escape closes it and restores focus.
+
 Voice & Video settings offer Voice Activity or Push to Talk. Record a shortcut and
 adjust its release delay from 0 to 2000 ms. Windows and X11 with XInput2 2.2 support
 passive global input that never consumes keys, so other applications still receive

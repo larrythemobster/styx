@@ -36,6 +36,10 @@
 #include "Core/Audio/VoiceManager.hpp"
 #endif
 
+#include <RmlUi/Core/Box.h>
+#include <RmlUi/Core/Context.h>
+#include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/ElementUtilities.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/Elements/ElementFormControlInput.h>
 #include <RmlUi/Core/Elements/ElementFormControlSelect.h>
@@ -115,20 +119,23 @@ void SettingsController::onSettingsOpenChanged(bool open)
         return;
 
     if (open) {
-        hideTransitionTimer.stop();
+        if (auto *focused = regionRoot->GetContext()->GetFocusElement())
+            previousFocus = focused->GetObserverPtr();
         regionRoot->SetProperty("display", "flex");
         render();
         regionRoot->SetClass("open", true);
+        if (auto *navigation = regionRoot->QuerySelector(".settings-nav-item.active"))
+            navigation->Focus();
         requestRender(200);
     } else {
         if (profileEditor)
             profileEditor->close();
+        clearSliderHint();
         stopRecordingKeybind();
         regionRoot->SetClass("open", false);
-        hideTransitionTimer.start(std::chrono::milliseconds(160), false, [this] {
-            if (!shell.isSettingsOpen() && regionRoot)
-                regionRoot->SetProperty("display", "none");
-        });
+        regionRoot->SetProperty("display", "none");
+        if (previousFocus) previousFocus->Focus();
+        previousFocus.reset();
         requestRender(200);
     }
 }
@@ -155,12 +162,38 @@ void SettingsController::render()
 {
     if (!regionRoot)
         return;
+    std::string focusSelector;
+    if (auto *focused = regionRoot->GetContext()->GetFocusElement()) {
+        for (auto *parent = focused; parent; parent = parent->GetParentNode()) {
+            if (parent != regionRoot) continue;
+            if (!focused->GetId().empty()) focusSelector = "#" + focused->GetId();
+            else if (focused->HasAttribute("data-action")) {
+                focusSelector = focused->GetTagName() + "[data-action=\"" + attribute(focused, "data-action") + "\"]";
+                for (const auto *qualifier : {"data-role", "data-keybind"})
+                    if (focused->HasAttribute(qualifier))
+                        focusSelector += "[" + std::string(qualifier) + "=\"" + attribute(focused, qualifier) + "\"]";
+            } else if (focused->IsClassSet("settings-radio-card")) {
+                focusSelector = ".settings-radio-card[data-setting=\"" + attribute(focused, "data-setting") +
+                                "\"][data-value=\"" + attribute(focused, "data-value") + "\"]";
+            } else focusSelector = ".settings-nav-item.active";
+            break;
+        }
+    }
 
-    std::string rml;
+    clearSliderHint();
+    std::string rml = "<div class=\"settings-backdrop\" data-action=\"close\"></div><div class=\"settings-dialog\" role=\"dialog\" aria-modal=\"true\" aria-label=\"User settings\">";
     renderSidebar(rml);
+    rml += "<div class=\"settings-close-container\"><button class=\"settings-close-btn\" data-action=\"close\" "
+           "title=\"Close Settings\" aria-label=\"Close Settings\"><img src=\"icon:x\"/></button></div>";
     renderContent(rml);
+    rml += "</div>";
 
     regionRoot->SetInnerRML(rml.c_str());
+    if (!focusSelector.empty()) {
+        auto *focus = regionRoot->QuerySelector(focusSelector);
+        if (!focus) focus = regionRoot->QuerySelector(".settings-nav-item.active");
+        if (focus) focus->Focus();
+    }
 }
 
 void SettingsController::renderSidebar(std::string &rml)
@@ -169,19 +202,19 @@ void SettingsController::renderSidebar(std::string &rml)
 
     // USER SETTINGS
     rml += std::string("<div class=\"settings-group-header\">User Settings</div>");
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"my-account\">My Account</div>", currentSection == Section::MyAccount ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"my-account\" tabindex=\"0\">My Account</div>", currentSection == Section::MyAccount ? std::string(" active") : std::string());
 
     rml += std::string("<div class=\"settings-divider\"></div>");
 
     // APP SETTINGS
     rml += std::string("<div class=\"settings-group-header\">App Settings</div>");
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"appearance\">Appearance</div>", currentSection == Section::Appearance ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"chat\">Chat &amp; Accessibility</div>", currentSection == Section::Chat ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"notifications\">Notifications</div>", currentSection == Section::Notifications ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"voice-video\">Voice &amp; Video</div>", currentSection == Section::VoiceVideo ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"keybinds\">Keybinds</div>", currentSection == Section::Keybinds ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"go-live\">Go Live</div>", currentSection == Section::GoLive ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"advanced\">Advanced</div>", currentSection == Section::Advanced ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"appearance\" tabindex=\"0\">Appearance</div>", currentSection == Section::Appearance ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"chat\" tabindex=\"0\">Chat &amp; Accessibility</div>", currentSection == Section::Chat ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"notifications\" tabindex=\"0\">Notifications</div>", currentSection == Section::Notifications ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"voice-video\" tabindex=\"0\">Voice &amp; Video</div>", currentSection == Section::VoiceVideo ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"keybinds\" tabindex=\"0\">Keybinds</div>", currentSection == Section::Keybinds ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"go-live\" tabindex=\"0\">Go Live</div>", currentSection == Section::GoLive ? std::string(" active") : std::string());
+    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"advanced\" tabindex=\"0\">Advanced</div>", currentSection == Section::Advanced ? std::string(" active") : std::string());
 
     rml += std::string("<div class=\"settings-divider\"></div>");
 
@@ -198,15 +231,7 @@ void SettingsController::renderContent(std::string &rml)
 {
     rml += std::string("<div class=\"settings-content-pane\">");
 
-    // Close button top right
-    rml += std::string(
-        "<div class=\"settings-close-container\">"
-        "  <div class=\"settings-close-btn\" data-action=\"close\" title=\"Close Settings\">"
-        "    <img src=\"icon:x\"/>"
-        "  </div>"
-        "  <div class=\"settings-esc-label\">ESC</div>"
-        "</div>");
-
+    // The close control stays outside the scrolling content pane.
     rml += std::string("<div class=\"settings-content-wrapper\">");
 
     switch (currentSection) {
@@ -309,11 +334,11 @@ void SettingsController::renderMyAccount(std::string &rml)
 
     rml += std::string(
         "<div class=\"settings-button-group\">"
-        "<button class=\"settings-btn settings-btn-primary\" data-action=\"edit-profile\" style=\"tab-index: auto;\">"
-        "Edit Profile"
+        "<button class=\"settings-btn settings-btn-primary\" data-action=\"edit-profile\">"
+        "<span class=\"settings-btn-label\">Edit Profile</span>"
         "</button>"
-        "<button class=\"settings-btn settings-btn-secondary\" data-action=\"manage-accounts\" style=\"tab-index: auto;\">"
-        "Switch / Manage Accounts"
+        "<button class=\"settings-btn settings-btn-secondary\" data-action=\"manage-accounts\">"
+        "<span class=\"settings-btn-label\">Switch / Manage Accounts</span>"
         "</button>"
         "</div>");
     rml += std::string("</div>"); // .my-account-card
@@ -358,9 +383,9 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += std::string("</div>");
 
     rml += std::string("<div class=\"settings-button-group\">");
-    rml += std::string("<button class=\"settings-btn settings-btn-primary\" data-action=\"generate-theme\">Apply theme</button>");
-    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"random-theme\">Randomize</button>");
-    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-theme\">Reset Theme</button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-primary\" data-action=\"generate-theme\"><span class=\"settings-btn-label\">Apply theme</span></button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"random-theme\"><span class=\"settings-btn-label\">Randomize</span></button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-theme\"><span class=\"settings-btn-label\">Reset Theme</span></button>");
     rml += std::string("</div>");
     rml += std::string("</div>"); // .settings-card
 
@@ -391,9 +416,9 @@ void SettingsController::renderAppearance(std::string &rml)
         rml += formatRml("<span class=\"settings-font-name\">%1</span>", std::string(fd.label));
         rml += formatRml("<span class=\"settings-font-size\">%1 pt</span>", ptSize);
         rml += std::string("<div class=\"settings-font-controls\">");
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-adjust\" data-action=\"font-size-dec\" data-role=\"%1\" title=\"Decrease %2 font size\" aria-label=\"Decrease %2 font size\">−</button>", static_cast<int>(role), std::string(fd.label));
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-adjust\" data-action=\"font-size-inc\" data-role=\"%1\" title=\"Increase %2 font size\" aria-label=\"Increase %2 font size\">+</button>", static_cast<int>(role), std::string(fd.label));
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-reset\" data-action=\"reset-font\" data-role=\"%1\">Reset</button>", static_cast<int>(role));
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-adjust\" data-action=\"font-size-dec\" data-role=\"%1\" title=\"Decrease %2 font size\" aria-label=\"Decrease %2 font size\"><img class=\"settings-btn-icon\" src=\"icon:minus\"/></button>", static_cast<int>(role), std::string(fd.label));
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-adjust\" data-action=\"font-size-inc\" data-role=\"%1\" title=\"Increase %2 font size\" aria-label=\"Increase %2 font size\"><img class=\"settings-btn-icon\" src=\"icon:plus\"/></button>", static_cast<int>(role), std::string(fd.label));
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-reset\" data-action=\"reset-font\" data-role=\"%1\"><span class=\"settings-btn-label\">Reset</span></button>", static_cast<int>(role));
         rml += std::string("</div>");
         rml += std::string("</div>");
     }
@@ -407,7 +432,7 @@ void SettingsController::renderChat(std::string &rml)
     // Animation toggles
     rml += std::string("<div class=\"settings-card\">");
     const bool animEmoji = getBool(Keys::AnimateEmoji, Defaults::AnimateEmoji);
-    rml += formatRml("<div class=\"settings-switch-row\" data-setting=\"%1\" style=\"cursor: pointer;\">", Keys::AnimateEmoji);
+    rml += std::string("<div class=\"settings-switch-row\">");
     rml += std::string("<div class=\"settings-switch-text\">");
     rml += std::string("<div class=\"settings-switch-title\">Animate emoji</div>");
     rml += std::string("<div class=\"settings-switch-desc\">Play animated emoji reactions and messages continuously.</div>");
@@ -433,7 +458,7 @@ void SettingsController::renderChat(std::string &rml)
     auto renderRadioCard = [&](const std::string &val, const std::string &title, const std::string &desc) {
         const bool active = (gifMode == val);
         rml += formatRml("<div class=\"settings-radio-card%1\" data-setting=\"%2\" data-value=\"%3\" tabindex=\"0\">", active ? std::string(" active") : std::string(), Keys::GifPlayback, val);
-        rml += std::string("<div class=\"settings-radio-indicator\"></div>");
+        rml += std::string("<div class=\"settings-radio-indicator\"><span class=\"settings-radio-dot\"></span></div>");
         rml += std::string("<div class=\"settings-radio-info\">");
         rml += formatRml("<div class=\"settings-radio-title\">%1</div>", title);
         rml += formatRml("<div class=\"settings-radio-desc\">%1</div>", desc);
@@ -449,12 +474,13 @@ void SettingsController::renderChat(std::string &rml)
 
     // GIF max playing slider
     const int maxPlaying = getInt(Keys::GifMaxPlaying, Defaults::GifMaxPlaying);
-    rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-top: 16dp;\">");
+    rml += std::string("<div class=\"settings-slider-wrap\">");
     rml += std::string("<div class=\"settings-slider-header\">");
     rml += std::string("<span class=\"settings-label\">Max simultaneous playing GIFs</span>");
     rml += formatRml("<span class=\"settings-slider-val\" id=\"val-gif-max-playing\">up to %1 at once</span>", maxPlaying);
     rml += std::string("</div>");
     rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"1\" max=\"16\" step=\"1\" value=\"%1\" data-setting=\"%2\" data-display=\"val-gif-max-playing\" data-prefix=\"up to \" data-unit=\" at once\"/>", maxPlaying, Keys::GifMaxPlaying);
+    rml += formatRml("<div class=\"settings-slider-hint\">up to %1 at once</div>", maxPlaying);
     rml += std::string("</div>");
 
     // GIF max memory slider
@@ -465,6 +491,7 @@ void SettingsController::renderChat(std::string &rml)
     rml += formatRml("<span class=\"settings-slider-val\" id=\"val-gif-max-mb\">%1 MB</span>", maxGifMb);
     rml += std::string("</div>");
     rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"8\" max=\"256\" step=\"8\" value=\"%1\" data-setting=\"%2\" data-display=\"val-gif-max-mb\" data-unit=\" MB\"/>", maxGifMb, Keys::GifMaxMb);
+    rml += formatRml("<div class=\"settings-slider-hint\">%1 MB</div>", maxGifMb);
     rml += std::string("<div class=\"settings-description\">Oversized GIFs exceeding this memory threshold stay as still pictures.</div>");
     rml += std::string("</div>");
 
@@ -481,6 +508,7 @@ void SettingsController::renderChat(std::string &rml)
     rml += formatRml("<span class=\"settings-slider-val\" id=\"val-anim-cache-mb\">%1 MB</span>", cacheMb);
     rml += std::string("</div>");
     rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"16\" max=\"1024\" step=\"16\" value=\"%1\" data-setting=\"%2\" data-display=\"val-anim-cache-mb\" data-unit=\" MB\"/>", cacheMb, Keys::AnimationCacheMb);
+    rml += formatRml("<div class=\"settings-slider-hint\">%1 MB</div>", cacheMb);
     rml += std::string("<div class=\"settings-description\">Total unpacked RAM buffer for animated stickers and emoji frames.</div>");
     rml += std::string("</div>");
 
@@ -491,6 +519,7 @@ void SettingsController::renderChat(std::string &rml)
     rml += formatRml("<span class=\"settings-slider-val\" id=\"val-anim-max-mb\">%1 MB</span>", maxAnimMb);
     rml += std::string("</div>");
     rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"4\" max=\"128\" step=\"4\" value=\"%1\" data-setting=\"%2\" data-display=\"val-anim-max-mb\" data-unit=\" MB\"/>", maxAnimMb, Keys::AnimationMaxMb);
+    rml += formatRml("<div class=\"settings-slider-hint\">%1 MB</div>", maxAnimMb);
     rml += std::string("<div class=\"settings-description\">Animations that exceed this limit are downscaled or shown static.</div>");
     rml += std::string("</div>");
 
@@ -529,7 +558,7 @@ void SettingsController::renderNotifications(std::string &rml)
                  "Show unread mentions on the taskbar",
                  "Put your mention count on Styx's taskbar or dock icon.");
     rml += std::string("<div class=\"settings-button-group\">");
-    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"test-notification\">Send a test notification</button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"test-notification\"><span class=\"settings-btn-label\">Send a test notification</span></button>");
     rml += std::string("</div>");
     rml += std::string("</div>"); // .settings-card
 
@@ -606,37 +635,39 @@ void SettingsController::renderVoiceVideo(std::string &rml)
     const int inputVolume = getInt(Keys::VoiceInputVolume, Defaults::VoiceInputVolume);
     const int outputVolume = getInt(Keys::VoiceOutputVolume, Defaults::VoiceOutputVolume);
 
-    rml += std::string("<div class=\"settings-grid-2col\" style=\"margin-bottom: 8dp;\">");
+    rml += std::string("<div class=\"settings-grid-2col\">");
 
     // Input Volume Column
     rml += std::string("<div class=\"settings-grid-col settings-grid-col-left\">");
-    rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
+    rml += std::string("<div class=\"settings-slider-wrap\">");
     rml += std::string("<div class=\"settings-slider-header\">");
-    rml += std::string("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Input Volume</span>");
+    rml += std::string("<span class=\"settings-label\">Input Volume</span>");
     rml += std::string("<span class=\"settings-slider-val\" id=\"val-voice-input-vol\">") + std::to_string(inputVolume) + std::string("%</span>");
     rml += std::string("</div>");
     rml += std::string("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"100\" step=\"1\" value=\"")
            + std::to_string(inputVolume)
            + std::string("\" data-setting=\"") + std::string(Keys::VoiceInputVolume)
            + std::string("\" data-display=\"val-voice-input-vol\" data-unit=\"%\"/>");
+    rml += formatRml("<div class=\"settings-slider-hint\">%1%</div>", inputVolume);
     rml += std::string("</div>"); // .settings-slider-wrap
     rml += std::string("</div>"); // .settings-grid-col
     // Output Volume Column
     rml += std::string("<div class=\"settings-grid-col settings-grid-col-right\">");
-    rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
+    rml += std::string("<div class=\"settings-slider-wrap\">");
     rml += std::string("<div class=\"settings-slider-header\">");
-    rml += std::string("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Output Volume</span>");
+    rml += std::string("<span class=\"settings-label\">Output Volume</span>");
     rml += std::string("<span class=\"settings-slider-val\" id=\"val-voice-output-vol\">") + std::to_string(outputVolume) + std::string("%</span>");
     rml += std::string("</div>");
     rml += std::string("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"200\" step=\"1\" value=\"")
            + std::to_string(outputVolume)
            + std::string("\" data-setting=\"") + std::string(Keys::VoiceOutputVolume)
            + std::string("\" data-display=\"val-voice-output-vol\" data-unit=\"%\"/>");
+    rml += formatRml("<div class=\"settings-slider-hint\">%1%</div>", outputVolume);
     rml += std::string("</div>"); // .settings-slider-wrap
     rml += std::string("</div>"); // .settings-grid-col
     rml += std::string("</div>"); // .settings-grid-2col
 
-    rml += std::string("<div class=\"settings-description\" style=\"margin-top: 8dp; margin-bottom: 0;\">Device and volume changes take effect immediately during a call, or on your next voice connection.</div>");
+    rml += std::string("<div class=\"settings-description\">Device and volume changes take effect immediately during a call, or on your next voice connection.</div>");
 #endif
     rml += std::string("</div>"); // .settings-card (Voice Settings)
 
@@ -648,7 +679,7 @@ void SettingsController::renderVoiceVideo(std::string &rml)
     auto renderInputModeRadio = [&](const std::string &val, const std::string &title) {
         const bool active = (inputMode == val);
         rml += formatRml("<div class=\"settings-radio-card%1\" data-setting=\"%2\" data-value=\"%3\" tabindex=\"0\">", active ? std::string(" active") : std::string(), Keys::VoiceInputMode, val);
-        rml += std::string("<div class=\"settings-radio-indicator\"></div>");
+        rml += std::string("<div class=\"settings-radio-indicator\"><span class=\"settings-radio-dot\"></span></div>");
         rml += std::string("<div class=\"settings-radio-info\">");
         rml += formatRml("<div class=\"settings-radio-title\">%1</div>", title);
         rml += std::string("</div></div>");
@@ -666,15 +697,16 @@ void SettingsController::renderVoiceVideo(std::string &rml)
         rml += formatRml("<div class=\"settings-description\">%1</div>", Rml::escape(scopeDesc));
 
         const int pttDelay = getInt(Keys::VoicePushToTalkReleaseDelay, Defaults::VoicePushToTalkReleaseDelay);
-        rml += std::string("<div class=\"settings-slider-wrap\" style=\"margin-bottom: 0;\">");
+        rml += std::string("<div class=\"settings-slider-wrap\">");
         rml += std::string("<div class=\"settings-slider-header\">");
-        rml += std::string("<span class=\"settings-label\" style=\"margin-bottom: 0;\">Push to Talk Release Delay</span>");
+        rml += std::string("<span class=\"settings-label\">Push to Talk Release Delay</span>");
         rml += std::string("<span class=\"settings-slider-val\" id=\"val-ptt-release-delay\">") + std::to_string(pttDelay) + std::string("ms</span>");
         rml += std::string("</div>");
         rml += std::string("<input type=\"range\" class=\"settings-slider\" min=\"0\" max=\"2000\" step=\"20\" value=\"")
                + std::to_string(pttDelay)
                + std::string("\" data-setting=\"") + std::string(Keys::VoicePushToTalkReleaseDelay)
                + std::string("\" data-display=\"val-ptt-release-delay\" data-unit=\"ms\"/>");
+        rml += formatRml("<div class=\"settings-slider-hint\">%1ms</div>", pttDelay);
         rml += std::string("</div>"); // .settings-slider-wrap
     }
 
@@ -685,7 +717,7 @@ void SettingsController::renderVoiceVideo(std::string &rml)
     rml += std::string("<div class=\"settings-card\">");
 
     const std::string currentBackend = getString(Keys::AudioBackend, Defaults::AudioBackend);
-    rml += std::string("<div class=\"settings-row\" style=\"margin-bottom: 0;\">");
+    rml += std::string("<div class=\"settings-row\">");
     rml += std::string("<div class=\"settings-label\">Audio Backend</div>");
     rml += formatRml("<select class=\"settings-select\" data-setting=\"%1\">", Keys::AudioBackend);
     rml += formatRml("<option value=\"\"%1>Automatic</option>", currentBackend.empty() ? std::string(" selected") : std::string());
@@ -748,10 +780,10 @@ void SettingsController::renderKeybindRow(std::string &rml, KeybindAction action
     rml += std::string("<div class=\"settings-keybind\">");
     rml += formatRml("<span class=\"settings-keybind-label\">%1</span>", Rml::escape(label));
     rml += std::string("<div class=\"settings-keybind-actions\">");
-    rml += formatRml("<button class=\"%1\" id=\"record-keybind-%2\" data-action=\"record-keybind\" data-keybind=\"%2\">%3</button>",
+    rml += formatRml("<button class=\"%1\" id=\"record-keybind-%2\" data-action=\"record-keybind\" data-keybind=\"%2\"><span class=\"settings-btn-label\">%3</span></button>",
                      btnClass, actionIdx, btnText);
     if (binding.valid()) {
-        rml += formatRml("<button class=\"settings-btn settings-btn-danger\" data-action=\"remove-keybind\" data-keybind=\"%1\">Remove</button>",
+        rml += formatRml("<button class=\"settings-btn settings-btn-danger\" data-action=\"remove-keybind\" data-keybind=\"%1\"><span class=\"settings-btn-label\">Remove</span></button>",
                          actionIdx);
     }
     rml += std::string("</div>"); // .settings-keybind-actions
@@ -894,6 +926,48 @@ void SettingsController::setupEventListeners()
             handleSelectChange(target);
         }
     }, regionRoot);
+    auto sliderTarget = [](auto *target) -> ::Rml::Element * {
+        for (auto *el = target; el; el = el->GetParentNode()) {
+            if (el->IsClassSet("settings-slider"))
+                return el;
+        }
+        return nullptr;
+    };
+    listen("mouseover", [this, sliderTarget](::Rml::Event &event) {
+        auto *slider = sliderTarget(event.GetTargetElement());
+        if (slider && (!sliderDragging || hintSlider == slider))
+            showSliderHint(slider);
+    }, regionRoot);
+    listen("mouseout", [this](::Rml::Event &event) {
+        if (!sliderDragging && event.GetTargetElement() == hintSlider)
+            clearSliderHint();
+    }, regionRoot);
+    listen("focus", [this, sliderTarget](::Rml::Event &event) {
+        if (auto *slider = sliderTarget(event.GetTargetElement()))
+            showSliderHint(slider);
+    }, regionRoot, true);
+    listen("blur", [this](::Rml::Event &event) {
+        if (!sliderDragging && event.GetTargetElement() == hintSlider)
+            clearSliderHint();
+    }, regionRoot, true);
+    listen("dragstart", [this, sliderTarget](::Rml::Event &event) {
+        if (auto *slider = sliderTarget(event.GetTargetElement())) {
+            sliderDragging = true;
+            showSliderHint(slider);
+        }
+    }, regionRoot);
+    listen("dragend", [this](::Rml::Event &event) {
+        if (!sliderDragging)
+            return;
+        sliderDragging = false;
+        if (hintSlider) {
+            const float x = event.GetParameter<float>("mouse_x", -1);
+            const float y = event.GetParameter<float>("mouse_y", -1);
+            if (x < hintSlider->GetAbsoluteLeft() || x > hintSlider->GetAbsoluteLeft() + hintSlider->GetOffsetWidth() ||
+                y < hintSlider->GetAbsoluteTop() || y > hintSlider->GetAbsoluteTop() + hintSlider->GetOffsetHeight())
+                clearSliderHint();
+        }
+    }, regionRoot);
 
     listen("keyup", [this](::Rml::Event &event) {
         const int key = event.GetParameter<int>("key_identifier", 0);
@@ -920,17 +994,33 @@ void SettingsController::setupEventListeners()
             event.StopPropagation();
             return;
         }
+        if (key == ::Rml::Input::KeyIdentifier::KI_TAB) {
+            ::Rml::ElementList controls;
+            regionRoot->QuerySelectorAll(controls, ".settings-nav-item, .settings-close-btn, .settings-btn, .settings-switch, .settings-radio-card, input, select");
+            std::erase_if(controls, [](auto *element) { return !element->IsVisible() || element->HasAttribute("disabled"); });
+            if (controls.empty()) return;
+            auto position = std::find(controls.begin(), controls.end(), regionRoot->GetContext()->GetFocusElement());
+            const bool backwards = event.GetParameter<bool>("shift_key", false);
+            const int count = static_cast<int>(controls.size());
+            const int index = position == controls.end() ? (backwards ? 0 : count - 1) : static_cast<int>(position - controls.begin());
+            auto *next = controls[(index + (backwards ? -1 : 1) + count) % count];
+            next->Focus();
+            next->ScrollIntoView();
+            event.StopPropagation();
+            return;
+        }
 
-        if (key == ::Rml::Input::KeyIdentifier::KI_SPACE || key == ::Rml::Input::KeyIdentifier::KI_RETURN) {
+        if (key == ::Rml::Input::KeyIdentifier::KI_SPACE || key == ::Rml::Input::KeyIdentifier::KI_RETURN ||
+            key == ::Rml::Input::KeyIdentifier::KI_NUMPADENTER) {
             auto *target = event.GetTargetElement();
             if (!target)
                 return;
-            if (target->IsClassSet("settings-switch")) {
-                handleSwitchClick(target);
+            if (target->HasAttribute("disabled")) return;
+            if (target->IsClassSet("settings-switch") || target->IsClassSet("settings-radio-card") ||
+                target->IsClassSet("settings-nav-item") || target->IsClassSet("settings-close-btn") ||
+                target->IsClassSet("settings-btn")) {
                 event.StopPropagation();
-            } else if (target->IsClassSet("settings-radio-card")) {
-                handleRadioClick(target);
-                event.StopPropagation();
+                target->Click();
             }
         }
     }, regionRoot);
@@ -986,6 +1076,71 @@ void SettingsController::handleRadioClick(::Rml::Element *radioEl)
     requestRender(100);
 }
 
+void SettingsController::clearSliderHint()
+{
+    if (hintSlider && hintSlider->GetParentNode())
+        hintSlider->GetParentNode()->SetClass("hint-visible", false);
+    hintSlider = nullptr;
+    sliderDragging = false;
+    requestRender();
+}
+
+void SettingsController::showSliderHint(::Rml::Element *sliderEl)
+{
+    auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(sliderEl);
+    auto *wrap = sliderEl ? sliderEl->GetParentNode() : nullptr;
+    if (!input || !wrap)
+        return;
+
+    ::Rml::ElementList hints;
+    wrap->GetElementsByClassName(hints, "settings-slider-hint");
+    if (hints.empty())
+        return;
+
+    float value = 0;
+    const auto text = input->GetValue();
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !std::isfinite(value))
+        return;
+
+    if (hintSlider && hintSlider != sliderEl && hintSlider->GetParentNode())
+        hintSlider->GetParentNode()->SetClass("hint-visible", false);
+    hintSlider = sliderEl;
+    auto *hint = hints[0];
+    const auto label = attribute(sliderEl, "data-prefix") + std::to_string(static_cast<int>(std::lround(value))) +
+                       attribute(sliderEl, "data-unit");
+    hint->SetInnerRML(Platform::htmlEscape(label));
+    const float textWidth = static_cast<float>(::Rml::ElementUtilities::GetStringWidth(hint, label));
+    hint->SetProperty(::Rml::PropertyId::Width, ::Rml::Property(textWidth, ::Rml::Unit::PX));
+    wrap->SetClass("hint-visible", true);
+
+    ::Rml::Element *track = nullptr;
+    ::Rml::Element *bar = nullptr;
+    for (int i = 0; i < sliderEl->GetNumChildren(true); ++i) {
+        auto *child = sliderEl->GetChild(i);
+        if (child->GetTagName() == "slidertrack")
+            track = child;
+        else if (child->GetTagName() == "sliderbar")
+            bar = child;
+    }
+    if (track && bar) {
+        const float min = sliderEl->GetAttribute<float>("min", 0);
+        const float max = sliderEl->GetAttribute<float>("max", 100);
+        const float fraction = max > min ? std::clamp((value - min) / (max - min), 0.0f, 1.0f) : 0;
+        const float leftEdge = bar->GetBox().GetEdge(::Rml::BoxArea::Margin, ::Rml::BoxEdge::Left);
+        const float rightEdge = bar->GetBox().GetEdge(::Rml::BoxArea::Margin, ::Rml::BoxEdge::Right);
+        const float barWidth = bar->GetBox().GetSize(::Rml::BoxArea::Border).x;
+        const float trackWidth = track->GetBox().GetSize(::Rml::BoxArea::Content).x;
+        const float center = track->GetAbsoluteLeft() - wrap->GetAbsoluteLeft() + leftEdge +
+                             (trackWidth - barWidth - leftEdge - rightEdge) * fraction + barWidth / 2;
+        const float width = textWidth + hint->GetBox().GetFrameSize(::Rml::BoxArea::Border).x +
+                            hint->GetBox().GetFrameSize(::Rml::BoxArea::Padding).x;
+        const float left = std::clamp(center - width / 2, 0.0f, std::max(0.0f, wrap->GetClientWidth() - width));
+        hint->SetProperty(::Rml::PropertyId::Left, ::Rml::Property(std::floor(left), ::Rml::Unit::PX));
+    }
+    requestRender();
+}
+
 void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
 {
     const std::string key = attribute(sliderEl, "data-setting");
@@ -1013,6 +1168,8 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
             labelEl->SetInnerRML((prefix + std::to_string(val) + unit).c_str());
         }
     }
+    if (hintSlider == sliderEl)
+        showSliderHint(sliderEl);
 
     // Apply immediate settings
     if (key == std::string(Keys::AnimationCacheMb)) {
