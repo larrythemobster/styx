@@ -45,6 +45,7 @@ class CreateServerController;
 class CreatePollController;
 class CreateGroupDmController;
 class ManageGroupDmController;
+class EditGroupDmController;
 }
 struct Location {
     Core::Snowflake accountId, guildId, channelId;
@@ -132,6 +133,7 @@ public:
     void openCreatePoll();
     void openCreateGroupDm(Core::Snowflake sourceChannelId = Core::Snowflake::Invalid);
     void openGroupDmMembers(Core::Snowflake channelId);
+    void openGroupDmDetails(Core::Snowflake channelId);
     // Opens a server the account just joined or created, now if it's in the tree, otherwise
     // when the gateway delivers it. A later call replaces an earlier wait.
     void openGuildWhenReady(Core::Snowflake accountId, Core::Snowflake guildId);
@@ -204,6 +206,7 @@ private:
     std::unique_ptr<Rml::CreatePollController> createPollController;
     std::unique_ptr<Rml::CreateGroupDmController> createGroupDmController;
     std::unique_ptr<Rml::ManageGroupDmController> groupDmMembersController;
+    std::unique_ptr<Rml::EditGroupDmController> groupDmDetailsController;
     std::unique_ptr<Rml::JoinServerController> joinServerController;
     // Declared after the controllers so it, and the handlers pointing into them, goes first.
     std::unique_ptr<Rml::ShortcutController> shortcutController;

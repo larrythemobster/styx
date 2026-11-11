@@ -25,6 +25,7 @@
 #include "CreatePollController.hpp"
 #include "CreateGroupDmController.hpp"
 #include "ManageGroupDmController.hpp"
+#include "EditGroupDmController.hpp"
 #include "SwitcherController.hpp"
 #include "ShortcutController.hpp"
 #include "ShortcutsHelpController.hpp"
@@ -755,6 +756,12 @@ void Shell::openGroupDmMembers(Core::Snowflake channelId)
     if (!groupDmMembersController)
         groupDmMembersController = std::make_unique<Rml::ManageGroupDmController>(*this);
     groupDmMembersController->open(channelId);
+}
+void Shell::openGroupDmDetails(Core::Snowflake channelId)
+{
+    if (!groupDmDetailsController)
+        groupDmDetailsController = std::make_unique<Rml::EditGroupDmController>(*this);
+    groupDmDetailsController->open(channelId);
 }
 void Shell::openGuildWhenReady(Snowflake account, Snowflake guild)
 {

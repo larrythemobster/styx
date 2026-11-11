@@ -1,0 +1,49 @@
+<rml>
+<head>
+    <title>Group details</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="group_dm_details.rcss"/>
+</head>
+<body id="group-dm-details-body">
+    <div class="gdm-details-backdrop" data-action="gdm-details-close"></div>
+    <div id="gdm-details-card" class="gdm-details-card">
+        <div class="gdm-details-header">
+            <div class="gdm-details-title">Group details</div>
+            <button id="gdm-details-close" class="gdm-details-close" data-action="gdm-details-close" title="Close">
+                <img class="gdm-details-close-icon" src="icon:x" alt="Close"/>
+            </button>
+        </div>
+        <div class="gdm-details-content">
+            <div class="gdm-details-section">
+                <div class="gdm-details-label">Group name</div>
+                <input type="text" id="gdm-details-name" class="gdm-details-name" maxlength="100"/>
+            </div>
+            <div class="gdm-details-section">
+                <div class="gdm-details-label">Group icon</div>
+                <div class="gdm-details-icon-row">
+                    <div class="gdm-details-icon-container">
+                        <img id="gdm-details-icon-preview" class="gdm-details-icon-preview" src="icon:camera" alt=""/>
+                        <div id="gdm-details-icon-state" class="gdm-details-icon-state" style="display: none;"></div>
+                    </div>
+                    <div class="gdm-details-icon-actions">
+                        <button id="gdm-details-choose" class="gdm-details-btn gdm-details-choose-btn" data-action="gdm-details-pick-icon">Change icon</button>
+                        <button id="gdm-details-remove" class="gdm-details-btn gdm-details-remove-btn" data-action="gdm-details-remove-icon">Remove icon</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="gdm-details-footer">
+            <div id="gdm-details-error" class="gdm-details-error" style="display: none;"></div>
+            <div id="gdm-details-status" class="gdm-details-status" style="display: none;"></div>
+            <div class="gdm-details-footer-bar">
+                <button id="gdm-details-reset" class="gdm-details-btn gdm-details-reset-btn" data-action="gdm-details-reset">Reset</button>
+                <div class="gdm-details-footer-right">
+                    <button id="gdm-details-cancel" class="gdm-details-btn gdm-details-cancel-btn" data-action="gdm-details-close">Cancel</button>
+                    <button id="gdm-details-save" class="gdm-details-btn gdm-details-save-btn" data-action="gdm-details-save">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

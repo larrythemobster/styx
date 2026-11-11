@@ -328,6 +328,8 @@ set(PROJECT_SOURCES
     src/UI/Rml/GroupDmCreateForm.cpp
     src/UI/Rml/ManageGroupDmController.cpp
     src/UI/Rml/GroupDmMembersForm.cpp
+    src/UI/Rml/EditGroupDmController.cpp
+    src/UI/Rml/GroupDmDetailsForm.cpp
     src/UI/Rml/ExpressionPickerController.cpp
     vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
 )
@@ -485,6 +487,8 @@ if(BUILD_TESTS)
         tests/tst_PollCreateForm.cpp src/UI/Rml/PollCreateForm.cpp
         tests/tst_GroupDmCreateForm.cpp src/UI/Rml/GroupDmCreateForm.cpp
         tests/tst_GroupDmMembersForm.cpp src/UI/Rml/GroupDmMembersForm.cpp
+        tests/tst_GroupDmDetailsForm.cpp src/UI/Rml/GroupDmDetailsForm.cpp
+        src/Discord/GroupDm.cpp src/Discord/ApiError.cpp src/Core/OrderedJson.cpp
         src/UI/Rml/RmlRuntime.cpp src/UI/Rml/RmlView.cpp src/UI/Rml/ContextMenu.cpp src/UI/Rml/ComponentRenderer.cpp src/UI/Chat/SelectDraft.cpp
         src/UI/Rml/CommandOptionsBar.cpp src/UI/Rml/PollRenderer.cpp
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp

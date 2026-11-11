@@ -113,7 +113,10 @@ The dialog shows pending requests and retryable errors without changing the sour
 or its composer draft. Group headers also open member management with searchable
 friend additions, the 10-person limit, and owner-only removal of other members.
 Membership and ownership refresh live, with pending controls and retryable errors.
-Name/icon editing and confirmed leave are not exposed in the UI yet.
+Edit group names and icons from the header. Icon uploads use shared image preparation,
+with previews, removal and reset. Live updates preserve unsaved fields; successful saves
+replace the saved baseline. Requests show pending state and retryable errors.
+Confirmed leave is not exposed in the UI yet.
 
 The executable is `styx.exe` on Windows or `styx` on Linux. If you used
 Acheron, Styx imports its settings, database and cache on first launch.

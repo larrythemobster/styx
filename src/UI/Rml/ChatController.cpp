@@ -451,6 +451,8 @@ void ChatController::setupEventListeners()
             shell.openCreateGroupDm(currentChannelId);
         } else if (action == std::string("manage-group-dm-members")) {
             shell.openGroupDmMembers(currentChannelId);
+        } else if (action == std::string("edit-group-dm")) {
+            shell.openGroupDmDetails(currentChannelId);
         } else if (action == std::string("composer-attach")) {
             Platform::Guard<ChatController> self(this);
             Platform::Desktop::openFiles("Select Files", {{"All Files", "*.*"}}, [self](std::vector<std::string> files) {
@@ -1849,6 +1851,14 @@ void ChatController::updateHeader()
             presenceDot = std::format("<span class=\"header-presence {0}\"></span>", status);
         } else {
             leadingIcon = std::string("<img class=\"header-icon\" src=\"icon:at-sign\"/>");
+            if (instance) {
+                const auto channel = instance->getChannel(currentChannelId);
+                if (channel && channel->type.get() == Discord::ChannelType::GROUP_DM
+                    && channel->icon.hasValue() && !channel->icon->empty()) {
+                    const auto source = shell.imageSource(Discord::Cdn::channelIcon(currentChannelId, channel->icon.get(), 64), Platform::Size{24, 24});
+                    leadingIcon = std::format("<div class=\"header-avatar-clip\"><img src=\"{}\"/></div>", escape(source));
+                }
+            }
         }
     } else {
         std::string icon = std::string("icon:hash");
@@ -1874,8 +1884,10 @@ void ChatController::updateHeader()
     if (isDm) {
         if (CreateGroupDmController::canOpen(instance, currentChannelId))
             groupDmButton = "<button class=\"header-btn group-dm-create\" data-action=\"create-group-dm\" title=\"Create group DM\"><img src=\"icon:user-plus\"/></button>";
-        else if (ManageGroupDmController::canOpen(instance, currentChannelId))
-            groupDmButton = "<button class=\"header-btn group-dm-create\" data-action=\"manage-group-dm-members\" title=\"Manage members\"><img src=\"icon:user-plus\"/></button>";
+        else if (ManageGroupDmController::canOpen(instance, currentChannelId)) {
+            groupDmButton = "<button class=\"header-btn group-dm-create\" data-action=\"manage-group-dm-members\" title=\"Manage members\"><img src=\"icon:user-plus\"/></button>"
+                "<button class=\"header-btn group-dm-create\" data-action=\"edit-group-dm\" title=\"Edit group details\"><img src=\"icon:pencil\"/></button>";
+        }
     }
     const std::string members = std::format("<div class=\"header-btn{0}\" data-action=\"toggle-members\" title=\"{1}\"><img src=\"icon:id-card\"/></div>", shell.isMemberListVisible() ? std::string(" active") : std::string(), isDm ? std::string("Conversation profile") : std::string("Member list"));
     const std::string html = std::string("<div class=\"header-left\">") + leadingIcon
