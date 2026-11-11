@@ -257,6 +257,7 @@ set(PROJECT_SOURCES
     src/Storage/RoleRepository.cpp
     src/Discord/Client.cpp
     src/Discord/ClientMessages.cpp
+    src/Discord/ClientInbox.cpp
     src/Discord/ClientInteractions.cpp
     src/Discord/ClientPolls.cpp
     src/Discord/PollProtocol.cpp
@@ -295,6 +296,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/Controller.cpp
     src/UI/Rml/ContextMenu.cpp
     src/UI/Rml/Shell.cpp
+    src/UI/Rml/InboxController.cpp
     src/UI/Rml/RailController.cpp
     src/UI/Rml/ChannelListController.cpp
     src/UI/Rml/UserPanelController.cpp

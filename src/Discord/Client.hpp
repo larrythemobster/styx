@@ -70,6 +70,8 @@ public:
     void fetchHistory(Snowflake channelId, Snowflake beforeId, int limit, MessagesCallback callback);
     void fetchMessagesAfter(Snowflake channelId, Snowflake afterId, int limit, MessagesCallback callback);
     void fetchMessagesAround(Snowflake channelId, Snowflake messageId, int limit, MessagesCallback callback);
+    // Fetch recent mentions without changing read state. before is invalid for the first page.
+    void fetchRecentMentions(Snowflake before, int limit, MessagesCallback callback);
 
     using ProfileCallback = std::function<void(const Core::Result<UserProfile> &)>;
     void fetchUserProfile(Snowflake userId, Snowflake guildId, ProfileCallback callback);

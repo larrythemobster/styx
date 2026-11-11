@@ -1,0 +1,19 @@
+<rml>
+<head>
+    <title>Inbox</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="inbox.rcss"/>
+</head>
+<body id="inbox-body">
+    <div class="inbox-backdrop" data-action="close"></div>
+    <div class="inbox-popover">
+        <div class="inbox-header">Inbox</div>
+        <div class="inbox-tabs">
+            <button id="inbox-unreads" class="inbox-tab selected" data-action="unreads">Unreads</button>
+            <button id="inbox-mentions" class="inbox-tab" data-action="mentions">Mentions</button>
+        </div>
+        <div id="inbox-content" class="inbox-content"></div>
+    </div>
+</body>
+</rml>

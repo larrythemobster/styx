@@ -35,6 +35,10 @@ maximize/restore and close controls. Drag the strip to move the window or
 double-click to maximize and restore. Window edges remain resizable, and Close
 honors the close-to-tray setting.
 
+Inbox shows unread channels with cached message previews and recent mentions.
+Load more mentions, fetch recent messages, open a result, or explicitly mark a
+channel read. Opening Inbox alone does not acknowledge messages.
+
 The DM sidebar and profile panel leave more room for messages. View Profile opens
 a centered modal with activity, mutual friends and mutual servers. Avatar clicks
 retain the compact profile popover. Both views support notes and messaging.
