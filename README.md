@@ -27,10 +27,11 @@ again. Recipient notifications use the documented
 [ring endpoint](https://docs.discord.food/resources/channel#ring-channel-recipients).
 Camera calling is not implemented.
 
-The DM sidebar and profile panel leave more room for messages. The profile
-panel's View Profile button opens the existing profile view. Call controls
-include labeled mute, deafen, screen sharing where supported, and disconnect
-actions. Header, profile, and call buttons support keyboard activation.
+The DM sidebar and profile panel leave more room for messages. View Profile opens
+a centered modal with activity, mutual friends and mutual servers. Avatar clicks
+retain the compact profile popover. Both views support notes and messaging.
+Call controls include labeled mute, deafen, screen sharing where supported, and
+disconnect actions. Header, profile, and call buttons support keyboard activation.
 
 Opening a DM or server channel starts at the latest message after layout.
 Loading older history preserves the visible position. Incoming messages follow

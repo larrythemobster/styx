@@ -647,6 +647,7 @@ void Shell::markChannelRead(Snowflake channel)
 }
 void Shell::markGuildRead(Snowflake account, Snowflake guild) { if (auto *client = instanceFor(account)) client->markGuildsAsRead({guild}); }
 void Shell::showUserProfile(Snowflake user, Snowflake guild, const Platform::Rect &anchor) { if (instance && userProfileController) userProfileController->showProfile(user, guild, anchor); }
+void Shell::showFullUserProfile(Snowflake user, Snowflake guild) { if (instance && userProfileController) userProfileController->showProfile(user, guild, {}, true); }
 void Shell::openSettings() { setSettingsOpen(true); }
 void Shell::closeSettings() { setSettingsOpen(false); }
 void Shell::setSettingsOpen(bool open) { if (settingsOpen == open) return; settingsOpen = open; applyBodyClasses(); settingsOpenChanged.publish(open); }

@@ -63,7 +63,7 @@ MemberListController::MemberListController(Shell &shell, ::Rml::Element *root)
         if (closest(event.GetTargetElement(), "data-profile-view")) {
             if (userId.isValid()) {
                 if (auto *button = closest(event.GetTargetElement(), "data-profile-view")) button->Focus();
-                this->shell.showUserProfile(userId, activeGuildId);
+                this->shell.showFullUserProfile(userId, activeGuildId);
             }
             return;
         }
@@ -235,7 +235,7 @@ void MemberListController::renderGuildMemberList()
         if (!item || item->type == Core::MemberListItem::Type::Placeholder) {
             rml += "<div class=\"member-item member-row\" style=\"top: " + top + "dp;\"><div class=\"member-avatar-wrap\"><div class=\"member-avatar-fallback\"></div></div><div class=\"member-content\"><div class=\"member-name\" style=\"opacity: 0.3;\">...</div></div></div>";
         } else if (item->type == Core::MemberListItem::Type::Group) {
-            rml += "<div class=\"member-item member-group-header\" style=\"top: " + top + "dp;\">" + escape(Platform::unicodeUpper(item->groupName)) + " â€” " + std::to_string(item->groupCount) + "</div>";
+            rml += "<div class=\"member-item member-group-header\" style=\"top: " + top + "dp;\">" + escape(Platform::unicodeUpper(item->groupName)) + " — " + std::to_string(item->groupCount) + "</div>";
         } else if (item->type == Core::MemberListItem::Type::Member) {
             const auto uid = item->userId;
             std::string userHash;
@@ -265,7 +265,7 @@ void MemberListController::renderGroupDmList(const std::vector<Snowflake> &recip
         return;
     }
     auto *users = currentInstance->users();
-    std::string rml = "<div class=\"member-group-header\">MEMBERS â€” " + std::to_string(recipients.size()) + "</div>";
+    std::string rml = "<div class=\"member-group-header\">MEMBERS — " + std::to_string(recipients.size()) + "</div>";
     for (auto uid : recipients) {
         auto name = users ? users->getDisplayName(uid) : uid.toString();
         if (name.empty()) name = uid.toString();

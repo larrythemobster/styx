@@ -95,6 +95,10 @@ void UserProfileController::ensureDocument()
         if (target->GetId() == "profile-backdrop" || target->GetId() == "user-profile-root") {
             event.StopPropagation(); hide(); return;
         }
+        if (target->GetId() == "profile-close") { event.StopPropagation(); hide(); return; }
+        if (auto *tab = closest(target, "data-profile-tab")) {
+            event.StopPropagation(); selectFullTab(attribute(tab, "data-profile-tab")); return;
+        }
         if (target->GetId() == "profile-message-btn" || closest(target, "profile-message-btn")) {
             event.StopPropagation();
             auto account = shell.location().accountId;
@@ -108,9 +112,33 @@ void UserProfileController::ensureDocument()
         }
     }, profileDocument);
     listen("keydown", [this](::Rml::Event &event) {
-        if (event.GetParameter<int>("key_identifier", 0) == ::Rml::Input::KI_ESCAPE) {
-            event.StopPropagation(); hide();
+        const int key = event.GetParameter<int>("key_identifier", 0);
+        if (key == ::Rml::Input::KI_ESCAPE) {
+            event.StopPropagation(); hide(); return;
         }
+        auto *target = event.GetTargetElement();
+        if (key == ::Rml::Input::KI_RETURN || key == ::Rml::Input::KI_NUMPADENTER || key == ::Rml::Input::KI_SPACE) {
+            if (target && target->GetTagName() == "button") {
+                event.StopPropagation(); target->DispatchEvent("click", {}); return;
+            }
+        }
+        if (!fullMode || key != ::Rml::Input::KI_TAB) return;
+        std::vector<const char *> ids{"profile-more"};
+        auto *inst = clientInstance();
+        if (inst && currentUserId != inst->accountId()) {
+            if (!isBot()) ids.push_back("profile-note-input");
+            ids.push_back("profile-message-btn");
+        }
+        ids.insert(ids.end(), {"profile-tab-activity", "profile-tab-friends", "profile-tab-guilds", "profile-close"});
+        auto *focused = profileDocument->GetContext()->GetFocusElement();
+        int index = -1;
+        for (int i = 0; i < static_cast<int>(ids.size()); ++i)
+            if (profileDocument->GetElementById(ids[i]) == focused) { index = i; break; }
+        const bool backwards = event.GetParameter<bool>("shift_key", false);
+        if (index < 0) index = backwards ? 0 : static_cast<int>(ids.size()) - 1;
+        index = (index + (backwards ? -1 : 1) + static_cast<int>(ids.size())) % static_cast<int>(ids.size());
+        event.StopPropagation();
+        if (auto *next = profileDocument->GetElementById(ids[index])) { next->Focus(); next->ScrollIntoView(); }
     }, profileDocument);
     listen("change", [this](::Rml::Event &event) {
         auto *target = event.GetTargetElement();
@@ -122,11 +150,23 @@ void UserProfileController::positionCard(const Platform::Rect &anchor)
     if (!profileDocument) return;
     auto *card = profileDocument->GetElementById("profile-card");
     if (!card) return;
-    constexpr float w = 320, h = 460;
-    float winW = shell.view() ? static_cast<float>(shell.view()->width()) : 1280;
-    float winH = shell.view() ? static_cast<float>(shell.view()->height()) : 720;
+    if (fullMode) {
+        card->SetProperty("width", "100%");
+        card->SetProperty("height", "100%");
+        card->SetProperty("left", "auto");
+        card->SetProperty("top", "auto");
+        return;
+    }
+    auto *context = profileDocument->GetContext();
+    const auto dimensions = context->GetDimensions();
+    const float scale = context->GetDensityIndependentPixelRatio();
+    const float winW = static_cast<float>(dimensions.x), winH = static_cast<float>(dimensions.y);
+    float w = 320.0f * scale;
+    float h = 460.0f * scale;
+    card->SetProperty("width", std::format("{}px", w));
+    card->SetProperty("height", "auto");
     float left = (winW - w) / 2, top = (winH - h) / 2;
-    if (!anchor.empty()) {
+    if (!fullMode && !anchor.empty()) {
         left = anchor.x + anchor.width / 2 > winW / 2 ? anchor.x - w - 8 : anchor.x + anchor.width + 8;
         top = anchor.y;
         left = std::max(10.0f, std::min(left, winW - w - 10));
@@ -146,7 +186,8 @@ void UserProfileController::updateProfileData()
     if (hasProfile && profile.guildMemberProfile.hasValue()) pronouns = profile.guildMemberProfile.get().pronouns.valueOr();
     if (pronouns.empty() && hasProfile && profile.userProfile.hasValue()) pronouns = profile.userProfile.get().pronouns.valueOr();
     if (auto *el = profileDocument->GetElementById("profile-pronouns")) { el->SetInnerRML(escape(pronouns)); el->SetClass("visible", !pronouns.empty()); }
-    if (auto *el = profileDocument->GetElementById("profile-avatar-img")) el->SetAttribute("src", shell.imageSource(resolvedAvatarUrl(128), {68, 68}));
+    const int avatarSize = fullMode ? 100 : 68;
+    if (auto *el = profileDocument->GetElementById("profile-avatar-img")) el->SetAttribute("src", shell.imageSource(resolvedAvatarUrl(fullMode ? 256 : 128), {avatarSize, avatarSize}));
     std::string banner;
     if (hasProfile && profile.guildMemberProfile.hasValue()) banner = profile.guildMemberProfile.get().banner.valueOr();
     if (banner.empty() && hasProfile) banner = profile.user.get().banner.valueOr();
@@ -156,7 +197,7 @@ void UserProfileController::updateProfileData()
     }
     if (auto *el = profileDocument->GetElementById("profile-banner")) {
         auto color = resolvedAccentColor();
-        el->SetProperty("background-color", color ? Platform::Color::rgb(color).css() : "#5865f2");
+        el->SetProperty("background-color", color ? Platform::Color::rgb(color).css() : "#303136");
     }
     std::string bio;
     if (hasProfile && profile.guildMemberProfile.hasValue()) bio = profile.guildMemberProfile.get().bio.valueOr();
@@ -171,12 +212,20 @@ void UserProfileController::updateProfileData()
             input->SetValue(initialNote);
         }
     }
+    if (auto *el = profileDocument->GetElementById("profile-message-btn")) el->SetProperty("display", currentUserId == inst->accountId() ? "none" : "block");
+    if (auto *el = profileDocument->GetElementById("profile-note-section")) el->SetProperty("display", isBot() || currentUserId == inst->accountId() ? "none" : "block");
     renderPresenceAndActivities(); renderRoles(); renderDates();
 }
 void UserProfileController::renderPresenceAndActivities()
 {
     auto *inst = clientInstance();
-    if (!profileDocument || !inst || !inst->presences()) return;
+    if (!profileDocument || !inst) return;
+    if (!inst->presences()) {
+        if (fullMode && fullTab == "activity")
+            if (auto *results = profileDocument->GetElementById("profile-full-results"))
+                results->SetInnerRML("<div class=\"profile-empty\">Activity is unavailable.</div>");
+        return;
+    }
     auto *presences = inst->presences();
     auto badge = presences->badge(currentUserId, currentGuildId);
     if (auto *dot = profileDocument->GetElementById("profile-status-dot")) {
@@ -226,7 +275,11 @@ void UserProfileController::renderPresenceAndActivities()
             rml += "</div></div></div>";
         }
         container->SetInnerRML(rml);
-        if (auto *section = profileDocument->GetElementById("profile-activities-section")) section->SetProperty("display", cards.empty() ? "none" : "block");
+        if (auto *section = profileDocument->GetElementById("profile-activities-section")) section->SetProperty("display", fullMode || cards.empty() ? "none" : "block");
+        if (fullMode && fullTab == "activity") {
+            if (auto *results = profileDocument->GetElementById("profile-full-results"))
+                results->SetInnerRML(rml.empty() ? "<div class=\"profile-empty\">No activity to show.</div>" : rml);
+        }
     }
 }
 void UserProfileController::renderRoles()
@@ -259,6 +312,51 @@ void UserProfileController::renderDates()
     }
     container->SetInnerRML(rml);
 }
+void UserProfileController::selectFullTab(const std::string &tab)
+{
+    if (!fullMode || !profileDocument) return;
+    fullTab = tab;
+    for (const auto *name : {"activity", "friends", "guilds"}) {
+        if (auto *el = profileDocument->GetElementById(std::string("profile-tab-") + name))
+            el->SetClass("selected", fullTab == name);
+    }
+    renderFullContent();
+    requestRender();
+}
+
+void UserProfileController::renderFullContent()
+{
+    if (!fullMode || !profileDocument) return;
+    auto *results = profileDocument->GetElementById("profile-full-results");
+    if (!results) return;
+    if (fullTab == "activity") { renderPresenceAndActivities(); return; }
+    if (!hasProfile) {
+        results->SetInnerRML(profileFailed ? "<div class=\"profile-empty\">Could not load profile.</div>" : "<div class=\"profile-empty\">Loading profile...</div>");
+        return;
+    }
+    std::string rml;
+    if (fullTab == "friends") {
+        if (!profile.mutualFriends.hasValue()) rml = "<div class=\"profile-empty\">Mutual friends are unavailable.</div>";
+        else {
+            for (const auto &user : profile.mutualFriends.get())
+                rml += "<div class=\"profile-mutual-row\">" + escape(user.getDisplayName()) + "</div>";
+            if (rml.empty()) rml = "<div class=\"profile-empty\">No mutual friends.</div>";
+        }
+    } else {
+        if (!profile.mutualGuilds.hasValue()) rml = "<div class=\"profile-empty\">Mutual servers are unavailable.</div>";
+        else {
+            auto *inst = clientInstance();
+            for (const auto &entry : profile.mutualGuilds.get()) {
+                auto guild = inst ? inst->getGuild(entry.id.get()) : std::nullopt;
+                auto name = guild ? guild->name.valueOr(entry.id.get().toString()) : entry.id.get().toString();
+                rml += "<div class=\"profile-mutual-row\">" + escape(name) + "</div>";
+            }
+            if (rml.empty()) rml = "<div class=\"profile-empty\">No mutual servers.</div>";
+        }
+    }
+    results->SetInnerRML(rml);
+}
+
 void UserProfileController::saveNoteIfDirty()
 {
     if (!noteDirty || !currentUserId.isValid() || isBot()) return;
@@ -270,15 +368,23 @@ void UserProfileController::saveNoteIfDirty()
     }
     noteDirty = false;
 }
-void UserProfileController::showProfile(Core::Snowflake userId, Core::Snowflake guildId, const Platform::Rect &anchor)
+void UserProfileController::showProfile(Core::Snowflake userId, Core::Snowflake guildId, const Platform::Rect &anchor, bool full)
 {
     ensureDocument();
     if (!profileDocument) return;
     if (visible) saveNoteIfDirty();
+    else if (full) {
+        if (auto *focused = profileDocument->GetContext()->GetFocusElement()) previousFocus = focused->GetObserverPtr();
+        else previousFocus.reset();
+    }
     currentUserId = userId; currentGuildId = guildId; hasProfile = false; noteDirty = false;
+    fullMode = full; profileFailed = false; fullTab = "activity";
+    profileDocument->SetClass("full-profile", fullMode);
     auto generation = ++requestGeneration;
-    updateProfileData(); positionCard(anchor);
-    profileDocument->Show(); profileDocument->PullToFront(); profileDocument->SetClass("open", true);
+    updateProfileData(); positionCard(anchor); selectFullTab(fullTab);
+    profileDocument->Show(fullMode ? ::Rml::ModalFlag::Modal : ::Rml::ModalFlag::None);
+    profileDocument->PullToFront(); profileDocument->SetClass("open", true);
+    if (fullMode) if (auto *close = profileDocument->GetElementById("profile-close")) close->Focus();
     visible = true;
     activityTimer.start(std::chrono::seconds(1), true, [this] { if (visible) { renderPresenceAndActivities(); requestRender(); } });
     requestRender();
@@ -286,7 +392,9 @@ void UserProfileController::showProfile(Core::Snowflake userId, Core::Snowflake 
         Platform::Guard<UserProfileController> self(this);
         inst->discord()->fetchUserProfile(userId, guildId, [self, generation](const Core::Result<Discord::UserProfile> &result) {
             if (!self || !self->visible || self->requestGeneration != generation) return;
-            if (result.success()) { self->profile = result.value.value(); self->hasProfile = true; self->updateProfileData(); self->requestRender(); }
+            if (result.success()) { self->profile = result.value.value(); self->hasProfile = true; self->updateProfileData(); }
+            else self->profileFailed = true;
+            self->renderFullContent(); self->requestRender();
         });
     }
 }
@@ -294,6 +402,9 @@ void UserProfileController::hide()
 {
     if (!profileDocument || !visible) return;
     saveNoteIfDirty(); ++requestGeneration; activityTimer.stop();
-    profileDocument->SetClass("open", false); profileDocument->Hide(); visible = false; requestRender();
+    profileDocument->SetClass("open", false); profileDocument->Hide(); visible = false;
+    if (auto *focus = previousFocus.get()) focus->Focus();
+    previousFocus.reset();
+    requestRender();
 }
 } // namespace Styx::UI::Rml

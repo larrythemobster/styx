@@ -8,14 +8,15 @@
 <body id="user-profile-root">
 	<div id="profile-backdrop" class="profile-backdrop">
 		<div id="profile-card" class="profile-card">
+			<div class="profile-main">
 			<div id="profile-banner" class="profile-banner">
 				<img id="profile-banner-img" class="profile-banner-img" src="" />
-				<div class="profile-more-btn" data-action="more" title="More"><img src="icon:ellipsis"/></div>
+				<button id="profile-more" class="profile-more-btn" data-action="more" title="More" aria-label="More"><img src="icon:ellipsis"/></button>
 			</div>
 
 			<div class="profile-header">
 				<div class="profile-avatar-wrapper">
-					<img id="profile-avatar-img" class="profile-avatar-img" src="" />
+					<div class="profile-avatar-clip"><img id="profile-avatar-img" class="profile-avatar-img" src="" /></div>
 					<div id="profile-status-dot" class="profile-status-dot"></div>
 				</div>
 				<div id="profile-badges" class="profile-badges"></div>
@@ -67,6 +68,16 @@
 				<div class="profile-footer">
 					<button id="profile-message-btn" class="profile-message-btn">Message</button>
 				</div>
+			</div>
+			</div>
+			<div class="profile-full-content">
+				<button id="profile-close" class="profile-close" aria-label="Close profile" title="Close">×</button>
+				<div class="profile-tabs">
+					<button id="profile-tab-activity" class="profile-tab" data-profile-tab="activity">Activity</button>
+					<button id="profile-tab-friends" class="profile-tab" data-profile-tab="friends">Mutual Friends</button>
+					<button id="profile-tab-guilds" class="profile-tab" data-profile-tab="guilds">Mutual Servers</button>
+				</div>
+				<div id="profile-full-results" class="profile-full-results"></div>
 			</div>
 		</div>
 	</div>

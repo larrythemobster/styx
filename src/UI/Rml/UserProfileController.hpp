@@ -6,6 +6,7 @@
 
 #include "Platform/Native.hpp"
 #include "Platform/Timer.hpp"
+#include <RmlUi/Core/ObserverPtr.h>
 #include <string>
 #include <optional>
 
@@ -27,7 +28,7 @@ public:
     explicit UserProfileController(Shell &shell);
     ~UserProfileController() override;
 
-    void showProfile(Core::Snowflake userId, Core::Snowflake guildId, const Platform::Rect &anchorRect = {});
+    void showProfile(Core::Snowflake userId, Core::Snowflake guildId, const Platform::Rect &anchorRect = {}, bool full = false);
     void hide();
     [[nodiscard]] bool isOpen() const { return visible; }
 
@@ -37,6 +38,8 @@ private:
     void renderPresenceAndActivities();
     void renderRoles();
     void renderDates();
+    void renderFullContent();
+    void selectFullTab(const std::string &tab);
     void positionCard(const Platform::Rect &anchorRect);
     void saveNoteIfDirty();
 
@@ -50,12 +53,16 @@ private:
     [[nodiscard]] bool isBot() const;
 
     ::Rml::ElementDocument *profileDocument = nullptr;
+    ::Rml::ObserverPtr<::Rml::Element> previousFocus;
     Core::Snowflake currentUserId;
     Core::Snowflake currentGuildId;
     Discord::UserProfile profile;
     bool hasProfile = false;
     bool visible = false;
     bool noteDirty = false;
+    bool fullMode = false;
+    bool profileFailed = false;
+    std::string fullTab = "activity";
     std::string initialNote;
     std::uint64_t requestGeneration = 0;
 

@@ -99,6 +99,7 @@ public:
     void markChannelRead(Core::Snowflake channelId);
     void markGuildRead(Core::Snowflake accountId, Core::Snowflake guildId);
     void showUserProfile(Core::Snowflake userId, Core::Snowflake guildId, const Platform::Rect &anchor = {});
+    void showFullUserProfile(Core::Snowflake userId, Core::Snowflake guildId);
     void openSettings();
     void closeSettings();
     void setSettingsOpen(bool open);
