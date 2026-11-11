@@ -32,6 +32,9 @@ Forward revisit Friends, DMs and server channels, skipping unavailable locations
 The centered title follows the current view. Drag the empty strip to move the
 window or double-click to maximize and restore. Window controls stay separate
 from the draggable area, edges remain resizable, and Close honors close-to-tray.
+Toolbar hints fit their text and stay inside the window. They appear after a
+short hover or immediately for keyboard navigation. Only one hint is shown;
+clicking a control or moving away dismisses it.
 
 Inbox shows unread channels with cached message previews and recent mentions.
 Load more mentions, fetch recent messages, open a result, or explicitly mark a

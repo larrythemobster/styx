@@ -75,7 +75,6 @@ body.custom-titlebar #titlebar
 .titlebar-app-actions { display: flex; flex-direction: row; margin-left: auto; flex-shrink: 0; }
 .titlebar-action
 {
-	position: relative;
 	display: flex; align-items: center; justify-content: center;
 	width: 32dp; height: 28dp; padding: 0; border-width: 0;
 	background-color: transparent; color: #949ba4; font-size: 14dp; tab-index: auto;
@@ -100,7 +99,6 @@ body.custom-titlebar #titlebar
 .titlebar-controls { display: flex; flex-direction: row; flex-shrink: 0; }
 .titlebar-button
 {
-	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -131,22 +129,21 @@ body.custom-titlebar #titlebar
 	border-right: 1dp #f2f3f5;
 }
 .titlebar-close-icon { width: 14dp; height: 14dp; image-color: #f2f3f5; }
-.titlebar-tooltip
+#titlebar-hint
 {
 	display: none;
 	position: absolute;
-	top: 31dp;
-	right: 2dp;
-	padding: 5dp 8dp;
+	box-sizing: content-box;
+	padding: 6dp 8dp;
 	background-color: #242428;
 	color: #f2f3f5;
 	font-size: 12dp;
+	line-height: 16dp;
 	white-space: nowrap;
 	border-radius: 4dp;
+	pointer-events: none;
+	z-index: 3010;
 }
-.titlebar-button:hover .titlebar-tooltip, .titlebar-button:focus .titlebar-tooltip { display: block; }
-.titlebar-action .titlebar-tooltip { left: 0; right: auto; }
-.titlebar-action:hover .titlebar-tooltip, .titlebar-action:focus .titlebar-tooltip { display: block; }
 
 #rail
 {
