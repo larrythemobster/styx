@@ -57,6 +57,12 @@ TEST_CASE("Markdown single-link detection", "[markdown]")
     CHECK(!isSingleLink(""));
 }
 
+TEST_CASE("Markdown keeps pathological unmatched syntax as plain text", "[markdown]")
+{
+    const std::string source = std::string(1800, '[') + std::string(1800, '*') + "tail";
+    CHECK(renderInline(source) == source);
+}
+
 TEST_CASE("Emoji segmentation preserves sequences", "[markdown][emoji]")
 {
     using Styx::Core::countUnicodeEmojisSegmented;

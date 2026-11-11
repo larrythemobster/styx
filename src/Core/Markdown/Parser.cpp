@@ -146,10 +146,17 @@ std::vector<AstNode> Parser::parse(std::string source, ParseState state)
         const Rule *best = nullptr;
         std::smatch capture, match;
         double quality = 0;
+        bool regexFailure = false;
         for (const auto &rule : rules()) {
             if (state.excludedRules.contains(rule.name) || (rule.scope == Rule::Inline && !state.isInline) || (rule.scope == Rule::Block && state.isInline)) continue;
             if (best && rule.order > best->order) break;
-            if (!std::regex_search(source, match, rule.regex, std::regex_constants::match_continuous) || match.length() == 0) continue;
+            const auto matchEnd = source.cend();
+            try {
+                if (!std::regex_search(source.cbegin(), matchEnd, match, rule.regex, std::regex_constants::match_continuous) || match.length() == 0) continue;
+            } catch (const std::regex_error &) {
+                regexFailure = true;
+                break;
+            }
             double candidate = 0;
             if (std::string_view(rule.name) == "strong") candidate = match.length() + 0.1;
             else if (std::string_view(rule.name) == "u") candidate = static_cast<double>(match.length());
@@ -157,7 +164,12 @@ std::vector<AstNode> Parser::parse(std::string source, ParseState state)
         }
         AstNode node;
         std::size_t consumed = 0;
-        if (!best) {
+        if (regexFailure) {
+            // Leave the input literal instead of aborting the UI.
+            consumed = source.size();
+            node.type = "text";
+            node.content = source;
+        } else if (!best) {
             // The text rule consumes at least one character before checking its lookahead.
             consumed = 1;
             while (consumed < source.size() && (static_cast<unsigned char>(source[consumed]) & 0xc0) == 0x80) ++consumed;
@@ -167,8 +179,9 @@ std::vector<AstNode> Parser::parse(std::string source, ParseState state)
             node.type = "text";
             node.content = source.substr(0, consumed);
         } else {
+            const std::size_t matchedLength = capture.length();
             node.type = best->name;
-            consumed = capture.length();
+            consumed = matchedLength;
             const std::string_view type = best->name;
             if (type == "escape") { node.type = "text"; node.content = capture[1].str(); }
             else if (type == "autolink") {
