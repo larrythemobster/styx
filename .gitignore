@@ -6,3 +6,7 @@ CMakeUserPresets.json
 .planning/
 /build
 /build-*/
+.cache/
+.env
+.env.*
+*.dmp
