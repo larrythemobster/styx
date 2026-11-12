@@ -410,6 +410,11 @@ else()
 endif()
 
 if(WIN32)
+    enable_language(RC)
+    target_sources(${PROJECT_NAME} PRIVATE resources/app/styx.rc)
+    set_source_files_properties(resources/app/styx.rc PROPERTIES
+        INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/resources/app"
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/app/styx.ico")
     target_link_libraries(${PROJECT_NAME} PRIVATE dwmapi)
     find_file(STYX_CURL_RUNTIME_DLL NAMES libcurl-impersonate.dll libcurl.dll
         HINTS "${CURL_INCLUDE_DIR}/../lib" "${CURL_INCLUDE_DIR}/../bin"
