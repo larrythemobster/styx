@@ -12,7 +12,6 @@
     <a href="#status"><img src="https://img.shields.io/badge/status-experimental-d29922?style=flat-square" alt="Status: experimental"></a>
     <a href="CMakeLists.txt"><img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&amp;logo=cplusplus&amp;logoColor=white" alt="C++20"></a>
     <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-GPLv3-555555?style=flat-square" alt="License: GPLv3"></a>
-    <a href="https://github.com/larrythemobster/styx/stargazers"><img src="https://img.shields.io/badge/GitHub-Star%20Styx-181717?style=flat-square&amp;logo=github" alt="Star Styx on GitHub"></a>
   </p>
 </div>
 
