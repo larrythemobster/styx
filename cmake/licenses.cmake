@@ -1,5 +1,5 @@
 # Keep license notices beside the app in both build trees and installed packages.
-set(STYX_LICENSE_DIR "${CMAKE_CURRENT_BINARY_DIR}/styx-licenses")
+set(STYX_LICENSE_DIR "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/styx-licenses")
 file(REMOVE_RECURSE "${STYX_LICENSE_DIR}")
 file(MAKE_DIRECTORY "${STYX_LICENSE_DIR}")
 
