@@ -545,6 +545,8 @@ jobs:
           cp curl-impersonate/libcurl-impersonate.dylib "$app/Frameworks/"
 
           cp -r resources "$app/MacOS/resources"
+          cp build/LICENSE.txt build/NOTICE.txt "$app/MacOS/"
+          cp -r build/licenses "$app/MacOS/"
 
           # Info.plist
           cat > "$app/Info.plist" << 'PLIST'

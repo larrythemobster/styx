@@ -1,0 +1,43 @@
+Styx
+
+Styx is a modified version of Acheron by ouwou and contributors.
+Source imported on 9 October 2026 from:
+https://github.com/ouwou/acheron/commit/e5337a5f3b2ca2978dbf48bbbe124e3a62926591
+The video engine also includes code from Acheron's video-streams branch.
+Styx changes are recorded in its Git history. See LICENSE.txt for GPL-3.0 terms.
+
+Third-party software and artwork retain their own licenses. Distributed builds
+include license texts in licenses/. These notices do not imply endorsement.
+
+Twemoji
+The bundled TwemojiCOLRv0.ttf uses Twemoji emoji artwork by Twitter and other
+contributors, under Creative Commons Attribution 4.0 International:
+https://github.com/jdecked/twemoji
+https://creativecommons.org/licenses/by/4.0/
+The font is distributed unchanged from Acheron's source import.
+
+Lucide
+Interface icons are from Lucide, under the ISC license; see licenses/lucide.txt.
+
+Mozilla CA certificates
+The unmodified CA bundle in resources/certs/cacert.pem is derived from Mozilla's
+root store under MPL-2.0. See licenses/mozilla.txt and its embedded source notice.
+https://curl.se/docs/caextract.html
+
+FFmpeg
+This software uses FFmpeg libraries. The project's prebuilt LGPL shared-library
+configuration is covered by LGPL-3.0. See licenses/ffmpeg.txt and LICENSE.txt.
+Compatible replacement shared libraries may be used; Styx does not prohibit
+reverse engineering for debugging changes to those libraries.
+The CI distribution and build recipes are available at:
+https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-07-31-14-10
+https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-07-31-14-10
+FFmpeg source for that configuration:
+https://github.com/FFmpeg/FFmpeg/tree/9b6c8969e0
+
+curl-impersonate
+The CI distribution uses curl-impersonate v2.0.0 and its dependencies. Their
+license texts and source references are in licenses/curl-impersonate.txt.
+https://github.com/lexiforest/curl-impersonate/tree/v2.0.0
+
+Styx is not affiliated with Discord. Discord's trademarks belong to Discord Inc.

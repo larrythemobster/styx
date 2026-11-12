@@ -92,4 +92,4 @@ Based on [Acheron](https://github.com/ouwou/acheron) by [ouwou](https://github.c
 Icons by [Lucide](https://lucide.dev). The application mark uses the Discord
 symbol from [Simple Icons](https://github.com/simple-icons/simple-icons), under CC0.
 
-Licensed under [GPL-3.0](LICENSE.txt).
+Licensed under [GPL-3.0](LICENSE.txt). [Third-party notices](NOTICE.txt).

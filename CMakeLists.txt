@@ -744,9 +744,15 @@ else()
 endif()
 target_compile_features(styx_platform PUBLIC cxx_std_20)
 target_compile_definitions(styx_platform PRIVATE STYX_RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources")
+include(cmake/licenses.cmake)
 add_custom_target(styx_resources ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${STYX_LICENSE_DIR}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/licenses"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt" "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE.txt"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
     COMMENT "Staging Styx resources")
 add_dependencies(${PROJECT_NAME} styx_resources)
 install(DIRECTORY resources/ DESTINATION ${CMAKE_INSTALL_BINDIR}/resources)
