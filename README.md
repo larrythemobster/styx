@@ -14,11 +14,14 @@ DAVE end-to-end encryption, multiple accounts and Go Live screen sharing.
 (HTML/CSS-style documents) using OpenGL 3.3 in an SDL3 window. It has:
 
 - a server rail with folders, unread and mention badges
-- channel and DM sidebars, a floating user panel and a member list
+- channel and DM sidebars, a voice/user dock and a member list
 - a chat view with grouped messages, embeds, replies and reactions
 - a Friends page with Online and All tabs, search, activity cards, an Active
   Now panel and an Add Friend form
 - a voice call view
+
+The server rail and expanded folders scroll above the voice/user dock. The last
+server stays reachable in restored windows, with or without an active voice panel.
 
 DM headers include a phone button to start a voice call, join an existing call,
 or reopen the connected call. New calls ring recipients after Discord confirms

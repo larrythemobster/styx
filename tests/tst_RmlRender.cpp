@@ -476,3 +476,52 @@ TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][the
     REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").green < 60);
     REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").blue < 60);
 }
+
+TEST_CASE("The last server remains reachable above the account and voice dock", "[rml][rail]")
+{
+    const int height = GENERATE(360, 600, 900);
+    const bool connected = GENERATE(false, true);
+    const bool folderOpen = GENERATE(false, true);
+    View view("server-rail-scrolling");
+    prepare(view, 960, height);
+    view.loadDocument("main.rml");
+    auto *document = view.document();
+    REQUIRE(document);
+    document->SetClass("rail-folder-open", folderOpen);
+    auto *rail = document->GetElementById("rail");
+    auto *dock = document->GetElementById("user-dock");
+    auto *voice = document->GetElementById("voice-panel");
+    REQUIRE(rail);
+    REQUIRE(dock);
+    REQUIRE(voice);
+    voice->SetProperty("display", connected ? "block" : "none");
+    voice->SetInnerRML("<div style=\"height: 88dp;\">Voice connected</div>");
+    document->GetElementById("user-panel")->SetInnerRML("<div>Account</div>");
+    std::string markup;
+    for (const auto *column : {"primary", "expanded"}) {
+        markup += "<div class=\"rail-" + std::string(column) + "\">";
+        for (int i = 0; i < 32; ++i) {
+            const std::string id = i == 31 ? " id=\"last-" + std::string(column) + "\"" : "";
+            markup += "<div class=\"rail-item\"><div class=\"rail-btn\"" + id + ">" + std::to_string(i) + "</div></div>";
+        }
+        markup += "</div>";
+    }
+    rail->SetInnerRML(markup);
+    view.renderNow();
+    for (const auto *column : {"primary", "expanded"}) {
+        if (!folderOpen && std::string_view(column) == "expanded") continue;
+        auto *scroll = rail->QuerySelector(".rail-" + std::string(column));
+        REQUIRE(scroll);
+        scroll->SetScrollTop(scroll->GetScrollHeight());
+        view.renderNow();
+        auto *last = document->GetElementById("last-" + std::string(column));
+        REQUIRE(last);
+        CHECK(last->GetAbsoluteTop() >= scroll->GetAbsoluteTop());
+        CHECK(last->GetAbsoluteTop() + last->GetOffsetHeight() <= dock->GetAbsoluteTop() + .5f);
+        const auto center = ::Rml::Vector2f(last->GetAbsoluteLeft() + last->GetOffsetWidth() / 2,
+            last->GetAbsoluteTop() + last->GetOffsetHeight() / 2);
+        auto *hit = view.context()->GetElementAtPoint(center);
+        while (hit && hit != last) hit = hit->GetParentNode();
+        CHECK(hit == last);
+    }
+}

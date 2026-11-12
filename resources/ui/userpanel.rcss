@@ -1,8 +1,8 @@
 #voice-panel
 {
-	width: 296dp;
+	width: 100%;
 	box-sizing: border-box;
-	margin: 0 0 -8dp -64dp;
+	margin: 0 0 -1dp 0;
 	padding: 8dp;
 	background-color: #08080a;
 	border: 1dp #202024;
@@ -11,11 +11,6 @@
 	flex-direction: column;
 	flex-shrink: 0;
 	gap: 8dp;
-}
-body.rail-folder-open #voice-panel
-{
-	width: 360dp;
-	margin-left: -128dp;
 }
 body.voice-connected #user-panel
 {
@@ -157,10 +152,8 @@ body.voice-connected #user-panel
 /* User Panel */
 #user-panel
 {
-	position: absolute;
-	left: 8dp;
-	bottom: 8dp;
-	width: 416dp;
+	position: relative;
+	width: 100%;
 	height: 56dp;
 	border: 1dp #202024;
 	border-radius: 8dp;
@@ -172,10 +165,6 @@ body.voice-connected #user-panel
 	z-index: 100;
 }
 
-body.rail-folder-open #user-panel
-{
-	width: 480dp;
-}
 
 .user-panel-info
 {
