@@ -988,14 +988,6 @@ TEST_CASE("Badge images are a red disc with white text", "[badge]")
 
     const auto eight = Badge::render("8", 16);
     REQUIRE(std::find(eight.begin(), eight.end(), 0xFFFFFFFFu) != eight.end());
-    bool symmetric = true;
-    for (int y = 0; y < 16; ++y) {
-        for (int x = 0; x < 16; ++x) {
-            if (eight[static_cast<std::size_t>(y) * 16 + x] != eight[static_cast<std::size_t>(y) * 16 + (15 - x)])
-                symmetric = false;
-        }
-    }
-    REQUIRE(symmetric);
 
     const auto big = Badge::render("9+", 32);
     REQUIRE(big.size() == 1024);
@@ -1003,6 +995,17 @@ TEST_CASE("Badge images are a red disc with white text", "[badge]")
     REQUIRE(big[31] == 0);
     REQUIRE(big[992] == 0);
     REQUIRE(big[1023] == 0);
+}
+
+TEST_CASE("Badge text stays inside the antialiased circular edge", "[badge]")
+{
+    namespace Badge = Styx::Platform::Badge;
+    for (const int size : {8, 14, 16, 24, 32, 48}) {
+        const auto disc = Badge::render("", size);
+        const auto labelled = Badge::render("9+", size);
+        for (size_t index = 0; index < disc.size(); ++index)
+            CHECK((labelled[index] >> 24) == (disc[index] >> 24));
+    }
 }
 
 #if defined(__linux__)

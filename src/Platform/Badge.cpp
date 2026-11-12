@@ -10,12 +10,15 @@
 #include <vector>
 
 namespace Styx::Platform::Badge {
+#ifdef _WIN32
+void drawLabelNative(std::vector<std::uint32_t> &pixels, std::string_view text, int size);
+#endif
 
 namespace {
 
 constexpr std::uint32_t RED = 0xED4245;
-constexpr std::uint32_t WHITE = 0xFFFFFFFF;
 
+#ifndef _WIN32
 // A 3x5 pixel font: one row per entry, top row first, the left column in the highest of three bits.
 struct Glyph
 {
@@ -44,6 +47,7 @@ const Glyph *glyphFor(char character)
             return &glyph;
     return nullptr;
 }
+#endif
 
 } // namespace
 
@@ -71,31 +75,42 @@ std::vector<std::uint32_t> render(std::string_view text, int size)
         }
     }
 
-    const int scale = std::max(1, size / 8);
     const int count = static_cast<int>(text.size());
-    const int width = count * 3 * scale + std::max(0, count - 1) * scale;
-    const int left = (size - width) / 2;
-    const int top = (size - 5 * scale) / 2;
-    for (int index = 0; index < count; ++index) {
-        const Glyph *glyph = glyphFor(text[index]);
-        if (!glyph)
-            continue;
-        const int glyphLeft = left + index * 4 * scale;
-        for (int row = 0; row < 5; ++row) {
-            for (int column = 0; column < 3; ++column) {
-                if (!(glyph->rows[row] & (0b100 >> column)))
-                    continue;
-                for (int dy = 0; dy < scale; ++dy) {
-                    for (int dx = 0; dx < scale; ++dx) {
-                        const int x = glyphLeft + column * scale + dx;
-                        const int y = top + row * scale + dy;
-                        if (x >= 0 && x < size && y >= 0 && y < size)
-                            pixels[static_cast<std::size_t>(y) * size + x] = WHITE;
-                    }
+    if (count == 0)
+        return pixels;
+#ifdef _WIN32
+    drawLabelNative(pixels, text, size);
+#else
+    const double scale = std::min(size * 0.60 / 5, size * 0.72 / (count * 4 - 1));
+    const double left = (size - (count * 4 - 1) * scale) / 2;
+    const double top = (size - 5 * scale) / 2;
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            int covered = 0;
+            for (int sy = 0; sy < 4; ++sy) {
+                for (int sx = 0; sx < 4; ++sx) {
+                    const double gx = (x + (sx + 0.5) / 4 - left) / scale;
+                    const double gy = (y + (sy + 0.5) / 4 - top) / scale;
+                    if (gx < 0 || gy < 0 || gy >= 5)
+                        continue;
+                    const int index = int(gx) / 4;
+                    const int column = int(gx) % 4;
+                    if (index >= count || column >= 3)
+                        continue;
+                    const auto *glyph = glyphFor(text[index]);
+                    if (glyph && (glyph->rows[int(gy)] & (0b100 >> column)))
+                        ++covered;
                 }
+            }
+            if (covered) {
+                auto &pixel = pixels[static_cast<std::size_t>(y) * size + x];
+                const auto channel = [covered](unsigned value) { return value + (255 - value) * covered / 16; };
+                pixel = (pixel & 0xFF000000u) | (channel((RED >> 16) & 255) << 16) |
+                    (channel((RED >> 8) & 255) << 8) | channel(RED & 255);
             }
         }
     }
+#endif
     return pixels;
 }
 
