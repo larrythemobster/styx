@@ -248,6 +248,11 @@ script looks for `..\deps`. Later builds only need
 set `BUILD_DIR` to override it. CMake deploys runtime DLLs and resources beside
 the executable.
 
+Windows test executables, debugger files and required DLLs go in `build/tests/`.
+Multi-configuration generators add a configuration subdirectory. The app stays
+in its normal output directory. Keep reference captures and temporary probes
+outside the build tree.
+
 ### Tests
 
 After a `configure` build, run the renderer, menu and animation regression tests

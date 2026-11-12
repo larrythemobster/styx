@@ -798,3 +798,44 @@ if(TARGET ffmpeg)
     include(cmake/video-codecs.cmake)
     include(cmake/video-capture.cmake)
 endif()
+
+# Keep Windows test binaries and linker sidecars out of the application's runtime directory.
+if(WIN32 AND BUILD_TESTS)
+    set(_styx_test_output_dir "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    if(CMAKE_CONFIGURATION_TYPES)
+        string(APPEND _styx_test_output_dir "/$<CONFIG>")
+    endif()
+    set(_styx_test_runtime_dlls ${FFMPEG_RUNTIME_DLLS})
+    if(STYX_CURL_RUNTIME_DLL)
+        list(APPEND _styx_test_runtime_dlls "${STYX_CURL_RUNTIME_DLL}")
+    endif()
+    foreach(_runtime_target IN ITEMS ${OPUS_TARGET} libdave)
+        if(TARGET ${_runtime_target})
+            get_target_property(_runtime_type ${_runtime_target} TYPE)
+            if(_runtime_type STREQUAL "SHARED_LIBRARY")
+                list(APPEND _styx_test_runtime_dlls "$<TARGET_FILE:${_runtime_target}>")
+            endif()
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _styx_test_runtime_dlls)
+    if(_styx_test_runtime_dlls)
+        add_custom_target(styx_test_runtime
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_styx_test_output_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${_styx_test_runtime_dlls} "${_styx_test_output_dir}"
+            DEPENDS ${_styx_test_runtime_dlls}
+            COMMAND_EXPAND_LISTS VERBATIM)
+    endif()
+    get_property(_styx_build_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_test_target IN LISTS _styx_build_targets)
+        get_target_property(_target_type ${_test_target} TYPE)
+        if(_test_target MATCHES "^Test" AND _target_type STREQUAL "EXECUTABLE")
+            set_target_properties(${_test_target} PROPERTIES
+                RUNTIME_OUTPUT_DIRECTORY "${_styx_test_output_dir}"
+                PDB_OUTPUT_DIRECTORY "${_styx_test_output_dir}")
+            if(TARGET styx_test_runtime)
+                add_dependencies(${_test_target} styx_test_runtime)
+            endif()
+        endif()
+    endforeach()
+endif()
