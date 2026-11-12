@@ -89,7 +89,6 @@ ctest --test-dir build -R "^(RmlRenderTests|ClipTests)$" --output-on-failure
 
 Based on [Acheron](https://github.com/ouwou/acheron) by [ouwou](https://github.com/ouwou).
 
-Icons by [Lucide](https://lucide.dev). The application mark uses the Discord
-symbol from [Simple Icons](https://github.com/simple-icons/simple-icons), under CC0.
+Icons by [Lucide](https://lucide.dev).
 
 Licensed under [GPL-3.0](LICENSE.txt). [Third-party notices](NOTICE.txt).
