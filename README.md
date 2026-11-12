@@ -32,6 +32,8 @@ Forward revisit Friends, DMs and server channels, skipping unavailable locations
 The centered title follows the current view. Drag the empty strip to move the
 window or double-click to maximize and restore. Window controls stay separate
 from the draggable area, edges remain resizable, and Close honors close-to-tray.
+Windows 11 uses native rounded corners and shadows for restored windows.
+Maximized and full-screen windows keep square edges.
 Toolbar hints fit their text and stay inside the window. They appear after a
 short hover or immediately for keyboard navigation. Only one hint is shown;
 clicking a control or moving away dismisses it.
@@ -74,9 +76,12 @@ apply immediately; Apply theme uses the entered accent color. Choosing a custom
 theme turns off system-color overrides. Theme choices survive restarts, and font
 size controls change rendered text. Reset Theme restores the bundled dark styling.
 
-Call controls share mute/deafen state with the user panel, even when the current
-user is absent from the participant list. Voice heartbeat acknowledgements support
-both numeric and object payloads.
+Call controls share mute/deafen state with the user panel. Local speech updates
+the participant model alongside remote speech and lights the user's avatar ring.
+Mute, suppression and disconnect clear the highlight. The connection panel shows
+the current channel, connection details and screen-sharing controls. Camera,
+Activities and Soundboard controls remain disabled because their call paths are
+not implemented. Voice heartbeat acknowledgements support numeric and object payloads.
 
 Voice & Video settings offer Voice Activity or Push to Talk. Record a shortcut and
 adjust its release delay from 0 to 2000 ms. Windows and X11 with XInput2 2.2 support
@@ -115,12 +120,26 @@ storage and startup error dialogs.
 
 - Shares a screen or a window through Windows Graphics Capture, with optional
   WASAPI loopback audio for the whole system or a single app.
+- The source picker has large previews, Applications and Entire Screen tabs, and
+  a Share Screen action on each source. Its settings menu offers Gaming
+  (1440p60), Screenshare (native size at 15 fps), and Custom modes with separate
+  resolution/frame-rate choices. Audio and cursor capture can be toggled.
+  Choices are saved between picker opens.
 - Encodes H.264 with AMF, NVENC, Quick Sync or Media Foundation and falls
-  back to OpenH264 or x264. Presets: 720p30, 720p60, 1080p30 and 1080p60.
-  Discord only allows 720p30 without Nitro.
+  back to OpenH264 or x264. Custom choices include 480p, 720p, 1080p, 1440p and
+  native size at 15, 30 or 60 fps. Discord enforces account quality limits.
+- Capture follows the chosen cadence where Windows supports it. Stream timestamps
+  follow elapsed time, including encoder stalls. Decoder input is bounded to three
+  waiting pictures; overload discards predictive backlog and requests a keyframe.
+  The UI keeps only the latest pending decoded picture.
 - Sends media over WebRTC through libdatachannel with SRTP and DAVE end-to-end
   encryption.
 - Can watch other people's streams in the call view.
+
+The Windows application icon is monochrome. Mention badges use a fitted Segoe UI
+label in the top-right corner, cap the displayed count at 9+, and disappear at
+zero or when the taskbar-badge preference is off. The shell retains an accessible
+description with the full count.
 
 ## Status
 
@@ -252,7 +271,11 @@ explicitly.
   ouwou and Acheron's other contributors.
 - [RmlUi](https://github.com/mikke89/RmlUi) provides the UI library and the
   OpenGL 3 renderer adapted in `vendor/rmlui-backend`.
-- Icons come from [Lucide](https://lucide.dev).
+- Interface icons come from [Lucide](https://lucide.dev).
+- The monochrome application mark uses the Discord symbol from
+  [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/discord.svg),
+  published under [CC0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md).
+  Styx is not affiliated with Discord.
 
 ## License
 
