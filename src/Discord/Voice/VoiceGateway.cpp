@@ -190,7 +190,10 @@ void VoiceGateway::onPayloadReceived(const nlohmann::json &root)
         handleSpeaking(d);
         break;
     case VoiceOpCode::HEARTBEAT_ACK:
-        handleHeartbeatAck(static_cast<uint64_t>(d.get<double>()));
+        if (const auto ack = HeartbeatAck::fromJson(d); ack.nonce)
+            handleHeartbeatAck(*ack.nonce);
+        else
+            Core::log(Core::LogLevel::Warning, LogVoice) << "Invalid voice heartbeat acknowledgement";
         break;
     case VoiceOpCode::RESUMED:
         handleResumed();

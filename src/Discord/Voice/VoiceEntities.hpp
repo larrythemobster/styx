@@ -1,6 +1,7 @@
 #pragma once
 
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -29,6 +30,35 @@ struct VoiceHello : Core::JsonUtils::JsonObject
         VoiceHello hello;
         get(obj, "heartbeat_interval", hello.heartbeatInterval);
         return hello;
+    }
+};
+
+struct HeartbeatAck
+{
+    std::optional<uint64_t> nonce;
+
+    static HeartbeatAck fromJson(const nlohmann::json &data)
+    {
+        const auto *value = &data;
+        if (data.is_object()) {
+            const auto it = data.find("t");
+            if (it == data.end())
+                return {};
+            value = &*it;
+        }
+        if (value->is_number_unsigned())
+            return {value->get<uint64_t>()};
+        if (value->is_number_integer()) {
+            const auto number = value->get<int64_t>();
+            return number >= 0 ? HeartbeatAck{static_cast<uint64_t>(number)} : HeartbeatAck{};
+        }
+        if (value->is_number_float()) {
+            const double number = value->get<double>();
+            if (std::isfinite(number) && number >= 0 && number < 18446744073709551616.0
+                && std::trunc(number) == number)
+                return {static_cast<uint64_t>(number)};
+        }
+        return {};
     }
 };
 

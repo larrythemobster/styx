@@ -127,6 +127,8 @@ void CallController::setupConnections()
     track(shell.locationChanged.connect([this](const Location &) { onLocationChanged(); }));
     track(shell.instanceChanged.connect([this](Core::ClientInstance *) { onInstanceChanged(); }));
     track(shell.callOpenChanged.connect([this](bool open) { onCallOpenChanged(open); }));
+    track(shell.selfMuteChanged.connect([this](bool) { scheduleUpdate(); }));
+    track(shell.selfDeafChanged.connect([this](bool) { scheduleUpdate(); }));
 }
 
 void CallController::scheduleUpdate()
@@ -227,10 +229,7 @@ void CallController::onMuteClicked()
 {
     if (!currentVoiceManager)
         return;
-    Snowflake selfId = currentInstance ? currentInstance->accountId() : Snowflake::Invalid;
-    const auto *selfPart = currentVoiceManager->participant(selfId);
-    bool currentMute = selfPart ? selfPart->selfMute : false;
-    shell.setSelfMute(!currentMute);
+    shell.setSelfMute(!shell.isSelfMute());
     scheduleUpdate();
 }
 
@@ -238,10 +237,7 @@ void CallController::onDeafClicked()
 {
     if (!currentVoiceManager)
         return;
-    Snowflake selfId = currentInstance ? currentInstance->accountId() : Snowflake::Invalid;
-    const auto *selfPart = currentVoiceManager->participant(selfId);
-    bool currentDeaf = selfPart ? selfPart->selfDeaf : false;
-    shell.setSelfDeaf(!currentDeaf);
+    shell.setSelfDeaf(!shell.isSelfDeaf());
     scheduleUpdate();
 }
 
@@ -471,14 +467,8 @@ void CallController::updateCallView()
     }
 
     // 4. Header & Controls
-    bool selfMuted = false;
-    bool selfDeafened = false;
-    if (currentVoiceManager && selfId.isValid()) {
-        if (const auto *me = currentVoiceManager->participant(selfId)) {
-            selfMuted = me->selfMute;
-            selfDeafened = me->selfDeaf;
-        }
-    }
+    const bool selfMuted = shell.isSelfMute();
+    const bool selfDeafened = shell.isSelfDeaf();
 
     const std::string muteBtnClass = selfMuted ? "call-btn active" : "call-btn";
     const std::string muteIcon = selfMuted ? "icon:mic-off" : "icon:mic";

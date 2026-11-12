@@ -54,6 +54,27 @@ Codec videoCodec(const std::string &name, int index, bool encode, bool decode)
 
 } // namespace
 
+TEST_CASE("Voice heartbeat acknowledgements accept current and legacy timestamps", "[voice][heartbeat]")
+{
+    constexpr uint64_t timestamp = 1794443049135ULL;
+    REQUIRE(HeartbeatAck::fromJson(nlohmann::json{{"t", timestamp}}).nonce == timestamp);
+    REQUIRE(HeartbeatAck::fromJson(nlohmann::json(timestamp)).nonce == timestamp);
+    REQUIRE(HeartbeatAck::fromJson(nlohmann::json(static_cast<double>(timestamp))).nonce == timestamp);
+    constexpr uint64_t precise = 9007199254740993ULL;
+    REQUIRE(HeartbeatAck::fromJson(nlohmann::json{{"t", precise}, {"seq_ack", 0}}).nonce == precise);
+    REQUIRE(HeartbeatAck::fromJson(nlohmann::json(0)).nonce == 0);
+}
+
+TEST_CASE("Malformed voice heartbeat acknowledgements have no timestamp", "[voice][heartbeat]")
+{
+    for (const auto &text : {"null", "{}", R"({"t":null})", R"({"t":"123"})",
+                             R"({"t":true})", R"({"t":{}})", "[]", "-1", "1.5",
+                             "18446744073709551616.0"}) {
+        INFO(text);
+        REQUIRE_FALSE(HeartbeatAck::fromJson(parse(text)).nonce.has_value());
+    }
+}
+
 TEST_CASE("identifyWithoutVideoOmitsVideoKeys", "[voice][payloads]")
 {
     REQUIRE(identifyFor(100, 200).toJson().toBytes() ==

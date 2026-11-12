@@ -69,6 +69,10 @@ and content. Buttons use black borders and centered labels or icons. Sliders sho
 a value hint above the thumb on hover, focus or drag. Tab stays inside the dialog;
 Escape closes it and restores focus.
 
+Call controls share mute/deafen state with the user panel, even when the current
+user is absent from the participant list. Voice heartbeat acknowledgements support
+both numeric and object payloads.
+
 Voice & Video settings offer Voice Activity or Push to Talk. Record a shortcut and
 adjust its release delay from 0 to 2000 ms. Windows and X11 with XInput2 2.2 support
 passive global input that never consumes keys, so other applications still receive
