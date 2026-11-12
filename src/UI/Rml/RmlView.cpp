@@ -13,6 +13,7 @@
 #include <unordered_map>
 #ifdef _WIN32
 #include <windows.h>
+#include <dwmapi.h>
 #endif
 
 namespace Styx::UI::Rml {
@@ -471,11 +472,15 @@ void View::setCustomTitleBar(bool enabled, float heightDp, float controlsWidthDp
             customTitleBars.erase(inserted.first);
             throw std::runtime_error(SDL_GetError());
         }
+        const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
     } else if (it != customTitleBars.end()) {
         SDL_SetWindowHitTest(nativeWindow, nullptr, nullptr);
         SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(it->second.previousProc));
         customTitleBars.erase(it);
         require(SDL_SetWindowBordered(nativeWindow, true));
+        const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DEFAULT;
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
     }
 #else
     (void)enabled;

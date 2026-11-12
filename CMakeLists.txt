@@ -408,6 +408,7 @@ else()
 endif()
 
 if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE dwmapi)
     find_file(STYX_CURL_RUNTIME_DLL NAMES libcurl-impersonate.dll libcurl.dll
         HINTS "${CURL_INCLUDE_DIR}/../lib" "${CURL_INCLUDE_DIR}/../bin"
         NO_DEFAULT_PATH NO_CACHE)
@@ -505,7 +506,7 @@ if(BUILD_TESTS)
     target_link_libraries(TestRmlRender PRIVATE RmlUi::RmlUi utf8proc SDL3::SDL3 OpenGL::GL Freetype::Freetype harfbuzz::harfbuzz)
     target_include_directories(TestRmlRender PRIVATE vendor/emoji-segmenter vendor/rmlui-backend)
     if(WIN32)
-        target_link_libraries(TestRmlRender PRIVATE user32 gdi32)
+        target_link_libraries(TestRmlRender PRIVATE user32 gdi32 dwmapi)
     endif()
     styx_test(TestEmbeds EmbedTests tests/tst_Embeds.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageComponents MessageComponentTests tests/tst_MessageComponents.cpp tests/tst_Polls.cpp src/Core/Snowflake.cpp)
