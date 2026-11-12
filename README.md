@@ -1,260 +1,70 @@
-# Styx
-
-A Discord client written in C++. The interface is built with RmlUi in an SDL3
-window and laid out like the official client. Styx supports voice calls with
-DAVE end-to-end encryption, multiple accounts and Go Live screen sharing.
-
-> [!WARNING]
-> Third-party Discord clients break Discord's Terms of Service. Your account
-> could be actioned for using one. Use Styx at your own risk.
-
-## Features
-
-**Interface.** The main window is drawn with [RmlUi](https://github.com/mikke89/RmlUi)
-(HTML/CSS-style documents) using OpenGL 3.3 in an SDL3 window. It has:
-
-- a server rail with folders, unread and mention badges
-- channel and DM sidebars, a voice/user dock and a member list
-- a chat view with grouped messages, embeds, replies and reactions
-- a Friends page with Online and All tabs, search, activity cards, an Active
-  Now panel and an Add Friend form
-- a voice call view
-
-The server rail and expanded folders scroll above the voice/user dock. The last
-server stays reachable in restored windows, with or without an active voice panel.
-
-DM headers include a phone button to start a voice call, join an existing call,
-or reopen the connected call. New calls ring recipients after Discord confirms
-the call and your voice membership. Joining a known active call does not ring it
-again. Recipient notifications use the documented
-[ring endpoint](https://docs.discord.food/resources/channel#ring-channel-recipients).
-Camera calling is not implemented.
-
-On Windows, a compact application toolbar replaces the native title bar. Back and
-Forward revisit Friends, DMs and server channels, skipping unavailable locations.
-The centered title follows the current view. Drag the empty strip to move the
-window or double-click to maximize and restore. Window controls stay separate
-from the draggable area, edges remain resizable, and Close honors close-to-tray.
-Windows 11 uses native rounded corners and shadows for restored windows.
-Maximized and full-screen windows keep square edges.
-Toolbar hints fit their text and stay inside the window. They appear after a
-short hover or immediately for keyboard navigation. Only one hint is shown;
-clicking a control or moving away dismisses it.
-
-Inbox shows unread channels with cached message previews and recent mentions.
-Load more mentions, fetch recent messages, open a result, or explicitly mark a
-channel read. Opening Inbox alone does not acknowledge messages.
-
-The toolbar also opens keyboard shortcut help and checks GitHub for public Styx
-releases. Updates links to the release page rather than installing automatically.
-Unavailable releases and failed checks report their status instead of claiming
-the client is up to date.
-
-The DM sidebar and profile panel leave more room for messages. View Profile opens
-a centered modal with activity, mutual friends and mutual servers. Avatar clicks
-retain the compact profile popover. Both views support notes and messaging.
-Mutual friend rows show avatars and open full profiles. Mutual server rows show
-server icons and open that server. Both lists support pointer and keyboard navigation.
-Call controls include labeled mute, deafen, screen sharing where supported, and
-disconnect actions. Header, profile, and call buttons support keyboard activation.
-
-Opening a DM or server channel starts at the latest message after layout.
-Loading older history preserves the visible position. Incoming messages follow
-the bottom only while you are already there; explicit message jumps retain their
-target position.
-
-Settings, profiles, account management, server settings, image viewing and
-pickers also use RmlUi. User, server, channel and message context menus render
-in the same view, with keyboard navigation, nested menus and viewport clamping.
-Member moderation includes kick, ban, timeout, nickname and searchable role
-forms. CAPTCHA prompts use RmlUi while the challenge still opens in your browser.
-
-Server menus offer timed or indefinite mute, unmute, notification levels and
-suppression controls, Hide Muted Channels, and community-server Show All Channels.
-These preferences save to Discord; mute expiry refreshes the rail without another
-message. Selected channels and mentions stay reachable when filtering.
-Invite creation checks channel permissions. Server administration stays separate
-from permission to create invites. Leave Server asks for confirmation, folder
-moves preserve other folders, and Copy Server ID requires Developer Mode.
-Hover and keyboard navigation open real flyouts; nested panels remain clickable
-when they flip at a window edge.
-Checkboxes and notification radio choices keep the menu and active flyout open.
-Other checkboxes remain usable while a preference saves. Successful saves update
-the checks and notification summary in place; rejected saves retain the previous
-state. Click outside or press Escape to dismiss. Ordinary commands still close
-the menu.
-
-User settings fill the window below the application toolbar. Navigation and page
-content scroll independently, while page headings and profile Save/Reset controls
-stay visible. Search filters the navigation; Enter opens a result and Clear restores
-the full list. Buttons have black borders and centered labels or icons. Sliders
-update their percentage while dragging. Tab stays inside settings; Escape dismisses
-an open picker or dropdown before closing settings.
-
-Appearance has an interactive saturation/brightness square, hue slider and hex input.
-Mode and palette changes apply immediately; Apply theme saves the selected accent.
-Custom themes turn off system-color overrides. Open views and new dialogs repaint
-without replacing drafts. Theme and font choices survive restarts. Reset Theme
-restores the bundled dark styling.
-
-Profiles edits the global avatar, banner, display name, pronouns and biography
-through the existing Discord profile APIs. It has a live preview, save/reset,
-error reporting and a discard prompt for unsaved changes. Narrow windows hide the
-secondary preview and keep the form actions reachable. Banner changes still
-require an eligible subscription.
-
-Edit Per-server Profile opens the same editor for the originating server and
-account. Nickname, avatar, banner, pronouns and bio overrides use the member API,
-not the global profile API. Clearing an override uses the main profile.
-Rejected saves retain the draft; successful saves reload the canonical profile.
-Image overrides remain subject to Discord's entitlement checks.
-Discard confirmations take input above modal editors. Cancel or Escape preserves
-the draft; Discard closes the editor and drops its unsaved changes.
-
-Other settings include:
-
-- Account-backed default DM privacy for new servers, friend-request sources,
-  screen-reader detection permission and activity visibility.
-- Local embed/reaction visibility, compact message spacing, avatars, chat font
-  size, link underlines and reduced interface motion.
-- A master sound switch and previews for the five supported event sounds.
-- Windows launch-at-login, start-minimized and close-to-tray preferences.
-- Developer Mode for Copy ID menu actions and animation-memory controls in Advanced.
-- A Discord account-language selector that updates request locale headers.
-  Styx's own interface remains English.
-
-Account security editing, devices, connected accounts, authorized apps, billing,
-game detection and camera settings are not implemented.
-
-Call controls share mute/deafen state with the user panel. Local speech updates
-the participant model alongside remote speech and lights the user's avatar ring.
-Mute, suppression and disconnect clear the highlight. The connection panel shows
-the current channel, connection details and screen-sharing controls. Camera,
-Activities and Soundboard controls remain disabled because their call paths are
-not implemented. Voice heartbeat acknowledgements support numeric and object payloads.
-
-Voice & Video settings offer Voice Activity or Push to Talk. Record a shortcut and
-adjust its release delay from 0 to 2000 ms. Windows and X11 with XInput2 2.2 support
-passive global input that never consumes keys, so other applications still receive
-them. On Wayland and macOS, push to talk works only while Styx has focus.
-
-Input and output volume sliders update their percentages and saved levels while
-dragging.
-
-The Keybinds page records and removes saved Push to Talk, Toggle Mute and Toggle
-Deafen shortcuts, and rejects conflicts with other bindings or fixed shortcuts.
-Mute and deafen work while Styx is focused. Their default keys are Ctrl+Shift+M
-and Ctrl+Shift+D, or Cmd+Shift+M and Cmd+Shift+D on macOS. Rebinding or removing
-them disables the old keys. The shortcut help dialog shows the current bindings.
-
-The smile button in the user panel edits custom status text, Unicode or server
-emoji, and expiry. Save, remove the emoji, or clear the whole status. Updates keep
-the current presence and activity-visibility settings.
-
-Account settings edits read the latest server protobuf, keep untouched fields
-and send only changed groups with a data-version check. Custom status uses this
-write path, which also supports appearance, privacy and guild-folder edits.
-Conflicts report an error rather than overwriting another client's changes.
-Styx's custom theme generator and local notification preferences stay local.
-Per-server privacy and folder moves apply one change to the fresh snapshot rather
-than replacing cached lists. Privacy edits preserve unrelated security/contact
-settings and use the
-[published protobuf field numbers](https://raw.githubusercontent.com/discord-userdoccers/discord-protos/7733549772139bbbe6b4f866dc03aa51bb736bc1/discord_protos/discord_users/v1/PreloadedUserSettings.proto).
-
-Native platform services provide file dialogs, the system tray, credential
-storage and startup error dialogs.
-
-**Go Live screen sharing (Windows 10+).**
-
-- Shares a screen or a window through Windows Graphics Capture, with optional
-  WASAPI loopback audio for the whole system or a single app.
-- The source picker has large previews, Applications and Entire Screen tabs, and
-  a Share Screen action on each source. Its settings menu offers Gaming
-  (1440p60), Screenshare (native size at 15 fps), and Custom modes with separate
-  resolution/frame-rate choices. Audio and cursor capture can be toggled.
-  Choices are saved between picker opens.
-- Encodes H.264 with AMF, NVENC, Quick Sync or Media Foundation and falls
-  back to OpenH264 or x264. Custom choices include 480p, 720p, 1080p, 1440p and
-  native size at 15, 30 or 60 fps. Discord enforces account quality limits.
-- Capture follows the chosen cadence where Windows supports it. Stream timestamps
-  follow elapsed time, including encoder stalls. Decoder input is bounded to three
-  waiting pictures; overload discards predictive backlog and requests a keyframe.
-  The UI keeps only the latest pending decoded picture.
-- Sends media over WebRTC through libdatachannel with SRTP and DAVE end-to-end
-  encryption.
-- Can watch other people's streams in the call view.
-
-The Windows application icon is monochrome. Unread mentions add a red circle
-with a white center dot in the top-right corner, without covering the logo's
-face. No notification numbers are drawn. Zero mentions or disabling taskbar
-badges restores the base icon. The accessible description retains the full count.
+<div align="center">
+  <img src="resources/app/styx.svg" alt="Styx logo" width="88" height="88">
+  <h1>Styx</h1>
+  <p>A native Discord client, written in C++.</p>
+  <p>
+    <a href="#features">Features</a> ·
+    <a href="#roadmap">Roadmap</a> ·
+    <a href="#build-from-source">Build</a> ·
+    <a href="https://github.com/larrythemobster/styx/issues">Issues</a>
+  </p>
+  <p>
+    <a href="#status"><img src="https://img.shields.io/badge/status-experimental-d29922?style=flat-square" alt="Status: experimental"></a>
+    <a href="CMakeLists.txt"><img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&amp;logo=cplusplus&amp;logoColor=white" alt="C++20"></a>
+    <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-GPLv3-555555?style=flat-square" alt="License: GPLv3"></a>
+    <a href="https://github.com/larrythemobster/styx/stargazers"><img src="https://img.shields.io/badge/GitHub-Star%20Styx-181717?style=flat-square&amp;logo=github" alt="Star Styx on GitHub"></a>
+  </p>
+</div>
 
 ## Status
 
-Styx is experimental and mainly tested on Windows 11. Go Live capture is
-Windows-only.
+Experimental. Windows is the primary development platform; Linux and macOS
+support is incomplete. Calls and streaming still need more live testing.
 
-The native SDL3/RmlUi build, login window and test suite have been verified on
-Ubuntu/WSL under Xvfb with software OpenGL, with `ENABLE_VOICE=OFF`,
-`ENABLE_RNNOISE=OFF` and `ENABLE_FFMPEG=OFF`. Linux voice and FFmpeg playback,
-and the native macOS UI, have not been verified.
+> [!WARNING]
+> Third-party clients violate Discord's Terms of Service and may put your account
+> at risk. Styx is not affiliated with Discord.
 
-Message parsing retains typed legacy and Components V2 trees, including replies
-and forwarded snapshots, through cache reloads. Partial updates preserve omitted
-components and clear them on an empty array. Chat renders legacy action rows,
-buttons and select summaries, plus Components V2 text, sections, containers,
-galleries and files. Bot actions and selects are read-only. Link buttons use the
-external-link confirmation dialog; hidden component spoilers do not load media
-until revealed.
+## Features
 
-The client API can submit [component interactions](https://docs.discord.food/interactions/receiving-and-responding#create-interaction)
-with the current Gateway session and a caller-supplied nonce. REST success means
-admission, not completion. `interactionCreated`, `interactionSucceeded` and
-`interactionFailed` carry Gateway correlation and outcomes.
+- Multiple accounts with account switching.
+- Server chats, DMs and group DMs, with replies, reactions, embeds, GIFs and stickers.
+- Message search, threads, and polls with voting and poll creation.
+- Voice channels and outgoing DM calls with DAVE end-to-end encryption.
+- Windows screen and window sharing, hardware encoding, and optional app or system audio.
+- Stream viewing, full profiles, and clickable mutual friends and servers.
+- Global and per-server profile editing, subject to Discord's account restrictions.
+- Custom accent colors, light and dark themes, font controls and keybinds.
+- Desktop notifications, server muting, and per-server privacy and notification settings.
 
-Chat displays poll questions, answer emoji, vote counts and percentages, your votes,
-and closed-poll winners. Polls and known results survive cache reloads and partial
-message updates. Finalized results mark a poll closed even when the local clock
-lags behind Discord. Countdown labels refresh when the message redraws.
-Open polls let you choose one or several answers, submit a vote, or remove your votes.
-Requests show a pending state and inline errors. Gateway events update known counts
-and your vote marks in memory and on disk; missing results stay unknown rather than
-becoming zero votes. Closed polls and forwarded snapshots stay read-only.
-You can end your own open polls after confirmation, with pending and inline error
-feedback. The response updates memory and disk without appending off-screen messages.
-The composer can create polls where you have Send Polls permission. Add a question,
-2 to 10 answers with optional emoji, a duration and a multiselect setting.
-Creation preserves your composer draft and shows pending state and retryable errors.
+## Roadmap
 
-The client API supports group DM creation, recipient changes, name/icon edits and
-leaving through the [channel API](https://docs.discord.food/resources/channel).
-Metadata and recipient changes update the originating account's cache and disk.
-Deleted groups clear their read state and cannot reopen from an older REST response.
-Create groups from Friends or a DM header with searchable friend selection.
-The dialog shows pending requests and retryable errors without changing the source DM
-or its composer draft. Group headers also open member management with searchable
-friend additions, the 10-person limit, and owner-only removal of other members.
-Membership and ownership refresh live, with pending controls and retryable errors.
-Edit group names and icons from the header. Icon uploads use shared image preparation,
-with previews, removal and reset. Live updates preserve unsaved fields; successful saves
-replace the saved baseline. Requests show pending state and retryable errors.
-Confirmed leave is not exposed in the UI yet.
+Current priorities, not a complete feature list:
 
-The executable is `styx.exe` on Windows or `styx` on Linux. If you used
-Acheron, Styx imports its settings, database and cache on first launch.
+- Settings and menus closer to Discord, with more account and privacy controls.
+- Call stability, incoming call controls, camera calls and microphone diagnostics.
+- Smoother streaming and screen sharing on Linux.
+- Better chat tools: autocomplete, pins, inline media and attachment controls.
+- Message requests, forwarding, server events and soundboard support.
+- Accessibility, translations and better Linux/macOS support.
 
-## Building on Windows
+## Built with
 
-Requirements:
+[SDL3](https://www.libsdl.org/) · [RmlUi](https://github.com/mikke89/RmlUi) ·
+[OpenGL](https://www.opengl.org/) · [FFmpeg](https://ffmpeg.org/) ·
+[libdatachannel](https://github.com/paullouisageneau/libdatachannel) ·
+[DAVE](https://github.com/discord/libdave)
 
-- Visual Studio 2022 with the C++ workload, CMake 3.21 or newer, and Ninja
-- prebuilt FFmpeg (shared) and
-  [curl-impersonate](https://github.com/lexiforest/curl-impersonate)
-- an OpenGL 3.3 driver
+## Build from source
 
-vcpkg is vendored as a submodule and installs SDL3 3.2 or newer for tray
-support, RmlUi, FreeType, HarfBuzz, LunaSVG, libavif, utf8proc, PCRE2,
-libdatachannel, libsodium, opus, OpenSSL and the remaining libraries.
+<details>
+<summary>Windows build instructions</summary>
+
+Requires Visual Studio 2022 Community with C++ tools, CMake 3.21+, Ninja and an
+OpenGL 3.3 driver. Put prebuilt [FFmpeg](https://ffmpeg.org/download.html) and
+[curl-impersonate](https://github.com/lexiforest/curl-impersonate) in the
+`ffmpeg` and `curl-impersonate` subfolders of your dependency directory.
+The remaining dependencies are installed through the bundled vcpkg submodule.
 
 ```bat
 git clone --recursive https://github.com/larrythemobster/styx.git
@@ -263,75 +73,27 @@ set DEPS=C:\path\to\deps
 scripts\build-windows.bat configure
 ```
 
-`DEPS` should contain `ffmpeg` and `curl-impersonate`. If it isn't set, the
-script looks for `..\deps`. Later builds only need
-`scripts\build-windows.bat`. The script defaults to the `build` directory;
-set `BUILD_DIR` to override it. CMake deploys runtime DLLs and resources beside
-the executable.
+Run `build\styx.exe`, keeping its DLLs and resources beside it. For later builds,
+run `scripts\build-windows.bat` without `configure`. Set `BUILD_DIR` to override
+`build`. Linux and macOS build configurations are in the [CI workflow](.github/workflows/build.yml).
 
-Windows test executables, debugger files and required DLLs go in `build/tests/`.
-Multi-configuration generators add a configuration subdirectory. The app stays
-in its normal output directory. Keep reference captures and temporary probes
-outside the build tree.
-
-### Tests
-
-After a `configure` build, run the renderer, menu and animation regression tests
-from an MSVC prompt. Replace `build` with `BUILD_DIR` if you used an override:
+To run the renderer and animation tests from an MSVC prompt:
 
 ```bat
 cmake --build build --target TestRmlRender TestClips
 ctest --test-dir build -R "^(RmlRenderTests|ClipTests)$" --output-on-failure
 ```
 
-The renderer and menu tests need a desktop session with OpenGL 3.3. They cover
-texture lifetimes, background document updates, menu selection, disabled actions,
-dismissal, nested navigation and viewport bounds. The background-refresh test reads
-pixels from an owned framebuffer, independent of front-buffer behavior after a swap.
+</details>
 
-`ClipTests` also checks GIF and animated WebP playback when `ENABLE_FFMPEG=OFF`.
-MP4 cases run when FFmpeg is enabled.
+## Credits and license
 
-## Dependencies
+Styx is a modified version of [Acheron](https://github.com/ouwou/acheron) by
+[ouwou](https://github.com/ouwou), forked on 9 October 2026. Acheron provides much
+of the client, networking, storage and voice code; its `video-streams` branch
+also provided the video engine and stream viewing.
 
-- SDL3 3.2+ and OpenGL 3.3
-- RmlUi 6.1, FreeType, HarfBuzz, LunaSVG, libavif with dav1d, utf8proc and PCRE2
-- libcurl-impersonate (plain libcurl works but isn't recommended)
-- OpenSSL and zlib
-- libsecret (Linux) or the system Security framework (macOS) for credential storage;
-  KDE sessions use KWallet over D-Bus. Existing QtKeychain service/account identities
-  are retained.
-- nayuki/QR-Code-generator and emoji-segmenter (vendored)
-- rlottie (optional, Lottie stickers)
-- libsodium, libopus, libdave, mlspp, miniaudio (optional, voice; the last
-  three are vendored)
-- rnnoise (optional, noise suppression, vendored)
-- libdatachannel with libsrtp and FFmpeg (optional, Go Live, Windows only)
+Icons by [Lucide](https://lucide.dev). The application mark uses the Discord
+symbol from [Simple Icons](https://github.com/simple-icons/simple-icons), under CC0.
 
-Linux builds also need libX11 and libXi development headers, along with Autoconf,
-Automake, Libtool, Gettext, M4 and NASM. The Linux CI jobs install these build tools
-explicitly.
-
-## Credits
-
-- Styx started from the source of [Acheron](https://github.com/ouwou/acheron)
-  by [ouwou](https://github.com/ouwou), imported at commit
-  [`e5337a5`](https://github.com/ouwou/acheron/commit/e5337a5f3b2ca2978dbf48bbbe124e3a62926591).
-  Acheron wrote the gateway and REST clients, storage, markdown parsing, voice
-  with DAVE, multi-account support and much of the client logic. Go Live
-  viewing and the video engine were ported from Acheron's `video-streams`
-  branch (commit `71b4907`), and the ported source files say so. Thanks to
-  ouwou and Acheron's other contributors.
-- [RmlUi](https://github.com/mikke89/RmlUi) provides the UI library and the
-  OpenGL 3 renderer adapted in `vendor/rmlui-backend`.
-- Interface icons come from [Lucide](https://lucide.dev).
-- The monochrome application mark uses the Discord symbol from
-  [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/discord.svg),
-  published under [CC0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md).
-  Styx is not affiliated with Discord.
-
-## License
-
-GPL-3.0. See [LICENSE](LICENSE). Styx is a modified version of Acheron, which
-is also GPL-3.0. The first commit in this repository is Acheron's source as of
-9 October 2026, and every change since then is in the commit history.
+Licensed under [GPL-3.0](LICENSE.txt).
