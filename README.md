@@ -88,10 +88,7 @@ ctest --test-dir build -R "^(RmlRenderTests|ClipTests)$" --output-on-failure
 
 ## Credits and license
 
-Styx is a modified version of [Acheron](https://github.com/ouwou/acheron) by
-[ouwou](https://github.com/ouwou), forked on 9 October 2026. Acheron provides much
-of the client, networking, storage and voice code; its `video-streams` branch
-also provided the video engine and stream viewing.
+Based on [Acheron](https://github.com/ouwou/acheron) by [ouwou](https://github.com/ouwou).
 
 Icons by [Lucide](https://lucide.dev). The application mark uses the Discord
 symbol from [Simple Icons](https://github.com/simple-icons/simple-icons), under CC0.
