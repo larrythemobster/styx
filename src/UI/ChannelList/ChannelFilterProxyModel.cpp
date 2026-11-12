@@ -3,6 +3,7 @@
 #include "ChannelNode.hpp"
 #include "Core/ClientInstance.hpp"
 #include "Core/PermissionManager.hpp"
+#include "Core/ReadStateManager.hpp"
 #include "Discord/Enums.hpp"
 #include <algorithm>
 
@@ -76,6 +77,31 @@ bool ChannelFilterProxyModel::accepts(ChannelNode *node) const
     auto *instance = userId.isValid() ? session->client(userId) : nullptr;
     if (!instance) return true;
     bool channel = type == ChannelNode::Type::Channel || type == ChannelNode::Type::VoiceChannel || type == ChannelNode::Type::Forum;
+    if (channel || type == ChannelNode::Type::Category) {
+        auto *guild = node;
+        while (guild && guild->type != ChannelNode::Type::Server) guild = guild->parent;
+        if (guild) {
+            auto *state = instance->readState();
+            const auto *preferences = state->guildSettings(guild->id);
+            bool keep = node->mentionCount > 0 || node->id == instance->voiceChannelId();
+            if (selectedAccountId == userId) {
+                for (auto *selectedNode = channelModel->findChannelTreeNode(selectedChannelId, userId);
+                     selectedNode && selectedNode->type != ChannelNode::Type::Server; selectedNode = selectedNode->parent) {
+                    if (selectedNode == node) { keep = true; break; }
+                }
+            }
+            if (!keep && preferences && preferences->hideMutedChannels.valueOr(false)) {
+                for (auto *parent = node; parent && parent != guild; parent = parent->parent)
+                    if (state->isChannelMuted(parent->id)) return false;
+            }
+            if (!keep && state->isOptInGuild(guild->id) && !state->isChannelOptedIn(node->id) &&
+                !(node->parent && node->parent->type == ChannelNode::Type::Category && state->isChannelOptedIn(node->parent->id))) {
+                if (type != ChannelNode::Type::Category) return false;
+                return std::any_of(node->children.begin(), node->children.end(),
+                                   [this](const auto &child) { return accepts(child.get()); });
+            }
+        }
+    }
     if (channel && node->parent && node->parent->type == ChannelNode::Type::Category && node->parent->collapsed) {
         if (selected(node)) return true;
         if (type == ChannelNode::Type::VoiceChannel) {

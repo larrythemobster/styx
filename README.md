@@ -69,6 +69,16 @@ in the same view, with keyboard navigation, nested menus and viewport clamping.
 Member moderation includes kick, ban, timeout, nickname and searchable role
 forms. CAPTCHA prompts use RmlUi while the challenge still opens in your browser.
 
+Server menus offer timed or indefinite mute, unmute, notification levels and
+suppression controls, Hide Muted Channels, and community-server Show All Channels.
+These preferences save to Discord; mute expiry refreshes the rail without another
+message. Selected channels and mentions stay reachable when filtering.
+Invite creation checks channel permissions. Server administration stays separate
+from permission to create invites. Leave Server asks for confirmation, folder
+moves preserve other folders, and Copy Server ID requires Developer Mode.
+Hover and keyboard navigation open real flyouts; nested panels remain clickable
+when they flip at a window edge.
+
 User settings fill the window below the application toolbar. Navigation and page
 content scroll independently, while page headings and profile Save/Reset controls
 stay visible. Search filters the navigation; Enter opens a result and Clear restores
@@ -88,6 +98,12 @@ error reporting and a discard prompt for unsaved changes. Narrow windows hide th
 secondary preview and keep the form actions reachable. Banner changes still
 require an eligible subscription.
 
+Edit Per-server Profile opens the same editor for the originating server and
+account. Nickname, avatar, banner, pronouns and bio overrides use the member API,
+not the global profile API. Clearing an override uses the main profile.
+Rejected saves retain the draft; successful saves reload the canonical profile.
+Image overrides remain subject to Discord's entitlement checks.
+
 Other settings include:
 
 - Account-backed default DM privacy for new servers, friend-request sources,
@@ -101,7 +117,7 @@ Other settings include:
   Styx's own interface remains English.
 
 Account security editing, devices, connected accounts, authorized apps, billing,
-server-profile editing, game detection and camera settings are not implemented.
+game detection and camera settings are not implemented.
 
 Call controls share mute/deafen state with the user panel. Local speech updates
 the participant model alongside remote speech and lights the user's avatar ring.
@@ -133,12 +149,10 @@ and send only changed groups with a data-version check. Custom status uses this
 write path, which also supports appearance, privacy and guild-folder edits.
 Conflicts report an error rather than overwriting another client's changes.
 Styx's custom theme generator and local notification preferences stay local.
-
-My Account's Edit Profile dialog changes your display name, pronouns, bio, avatar
-and banner. Images use the same crop and preview pipeline as server settings.
-Reset discards unsaved edits. If only part of a save succeeds, retry sends the
-remaining changes without uploading the saved avatar again. Banner changes
-require an eligible Nitro subscription.
+Per-server privacy and folder moves apply one change to the fresh snapshot rather
+than replacing cached lists. Privacy edits preserve unrelated security/contact
+settings and use the
+[published protobuf field numbers](https://raw.githubusercontent.com/discord-userdoccers/discord-protos/7733549772139bbbe6b4f866dc03aa51bb736bc1/discord_protos/discord_users/v1/PreloadedUserSettings.proto).
 
 Native platform services provide file dialogs, the system tray, credential
 storage and startup error dialogs.

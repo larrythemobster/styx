@@ -309,6 +309,7 @@ TEST_CASE("Context menu keyboard and pointer actions", "[rml][menu]")
     };
     menu.show(entries, { 20, 20 });
     key(view, SDLK_DOWN);
+    key(view, SDLK_DOWN);
     key(view, SDLK_RETURN);
     REQUIRE(selected == 2);
     REQUIRE_FALSE(menu.isVisible());
@@ -344,33 +345,83 @@ TEST_CASE("Context menu keyboard and pointer actions", "[rml][menu]")
     REQUIRE(selected == 1);
 }
 
-TEST_CASE("Context menu nested navigation stays within the viewport", "[rml][menu]")
+TEST_CASE("Cascading context menus retain their parent and stay within the viewport", "[rml][menu]")
 {
     View view("menu-nesting");
     prepare(view, 420, 260);
     ContextMenu menu(view);
     bool selected = false;
-    MenuItem submenu{ "Settings" };
-    submenu.children.push_back({ "Profile", [&] { selected = true; } });
-    menu.show({ submenu }, { 419, 259 });
-    view.context()->Update();
+    MenuItem submenu{"Settings"};
+    submenu.children.push_back({"Profile", [&] { selected = true; }});
+    menu.show({submenu}, {419, 259});
     auto *doc = view.context()->GetDocument("context-menu-root");
     REQUIRE(doc);
-    auto *panel = doc->GetElementById("context-menu-panel");
-    REQUIRE(panel);
-    const auto offset = panel->GetAbsoluteOffset(::Rml::BoxArea::Border);
-    const auto dimensions = view.context()->GetDimensions();
-    REQUIRE(offset.x >= 0);
-    REQUIRE(offset.y >= 0);
-    REQUIRE(offset.x + panel->GetOffsetWidth() <= dimensions.x);
-    REQUIRE(offset.y + panel->GetOffsetHeight() <= dimensions.y);
+    auto inBounds = [&](const char *id) {
+        view.context()->Update();
+        auto *panel = doc->GetElementById(id);
+        REQUIRE(panel);
+        REQUIRE(panel->IsVisible());
+        const auto offset = panel->GetAbsoluteOffset(::Rml::BoxArea::Border);
+        const auto dimensions = view.context()->GetDimensions();
+        REQUIRE(offset.x >= 0);
+        REQUIRE(offset.y >= 0);
+        REQUIRE(offset.x + panel->GetOffsetWidth() <= dimensions.x);
+        REQUIRE(offset.y + panel->GetOffsetHeight() <= dimensions.y);
+    };
+    inBounds("context-menu-panel");
+    key(view, SDLK_DOWN);
     key(view, SDLK_RIGHT);
-    REQUIRE(doc->GetElementById("context-menu-back"));
+    inBounds("context-menu-panel");
+    inBounds("context-submenu-1");
+    REQUIRE_FALSE(selected);
     key(view, SDLK_LEFT);
-    REQUIRE_FALSE(doc->GetElementById("context-menu-back"));
+    REQUIRE_FALSE(doc->GetElementById("context-submenu-1"));
     key(view, SDLK_RETURN);
     key(view, SDLK_RETURN);
     REQUIRE(selected);
+    REQUIRE_FALSE(menu.isVisible());
+}
+
+TEST_CASE("Hover opens cascading menus without activating an action", "[rml][menu]")
+{
+    const float anchorX = GENERATE(20.f, 880.f);
+    View view("menu-hover");
+    prepare(view, 900, 600);
+    ContextMenu menu(view);
+    int selected = 0;
+    MenuItem folder{"Folder"};
+    folder.children.push_back({"Destination", [&] { ++selected; }});
+    MenuItem move{"Move to..."};
+    move.children.push_back(std::move(folder));
+    menu.show({move}, {anchorX, 20});
+    auto *doc = view.context()->GetDocument("context-menu-root");
+    REQUIRE(doc);
+    auto hover = [&](const char *id) {
+        view.context()->Update();
+        auto *row = doc->GetElementById(id);
+        REQUIRE(row);
+        const auto origin = row->GetAbsoluteOffset(::Rml::BoxArea::Border);
+        const auto scale = view.devicePixelRatioF();
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_MOTION;
+        event.motion.windowID = SDL_GetWindowID(view.window());
+        event.motion.x = (origin.x + row->GetOffsetWidth() / 2) / scale;
+        event.motion.y = (origin.y + row->GetOffsetHeight() / 2) / scale;
+        REQUIRE(SDL_PushEvent(&event));
+        View::processEvents();
+        view.context()->Update();
+        return Styx::Platform::Point{event.motion.x, event.motion.y};
+    };
+    hover("menu-item-0");
+    REQUIRE(doc->GetElementById("context-submenu-1"));
+    REQUIRE(selected == 0);
+    hover("menu-item-1-0");
+    REQUIRE(doc->GetElementById("context-submenu-2"));
+    REQUIRE(doc->GetElementById("context-menu-panel")->IsVisible());
+    REQUIRE(selected == 0);
+    const auto point = hover("menu-item-2-0");
+    click(view, int(point.x), int(point.y));
+    REQUIRE(selected == 1);
     REQUIRE_FALSE(menu.isVisible());
 }
 

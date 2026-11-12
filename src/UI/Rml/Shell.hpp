@@ -30,6 +30,7 @@ enum class GuildSettingsSection;
 namespace MemberModeration { class Controller; }
 namespace Rml {
 class GuildSettingsController;
+class ServerMenuController;
 class Controller;
 class AccountsController;
 class ConfirmModalController;
@@ -216,6 +217,7 @@ private:
     std::unique_ptr<CallSounds> callSounds;
     std::unique_ptr<PushToTalk> pushToTalkKey;
     std::unique_ptr<Rml::GuildSettingsController> guildSettingsController;
+    std::unique_ptr<Rml::ServerMenuController> serverMenuController;
     std::unique_ptr<Rml::ForumController> forumController;
     std::unique_ptr<Rml::ThreadBrowserController> threadBrowserController;
     std::unique_ptr<Rml::SearchController> searchController;

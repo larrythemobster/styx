@@ -2,6 +2,7 @@
 
 #include "Discord/CdnUrls.hpp"
 #include "Core/ClientInstance.hpp"
+#include "Core/PermissionManager.hpp"
 #include "Core/Theme/Manager.hpp"
 #include "Discord/Client.hpp"
 #include "ImageUpload.hpp"
@@ -50,6 +51,7 @@ ProfileEditorController::ProfileEditorController(Shell &shell, ::Rml::Element &h
     avatarFrameKey = "profile-editor-avatar-" + scope;
     bannerFrameKey = "profile-editor-banner-" + scope;
     track(this->shell.instanceChanged.connect([this](Core::ClientInstance *) {
+        if (editingGuildId.isValid()) return;
         if (visible)
             close();
         else
@@ -66,7 +68,7 @@ ProfileEditorController::~ProfileEditorController()
     removeListeners();
 }
 
-void ProfileEditorController::open()
+void ProfileEditorController::open(Core::Snowflake guildId, Core::Snowflake account)
 {
     ensureDocument();
     if (!regionRoot)
@@ -77,14 +79,18 @@ void ProfileEditorController::open()
     loading = false;
     error.clear();
     savedMessage.clear();
+    editingGuildId = guildId;
+    nicknameEditable = true;
     hasSavedData = false;
     savedUser = Discord::User{};
     savedProfile = Discord::UserProfileData{};
+    savedMainProfile = {};
+    savedMember = {};
 
     clearDrafts();
     applyBaselineToInputs();
 
-    auto *inst = shell.currentInstance();
+    auto *inst = account.isValid() ? shell.instanceFor(account) : shell.currentInstance();
     editingAccountId = inst ? inst->accountId() : Core::Snowflake::Invalid;
 
     visible = true;
@@ -96,6 +102,10 @@ void ProfileEditorController::open()
         return;
     }
 
+    if (editingGuildId.isValid()) {
+        const auto permissions = inst->permissions()->getGuildPermissions(editingAccountId, editingGuildId);
+        nicknameEditable = (permissions & (Discord::Permission::CHANGE_NICKNAME | Discord::Permission::MANAGE_NICKNAMES)) != Discord::NO_PERMISSIONS;
+    }
     loading = true;
     render();
     regionRoot->Focus();
@@ -104,14 +114,12 @@ void ProfileEditorController::open()
     const auto accountId = editingAccountId;
     Platform::Guard<ProfileEditorController> self(this);
 
-    inst->discord()->fetchUserProfile(accountId, Core::Snowflake::Invalid, [self, currentGen, accountId](const Core::Result<Discord::UserProfile> &result) {
+    inst->discord()->fetchUserProfile(editingAccountId, editingGuildId, [self, currentGen, accountId](const Core::Result<Discord::UserProfile> &result) {
         if (!self || !self->visible || self->generation != currentGen || self->editingAccountId != accountId)
             return;
 
         self->loading = false;
-        if (result.success() && result.value->user->id.get() == accountId) {
-            self->savedUser = result.value->user.get();
-            self->savedProfile = result.value->userProfile.get();
+        if (result.success() && self->applyProfileSnapshot(*result.value)) {
             self->hasSavedData = true;
             self->applyBaselineToInputs();
             self->render();
@@ -125,6 +133,45 @@ void ProfileEditorController::open()
             self->regionRoot->Focus();
         }
     });
+}
+
+bool ProfileEditorController::applyProfileSnapshot(const Discord::UserProfile &profile)
+{
+    if (profile.user->id.get() != editingAccountId || (editingGuildId.isValid() && !profile.guildMember.hasValue()))
+        return false;
+    if (editingGuildId.isValid() && profile.guildMemberProfile.hasValue() &&
+        profile.guildMemberProfile->guildId.hasValue() && profile.guildMemberProfile->guildId.get() != editingGuildId)
+        return false;
+    savedUser = profile.user.get();
+    savedProfile = profile.userProfile.get();
+    if (editingGuildId.isValid()) {
+        savedMainProfile = savedProfile;
+        savedMember = profile.guildMember.get();
+        savedProfile = {};
+        savedProfile.banner = nullptr;
+        if (profile.guildMemberProfile.hasValue()) {
+            const auto &memberProfile = profile.guildMemberProfile.get();
+            savedProfile.bio = memberProfile.bio;
+            savedProfile.pronouns = memberProfile.pronouns;
+            savedProfile.accentColor = memberProfile.accentColor;
+            if (!memberProfile.banner.isUndefined()) savedProfile.banner = memberProfile.banner;
+        }
+    }
+    return true;
+}
+
+const std::string &ProfileEditorController::baselineName() const
+{
+    static const std::string empty;
+    if (editingGuildId.isValid()) return savedMember.nick.hasValue() ? savedMember.nick.get() : empty;
+    return savedUser.globalName.hasValue() ? savedUser.globalName.get() : empty;
+}
+
+const std::string &ProfileEditorController::baselineAvatar() const
+{
+    static const std::string empty;
+    if (editingGuildId.isValid()) return savedMember.avatar.hasValue() ? savedMember.avatar.get() : empty;
+    return savedUser.avatar.hasValue() ? savedUser.avatar.get() : empty;
 }
 
 void ProfileEditorController::close()
@@ -218,32 +265,33 @@ void ProfileEditorController::render()
 
     const std::string empty;
     std::string avatarSrc;
+    const auto &mainAvatar = savedUser.avatar.hasValue() ? savedUser.avatar.get() : empty;
+    auto image = [this](const std::string &url, Platform::Size size) {
+        return Runtime::instance().imageSource(url, size, editingAccountId);
+    };
     if (avatarDraft.removed) {
-        avatarSrc = shell.imageSource(Discord::Cdn::defaultUserAvatar(editingAccountId, 128), {80, 80});
+        avatarSrc = image(editingGuildId.isValid() ? Discord::Cdn::effectiveAvatar({}, editingAccountId, {}, mainAvatar, 128)
+                                                 : Discord::Cdn::defaultUserAvatar(editingAccountId, 128), {80, 80});
     } else if (!avatarDraft.uri.empty()) {
-        if (!avatarDraft.previewEmpty)
-            avatarSrc = "frame:" + frameKey(ImageSlot::Avatar);
+        if (!avatarDraft.previewEmpty) avatarSrc = "frame:" + frameKey(ImageSlot::Avatar);
     } else if (hasSavedData) {
-        const auto &avatarHash = savedUser.avatar.hasValue() ? savedUser.avatar.get() : empty;
-        if (!avatarHash.empty())
-            avatarSrc = shell.imageSource(Discord::Cdn::userAvatar(editingAccountId, avatarHash, 128), {80, 80});
-        else
-            avatarSrc = shell.imageSource(Discord::Cdn::defaultUserAvatar(editingAccountId, 128), {80, 80});
+        const auto &memberAvatar = editingGuildId.isValid() && savedMember.avatar.hasValue() ? savedMember.avatar.get() : empty;
+        avatarSrc = image(Discord::Cdn::effectiveAvatar(editingGuildId, editingAccountId, memberAvatar, mainAvatar, 128), {80, 80});
     } else {
-        avatarSrc = shell.imageSource(Discord::Cdn::defaultUserAvatar(editingAccountId, 128), {80, 80});
+        avatarSrc = image(Discord::Cdn::defaultUserAvatar(editingAccountId, 128), {80, 80});
     }
 
     std::string bannerSrc;
-    if (bannerDraft.removed) {
-        bannerSrc.clear();
-    } else if (!bannerDraft.uri.empty()) {
-        if (!bannerDraft.previewEmpty)
-            bannerSrc = "frame:" + frameKey(ImageSlot::Banner);
-    } else if (hasSavedData) {
-        const auto &banner = savedProfile.banner.isUndefined() ? savedUser.banner : savedProfile.banner;
-        const auto &bannerHash = banner.hasValue() ? banner.get() : empty;
-        if (!bannerHash.empty())
-            bannerSrc = shell.imageSource(Discord::Cdn::userBanner(editingAccountId, bannerHash, 1024), {600, 240});
+    const auto &mainBanner = savedMainProfile.banner.isUndefined() ? savedUser.banner : savedMainProfile.banner;
+    const auto &currentBanner = savedProfile.banner.isUndefined() ? savedUser.banner : savedProfile.banner;
+    if (!bannerDraft.uri.empty()) {
+        if (!bannerDraft.previewEmpty) bannerSrc = "frame:" + frameKey(ImageSlot::Banner);
+    } else if (hasSavedData && !bannerDraft.removed && currentBanner.hasValue() && !currentBanner->empty()) {
+        bannerSrc = image(editingGuildId.isValid()
+            ? Discord::Cdn::guildMemberBanner(editingGuildId, editingAccountId, currentBanner.get(), 1024)
+            : Discord::Cdn::userBanner(editingAccountId, currentBanner.get(), 1024), {600, 240});
+    } else if (hasSavedData && editingGuildId.isValid() && mainBanner.hasValue() && !mainBanner->empty()) {
+        bannerSrc = image(Discord::Cdn::userBanner(editingAccountId, mainBanner.get(), 1024), {600, 240});
     }
 
     if (auto *avatarImg = avatarPreview()) {
@@ -282,15 +330,20 @@ void ProfileEditorController::render()
         errorEl->SetProperty("display", error.empty() ? "none" : "block");
     }
 
+    if (auto *label = regionRoot->GetElementById("profile-edit-name-label"))
+        label->SetInnerRML(editingGuildId.isValid() ? "Server Nickname" : "Display Name");
+    if (auto *note = regionRoot->GetElementById("profile-edit-scope-note")) {
+        note->SetInnerRML("Changes apply only to this server. Empty fields use your main profile.");
+        note->SetProperty("display", editingGuildId.isValid() ? "block" : "none");
+    }
     const bool busy = loading || saving || !editingAccountId.isValid() || !hasSavedData;
-    setControlDisabled(nameInput(), busy);
+    setControlDisabled(nameInput(), busy || !nicknameEditable);
     setControlDisabled(pronounsInput(), busy);
     setControlDisabled(bioTextarea(), busy);
     setControlDisabled(chooseAvatarButton(), busy);
     setControlDisabled(removeAvatarButton(), busy || avatarDraft.removed ||
-        (avatarDraft.uri.empty() && (!savedUser.avatar.hasValue() || savedUser.avatar->empty())));
+        (avatarDraft.uri.empty() && baselineAvatar().empty()));
     setControlDisabled(chooseBannerButton(), busy);
-    const auto &currentBanner = savedProfile.banner.isUndefined() ? savedUser.banner : savedProfile.banner;
     setControlDisabled(removeBannerButton(), busy || bannerDraft.removed ||
         (bannerDraft.uri.empty() && (!currentBanner.hasValue() || currentBanner->empty())));
     setControlDisabled(saveButton(), busy || !hasPendingChanges());
@@ -314,16 +367,20 @@ void ProfileEditorController::updatePreview(::Rml::Element *changed)
     if (!changed || id == "profile-edit-name") {
         const auto *input = nameInput();
         const auto name = input ? input->GetValue() : "";
-        text("profile-live-name", name.empty() ? savedUser.username.get() : name);
+        const auto &fallback = editingGuildId.isValid() && savedUser.globalName.hasValue() && !savedUser.globalName->empty()
+            ? savedUser.globalName.get() : savedUser.username.get();
+        text("profile-live-name", name.empty() ? fallback : name);
     }
     if (!changed) text("profile-live-username", savedUser.username.get());
     if (!changed || id == "profile-edit-pronouns") {
         const auto *input = pronounsInput();
-        text("profile-live-pronouns", input ? input->GetValue() : "");
+        const auto value = input ? input->GetValue() : "";
+        text("profile-live-pronouns", value.empty() && editingGuildId.isValid() ? savedMainProfile.pronouns.get() : value);
     }
     if (!changed || id == "profile-edit-bio") {
         const auto *input = bioTextarea();
-        text("profile-live-bio", input ? input->GetValue() : "");
+        const auto value = input ? input->GetValue() : "";
+        text("profile-live-bio", value.empty() && editingGuildId.isValid() ? savedMainProfile.bio.get() : value);
     }
     if (changed) return;
     for (const auto &[original, preview] : {std::pair{avatarPreview(), "profile-live-avatar"},
@@ -334,9 +391,11 @@ void ProfileEditorController::updatePreview(::Rml::Element *changed)
             image->SetProperty("display", source.empty() ? "none" : "block");
         }
     }
+    const auto &accent = editingGuildId.isValid() && !savedProfile.accentColor.hasValue()
+        ? savedMainProfile.accentColor : savedProfile.accentColor;
     if (auto *banner = regionRoot->GetElementById("profile-live-banner"))
-        banner->SetProperty("background-color", savedProfile.accentColor.hasValue()
-            ? Platform::Color::rgb(uint32_t(savedProfile.accentColor.get())).css()
+        banner->SetProperty("background-color", accent.hasValue()
+            ? Platform::Color::rgb(uint32_t(accent.get())).css()
             : Core::Theme::Manager::instance().color(Core::Theme::Token::Highlight).css());
 }
 
@@ -346,7 +405,7 @@ void ProfileEditorController::reset()
         return;
 
     if (!hasSavedData) {
-        open();
+        open(editingGuildId, editingAccountId);
         return;
     }
     ++generation;
@@ -363,29 +422,29 @@ void ProfileEditorController::save()
     if (loading || saving || !editingAccountId.isValid() || !hasSavedData)
         return;
 
-    auto *inst = shell.currentInstance();
+    auto *inst = shell.instanceFor(editingAccountId);
     if (!inst || !inst->discord())
         return;
 
     ++generation;
     Discord::CurrentUserEdit accountEdit;
     Discord::UserProfileEdit profileEdit;
+    Discord::CurrentMemberEdit memberEdit;
     const std::string empty;
 
     const auto *nameEl = nameInput();
     const std::string currentName = nameEl ? nameEl->GetValue() : "";
-    const auto &baselineName = savedUser.globalName.hasValue() ? savedUser.globalName.get() : empty;
-    if (currentName != baselineName) {
-        if (currentName.empty())
-            accountEdit.globalName = nullptr;
-        else
-            accountEdit.globalName = currentName;
+    if (currentName != baselineName()) {
+        auto &field = editingGuildId.isValid() ? memberEdit.nick : accountEdit.globalName;
+        if (currentName.empty()) field = nullptr;
+        else field = currentName;
     }
 
-    if (avatarDraft.removed && savedUser.avatar.hasValue() && !savedUser.avatar->empty()) {
-        accountEdit.avatar = nullptr;
+    auto &avatar = editingGuildId.isValid() ? memberEdit.avatar : accountEdit.avatar;
+    if (avatarDraft.removed && !baselineAvatar().empty()) {
+        avatar = nullptr;
     } else if (!avatarDraft.uri.empty()) {
-        accountEdit.avatar = avatarDraft.uri;
+        avatar = avatarDraft.uri;
     }
 
     const auto *pronounsEl = pronounsInput();
@@ -407,6 +466,19 @@ void ProfileEditorController::save()
         profileEdit.banner = bannerDraft.uri;
     }
 
+    if (editingGuildId.isValid()) {
+        if (memberEdit.nick.isUndefined() && memberEdit.avatar.isUndefined() && profileEdit.empty()) {
+            render();
+            return;
+        }
+        memberEdit.pronouns = profileEdit.pronouns;
+        memberEdit.bio = profileEdit.bio;
+        memberEdit.banner = profileEdit.banner;
+        if (memberEdit.pronouns.hasValue() && memberEdit.pronouns->empty()) memberEdit.pronouns = nullptr;
+        if (memberEdit.bio.hasValue() && memberEdit.bio->empty()) memberEdit.bio = nullptr;
+        saveMember(memberEdit);
+        return;
+    }
     if (accountEdit.empty() && profileEdit.empty()) {
         render();
         return;
@@ -420,7 +492,7 @@ void ProfileEditorController::save()
 
 void ProfileEditorController::saveAccount(const Discord::CurrentUserEdit &accountEdit, Discord::UserProfileEdit profileEdit)
 {
-    auto *inst = shell.currentInstance();
+    auto *inst = shell.instanceFor(editingAccountId);
     if (!inst || !inst->discord())
         return;
 
@@ -463,7 +535,7 @@ void ProfileEditorController::saveAccount(const Discord::CurrentUserEdit &accoun
 
 void ProfileEditorController::saveMetadata(const Discord::UserProfileEdit &profileEdit, bool accountAlreadySaved)
 {
-    auto *inst = shell.currentInstance();
+    auto *inst = shell.instanceFor(editingAccountId);
     if (!inst || !inst->discord())
         return;
 
@@ -498,6 +570,41 @@ void ProfileEditorController::saveMetadata(const Discord::UserProfileEdit &profi
     });
 }
 
+void ProfileEditorController::saveMember(const Discord::CurrentMemberEdit &edit)
+{
+    auto *inst = shell.instanceFor(editingAccountId);
+    if (!inst || !inst->discord()) return;
+    saving = true;
+    error.clear();
+    render();
+    std::map<std::string, std::string> hashes;
+    if (!avatarDraft.uri.empty() && !avatarDraft.originalMd5.empty()) hashes["avatar"] = avatarDraft.originalMd5;
+    if (!bannerDraft.uri.empty() && !bannerDraft.originalMd5.empty()) hashes["banner"] = bannerDraft.originalMd5;
+    const auto currentGen = generation;
+    Platform::Guard<ProfileEditorController> self(this);
+    Platform::Guard<Core::ClientInstance> origin(inst);
+    inst->discord()->modifyCurrentMember(editingGuildId, edit, hashes, [self, origin, currentGen](const Core::Result<void> &result) {
+        if (!self || !origin || !self->visible || self->generation != currentGen) return;
+        if (!result.success()) {
+            self->saving = false;
+            self->error = result.error.empty() ? "Failed to save your server profile." : result.error;
+            self->render();
+            return;
+        }
+        origin->discord()->fetchUserProfile(self->editingAccountId, self->editingGuildId,
+            [self, origin, currentGen](const Core::Result<Discord::UserProfile> &profile) {
+                if (!self || !origin || !self->visible || self->generation != currentGen) return;
+                if (profile.success() && self->applyProfileSnapshot(*profile.value)) {
+                    self->finishSave();
+                } else {
+                    self->saving = false;
+                    self->error = "Server profile saved, but it could not be reloaded. Close and reopen this editor.";
+                    self->render();
+                }
+            });
+    });
+}
+
 void ProfileEditorController::finishSave()
 {
     saving = false;
@@ -515,11 +622,11 @@ bool ProfileEditorController::hasPendingChanges() const
     const auto *pronouns = pronounsInput();
     const auto *bio = bioTextarea();
     const auto &banner = savedProfile.banner.isUndefined() ? savedUser.banner : savedProfile.banner;
-    return (name && name->GetValue() != savedUser.globalName.valueOr("")) ||
+    return (name && name->GetValue() != baselineName()) ||
         (pronouns && pronouns->GetValue() != savedProfile.pronouns.get()) ||
         (bio && bio->GetValue() != savedProfile.bio.valueOr("")) ||
         !avatarDraft.uri.empty() || !bannerDraft.uri.empty() ||
-        (avatarDraft.removed && savedUser.avatar.hasValue() && !savedUser.avatar->empty()) ||
+        (avatarDraft.removed && !baselineAvatar().empty()) ||
         (bannerDraft.removed && banner.hasValue() && !banner->empty());
 }
 
@@ -598,7 +705,7 @@ void ProfileEditorController::applyBaselineToInputs()
 {
     const std::string empty;
     if (auto *el = nameInput())
-        el->SetValue(savedUser.globalName.hasValue() ? savedUser.globalName.get() : empty);
+        el->SetValue(baselineName());
     if (auto *el = pronounsInput())
         el->SetValue(savedProfile.pronouns.get());
     if (auto *el = bioTextarea())

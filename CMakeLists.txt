@@ -313,6 +313,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/SettingsController.cpp
     src/UI/Rml/SettingsPages.cpp
     src/UI/Rml/ProfileEditorController.cpp
+    src/UI/Rml/ServerMenuController.cpp
     src/UI/Rml/AccountsController.cpp
     src/UI/Rml/ConfirmModal.cpp
     src/UI/Rml/UserProfileController.cpp

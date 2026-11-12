@@ -209,9 +209,12 @@ void UserProfileController::updateProfileData()
     if (auto *el = profileDocument->GetElementById("profile-avatar-img")) el->SetAttribute("src", shell.imageSource(resolvedAvatarUrl(fullMode ? 256 : 128), {avatarSize, avatarSize}));
     std::string banner;
     if (hasProfile && profile.guildMemberProfile.hasValue()) banner = profile.guildMemberProfile.get().banner.valueOr();
+    const bool serverBanner = currentGuildId.isValid() && !banner.empty();
     if (banner.empty() && hasProfile) banner = profile.user.get().banner.valueOr();
     if (auto *el = profileDocument->GetElementById("profile-banner-img")) {
-        if (!banner.empty()) el->SetAttribute("src", shell.imageSource(Discord::Cdn::userBanner(currentUserId, banner, 640), {320, 105}));
+        if (!banner.empty()) el->SetAttribute("src", shell.imageSource(serverBanner
+            ? Discord::Cdn::guildMemberBanner(currentGuildId, currentUserId, banner, 640)
+            : Discord::Cdn::userBanner(currentUserId, banner, 640), {320, 105}));
         el->SetClass("visible", !banner.empty());
     }
     if (auto *el = profileDocument->GetElementById("profile-banner")) {

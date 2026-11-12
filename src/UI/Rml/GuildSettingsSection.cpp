@@ -38,7 +38,7 @@ std::vector<GuildSettingsSection> visibleSections(Core::ClientInstance *instance
                                           GuildSettingsSection::Stickers, GuildSettingsSection::Members,
                                           GuildSettingsSection::Roles };
 
-    if (has(Permission::MANAGE_GUILD | Permission::CREATE_INSTANT_INVITE))
+    if (has(Permission::MANAGE_GUILD | Permission::VIEW_AUDIT_LOG))
         sections.push_back(GuildSettingsSection::Invites);
     if (has(Permission::VIEW_AUDIT_LOG))
         sections.push_back(GuildSettingsSection::AuditLog);
@@ -66,7 +66,7 @@ bool canEdit(Core::ClientInstance *instance, Core::Snowflake guildId, GuildSetti
     case GuildSettingsSection::BoostPerks:
         return has(Permission::MANAGE_GUILD);
     case GuildSettingsSection::Invites:
-        return has(Permission::MANAGE_GUILD | Permission::CREATE_INSTANT_INVITE);
+        return has(Permission::MANAGE_GUILD);
     case GuildSettingsSection::Emoji:
     case GuildSettingsSection::Stickers:
         return has(Permission::MANAGE_EXPRESSIONS | Permission::CREATE_EXPRESSIONS);

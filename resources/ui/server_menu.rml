@@ -1,0 +1,22 @@
+<rml>
+<head>
+    <title>Server preferences</title>
+    <link type="text/rcss" href="base.rcss"/>
+    <link type="text/rcss" href="theme.rcss"/>
+    <link type="text/rcss" href="settings.rcss"/>
+    <link type="text/rcss" href="profile_editor.rcss"/>
+    <link type="text/rcss" href="server_menu.rcss"/>
+</head>
+<body id="server-options-root">
+    <div class="server-options-backdrop" data-action="close"></div>
+    <div id="server-options-dialog" role="dialog" aria-modal="true" aria-labelledby="server-options-title">
+        <div class="server-options-header">
+            <div><div id="server-options-title"></div><div id="server-options-name"></div></div>
+            <button class="server-options-close" data-action="close" title="Close"><img src="icon:x" alt="Close"/></button>
+        </div>
+        <div id="server-options-error" style="display:none"></div>
+        <div id="server-options-content"></div>
+        <div id="server-options-footer"><button class="settings-btn settings-btn-primary" data-action="close"><span class="settings-btn-label">Done</span></button></div>
+    </div>
+</body>
+</rml>

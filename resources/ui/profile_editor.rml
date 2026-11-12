@@ -10,6 +10,7 @@
         <div class="profile-editor-header">
             <div id="profile-edit-state" class="profile-edit-state" style="display: none;"></div>
         </div>
+        <div id="profile-edit-scope-note" class="profile-edit-banner-note" style="display: none;"></div>
         <div id="profile-edit-error" class="profile-edit-error" style="display: none;"></div>
         <div class="profile-editor-content">
             <div class="profile-editor-layout">
@@ -42,7 +43,7 @@
             </div>
 
             <div class="profile-edit-section">
-                <div class="profile-edit-label">Display Name</div>
+                <div id="profile-edit-name-label" class="profile-edit-label">Display Name</div>
                 <input id="profile-edit-name" class="profile-edit-input" type="text" maxlength="32" placeholder="Display Name"/>
             </div>
 

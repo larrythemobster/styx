@@ -19,6 +19,7 @@
 #include "ForumController.hpp"
 #include "GuildSettingsSection.hpp"
 #include "GuildSettingsController.hpp"
+#include "ServerMenuController.hpp"
 #include "MemberModeration.hpp"
 #include "ImageViewerController.hpp"
 #include "SettingsController.hpp"
@@ -1000,23 +1001,8 @@ void Shell::showContextMenuForUser(Snowflake userId, Snowflake guild)
 }
 void Shell::showContextMenuForGuild(Snowflake account, Snowflake guild)
 {
-    auto *client = instanceFor(account);
-    if (!client) return;
-    Platform::Guard<ClientInstance> guard(client);
-    std::vector<Rml::MenuItem> menu{{"Mark As Read", [this, account, guild] { markGuildRead(account, guild); }}};
-    Rml::MenuItem settings{"Server Settings"};
-    for (auto section : GuildSettingsAccess::visibleSections(client, guild)) if (section != GuildSettingsSection::DeleteServer)
-        settings.children.push_back({GuildSettingsAccess::title(section), [this, account, guild, section] { openGuildSettings(account, guild, section); }});
-    if (!settings.children.empty()) { menu.push_back({{}, {}, false, false, true}); menu.push_back(std::move(settings)); }
-    menu.push_back({{}, {}, false, false, true});
-    auto data = client->getGuild(guild);
-    bool owner = data && data->ownerId.hasValue() && data->ownerId.get() == account;
-    menu.push_back({"Leave Server", [guard, guild] { if (guard) guard->discord()->leaveGuild(guild); }, !owner, true});
-    if (developerModeEnabled(account)) {
-        menu.push_back({{}, {}, false, false, true});
-        menu.push_back({"Copy Server ID", [guild] { Platform::Desktop::setClipboardText(guild.toString()); }});
-    }
-    showContextMenu(std::move(menu));
+    if (!serverMenuController) serverMenuController = std::make_unique<Rml::ServerMenuController>(*this);
+    serverMenuController->show(account, guild, developerModeEnabled(account));
 }
 void Shell::showContextMenuForChannel(Snowflake account, Snowflake guild, Snowflake channel)
 {

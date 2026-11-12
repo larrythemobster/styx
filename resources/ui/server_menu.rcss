@@ -1,0 +1,49 @@
+body#server-options-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    background-color: transparent;
+}
+.server-options-backdrop { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; }
+#server-options-dialog {
+    position: relative;
+    width: 440dp;
+    height: 520dp;
+    max-width: 92%;
+    max-height: 90%;
+    display: flex;
+    flex-direction: column;
+    background-color: #111214;
+    border: 1dp #303136;
+    border-radius: 8dp;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+#server-options-dialog.profile { width: 940dp; height: 680dp; }
+.server-options-header { display: flex; justify-content: space-between; align-items: center; padding: 16dp 20dp; flex-shrink: 0; border-bottom: 1dp #202024; }
+#server-options-title { font-size: 20dp; font-weight: 700; color: #f2f3f5; }
+#server-options-name { font-size: 13dp; color: #b5bac1; margin-top: 5dp; }
+.server-options-close { width: 36dp; height: 36dp; display: flex; align-items: center; justify-content: center; background-color: transparent; border: 1dp #000000; border-radius: 4dp; cursor: pointer; padding: 0; }
+.server-options-close img { width: 18dp; height: 18dp; image-color: #b5bac1; }
+.server-options-close:hover, .server-options-close:focus { background-color: #35363c; }
+#server-options-error { color: #ff7378; font-size: 13dp; padding: 12dp 20dp 0; max-height: 80dp; overflow-y: auto; flex-shrink: 0; }
+#server-options-content { flex: 1; min-height: 0; overflow-y: auto; padding: 8dp 20dp 16dp; box-sizing: border-box; }
+.profile #server-options-content { display: flex; flex-direction: column; overflow: hidden; padding-top: 16dp; }
+#server-profile-host { width: 100%; height: 100%; min-height: 0; }
+#server-options-footer { display: flex; padding: 12dp 20dp 20dp; border-top: 1dp #202024; flex-shrink: 0; }
+#server-options-footer button { width: 100%; }
+#server-options-dialog .settings-switch-row { cursor: pointer; }
+#server-options-dialog .settings-switch.checked { background-color: #5865f2; }
+#server-options-dialog .settings-switch.checked:hover, #server-options-dialog .settings-switch.checked:focus { background-color: #4752c4; }
+#server-options-dialog button[disabled] { tab-index: none; focus: none; opacity: 0.5; cursor: default; }
+.server-field-label { display: block; color: #b5bac1; font-size: 13dp; font-weight: 500; margin: 16dp 0 6dp; }
+#server-options-dialog select { width: 100%; }
+.server-invite-actions { margin-top: 20dp; }
+#server-invite-result { margin-top: 16dp; align-items: center; gap: 8dp; }
+#server-invite-link { flex: 1; min-width: 0; }
