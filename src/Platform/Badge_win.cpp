@@ -111,23 +111,29 @@ struct IconCache {
     {
         if (base.empty())
             return nullptr;
-        const auto key = std::pair{std::clamp(count, 0, 10), size};
+        const int shownCount = count <= 0 ? 0 : size < 24 ? 1 : std::min(count, 10);
+        const auto key = std::pair{shownCount, size};
         if (auto found = icons.find(key); found != icons.end())
             return found->second;
         auto image = Image::scale(base, size, size);
         if (count > 0) {
-            const int diameter = size / 2;
-            const int inset = std::max(1, size / 32);
-            const int inner = diameter - inset * 2;
-            const auto badge = render(label(count), inner);
-            for (int y = 0; y < diameter; ++y) {
-                for (int x = 0; x < diameter; ++x) {
-                    auto *pixel = image.pixels.data() + (static_cast<size_t>(y) * size + size - diameter + x) * 4;
-                    const double coverage = std::clamp(diameter / 2.0 -
-                        std::hypot(x + 0.5 - diameter / 2.0, y + 0.5 - diameter / 2.0) + 0.5, 0.0, 1.0);
+            const std::string text = size >= 24 ? label(count) : "";
+            const int height = std::max(5, int(std::lround(size * 0.34)));
+            const int width = text.size() > 1 ? int(std::lround(height * 1.45)) : height;
+            const int inset = std::max(1, size / 48);
+            const int outerWidth = width + inset * 2;
+            const int outerHeight = height + inset * 2;
+            const auto badge = render(text, width, height);
+            for (int y = 0; y < outerHeight; ++y) {
+                for (int x = 0; x < outerWidth; ++x) {
+                    auto *pixel = image.pixels.data() + (static_cast<size_t>(y) * size + size - outerWidth + x) * 4;
+                    const double dx = std::max(std::abs(x + 0.5 - outerWidth / 2.0) -
+                        (outerWidth - outerHeight) / 2.0, 0.0);
+                    const double coverage = std::clamp(outerHeight / 2.0 -
+                        std::hypot(dx, y + 0.5 - outerHeight / 2.0) + 0.5, 0.0, 1.0);
                     blend(pixel, uint32_t(std::lround(coverage * 255)) << 24);
-                    if (x >= inset && y >= inset && x < diameter - inset && y < diameter - inset)
-                        blend(pixel, badge[static_cast<size_t>(y - inset) * inner + x - inset]);
+                    if (x >= inset && y >= inset && x < outerWidth - inset && y < outerHeight - inset)
+                        blend(pixel, badge[static_cast<size_t>(y - inset) * width + x - inset]);
                 }
             }
         }
@@ -140,27 +146,33 @@ struct IconCache {
 
 } // namespace
 
-void drawLabelNative(std::vector<uint32_t> &pixels, std::string_view text, int size)
+void drawLabelNative(std::vector<uint32_t> &pixels, std::string_view text, int width, int height)
 {
+    constexpr int scale = 4;
+    const int canvasWidth = width * scale;
+    const int canvasHeight = height * scale;
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = size;
-    info.bmiHeader.biHeight = -size;
+    info.bmiHeader.biWidth = canvasWidth;
+    info.bmiHeader.biHeight = -canvasHeight;
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     void *bits = nullptr;
     HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
     if (!bitmap)
         return;
-    std::fill_n(static_cast<uint32_t *>(bits), size_t(size) * size, 0);
     HDC dc = CreateCompatibleDC(nullptr);
     const auto oldBitmap = SelectObject(dc, bitmap);
     const std::wstring label(text.begin(), text.end());
-    int height = std::max(1, int(std::lround(size * 0.72)));
+    auto *coverage = static_cast<uint32_t *>(bits);
+    int fontHeight = std::max(1, int(std::lround(canvasHeight * 0.9)));
     HFONT font = nullptr;
     HGDIOBJ oldFont = nullptr;
+    RECT ink{};
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, RGB(255, 255, 255));
     for (;;) {
-        font = CreateFontW(-height, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        font = CreateFontW(-fontHeight, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
         if (!font)
@@ -168,28 +180,59 @@ void drawLabelNative(std::vector<uint32_t> &pixels, std::string_view text, int s
         oldFont = SelectObject(dc, font);
         SIZE extent{};
         GetTextExtentPoint32W(dc, label.data(), int(label.size()), &extent);
-        if (extent.cx <= size - 2 || height == 1)
+        std::fill_n(coverage, size_t(canvasWidth) * canvasHeight, 0);
+        ink = {canvasWidth, canvasHeight, 0, 0};
+        if (extent.cx < canvasWidth) {
+            TextOutW(dc, 0, 0, label.data(), int(label.size()));
+            GdiFlush();
+            for (int y = 0; y < canvasHeight; ++y) {
+                for (int x = 0; x < canvasWidth; ++x) {
+                    if (!(coverage[size_t(y) * canvasWidth + x] & 255))
+                        continue;
+                    ink.left = std::min(ink.left, LONG(x));
+                    ink.top = std::min(ink.top, LONG(y));
+                    ink.right = std::max(ink.right, LONG(x + 1));
+                    ink.bottom = std::max(ink.bottom, LONG(y + 1));
+                }
+            }
+        }
+        const double radius = std::min(canvasWidth, canvasHeight) / 2.0;
+        const double dx = std::max((ink.right - ink.left) / 2.0 - (canvasWidth / 2.0 - radius), 0.0);
+        const double dy = std::max((ink.bottom - ink.top) / 2.0 - (canvasHeight / 2.0 - radius), 0.0);
+        if ((ink.right > ink.left && ink.bottom > ink.top &&
+             ink.bottom - ink.top <= canvasHeight * 0.64 &&
+             std::hypot(dx, dy) <= radius - scale) || fontHeight == 1)
             break;
         SelectObject(dc, oldFont);
         DeleteObject(font);
         font = nullptr;
-        --height;
+        --fontHeight;
     }
     if (font) {
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, RGB(255, 255, 255));
-        RECT rectangle{0, 0, size, size};
-        DrawTextW(dc, label.data(), int(label.size()), &rectangle, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        GdiFlush();
-        const auto *coverage = static_cast<const uint32_t *>(bits);
-        for (size_t index = 0; index < pixels.size(); ++index) {
-            const unsigned alpha = coverage[index] & 255;
-            if (!alpha)
-                continue;
-            const auto channel = [alpha](unsigned value) { return value + (255 - value) * alpha / 255; };
-            const auto pixel = pixels[index];
-            pixels[index] = (pixel & 0xFF000000u) | (channel((pixel >> 16) & 255) << 16) |
-                (channel((pixel >> 8) & 255) << 8) | channel(pixel & 255);
+        // Centre visible ink rather than the font's line box and side bearings.
+        const int left = (canvasWidth - (ink.right - ink.left)) / 2;
+        const int top = (canvasHeight - (ink.bottom - ink.top)) / 2;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                unsigned sum = 0;
+                for (int sy = 0; sy < scale; ++sy) {
+                    const int sourceY = y * scale + sy + ink.top - top;
+                    if (sourceY < ink.top || sourceY >= ink.bottom)
+                        continue;
+                    for (int sx = 0; sx < scale; ++sx) {
+                        const int sourceX = x * scale + sx + ink.left - left;
+                        if (sourceX >= ink.left && sourceX < ink.right)
+                            sum += coverage[size_t(sourceY) * canvasWidth + sourceX] & 255;
+                    }
+                }
+                const unsigned alpha = (sum + scale * scale / 2) / (scale * scale);
+                if (!alpha)
+                    continue;
+                auto &pixel = pixels[size_t(y) * width + x];
+                const auto channel = [alpha](unsigned value) { return value + (255 - value) * alpha / 255; };
+                pixel = (pixel & 0xFF000000u) | (channel((pixel >> 16) & 255) << 16) |
+                    (channel((pixel >> 8) & 255) << 8) | channel(pixel & 255);
+            }
         }
         SelectObject(dc, oldFont);
         DeleteObject(font);

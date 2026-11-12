@@ -11,7 +11,7 @@
 
 namespace Styx::Platform::Badge {
 #ifdef _WIN32
-void drawLabelNative(std::vector<std::uint32_t> &pixels, std::string_view text, int size);
+void drawLabelNative(std::vector<std::uint32_t> &pixels, std::string_view text, int width, int height);
 #endif
 
 namespace {
@@ -60,18 +60,18 @@ std::string label(int count)
     return std::to_string(count);
 }
 
-std::vector<std::uint32_t> render(std::string_view text, int size)
+std::vector<std::uint32_t> render(std::string_view text, int width, int height)
 {
-    std::vector<std::uint32_t> pixels(static_cast<std::size_t>(size) * size, 0);
-    // The disc: each pixel's alpha is how much of it lies inside the circle, which smooths the edge.
-    const double centre = size / 2.0;
-    for (int y = 0; y < size; ++y) {
-        for (int x = 0; x < size; ++x) {
-            const double distance = std::hypot(x + 0.5 - centre, y + 0.5 - centre);
-            const double coverage = std::clamp(centre - distance + 0.5, 0.0, 1.0);
+    std::vector<std::uint32_t> pixels(static_cast<std::size_t>(width) * height, 0);
+    const double radius = std::min(width, height) / 2.0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const double dx = std::max(std::abs(x + 0.5 - width / 2.0) - (width / 2.0 - radius), 0.0);
+            const double dy = std::max(std::abs(y + 0.5 - height / 2.0) - (height / 2.0 - radius), 0.0);
+            const double coverage = std::clamp(radius - std::hypot(dx, dy) + 0.5, 0.0, 1.0);
             const auto alpha = static_cast<std::uint32_t>(std::lround(coverage * 255));
             if (alpha)
-                pixels[static_cast<std::size_t>(y) * size + x] = (alpha << 24) | RED;
+                pixels[static_cast<std::size_t>(y) * width + x] = (alpha << 24) | RED;
         }
     }
 
@@ -79,13 +79,13 @@ std::vector<std::uint32_t> render(std::string_view text, int size)
     if (count == 0)
         return pixels;
 #ifdef _WIN32
-    drawLabelNative(pixels, text, size);
+    drawLabelNative(pixels, text, width, height);
 #else
-    const double scale = std::min(size * 0.60 / 5, size * 0.72 / (count * 4 - 1));
-    const double left = (size - (count * 4 - 1) * scale) / 2;
-    const double top = (size - 5 * scale) / 2;
-    for (int y = 0; y < size; ++y) {
-        for (int x = 0; x < size; ++x) {
+    const double scale = std::min(height * 0.60 / 5, width * 0.70 / (count * 4 - 1));
+    const double left = (width - (count * 4 - 1) * scale) / 2;
+    const double top = (height - 5 * scale) / 2;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
             int covered = 0;
             for (int sy = 0; sy < 4; ++sy) {
                 for (int sx = 0; sx < 4; ++sx) {
@@ -103,7 +103,7 @@ std::vector<std::uint32_t> render(std::string_view text, int size)
                 }
             }
             if (covered) {
-                auto &pixel = pixels[static_cast<std::size_t>(y) * size + x];
+                auto &pixel = pixels[static_cast<std::size_t>(y) * width + x];
                 const auto channel = [covered](unsigned value) { return value + (255 - value) * covered / 16; };
                 pixel = (pixel & 0xFF000000u) | (channel((RED >> 16) & 255) << 16) |
                     (channel((RED >> 8) & 255) << 8) | channel(RED & 255);

@@ -977,7 +977,7 @@ TEST_CASE("Badge images are a red disc with white text", "[badge]")
 {
     namespace Badge = Styx::Platform::Badge;
 
-    const auto empty = Badge::render("", 16);
+    const auto empty = Badge::render("", 16, 16);
     REQUIRE(empty.size() == 256);
     REQUIRE(empty[0] == 0);
     REQUIRE(empty[15] == 0);
@@ -986,10 +986,10 @@ TEST_CASE("Badge images are a red disc with white text", "[badge]")
     REQUIRE(empty[8 * 16 + 8] == 0xFFED4245u);
     REQUIRE(std::find(empty.begin(), empty.end(), 0xFFFFFFFFu) == empty.end());
 
-    const auto eight = Badge::render("8", 16);
+    const auto eight = Badge::render("8", 16, 16);
     REQUIRE(std::find(eight.begin(), eight.end(), 0xFFFFFFFFu) != eight.end());
 
-    const auto big = Badge::render("9+", 32);
+    const auto big = Badge::render("9+", 32, 32);
     REQUIRE(big.size() == 1024);
     REQUIRE(big[0] == 0);
     REQUIRE(big[31] == 0);
@@ -997,14 +997,21 @@ TEST_CASE("Badge images are a red disc with white text", "[badge]")
     REQUIRE(big[1023] == 0);
 }
 
-TEST_CASE("Badge text stays inside the antialiased circular edge", "[badge]")
+TEST_CASE("Badge labels have opaque red padding before the curved edge", "[badge]")
 {
     namespace Badge = Styx::Platform::Badge;
-    for (const int size : {8, 14, 16, 24, 32, 48}) {
-        const auto disc = Badge::render("", size);
-        const auto labelled = Badge::render("9+", size);
-        for (size_t index = 0; index < disc.size(); ++index)
-            CHECK((labelled[index] >> 24) == (disc[index] >> 24));
+    for (const int height : {8, 11, 14, 16, 24, 32, 48}) {
+        for (const int width : {height, height * 3 / 2}) {
+            const auto background = Badge::render("", width, height);
+            for (const auto text : {"1", "8", "9+"}) {
+                const auto labelled = Badge::render(text, width, height);
+                for (size_t index = 0; index < background.size(); ++index) {
+                    CHECK((labelled[index] >> 24) == (background[index] >> 24));
+                    if ((labelled[index] & 0xFFFFFF) != (background[index] & 0xFFFFFF))
+                        CHECK((background[index] >> 24) == 255);
+                }
+            }
+        }
     }
 }
 
