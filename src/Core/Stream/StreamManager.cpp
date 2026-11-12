@@ -9,7 +9,9 @@
 #include "Platform/Dispatcher.hpp"
 
 #include <chrono>
+#include <deque>
 #include <future>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -404,21 +406,100 @@ void StreamManager::connectViewer(Session &session)
     std::weak_ptr<StreamDecoder> weakDecoder = session.decoder;
     auto decoderLoop = session.decoderLoop;
     auto *streamWorker = streamLoop.get();
-    connection->track(connection->videoFrame.connect([weakDecoder, decoderLoop](const std::string &frame, uint32_t timestamp, bool keyframe) {
-        decoderLoop->post([weakDecoder, frame, timestamp, keyframe] { if (auto decoder = weakDecoder.lock()) decoder->decode(frame, timestamp, keyframe); });
+    struct DecodeQueue {
+        struct Frame { std::string bytes; uint32_t timestamp; bool keyframe; };
+        std::mutex mutex;
+        std::deque<Frame> frames;
+        bool scheduled = false;
+        bool waitingForKeyframe = true;
+    };
+    auto queue = std::make_shared<DecodeQueue>();
+    connection->track(connection->videoFrame.connect([weakDecoder, decoderLoop, weakConnection, streamWorker, queue](const std::string &frame, uint32_t timestamp, bool keyframe) {
+        bool schedule = false;
+        bool requestKeyframe = false;
+        {
+            std::lock_guard lock(queue->mutex);
+            if (queue->waitingForKeyframe && !keyframe)
+                return;
+            if (keyframe) {
+                queue->frames.clear();
+                queue->waitingForKeyframe = false;
+            }
+            if (queue->frames.size() >= 3) {
+                // Predictive pictures cannot be dropped individually without losing references.
+                queue->frames.clear();
+                queue->waitingForKeyframe = true;
+                requestKeyframe = true;
+            } else {
+                queue->frames.push_back({frame, timestamp, keyframe});
+                if (!queue->scheduled) {
+                    queue->scheduled = true;
+                    schedule = true;
+                }
+            }
+        }
+        if (requestKeyframe) {
+            streamWorker->post([weakConnection] { if (auto connection = weakConnection.lock()) connection->requestKeyframe(); });
+        }
+        if (schedule) {
+            decoderLoop->post([weakDecoder, queue] {
+                for (;;) {
+                    DecodeQueue::Frame frame;
+                    {
+                        std::lock_guard lock(queue->mutex);
+                        if (queue->frames.empty()) {
+                            queue->scheduled = false;
+                            return;
+                        }
+                        frame = std::move(queue->frames.front());
+                        queue->frames.pop_front();
+                    }
+                    if (auto decoder = weakDecoder.lock())
+                        decoder->decode(frame.bytes, frame.timestamp, frame.keyframe);
+                }
+            });
+        }
     }));
-    connection->track(session.decoder->needKeyframe.connect([weakConnection, streamWorker] {
+    connection->track(session.decoder->needKeyframe.connect([weakConnection, streamWorker, queue] {
+        {
+            std::lock_guard lock(queue->mutex);
+            queue->frames.clear();
+            queue->waitingForKeyframe = true;
+        }
         streamWorker->post([weakConnection] { if (auto c = weakConnection.lock()) c->requestKeyframe(); });
     }));
-    connection->track(session.decoder->frameDecoded.connect([self, streamer, weakConnection](const Platform::ImageBuffer &image, const Platform::Size &size) {
-        Platform::Dispatcher::main().post([self, streamer, weakConnection, image, size] {
+    struct FrameDelivery {
+        std::mutex mutex;
+        Platform::ImageBuffer image;
+        Platform::Size size;
+        bool queued = false;
+    };
+    auto delivery = std::make_shared<FrameDelivery>();
+    session.decoder->onFrameDecoded = [self, streamer, weakConnection, delivery](Platform::ImageBuffer image, Platform::Size size) {
+        {
+            std::lock_guard lock(delivery->mutex);
+            delivery->image = std::move(image);
+            delivery->size = size;
+            if (delivery->queued)
+                return;
+            delivery->queued = true;
+        }
+        Platform::Dispatcher::main().post([self, streamer, weakConnection, delivery] {
+            Platform::ImageBuffer image;
+            Platform::Size size;
+            {
+                std::lock_guard lock(delivery->mutex);
+                image = std::move(delivery->image);
+                size = delivery->size;
+                delivery->queued = false;
+            }
             if (auto *manager = self.get()) {
                 auto it = manager->watched.find(streamer);
                 if (it != manager->watched.end() && it->second.connection == weakConnection.lock())
                     manager->viewerFrame.publish(streamer, image, size);
             }
         });
-    }));
+    };
 #endif
     connection->track(connection->audioPacket.connect([self, streamer, weakConnection](uint32_t ssrc, uint16_t sequence, uint32_t timestamp, const std::string &opus) {
         Platform::Dispatcher::main().post([self, streamer, weakConnection, ssrc, sequence, timestamp, opus] {

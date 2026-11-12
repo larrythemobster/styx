@@ -8,48 +8,24 @@
 <body id="golive-modal-body">
 	<div class="golive-backdrop" id="golive-backdrop">
 		<div class="golive-dialog" id="golive-dialog">
-			<div class="golive-header">
-				<div class="golive-title">Share your screen</div>
-				<div class="golive-close-btn" id="golive-close-btn">
-					<img class="golive-close-icon" src="icon:x"/>
+			<div class="golive-topbar">
+				<div class="golive-tabs">
+					<button class="golive-tab-btn active" id="tab-applications" data-tab="applications"><img src="icon:monitor"/><span>Applications</span></button>
+					<button class="golive-tab-btn" id="tab-screens" data-tab="screens"><img src="icon:monitor"/><span>Entire Screen</span></button>
+					<button class="golive-tab-btn disabled" disabled="disabled" aria-disabled="true" title="Camera streaming is not available in Styx"><img src="icon:camera"/><span>Devices</span></button>
 				</div>
+				<button class="golive-icon-button" id="golive-close-btn" title="Close"><img src="icon:x"/></button>
 			</div>
-
-			<div class="golive-tabs">
-				<div class="golive-tab-btn active" id="tab-applications" data-tab="applications">Applications</div>
-				<div class="golive-tab-btn" id="tab-screens" data-tab="screens">Screens</div>
-			</div>
-
-			<div class="golive-sources" id="golive-sources">
-			</div>
-
-			<div class="golive-options">
-				<div class="golive-options-grid">
-					<div class="golive-option-col">
-						<div class="golive-option-title">STREAM QUALITY</div>
-						<select class="golive-select" id="quality-select">
-						</select>
-					</div>
-					<div class="golive-option-col">
-						<div class="golive-option-title">AUDIO</div>
-						<div class="golive-switch-row" id="audio-toggle-row">
-							<div class="golive-switch checked" id="audio-switch" tabindex="0">
-								<div class="golive-switch-thumb"></div>
-							</div>
-							<div class="golive-switch-label">Share system audio</div>
-						</div>
-					</div>
-				</div>
-				<div class="golive-subtitle" id="audio-subtitle">
-					A window shares its app's sound; a screen shares everything except this call.
+			<div class="golive-sources" id="golive-sources"></div>
+			<div class="golive-footer">
+				<div class="golive-quality-summary">
+					<div id="golive-quality-mode">Custom</div>
+					<div id="golive-quality-detail">720p · 30fps</div>
 				</div>
 				<div class="golive-status" id="golive-status"></div>
+				<button class="golive-icon-button" id="golive-quality-button" title="Stream settings"><img src="icon:settings"/></button>
 			</div>
-
-			<div class="golive-footer">
-				<button class="golive-btn-cancel" id="btn-cancel">Cancel</button>
-				<button class="golive-btn-go disabled" id="btn-go-live">Go Live</button>
-			</div>
+			<div id="golive-quality-menu"></div>
 		</div>
 	</div>
 </body>

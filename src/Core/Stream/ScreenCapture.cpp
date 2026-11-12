@@ -280,7 +280,7 @@ ScreenCapture::~ScreenCapture()
     stop();
 }
 
-bool ScreenCapture::start(const CaptureSource &source, bool captureCursor, std::string *error)
+bool ScreenCapture::start(const CaptureSource &source, bool captureCursor, int framerate, std::string *error)
 {
     try {
         ComPtr<IDXGIDevice> dxgiDevice;
@@ -314,6 +314,13 @@ bool ScreenCapture::start(const CaptureSource &source, bool captureCursor, std::
         using winrt::Windows::Foundation::Metadata::ApiInformation;
         if (ApiInformation::IsPropertyPresent(L"Windows.Graphics.Capture.GraphicsCaptureSession", L"IsCursorCaptureEnabled"))
             impl->session.IsCursorCaptureEnabled(captureCursor);
+        [framerate]<typename Session>(const Session &session) {
+            if constexpr (requires { session.MinUpdateInterval(winrt::Windows::Foundation::TimeSpan{}); }) {
+                if (winrt::Windows::Foundation::Metadata::ApiInformation::IsPropertyPresent(
+                        L"Windows.Graphics.Capture.GraphicsCaptureSession", L"MinUpdateInterval"))
+                    session.MinUpdateInterval(winrt::Windows::Foundation::TimeSpan{10'000'000 / framerate});
+            }
+        }(impl->session);
         // the yellow "being captured" border on Windows 11; best effort, needs no consent from us
         if (ApiInformation::IsPropertyPresent(L"Windows.Graphics.Capture.GraphicsCaptureSession", L"IsBorderRequired")) {
             try {

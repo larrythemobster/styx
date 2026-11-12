@@ -4,6 +4,7 @@
 
 #include "Core/Logging.hpp"
 #include <algorithm>
+#include <utility>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -67,6 +68,7 @@ bool StreamDecoder::openDecoder(bool useHardware)
     ctx = avcodec_alloc_context3(codec);
     ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
     ctx->flags2 |= AV_CODEC_FLAG2_FAST;
+    ctx->thread_type = FF_THREAD_SLICE;
 
     hardware = false;
     if (useHardware) {
@@ -159,7 +161,8 @@ void StreamDecoder::present(AVFrame *decoded)
     uint8_t *dst[4] = { image.pixels.data(), nullptr, nullptr, nullptr };
     int dstStride[4] = { static_cast<int>(image.stride()), 0, 0, 0 };
     sws_scale(sws, source->data, source->linesize, 0, source->height, dst, dstStride);
-    frameDecoded.publish(image, sourceSize);
+    if (onFrameDecoded)
+        onFrameDecoded(std::move(image), sourceSize);
 }
 
 } // namespace Stream

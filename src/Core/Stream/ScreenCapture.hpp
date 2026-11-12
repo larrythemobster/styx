@@ -50,7 +50,7 @@ public:
     explicit ScreenCapture(std::shared_ptr<D3DDevice> device);
     ~ScreenCapture();
 
-    bool start(const CaptureSource &source, bool captureCursor, std::string *error);
+    bool start(const CaptureSource &source, bool captureCursor, int framerate, std::string *error);
     void stop();
 
     // The newest frame (BGRA), or null before the first one. Valid until the next call;

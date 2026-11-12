@@ -8,6 +8,7 @@
 #include "Platform/Trackable.hpp"
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 struct AVCodecContext;
@@ -31,7 +32,7 @@ public:
     void setTargetSize(const Platform::Size &size);
     void decode(const std::string &annexB, uint32_t rtpTimestamp, bool keyframe);
 
-    Platform::Signal<const Platform::ImageBuffer &, const Platform::Size &> frameDecoded;
+    std::function<void(Platform::ImageBuffer, Platform::Size)> onFrameDecoded;
     Platform::Signal<> needKeyframe;
 
 private:

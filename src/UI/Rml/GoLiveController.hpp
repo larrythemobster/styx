@@ -42,12 +42,13 @@ private:
     void setupEventListeners();
     void populate();
     void renderSources();
-    void renderQualityPresets();
-    void updateAudioUi();
-    void updateGoLiveButton();
+    void renderQualityMenu();
+    void updateQualitySummary();
+    void updateSharingAvailability();
+    void savePreferences();
     void switchTab(Tab tab);
     void selectSource(int index);
-    void toggleAudio();
+    void setQualityMenuOpen(bool open);
     void goLive();
 
     void startThumbnailCapture();
@@ -63,6 +64,11 @@ private:
     int selectedSourceIndex = -1;
 
     std::string selectedQualityId;
+    std::string streamMode = "custom";
+    std::string qualityPage;
+    bool qualityMenuOpen = false;
+    bool shareAllowed = false;
+    bool captureCursor = true;
     bool audioEnabled = true;
     bool audioSupported = true;
 

@@ -27,7 +27,7 @@ StreamSender::~StreamSender()
 void StreamSender::start(const CaptureSource &source, const StreamQuality &q, bool includeAudio)
 {
     stop();
-    quality = q;
+    quality = q.resolved({static_cast<int>(source.geometry.width), static_cast<int>(source.geometry.height)});
     targetBitrate = quality.bitrate;
 
     device = D3DDevice::create();
@@ -38,7 +38,7 @@ void StreamSender::start(const CaptureSource &source, const StreamQuality &q, bo
 
     capture = std::make_unique<ScreenCapture>(device);
     std::string error;
-    if (!capture->start(source, true, &error)) {
+    if (!capture->start(source, quality.captureCursor, quality.framerate, &error)) {
         failed.publish("Could not capture \"" + source.title + "\": " + error);
         capture.reset();
         return;
@@ -48,6 +48,8 @@ void StreamSender::start(const CaptureSource &source, const StreamQuality &q, bo
     encoder = std::make_unique<VideoEncoder>(device);
     if (!reopenEncoder(targetBitrate))
         return;
+    audioSamplesSent = 0;
+    clock = std::chrono::steady_clock::now();
 
     bool audio = false;
     if (includeAudio && LoopbackCapture::isSupported()) {
@@ -78,10 +80,11 @@ void StreamSender::start(const CaptureSource &source, const StreamQuality &q, bo
 
     running = true;
     frameIndex = 0;
-    audioSamplesSent = 0;
+    lastCaptureSequence = 0;
+    lastEncodedMs = -10000;
+    lastKeyframeMs = -10000;
     keyframePending = true;
-    clock = std::chrono::steady_clock::now();
-    timer = loop.setTimer(std::chrono::milliseconds(1000 / quality.framerate), true, [this] { encodeTick(); });
+    scheduleEncode();
 
     started.publish(encoder->settings().size.width, encoder->settings().size.height, quality.framerate,
                  quality.maxBitrate, audio, encoder->name());
@@ -201,10 +204,32 @@ bool StreamSender::readBackNv12(ID3D11Texture2D *source, AVFrame *frame)
     return true;
 }
 
+void StreamSender::scheduleEncode()
+{
+    if (!running)
+        return;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - clock).count();
+    const auto due = frameIndex * 1'000'000 / quality.framerate;
+    const auto delay = std::chrono::milliseconds(std::max<int64_t>(1, (due - elapsed + 999) / 1000));
+    timer = loop.setTimer(delay, false, [this] {
+        timer = 0;
+        encodeTick();
+        scheduleEncode();
+    });
+}
+
 void StreamSender::encodeTick()
 {
     if (!running || !encoder || !capture)
         return;
+    const int64_t elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - clock).count();
+    const int64_t sample = std::max(frameIndex, elapsedUs * quality.framerate / 1'000'000);
+    const int64_t ptsUs = sample * 1'000'000 / quality.framerate;
+    frameIndex = sample + 1;
+    const int64_t now = elapsedUs / 1000;
+    const bool forceKeyframe = keyframePending && now - lastKeyframeMs >= KEYFRAME_MIN_INTERVAL_MS;
 
     if (capture->isClosed()) {
         running = false;
@@ -220,6 +245,8 @@ void StreamSender::encodeTick()
         const ScreenCapture::Frame captured = capture->latestFrame();
         if (!captured.texture)
             return; // nothing captured yet
+        if (captured.sequence == lastCaptureSequence && !forceKeyframe && now - lastEncodedMs < 500)
+            return;
         lastCaptureSequence = captured.sequence;
 
         if (encoder->takesGpuSurfaces()) {
@@ -256,16 +283,12 @@ void StreamSender::encodeTick()
         }
     }
 
-    bool forceKeyframe = false;
-    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - clock).count();
-    if (keyframePending && now - lastKeyframeMs >= KEYFRAME_MIN_INTERVAL_MS) {
+    if (forceKeyframe) {
         keyframePending = false;
-        forceKeyframe = true;
         lastKeyframeMs = now;
     }
 
-    const int64_t ptsUs = frameIndex * 1'000'000 / quality.framerate;
-    ++frameIndex;
+    lastEncodedMs = now;
 
     std::vector<EncodedPacket> packets;
     encoder->encode(frame, ptsUs, forceKeyframe, packets);

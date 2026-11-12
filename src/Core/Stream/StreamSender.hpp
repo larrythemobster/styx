@@ -27,9 +27,9 @@ class FrameConverter;
 class VideoEncoder;
 class LoopbackCapture;
 
-// Capture -> convert -> encode for the stream we send. Lives on its own thread; a timer
-// at the stream frame rate encodes whatever the capture produced last, so the output is
-// a steady frame rate no matter how often the source repaints.
+// Capture -> convert -> encode on a worker thread. Sample the newest picture at the
+// chosen cadence, retain wall-clock timestamps when overloaded, and avoid encoding
+// unchanged pictures except for keyframes and the half-second still-picture refresh.
 class StreamSender : public Platform::Trackable
 {
 public:
@@ -50,6 +50,7 @@ public:
 
 private:
     void encodeTick();
+    void scheduleEncode();
     bool reopenEncoder(int bitrate);
     bool readBackNv12(ID3D11Texture2D *source, AVFrame *frame);
     void onAudioSamples(const int16_t *samples, int frames);
@@ -72,6 +73,7 @@ private:
     std::atomic<bool> keyframePending{ true };
     int64_t lastKeyframeMs = -10000;
     uint64_t lastCaptureSequence = 0;
+    int64_t lastEncodedMs = -10000;
     bool running = false;
 
     // bitrate adaptation from REMB
