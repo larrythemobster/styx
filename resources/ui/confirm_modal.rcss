@@ -6,14 +6,11 @@
 	width: 100%;
 	height: 100%;
 	z-index: 2000;
-	display: none;
+	display: block;
+	visibility: hidden;
 	background-color: transparent;
 }
 
-#confirm-modal-root.open
-{
-	display: block;
-}
 
 .modal-backdrop
 {

@@ -595,6 +595,58 @@ TEST_CASE("Late preference completion cannot change a replacement menu", "[rml][
     REQUIRE(row->GetAttribute<std::string>("aria-checked", "") == "true");
 }
 
+TEST_CASE("Confirmation buttons receive input above an existing modal document", "[rml][modal]")
+{
+    View view("nested-confirmation");
+    prepare(view, 1000, 720);
+    auto *parent = view.context()->LoadDocument("ui/server_menu.rml");
+    REQUIRE(parent);
+    parent->Show(::Rml::ModalFlag::Modal);
+    view.context()->Update();
+    REQUIRE(view.context()->GetFocusElement()->GetOwnerDocument() == parent);
+    auto *confirmation = view.context()->LoadDocument("ui/confirm_modal.rml");
+    REQUIRE(confirmation);
+    REQUIRE_FALSE(confirmation->IsVisible());
+    confirmation->Show(::Rml::ModalFlag::Modal);
+    confirmation->PullToFront();
+    view.context()->Update();
+    REQUIRE(confirmation->IsVisible());
+    REQUIRE(view.context()->GetFocusElement()->GetOwnerDocument() == confirmation);
+    struct Clicks final : ::Rml::EventListener {
+        int count = 0;
+        void ProcessEvent(::Rml::Event &) override { ++count; }
+    } confirmClicks, cancelClicks, parentClicks;
+    auto *cancel = confirmation->GetElementById("confirm-cancel-btn");
+    auto *discard = confirmation->GetElementById("confirm-action-btn");
+    REQUIRE(cancel);
+    REQUIRE(discard);
+    cancel->AddEventListener("click", &cancelClicks);
+    discard->AddEventListener("click", &confirmClicks);
+    parent->AddEventListener("click", &parentClicks);
+    for (auto *button : {cancel, discard}) {
+        const auto origin = button->GetAbsoluteOffset(::Rml::BoxArea::Border);
+        const ::Rml::Vector2f center(origin.x + button->GetOffsetWidth() / 2,
+                                     origin.y + button->GetOffsetHeight() / 2);
+        auto *hit = view.context()->GetElementAtPoint(center);
+        while (hit && hit != button) hit = hit->GetParentNode();
+        REQUIRE(hit == button);
+        const auto scale = view.devicePixelRatioF();
+        click(view, int(center.x / scale), int(center.y / scale));
+    }
+    CHECK(cancelClicks.count == 1);
+    CHECK(confirmClicks.count == 1);
+    CHECK(parentClicks.count == 0);
+    cancel->RemoveEventListener("click", &cancelClicks);
+    discard->RemoveEventListener("click", &confirmClicks);
+    parent->RemoveEventListener("click", &parentClicks);
+    confirmation->Hide();
+    view.context()->Update();
+    REQUIRE_FALSE(confirmation->IsVisible());
+    REQUIRE(parent->IsVisible());
+    REQUIRE(view.context()->GetFocusElement()->GetOwnerDocument() == parent);
+    parent->Hide();
+}
+
 
 TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][theme]")
 {

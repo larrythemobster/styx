@@ -115,7 +115,6 @@ void ConfirmModalController::show(const ConfirmOptions &options)
 
     modalDocument->Show(::Rml::ModalFlag::Modal);
     modalDocument->PullToFront();
-    modalDocument->SetClass("open", true);
     visible = true;
     requestRender();
 }
@@ -125,7 +124,6 @@ void ConfirmModalController::hide()
     if (!modalDocument || !visible)
         return;
 
-    modalDocument->SetClass("open", false);
     modalDocument->Hide();
     visible = false;
     requestRender();

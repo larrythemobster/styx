@@ -108,6 +108,8 @@ account. Nickname, avatar, banner, pronouns and bio overrides use the member API
 not the global profile API. Clearing an override uses the main profile.
 Rejected saves retain the draft; successful saves reload the canonical profile.
 Image overrides remain subject to Discord's entitlement checks.
+Discard confirmations take input above modal editors. Cancel or Escape preserves
+the draft; Discard closes the editor and drops its unsaved changes.
 
 Other settings include:
 
