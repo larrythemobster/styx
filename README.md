@@ -136,12 +136,10 @@ storage and startup error dialogs.
   encryption.
 - Can watch other people's streams in the call view.
 
-The Windows application icon is monochrome. Mention badges sit in the top-right
-corner without covering the face of the logo. Single digits use a circle; 9+ uses
-a wider capsule. Labels are smoothed and centered by their visible ink, with red
-padding before the curved edge. Icons below 24 pixels use an unread dot instead
-of tiny text. Zero mentions or disabling taskbar badges restores the base icon.
-The shell retains an accessible description with the full count.
+The Windows application icon is monochrome. Unread mentions add a red circle
+with a white center dot in the top-right corner, without covering the logo's
+face. No notification numbers are drawn. Zero mentions or disabling taskbar
+badges restores the base icon. The accessible description retains the full count.
 
 ## Status
 

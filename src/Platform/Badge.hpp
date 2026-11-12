@@ -1,21 +1,16 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
-#include <string_view>
 #include <vector>
 
 namespace Styx::Platform::Badge {
 
-// The text a badge shows for a mention count: empty for none, "1" to "9", then "9+".
-[[nodiscard]] std::string label(int count);
+// A size x size notification mark, row by row, as 0xAARRGGBB with straight
+// alpha: a red disc with a white dot, independent of the notification count.
+[[nodiscard]] std::vector<std::uint32_t> render(int size);
 
-// A width x height badge, row by row from the top, as 0xAARRGGBB with straight
-// alpha: a red capsule with the label in white.
-[[nodiscard]] std::vector<std::uint32_t> render(std::string_view label, int width, int height);
-
-// Shows a mention count on Styx's taskbar or dock entry, or clears it for 0. window is the
-// native window handle (an HWND on Windows); other platforms ignore it.
+// Positive counts show a notification marker; zero clears it. Windows draws a
+// red-and-white dot and exposes the count to accessibility. window is an HWND.
 void setCount(void *window, int count);
 
 } // namespace Styx::Platform::Badge

@@ -26,6 +26,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cmath>
 #include <filesystem>
 #include <thread>
 #include <vector>
@@ -962,54 +963,22 @@ TEST_CASE("Notifications: a toast reaches the desktop", "[notifications]")
     REQUIRE(show(notification, [] {}));
 }
 
-TEST_CASE("Badge labels cap at nine", "[badge]")
+TEST_CASE("Notification marks have a white centre and red ring inside a circular edge", "[badge]")
 {
-    namespace Badge = Styx::Platform::Badge;
-    REQUIRE(Badge::label(0) == "");
-    REQUIRE(Badge::label(-3) == "");
-    REQUIRE(Badge::label(1) == "1");
-    REQUIRE(Badge::label(9) == "9");
-    REQUIRE(Badge::label(10) == "9+");
-    REQUIRE(Badge::label(1000) == "9+");
-}
-
-TEST_CASE("Badge images are a red disc with white text", "[badge]")
-{
-    namespace Badge = Styx::Platform::Badge;
-
-    const auto empty = Badge::render("", 16, 16);
-    REQUIRE(empty.size() == 256);
-    REQUIRE(empty[0] == 0);
-    REQUIRE(empty[15] == 0);
-    REQUIRE(empty[240] == 0);
-    REQUIRE(empty[255] == 0);
-    REQUIRE(empty[8 * 16 + 8] == 0xFFED4245u);
-    REQUIRE(std::find(empty.begin(), empty.end(), 0xFFFFFFFFu) == empty.end());
-
-    const auto eight = Badge::render("8", 16, 16);
-    REQUIRE(std::find(eight.begin(), eight.end(), 0xFFFFFFFFu) != eight.end());
-
-    const auto big = Badge::render("9+", 32, 32);
-    REQUIRE(big.size() == 1024);
-    REQUIRE(big[0] == 0);
-    REQUIRE(big[31] == 0);
-    REQUIRE(big[992] == 0);
-    REQUIRE(big[1023] == 0);
-}
-
-TEST_CASE("Badge labels have opaque red padding before the curved edge", "[badge]")
-{
-    namespace Badge = Styx::Platform::Badge;
-    for (const int height : {8, 11, 14, 16, 24, 32, 48}) {
-        for (const int width : {height, height * 3 / 2}) {
-            const auto background = Badge::render("", width, height);
-            for (const auto text : {"1", "8", "9+"}) {
-                const auto labelled = Badge::render(text, width, height);
-                for (size_t index = 0; index < background.size(); ++index) {
-                    CHECK((labelled[index] >> 24) == (background[index] >> 24));
-                    if ((labelled[index] & 0xFFFFFF) != (background[index] & 0xFFFFFF))
-                        CHECK((background[index] >> 24) == 255);
-                }
+    for (const int size : {8, 11, 14, 16, 24, 32, 48}) {
+        const auto pixels = Styx::Platform::Badge::render(size);
+        CHECK(pixels[size_t(size / 2) * size + size / 2] == 0xFFFFFFFFu);
+        const auto ring = pixels[size + size / 2];
+        CHECK((ring >> 24) == 255);
+        CHECK(((ring >> 16) & 255) > ((ring >> 8) & 255));
+        CHECK(((ring >> 16) & 255) > (ring & 255));
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                const auto alpha = pixels[size_t(y) * size + x] >> 24;
+                if (std::hypot(x + 0.5 - size / 2.0, y + 0.5 - size / 2.0) >= size / 2.0 + 0.5)
+                    CHECK(alpha == 0);
+                CHECK(alpha == (pixels[size_t(y) * size + size - x - 1] >> 24));
+                CHECK(alpha == (pixels[size_t(size - y - 1) * size + x] >> 24));
             }
         }
     }
