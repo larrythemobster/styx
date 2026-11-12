@@ -180,6 +180,7 @@ private:
     float cachedInputGain = 1.0f;
     float cachedOutputVolume = 1.0f;
 
+    VoiceParticipant selfParticipant;
     std::unordered_map<Snowflake, VoiceParticipant> participants;
     std::unordered_set<Snowflake> mutedUsers;
     std::unordered_map<Snowflake, Discord::VoiceState> knownVoiceStates;

@@ -1,119 +1,154 @@
-/*
- * User panel & Voice status panel styles (owned by UserPanelController)
- */
-
 #voice-panel
 {
+	width: 296dp;
+	box-sizing: border-box;
+	margin: 0 0 -8dp -64dp;
+	padding: 8dp;
 	background-color: #08080a;
-	border-bottom: 1dp #202024;
-	padding: 8dp 12dp;
+	border: 1dp #202024;
+	border-radius: 8dp 8dp 0 0;
 	display: flex;
 	flex-direction: column;
 	flex-shrink: 0;
+	gap: 8dp;
 }
-
+body.rail-folder-open #voice-panel
+{
+	width: 360dp;
+	margin-left: -128dp;
+}
+body.voice-connected #user-panel
+{
+	border-top-width: 0;
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
 .voice-panel-header
 {
 	display: flex;
-	flex-direction: row;
 	align-items: center;
-	margin-bottom: 2dp;
+	gap: 6dp;
 }
-
-.voice-status-icon
+.voice-status-badge
 {
-	width: 14dp;
-	height: 14dp;
-	margin-right: 6dp;
+	width: 30dp;
+	height: 30dp;
+	border: 1dp #202024;
+	border-radius: 5dp;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	flex-shrink: 0;
 }
-
+.voice-status-badge img
+{
+	width: 20dp;
+	height: 20dp;
+	image-color: #23a55a;
+}
+.voice-connection-text
+{
+	flex: 1;
+	min-width: 0;
+	cursor: pointer;
+}
 .voice-conn-status
 {
-	font-size: 13dp;
-	font-weight: 700;
+	font-size: 14dp;
+	font-weight: 600;
+	line-height: 18dp;
 	color: #23a55a;
-	flex: 1;
 }
-
 .voice-conn-status.connecting
 {
 	color: #faa61a;
 }
-
-.voice-panel-info
-{
-	display: flex;
-	flex-direction: row;
-	align-items: center;
-	margin-bottom: 6dp;
-}
-
 .voice-channel-link
 {
 	font-size: 12dp;
-	font-weight: 500;
+	line-height: 16dp;
 	color: #b5bac1;
-	cursor: pointer;
-	overflow: hidden;
 	white-space: nowrap;
-	flex: 1;
+	overflow: hidden;
 }
-
-.voice-channel-link:hover
+.voice-connection-text:hover .voice-channel-link
 {
 	color: #dbdee1;
-	text-decoration: underline;
 }
-
-.voice-panel-actions
+.voice-header-btn
 {
-	display: flex;
-	flex-direction: row;
-	justify-content: flex-end;
-	gap: 6dp;
-}
-
-.voice-action-btn
-{
-	width: 32dp;
+	width: 28dp;
+	tab-index: auto;
 	height: 32dp;
+	padding: 0;
+	background-color: transparent;
+	border-width: 0;
 	border-radius: 4dp;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background-color: #111214;
+	flex-shrink: 0;
 	cursor: pointer;
-	transition: background-color 0.15s;
 }
-
-.voice-action-btn:hover
-{
-	background-color: #19191c;
-}
-
-.voice-action-btn img
+.voice-header-btn img
 {
 	width: 18dp;
 	height: 18dp;
 	image-color: #b5bac1;
 }
-
-.voice-action-btn:hover img
+.voice-header-btn:hover, .voice-header-btn:focus
 {
-	image-color: #dbdee1;
+	background-color: #232428;
 }
-
-.voice-action-btn.disconnect img
-{
-	image-color: #f23f43;
-}
-
-.voice-action-btn.streaming
+.voice-header-btn.disconnect:hover
 {
 	background-color: #f23f43;
 }
-
+.voice-header-btn.disconnect:hover img
+{
+	image-color: #ffffff;
+}
+.voice-panel-actions
+{
+	display: flex;
+	gap: 8dp;
+}
+.voice-action-btn
+{
+	flex: 1;
+	tab-index: auto;
+	height: 34dp;
+	padding: 0;
+	box-sizing: border-box;
+	border: 1dp #000000;
+	border-radius: 6dp;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background-color: #111214;
+	cursor: pointer;
+}
+.voice-action-btn:hover, .voice-action-btn:focus
+{
+	background-color: #232428;
+}
+.voice-action-btn img
+{
+	width: 20dp;
+	height: 20dp;
+	image-color: #dbdee1;
+}
+.voice-action-btn:disabled, .voice-action-btn.disabled
+{
+	tab-index: none;
+	opacity: 0.45;
+	cursor: default;
+	background-color: #111214;
+}
+.voice-action-btn.streaming
+{
+	background-color: #23a55a;
+}
 .voice-action-btn.streaming img
 {
 	image-color: #ffffff;
@@ -194,6 +229,25 @@ body.rail-folder-open #user-panel
 	border-radius: 5dp;
 	border: 2dp #08080a;
 	clip: 1;
+}
+
+.user-speaking-ring
+{
+	display: none;
+	position: absolute;
+	left: -3dp;
+	top: -3dp;
+	width: 38dp;
+	height: 38dp;
+	box-sizing: border-box;
+	border: 2dp #23a55a;
+	border-radius: 19dp;
+	pointer-events: none;
+}
+
+.user-avatar-wrap.speaking .user-speaking-ring
+{
+	display: block;
 }
 
 .user-names

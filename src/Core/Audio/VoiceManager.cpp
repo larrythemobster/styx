@@ -36,6 +36,16 @@ std::string decodeDeviceId(std::string_view hex)
 VoiceManager::VoiceManager(Snowflake accountId, const ProxyConfig &proxy)
     : accountId(accountId), proxy(proxy)
 {
+    selfParticipant.userId = accountId;
+    track(speakingChanged.connect([this](bool speaking) {
+        speaking = speaking && channelId.isValid() && !selfParticipant.selfMute &&
+            !selfParticipant.selfDeaf && !selfParticipant.serverMute &&
+            !selfParticipant.serverDeaf && !selfParticipant.suppress;
+        if (selfParticipant.speaking == speaking)
+            return;
+        selfParticipant.speaking = speaking;
+        participantSpeakingChanged.publish(this->accountId, speaking);
+    }));
     const int inVol = Settings::getInt(Settings::Keys::VoiceInputVolume, Settings::Defaults::VoiceInputVolume);
     cachedInputGain = static_cast<float>(inVol) / 100.0f;
     const int outVol = Settings::getInt(Settings::Keys::VoiceOutputVolume, Settings::Defaults::VoiceOutputVolume);
@@ -128,6 +138,7 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
             channelId = Snowflake::Invalid;
             guildId = Snowflake::Invalid;
             pending = {};
+            speakingChanged.publish(false);
 
             if (oldChannel.isValid())
                 channelVoiceMemberChanged.publish(oldChannel, accountId, false);
@@ -159,13 +170,26 @@ void VoiceManager::handleVoiceStateUpdate(const Discord::VoiceState &state)
 
         bool wasMuted = selfMute;
         bool wasDeaf = selfDeaf;
+        const auto oldSelf = selfParticipant;
         selfMute = state.selfMute.get();
         selfDeaf = state.selfDeaf.get();
+        selfParticipant.selfMute = selfMute;
+        selfParticipant.selfDeaf = selfDeaf;
+        selfParticipant.serverMute = state.mute.get();
+        selfParticipant.serverDeaf = state.deaf.get();
+        selfParticipant.suppress = state.suppress.get();
+        selfParticipant.streaming = state.selfStream.valueOr(false);
+        if (channelChanged || selfMute || selfDeaf || selfParticipant.serverMute ||
+            selfParticipant.serverDeaf || selfParticipant.suppress)
+            speakingChanged.publish(false);
 
         log(LogLevel::Info, LogVoice) << "Voice state: session =" << voiceSessionId
                          << "channel =" << channelId << "guild =" << guildId;
 
-        if (!channelChanged && channelId.isValid() && (selfMute != wasMuted || selfDeaf != wasDeaf))
+        const bool stateChanged = selfMute != wasMuted || selfDeaf != wasDeaf ||
+            selfParticipant.serverMute != oldSelf.serverMute || selfParticipant.serverDeaf != oldSelf.serverDeaf ||
+            selfParticipant.suppress != oldSelf.suppress || selfParticipant.streaming != oldSelf.streaming;
+        if (!channelChanged && channelId.isValid() && stateChanged)
             participantVoiceStateChanged.publish(channelId, accountId);
 
         if (audioPipeline && voiceLoop && (selfMute != wasMuted || selfDeaf != wasDeaf)) {
@@ -428,7 +452,9 @@ void VoiceManager::setOutputDevice(const std::string &deviceId)
 std::vector<VoiceParticipant> VoiceManager::currentParticipants() const
 {
     std::vector<VoiceParticipant> result;
-    result.reserve(participants.size());
+    result.reserve(participants.size() + (channelId.isValid() ? 1 : 0));
+    if (channelId.isValid())
+        result.push_back(selfParticipant);
     for (const auto &[id, participant] : participants)
         result.push_back(participant);
     return result;
@@ -436,6 +462,8 @@ std::vector<VoiceParticipant> VoiceManager::currentParticipants() const
 
 const VoiceParticipant *VoiceManager::participant(Snowflake userId) const
 {
+    if (userId == accountId)
+        return channelId.isValid() ? &selfParticipant : nullptr;
     auto it = participants.find(userId);
     if (it == participants.end())
         return nullptr;
@@ -669,6 +697,7 @@ void VoiceManager::connectToVoiceServer(const std::string &endpoint, const std::
 
 void VoiceManager::stopVoiceThread()
 {
+    speakingChanged.publish(false);
     if (!voiceLoop)
         return;
 

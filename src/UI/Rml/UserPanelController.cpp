@@ -1,5 +1,7 @@
 #include "UserPanelController.hpp"
 #include "CustomStatusController.hpp"
+#include "ContextMenu.hpp"
+#include "RmlView.hpp"
 
 #include "RmlRuntime.hpp"
 #include "Shell.hpp"
@@ -78,6 +80,10 @@ UserPanelController::UserPanelController(Shell &shell, ::Rml::Element *root)
                     this->shell.leaveVoice();
                 } else if (action == std::string_view("open-call")) {
                     this->shell.setCallOpen(true);
+                } else if (action == std::string_view("connection-info")) {
+                    const float dpr = float(this->shell.view()->devicePixelRatioF());
+                    showConnectionInfo(event.GetParameter("mouse_x", 0.0f) / dpr,
+                                       event.GetParameter("mouse_y", 0.0f) / dpr);
                 } else if (action == std::string_view("toggle-share")) {
 #ifdef STYX_HAVE_SCREENSHARE
                     this->onShareClicked();
@@ -105,6 +111,8 @@ void UserPanelController::connectInstanceVoice(Core::ClientInstance *instance)
     if (lastInstance.get() == instance)
         return;
     instanceConnections.clear();
+    if (connectionMenu)
+        connectionMenu->hide();
     lastInstance = instance;
     if (!instance)
         return;
@@ -121,6 +129,10 @@ void UserPanelController::connectInstanceVoice(Core::ClientInstance *instance)
         instanceConnections.push_back(vm->voiceConnected.connect([this]() { scheduleRebuild(); }));
         instanceConnections.push_back(vm->voiceDisconnected.connect([this]() { scheduleRebuild(); }));
         instanceConnections.push_back(vm->voiceStateChanged.connect([this]() { scheduleRebuild(); }));
+        instanceConnections.push_back(vm->participantSpeakingChanged.connect([this, self = instance->accountId()](Snowflake user, bool) {
+            if (user == self)
+                scheduleRebuild();
+        }));
     }
 #endif
 
@@ -165,6 +177,8 @@ void UserPanelController::renderVoicePanel()
         }
     }
 #endif
+    if (auto *doc = shell.document())
+        doc->SetClass("voice-connected", inVoice);
 
     if (!inVoice) {
         voicePanel->SetInnerRML("");
@@ -205,15 +219,14 @@ void UserPanelController::renderVoicePanel()
                                      : channelName;
 
     std::string rml;
-    rml += "<div class=\"voice-panel-header\">";
+    rml += "<div class=\"voice-panel-header\"><div class=\"voice-status-badge\"><img src=\"icon:radio\"/></div>";
+    rml += "<div class=\"voice-connection-text\" data-action=\"open-call\" title=\"Open call\">";
     rml += std::format("<span class=\"{0}\">{1}</span>", statusClass, Rml::escape(statusText));
-    rml += "<div class=\"voice-action-btn disconnect\" data-action=\"disconnect\" title=\"Disconnect\">";
-    rml += "<img src=\"icon:phone-off\"/>";
-    rml += "</div>"; // .disconnect
-    rml += "</div>"; // .voice-panel-header
-
-    rml += "<div class=\"voice-panel-info\">";
-    rml += std::format("<div class=\"voice-channel-link\" data-action=\"open-call\" title=\"Open Call\">{0}</div>", Rml::escape(channelLabel));
+    rml += std::format("<div class=\"voice-channel-link\">{0}</div></div>", Rml::escape(channelLabel));
+    rml += "<button class=\"voice-header-btn\" data-action=\"connection-info\" title=\"Connection details\"><img src=\"icon:chart-column\"/></button>";
+    rml += "<button class=\"voice-header-btn disconnect\" data-action=\"disconnect\" title=\"Disconnect\"><img src=\"icon:phone-off\"/></button></div>";
+    rml += "<div class=\"voice-panel-actions\">";
+    rml += "<button class=\"voice-action-btn disabled\" disabled=\"disabled\" aria-disabled=\"true\" title=\"Camera video is not available in Styx\"><img src=\"icon:camera\"/></button>";
 
 #ifdef STYX_HAVE_SCREENSHARE
     if (auto *inst = shell.currentInstance()) {
@@ -222,15 +235,35 @@ void UserPanelController::renderVoicePanel()
         const std::string shareClass = isStreaming ? "voice-action-btn streaming" : "voice-action-btn";
         const std::string shareTip = isStreaming ? "Stop streaming" : "Share your screen";
 
-        rml += std::format("<div class=\"{0}\" data-action=\"toggle-share\" title=\"{1}\">", shareClass, Rml::escape(shareTip));
-        rml += "<img src=\"icon:monitor\"/>";
-        rml += "</div>"; // .voice-action-btn
+        rml += std::format("<button class=\"{0}\" data-action=\"toggle-share\" title=\"{1}\"><img src=\"icon:monitor\"/></button>", shareClass, Rml::escape(shareTip));
     }
 #endif
 
-    rml += "</div>"; // .voice-panel-info
+    rml += "<button class=\"voice-action-btn disabled\" disabled=\"disabled\" aria-disabled=\"true\" title=\"Activities are not available in Styx\"><img src=\"icon:gamepad-2\"/></button>";
+    rml += "<button class=\"voice-action-btn disabled\" disabled=\"disabled\" aria-disabled=\"true\" title=\"Soundboard is not available in Styx\"><img src=\"icon:music\"/></button></div>";
 
     voicePanel->SetInnerRML(rml.c_str());
+}
+
+void UserPanelController::showConnectionInfo(float x, float y)
+{
+#ifndef STYX_NO_VOICE
+    auto *instance = shell.currentInstance();
+    auto *voice = instance ? instance->voice() : nullptr;
+    if (!voice || !shell.view())
+        return;
+    if (!connectionMenu)
+        connectionMenu = std::make_unique<ContextMenu>(*shell.view());
+    std::vector<MenuItem> items;
+    items.push_back({voice->isConnected() ? "Voice Connected" : "Connecting", {}});
+    if (voice->isConnected())
+        items.push_back({voice->isDaveEnabled() ? "End-to-end encrypted" : "Transport encryption active", {}});
+    if (auto channel = instance->getChannel(voice->currentChannelId()))
+        items.push_back({channel->name, {}});
+    items.push_back({"Open call", [this] { shell.setCallOpen(true); }});
+    items.push_back({"Disconnect", [this] { shell.leaveVoice(); }, true, true});
+    connectionMenu->show(std::move(items), {x, y});
+#endif
 }
 
 void UserPanelController::renderUserPanel()
@@ -309,8 +342,11 @@ void UserPanelController::renderUserPanel()
     // Mute and deaf state (from Shell and VoiceManager)
     bool isMuted = shell.isSelfMute();
     bool isDeafened = shell.isSelfDeaf();
+    bool speaking = false;
 #ifndef STYX_NO_VOICE
     if (auto *vm = inst->voice()) {
+        if (const auto *self = vm->participant(accountId))
+            speaking = self->speaking && !isMuted && !isDeafened;
         auto vs = vm->voiceStateForUser(accountId);
         if (vs.has_value()) {
             if (vs->selfMute.hasValue() && vs->selfMute.get())
@@ -331,7 +367,8 @@ void UserPanelController::renderUserPanel()
 
     std::string rml;
     rml += "<div class=\"user-panel-info\" data-action=\"profile\" title=\"User Profile\">";
-    rml += "<div class=\"user-avatar-wrap\">";
+    rml += speaking ? "<div class=\"user-avatar-wrap speaking\">" : "<div class=\"user-avatar-wrap\">";
+    rml += "<div class=\"user-speaking-ring\"></div>";
     rml += "<div class=\"user-avatar-clip\">";
     rml += std::format("<img class=\"user-avatar\" src=\"{0}\"/>", Rml::escape(avatarSrc));
     rml += "</div>"; // .user-avatar-clip

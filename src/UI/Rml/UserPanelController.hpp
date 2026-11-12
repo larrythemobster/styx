@@ -15,6 +15,7 @@ class ClientInstance;
 namespace UI {
 namespace Rml {
 class CustomStatusController;
+class ContextMenu;
 
 
 class UserPanelController final : public Controller
@@ -29,6 +30,7 @@ private:
     void renderVoicePanel();
     void renderUserPanel();
     void connectInstanceVoice(Core::ClientInstance *instance);
+    void showConnectionInfo(float x, float y);
 #ifdef STYX_HAVE_SCREENSHARE
     void onShareClicked();
 #endif
@@ -40,6 +42,7 @@ private:
     Platform::Guard<Core::ClientInstance> lastInstance;
     std::vector<Platform::Connection> instanceConnections;
     std::unique_ptr<CustomStatusController> customStatusController;
+    std::unique_ptr<ContextMenu> connectionMenu;
 };
 
 } // namespace Rml
