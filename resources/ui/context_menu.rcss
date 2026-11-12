@@ -67,6 +67,8 @@
 .menu-check.radio { border-radius: 9dp; }
 .menu-check-mark { font-family: symbols; line-height: 16dp; }
 .menu-radio-dot { width: 8dp; height: 8dp; background-color: #ffffff; border-radius: 4dp; }
+.menu-check-mark, .menu-radio-dot { visibility: hidden; }
+.menu-check.checked .menu-check-mark, .menu-check.checked .menu-radio-dot { visibility: visible; }
 .menu-icon-text {
     width: 17dp;
     height: 16dp;

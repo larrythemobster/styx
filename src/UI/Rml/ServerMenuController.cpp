@@ -70,9 +70,11 @@ template<class Visit> void visitChannels(ChannelNode *node, const Visit &visit)
 }
 
 MenuItem separator() { MenuItem item; item.separator = true; return item; }
-MenuItem choice(std::string label, bool checked, std::function<void()> action, bool radio = false)
+MenuItem choice(std::string label, bool checked, MenuItem::ToggleAction toggle, bool radio = false)
 {
-    MenuItem item{std::move(label), std::move(action)};
+    MenuItem item;
+    item.label = std::move(label);
+    item.toggle = std::move(toggle);
     item.checked = checked;
     item.radio = radio;
     return item;
@@ -138,21 +140,23 @@ void ServerMenuController::show(Snowflake account, Snowflake guild, bool develop
     notifications.children = notificationItems(account, guild);
     menu.push_back(std::move(notifications));
     const bool hideMuted = preferences && preferences->hideMutedChannels.valueOr(false);
-    menu.push_back(choice("Hide Muted Channels", hideMuted, [self, account, guild, hideMuted] {
-        if (!self) return;
-        Discord::UserGuildSettingsEdit edit; edit.hideMutedChannels = !hideMuted;
-        self->applyGuildEdit(account, guild, edit);
+    menu.push_back(choice("Hide Muted Channels", hideMuted, [self, account, guild](bool checked, MenuItem::ToggleComplete complete) {
+        if (!self) { complete(false); return; }
+        Discord::UserGuildSettingsEdit edit; edit.hideMutedChannels = checked;
+        self->applyGuildEdit(account, guild, edit, std::move(complete));
     }));
     const auto &features = data->features.get();
     if (std::find(features.begin(), features.end(), "COMMUNITY") != features.end()) {
         const bool showAll = !readState->isOptInGuild(guild);
-        const int flags = preferences ? preferences->flags.valueOr(0) : 0;
-        menu.push_back(choice("Show All Channels", showAll, [self, account, guild, showAll, flags] {
-            if (!self) return;
+        menu.push_back(choice("Show All Channels", showAll, [self, account, guild](bool checked, MenuItem::ToggleComplete complete) {
+            auto *instance = self ? self->shell.instanceFor(account) : nullptr;
+            if (!instance) { complete(false); return; }
+            const auto *preferences = instance->readState()->guildSettings(guild);
+            const int flags = preferences ? preferences->flags.valueOr(0) : 0;
             constexpr int off = int(Discord::UserGuildSettingsFlag::OPT_IN_CHANNELS_OFF);
             constexpr int on = int(Discord::UserGuildSettingsFlag::OPT_IN_CHANNELS_ON);
-            Discord::UserGuildSettingsEdit edit; edit.flags = (flags & ~(off | on)) | (showAll ? on : off);
-            self->applyGuildEdit(account, guild, edit);
+            Discord::UserGuildSettingsEdit edit; edit.flags = (flags & ~(off | on)) | (checked ? off : on);
+            self->applyGuildEdit(account, guild, edit, std::move(complete));
         }));
     }
     menu.push_back(separator());
@@ -197,12 +201,14 @@ void ServerMenuController::setMute(Snowflake account, Snowflake guild, int secon
     applyGuildEdit(account, guild, edit);
 }
 
-void ServerMenuController::applyGuildEdit(Snowflake account, Snowflake guild, const Discord::UserGuildSettingsEdit &edit)
+void ServerMenuController::applyGuildEdit(Snowflake account, Snowflake guild, const Discord::UserGuildSettingsEdit &edit,
+                                         MenuItem::ToggleComplete complete)
 {
     auto *instance = shell.instanceFor(account);
-    if (!instance) return;
+    if (!instance) { if (complete) complete(false); return; }
     Platform::Guard<ServerMenuController> self(this);
-    instance->discord()->modifyUserGuildSettings(guild, edit, [self](const Core::Result<void> &result) {
+    instance->discord()->modifyUserGuildSettings(guild, edit, [self, complete = std::move(complete)](const Core::Result<void> &result) {
+        if (complete) complete(result.success());
         if (self && !result.success()) showConfirmModal(self->shell, ConfirmOptions{
             "Could not save server preferences", Platform::htmlEscape(result.error), "Close", ""});
     });
@@ -232,38 +238,43 @@ std::vector<MenuItem> ServerMenuController::notificationItems(Snowflake account,
              {"All Messages", Discord::MessageNotificationLevel::ALL_MESSAGES},
              {"Only @mentions", Discord::MessageNotificationLevel::ONLY_MENTIONS},
              {"Nothing", Discord::MessageNotificationLevel::NO_MESSAGES}}}) {
-        items.push_back(choice(label, level == value, [self, account, guild, value] {
-            if (!self) return;
+        items.push_back(choice(label, level == value, [self, account, guild, value](bool, MenuItem::ToggleComplete complete) {
+            if (!self) { complete(false); return; }
             Discord::UserGuildSettingsEdit edit; edit.messageNotifications = value;
-            self->applyGuildEdit(account, guild, edit);
+            self->applyGuildEdit(account, guild, edit, std::move(complete));
         }, true));
     }
     items.push_back(separator());
     const bool everyone = settings && settings->suppressEveryone.valueOr(false);
-    items.push_back(choice("Suppress @everyone and @here", everyone, [self, account, guild, everyone] {
-        if (!self) return;
-        Discord::UserGuildSettingsEdit edit; edit.suppressEveryone = !everyone; self->applyGuildEdit(account, guild, edit);
+    items.push_back(choice("Suppress @everyone and @here", everyone, [self, account, guild](bool checked, MenuItem::ToggleComplete complete) {
+        if (!self) { complete(false); return; }
+        Discord::UserGuildSettingsEdit edit; edit.suppressEveryone = checked;
+        self->applyGuildEdit(account, guild, edit, std::move(complete));
     }));
     const bool roles = settings && settings->suppressRoles.valueOr(false);
-    items.push_back(choice("Suppress All Role @mentions", roles, [self, account, guild, roles] {
-        if (!self) return;
-        Discord::UserGuildSettingsEdit edit; edit.suppressRoles = !roles; self->applyGuildEdit(account, guild, edit);
+    items.push_back(choice("Suppress All Role @mentions", roles, [self, account, guild](bool checked, MenuItem::ToggleComplete complete) {
+        if (!self) { complete(false); return; }
+        Discord::UserGuildSettingsEdit edit; edit.suppressRoles = checked;
+        self->applyGuildEdit(account, guild, edit, std::move(complete));
     }));
     const bool highlights = settings && settings->notifyHighlights.valueOr(0) == 1;
-    items.push_back(choice("Suppress Highlights", highlights, [self, account, guild, highlights] {
-        if (!self) return;
-        Discord::UserGuildSettingsEdit edit; edit.notifyHighlights = highlights ? 0 : 1; self->applyGuildEdit(account, guild, edit);
+    items.push_back(choice("Suppress Highlights", highlights, [self, account, guild](bool checked, MenuItem::ToggleComplete complete) {
+        if (!self) { complete(false); return; }
+        Discord::UserGuildSettingsEdit edit; edit.notifyHighlights = checked ? 1 : 0;
+        self->applyGuildEdit(account, guild, edit, std::move(complete));
     }));
     const bool events = settings && settings->muteScheduledEvents.valueOr(false);
-    items.push_back(choice("Mute New Events", events, [self, account, guild, events] {
-        if (!self) return;
-        Discord::UserGuildSettingsEdit edit; edit.muteScheduledEvents = !events; self->applyGuildEdit(account, guild, edit);
+    items.push_back(choice("Mute New Events", events, [self, account, guild](bool checked, MenuItem::ToggleComplete complete) {
+        if (!self) { complete(false); return; }
+        Discord::UserGuildSettingsEdit edit; edit.muteScheduledEvents = checked;
+        self->applyGuildEdit(account, guild, edit, std::move(complete));
     }));
     items.push_back(separator());
     const bool push = !settings || settings->mobilePush.valueOr(true);
-    items.push_back(choice("Mobile Push Notifications", push, [self, account, guild, push] {
-        if (!self) return;
-        Discord::UserGuildSettingsEdit edit; edit.mobilePush = !push; self->applyGuildEdit(account, guild, edit);
+    items.push_back(choice("Mobile Push Notifications", push, [self, account, guild](bool checked, MenuItem::ToggleComplete complete) {
+        if (!self) { complete(false); return; }
+        Discord::UserGuildSettingsEdit edit; edit.mobilePush = checked;
+        self->applyGuildEdit(account, guild, edit, std::move(complete));
     }));
     return items;
 }
@@ -285,9 +296,15 @@ std::vector<MenuItem> ServerMenuController::moveItems(Snowflake account, Snowfla
             self->applyProtoEdit(account, std::move(edit));
         };
     };
+    auto destination = [&](std::string label, bool checked, std::optional<int64_t> id) {
+        MenuItem item{std::move(label), action(id, Proto::GuildFolderMove::Kind::Folder)};
+        item.checked = checked;
+        item.radio = true;
+        return item;
+    };
     MenuItem folders{"Folder"};
     const bool root = !current || !current->id.has_value();
-    folders.children.push_back(choice("No Folder", root, action({}, Proto::GuildFolderMove::Kind::Folder), true));
+    folders.children.push_back(destination("No Folder", root, {}));
     if (settings.guildFolders) {
         for (const auto &folder : settings.guildFolders->folders) {
             if (!folder.id.has_value()) continue;
@@ -301,8 +318,7 @@ std::vector<MenuItem> ServerMenuController::moveItems(Snowflake account, Snowfla
                 }
             }
             if (name.empty()) name = "Folder";
-            folders.children.push_back(choice(std::move(name), current && current->id == folder.id,
-                action(folder.id, Proto::GuildFolderMove::Kind::Folder), true));
+            folders.children.push_back(destination(std::move(name), current && current->id == folder.id, folder.id));
         }
     }
     const bool first = current && current->id && !current->guildIds.empty() && current->guildIds.front() != guild;

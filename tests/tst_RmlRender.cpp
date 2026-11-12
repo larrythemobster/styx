@@ -425,6 +425,177 @@ TEST_CASE("Hover opens cascading menus without activating an action", "[rml][men
     REQUIRE_FALSE(menu.isVisible());
 }
 
+TEST_CASE("Preference checkboxes stay open through repeated keyboard and pointer changes", "[rml][menu]")
+{
+    const bool nested = GENERATE(false, true);
+    const bool keyboard = GENERATE(false, true);
+    View view("menu-preferences");
+    prepare(view, 640, 480);
+    ContextMenu menu(view);
+    MenuItem first{"First preference"};
+    first.checked = false;
+    first.toggle = [](bool, MenuItem::ToggleComplete complete) { complete(true); };
+    MenuItem second = first;
+    second.label = "Second preference";
+    if (nested) {
+        MenuItem parent{"Preferences"};
+        parent.children = {first, second};
+        menu.show({parent}, {20, 20});
+        key(view, SDLK_DOWN);
+        key(view, SDLK_RIGHT);
+    } else {
+        menu.show({first, second}, {20, 20});
+        key(view, SDLK_DOWN);
+    }
+    auto *doc = view.context()->GetDocument("context-menu-root");
+    REQUIRE(doc);
+    const std::string prefix = nested ? "menu-item-1-" : "menu-item-";
+    auto *firstRow = doc->GetElementById(prefix + "0");
+    auto *secondRow = doc->GetElementById(prefix + "1");
+    auto *panel = doc->GetElementById(nested ? "context-submenu-1" : "context-menu-panel");
+    REQUIRE(firstRow);
+    REQUIRE(secondRow);
+    REQUIRE(panel);
+    auto press = [&](::Rml::Element *row) {
+        view.context()->Update();
+        const auto position = row->GetAbsoluteOffset(::Rml::BoxArea::Border);
+        const auto scale = view.devicePixelRatioF();
+        click(view, int((position.x + row->GetOffsetWidth() / 2) / scale),
+                    int((position.y + row->GetOffsetHeight() / 2) / scale));
+    };
+    if (keyboard) key(view, SDLK_SPACE); else press(firstRow);
+    REQUIRE(menu.isVisible());
+    REQUIRE(firstRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    REQUIRE(secondRow->GetAttribute<std::string>("aria-checked", "") == "false");
+    if (keyboard) { key(view, SDLK_DOWN); key(view, SDLK_RETURN); } else press(secondRow);
+    REQUIRE(menu.isVisible());
+    REQUIRE(firstRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    REQUIRE(secondRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    if (keyboard) { key(view, SDLK_UP); key(view, SDLK_SPACE); } else press(firstRow);
+    REQUIRE(firstRow->GetAttribute<std::string>("aria-checked", "") == "false");
+    REQUIRE(secondRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    REQUIRE(doc->GetElementById(nested ? "context-submenu-1" : "context-menu-panel") == panel);
+    REQUIRE(doc->GetElementById(prefix + "0") == firstRow);
+    click(view, 620, 450);
+    REQUIRE_FALSE(menu.isVisible());
+}
+
+TEST_CASE("Independent preference requests retain accepted state after another request fails", "[rml][menu]")
+{
+    View view("menu-pending-preferences");
+    prepare(view, 640, 480);
+    ContextMenu menu(view);
+    MenuItem::ToggleComplete firstComplete;
+    MenuItem::ToggleComplete secondComplete;
+    MenuItem first{"First preference"};
+    first.checked = false;
+    first.toggle = [&](bool, MenuItem::ToggleComplete complete) { firstComplete = std::move(complete); };
+    MenuItem second{"Second preference"};
+    second.checked = false;
+    second.toggle = [&](bool, MenuItem::ToggleComplete complete) { secondComplete = std::move(complete); };
+    menu.show({first, second}, {20, 20});
+    auto *doc = view.context()->GetDocument("context-menu-root");
+    auto *firstRow = doc->GetElementById("menu-item-0");
+    auto *secondRow = doc->GetElementById("menu-item-1");
+    key(view, SDLK_DOWN);
+    key(view, SDLK_SPACE);
+    REQUIRE(menu.isVisible());
+    REQUIRE(firstComplete);
+    REQUIRE(firstRow->HasAttribute("disabled"));
+    REQUIRE_FALSE(secondRow->HasAttribute("disabled"));
+    REQUIRE(firstRow->GetAttribute<std::string>("aria-checked", "") == "false");
+    key(view, SDLK_DOWN);
+    key(view, SDLK_SPACE);
+    REQUIRE(secondComplete);
+    secondComplete(true);
+    REQUIRE(menu.isVisible());
+    REQUIRE(secondRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    REQUIRE(firstRow->HasAttribute("disabled"));
+    firstComplete(false);
+    REQUIRE_FALSE(firstRow->HasAttribute("disabled"));
+    REQUIRE(firstRow->GetAttribute<std::string>("aria-checked", "") == "false");
+    REQUIRE(secondRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    key(view, SDLK_UP);
+    key(view, SDLK_SPACE);
+    firstComplete(true);
+    REQUIRE(firstRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    REQUIRE(secondRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    key(view, SDLK_ESCAPE);
+    REQUIRE_FALSE(menu.isVisible());
+}
+
+TEST_CASE("Preference radio groups stay open and change only after a successful save", "[rml][menu]")
+{
+    View view("menu-radio-preferences");
+    prepare(view, 640, 480);
+    ContextMenu menu(view);
+    MenuItem::ToggleComplete complete;
+    MenuItem first{"All messages"};
+    first.checked = true;
+    first.radio = true;
+    first.toggle = [&](bool, MenuItem::ToggleComplete done) { complete = std::move(done); };
+    MenuItem second = first;
+    second.label = "Mentions";
+    second.checked = false;
+    MenuItem parent{"Notifications"};
+    parent.subtitle = first.label;
+    parent.children = {first, second};
+    menu.show({parent}, {20, 20});
+    key(view, SDLK_DOWN);
+    key(view, SDLK_RIGHT);
+    key(view, SDLK_SPACE);
+    REQUIRE_FALSE(complete);
+    REQUIRE(menu.isVisible());
+    auto *doc = view.context()->GetDocument("context-menu-root");
+    auto *firstRow = doc->GetElementById("menu-item-1-0");
+    auto *secondRow = doc->GetElementById("menu-item-1-1");
+    key(view, SDLK_DOWN);
+    key(view, SDLK_RETURN);
+    REQUIRE(complete);
+    REQUIRE(firstRow->HasAttribute("disabled"));
+    REQUIRE(secondRow->HasAttribute("disabled"));
+    complete(false);
+    REQUIRE(firstRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    REQUIRE(secondRow->GetAttribute<std::string>("aria-checked", "") == "false");
+    key(view, SDLK_SPACE);
+    complete(true);
+    REQUIRE(menu.isVisible());
+    REQUIRE(doc->GetElementById("context-submenu-1")->IsVisible());
+    REQUIRE(firstRow->GetAttribute<std::string>("aria-checked", "") == "false");
+    REQUIRE(secondRow->GetAttribute<std::string>("aria-checked", "") == "true");
+    REQUIRE(doc->GetElementById("menu-item-0")->QuerySelector(".menu-subtitle")->GetInnerRML() == second.label);
+}
+
+TEST_CASE("Late preference completion cannot change a replacement menu", "[rml][menu]")
+{
+    View view("menu-replaced-preferences");
+    prepare(view, 640, 480);
+    ContextMenu menu(view);
+    MenuItem::ToggleComplete complete;
+    MenuItem old{"Old preference"};
+    old.checked = false;
+    old.toggle = [&](bool, MenuItem::ToggleComplete done) { complete = std::move(done); };
+    menu.show({old}, {20, 20});
+    key(view, SDLK_DOWN);
+    key(view, SDLK_SPACE);
+    REQUIRE(complete);
+    click(view, 620, 450);
+    REQUIRE_FALSE(menu.isVisible());
+    MenuItem replacement{"New preference"};
+    replacement.checked = false;
+    replacement.toggle = [](bool, MenuItem::ToggleComplete done) { done(true); };
+    menu.show({replacement}, {20, 20});
+    complete(true);
+    auto *row = view.context()->GetDocument("context-menu-root")->GetElementById("menu-item-0");
+    REQUIRE(menu.isVisible());
+    REQUIRE(row->GetAttribute<std::string>("aria-checked", "") == "false");
+    REQUIRE_FALSE(row->HasAttribute("disabled"));
+    key(view, SDLK_DOWN);
+    key(view, SDLK_SPACE);
+    REQUIRE(row->GetAttribute<std::string>("aria-checked", "") == "true");
+}
+
+
 TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][theme]")
 {
     namespace Theme = Styx::Core::Theme;

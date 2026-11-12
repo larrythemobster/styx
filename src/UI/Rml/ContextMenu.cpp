@@ -48,6 +48,7 @@ void ContextMenu::show(std::vector<MenuItem> entries, Platform::Point position)
             document->AddEventListener(type, this);
         document->AddEventListener("scroll", this, true);
     }
+    ++generation;
     closeSubmenus(0);
     items = std::move(entries);
     activeDepth = 0;
@@ -63,6 +64,7 @@ void ContextMenu::show(std::vector<MenuItem> entries, Platform::Point position)
 
 void ContextMenu::hide()
 {
+    ++generation;
     if (document) document->Hide();
     closeSubmenus(0);
     items.clear();
@@ -71,7 +73,7 @@ void ContextMenu::hide()
     view.requestRender();
 }
 
-const std::vector<MenuItem> &ContextMenu::entriesAt(std::size_t depth) const
+std::vector<MenuItem> &ContextMenu::entriesAt(std::size_t depth)
 {
     auto *entries = &items;
     for (std::size_t level = 0; level < depth; ++level)
@@ -79,11 +81,11 @@ const std::vector<MenuItem> &ContextMenu::entriesAt(std::size_t depth) const
     return *entries;
 }
 
-bool ContextMenu::selectable(std::size_t depth, int index) const
+bool ContextMenu::selectable(std::size_t depth, int index)
 {
     const auto &entries = entriesAt(depth);
-    return index >= 0 && index < int(entries.size()) && entries[index].enabled &&
-           !entries[index].separator && (entries[index].action || !entries[index].children.empty());
+    return index >= 0 && index < int(entries.size()) && entries[index].enabled && !entries[index].pending &&
+           !entries[index].separator && (entries[index].action || entries[index].toggle || !entries[index].children.empty());
 }
 
 std::string ContextMenu::itemId(std::size_t depth, int index)
@@ -112,18 +114,19 @@ void ContextMenu::renderPanel(std::size_t depth)
             markup += "<div class='menu-separator' role='separator'></div>";
             continue;
         }
-        const bool actionable = bool(item.action) || !item.children.empty();
+        const bool actionable = bool(item.action) || bool(item.toggle) || !item.children.empty();
         const auto tag = actionable ? "button" : "div";
         markup += std::string("<") + tag + " id='" + itemId(depth, index) + "' data-menu-index='" +
                   std::to_string(index) + "' data-menu-depth='" + std::to_string(depth) +
                   "' class='menu-item" + (item.danger ? " danger" : "") +
-                  (actionable ? "" : " menu-label") + (item.enabled ? "" : " disabled") + "'";
+                  (actionable ? "" : " menu-label") + (item.enabled && !item.pending ? "" : " disabled") + "'";
         if (actionable) {
             markup += " role='" + std::string(item.checked ? (item.radio ? "menuitemradio" : "menuitemcheckbox") : "menuitem") + "'";
             if (item.checked) markup += std::string(" aria-checked='") + (*item.checked ? "true" : "false") + "'";
             if (!item.children.empty()) markup += " aria-haspopup='menu' aria-expanded='false'";
         }
-        if (!item.enabled || !actionable) markup += " disabled='disabled'";
+        if (!item.enabled || item.pending || !actionable) markup += " disabled='disabled'";
+        if (item.pending) markup += " aria-busy='true'";
         markup += ">";
         if (!item.iconText.empty())
             markup += "<span class='menu-icon-text'><span>" + Platform::htmlEscape(item.iconText) + "</span></span>";
@@ -137,13 +140,87 @@ void ContextMenu::renderPanel(std::size_t depth)
         markup += "</div>";
         if (item.checked) {
             markup += std::string("<span class='menu-check") + (*item.checked ? " checked" : "") + (item.radio ? " radio" : "") + "'>";
-            if (*item.checked) markup += item.radio ? "<span class='menu-radio-dot'></span>" : "<span class='menu-check-mark'>&#10003;</span>";
+            markup += item.radio ? "<span class='menu-radio-dot'></span>" : "<span class='menu-check-mark'>&#10003;</span>";
             markup += "</span>";
         }
         if (!item.children.empty()) markup += "<span class='menu-arrow'>&gt;</span>";
         markup += std::string("</") + tag + ">";
     }
     panel->SetInnerRML(markup);
+}
+
+void ContextMenu::refreshStates()
+{
+    if (!isVisible()) return;
+    for (std::size_t depth = 0; depth <= path.size(); ++depth) {
+        const auto &entries = entriesAt(depth);
+        for (int index = 0; index < int(entries.size()); ++index) {
+            const auto &entry = entries[index];
+            auto *row = document->GetElementById(itemId(depth, index));
+            if (!row) continue;
+            const bool disabled = !entry.enabled || entry.pending;
+            row->SetClass("disabled", disabled);
+            if (disabled) row->SetAttribute("disabled", "disabled");
+            else row->RemoveAttribute("disabled");
+            row->SetAttribute("aria-busy", entry.pending ? "true" : "false");
+            if (entry.checked) {
+                row->SetAttribute("aria-checked", *entry.checked ? "true" : "false");
+                if (auto *indicator = row->QuerySelector(".menu-check"))
+                    indicator->SetClass("checked", *entry.checked);
+            }
+            if (auto *subtitle = row->QuerySelector(".menu-subtitle")) {
+                const auto text = Platform::htmlEscape(entry.subtitle);
+                if (subtitle->GetInnerRML() != text) subtitle->SetInnerRML(text);
+            }
+        }
+    }
+    view.requestRender();
+}
+
+void ContextMenu::activate(std::size_t depth, int index)
+{
+    if (!selectable(depth, index)) return;
+    auto &entries = entriesAt(depth);
+    auto &entry = entries[index];
+    if (!entry.children.empty()) {
+        openSubmenu(depth, index, true);
+        return;
+    }
+    if (!entry.toggle || !entry.checked) {
+        auto action = entry.action;
+        hide();
+        if (action) action();
+        return;
+    }
+    if (entry.radio && *entry.checked) return;
+    const bool checked = entry.radio || !*entry.checked;
+    int first = index;
+    int last = index + 1;
+    if (entry.radio) {
+        while (first > 0 && entries[first - 1].radio && entries[first - 1].checked) --first;
+        while (last < int(entries.size()) && entries[last].radio && entries[last].checked) ++last;
+    }
+    for (int i = first; i < last; ++i) entries[i].pending = true;
+    refreshStates();
+    auto toggle = entry.toggle;
+    auto *group = &entries;
+    auto *parent = depth ? &entriesAt(depth - 1)[path[depth - 1]] : nullptr;
+    const auto request = generation;
+    Platform::Guard<ContextMenu> self(this);
+    toggle(checked, [self, request, group, parent, index, first, last, checked](bool accepted) {
+        if (!self || self->generation != request || !self->isVisible()) return;
+        for (int i = first; i < last; ++i) (*group)[i].pending = false;
+        auto &entry = (*group)[index];
+        if (accepted) {
+            if (entry.radio) {
+                for (int i = first; i < last; ++i) (*group)[i].checked = i == index;
+                if (parent && !parent->subtitle.empty()) parent->subtitle = entry.label;
+            } else {
+                entry.checked = checked;
+            }
+        }
+        self->refreshStates();
+    });
 }
 
 void ContextMenu::positionPanels()
@@ -279,16 +356,7 @@ void ContextMenu::ProcessEvent(::Rml::Event &event)
         } else if (key == KI_RIGHT) {
             openSubmenu(activeDepth, focused, true);
         } else if (key == KI_RETURN || key == KI_NUMPADENTER || key == KI_SPACE) {
-            if (selectable(activeDepth, focused)) {
-                const auto &entry = entriesAt(activeDepth)[focused];
-                if (!entry.children.empty()) {
-                    openSubmenu(activeDepth, focused, true);
-                } else {
-                    auto action = entry.action;
-                    hide();
-                    if (action) action();
-                }
-            }
+            activate(activeDepth, focused);
         } else {
             return;
         }
@@ -309,13 +377,7 @@ void ContextMenu::ProcessEvent(::Rml::Event &event)
     } else if (type == "click") {
         event.StopPropagation();
         activeDepth = depth;
-        if (!entriesAt(depth)[index].children.empty()) {
-            openSubmenu(depth, index, true);
-        } else {
-            auto action = entriesAt(depth)[index].action;
-            hide();
-            if (action) action();
-        }
+        activate(depth, index);
     }
 }
 

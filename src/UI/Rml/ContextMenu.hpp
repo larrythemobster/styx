@@ -3,6 +3,7 @@
 #include "Platform/Native.hpp"
 #include "Platform/Trackable.hpp"
 #include <string>
+#include <cstdint>
 #include <RmlUi/Core/EventListener.h>
 
 #include <functional>
@@ -20,6 +21,8 @@ class View;
 
 struct MenuItem
 {
+    using ToggleComplete = std::function<void(bool accepted)>;
+    using ToggleAction = std::function<void(bool checked, ToggleComplete complete)>;
     std::string label;
     std::function<void()> action;
     bool enabled = true;
@@ -32,6 +35,8 @@ struct MenuItem
     std::optional<bool> checked;
     bool radio = false;
     std::string iconText;
+    ToggleAction toggle;
+    bool pending = false;
 };
 
 class ContextMenu final : public Platform::Trackable, public ::Rml::EventListener
@@ -48,12 +53,14 @@ public:
 private:
     void renderPanel(std::size_t depth);
     void positionPanels();
+    void refreshStates();
+    void activate(std::size_t depth, int index);
     void closeSubmenus(std::size_t depth);
     void openSubmenu(std::size_t depth, int index, bool enter);
     void focusItem(int index, bool scroll = true);
     void moveFocus(int direction);
-    [[nodiscard]] const std::vector<MenuItem> &entriesAt(std::size_t depth) const;
-    [[nodiscard]] bool selectable(std::size_t depth, int index) const;
+    [[nodiscard]] std::vector<MenuItem> &entriesAt(std::size_t depth);
+    [[nodiscard]] bool selectable(std::size_t depth, int index);
     [[nodiscard]] static std::string itemId(std::size_t depth, int index);
 
     View &view;
@@ -63,6 +70,7 @@ private:
     int focused = -1;
     std::size_t activeDepth = 0;
     Platform::Point anchor;
+    std::uint64_t generation = 0;
 };
 
 } // namespace Styx::UI::Rml

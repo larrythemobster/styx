@@ -36,7 +36,8 @@ private:
     void createInvite();
     void setError(const std::string &message);
     void setMute(Core::Snowflake account, Core::Snowflake guild, int seconds);
-    void applyGuildEdit(Core::Snowflake account, Core::Snowflake guild, const Discord::UserGuildSettingsEdit &edit);
+    void applyGuildEdit(Core::Snowflake account, Core::Snowflake guild, const Discord::UserGuildSettingsEdit &edit,
+                        MenuItem::ToggleComplete complete = {});
     void applyProtoEdit(Core::Snowflake account, Proto::PreloadedSettingsEdit edit);
     void leave(Core::Snowflake account, Core::Snowflake guild, const std::string &name);
     std::vector<MenuItem> notificationItems(Core::Snowflake account, Core::Snowflake guild);

@@ -78,6 +78,11 @@ from permission to create invites. Leave Server asks for confirmation, folder
 moves preserve other folders, and Copy Server ID requires Developer Mode.
 Hover and keyboard navigation open real flyouts; nested panels remain clickable
 when they flip at a window edge.
+Checkboxes and notification radio choices keep the menu and active flyout open.
+Other checkboxes remain usable while a preference saves. Successful saves update
+the checks and notification summary in place; rejected saves retain the previous
+state. Click outside or press Escape to dismiss. Ordinary commands still close
+the menu.
 
 User settings fill the window below the application toolbar. Navigation and page
 content scroll independently, while page headings and profile Save/Reset controls
