@@ -28,6 +28,9 @@ inline constexpr const char *TaskbarBadge = "notifications/taskbar_badge";
 
 // Theme / Appearance
 inline constexpr const char *ThemeUseSystemColors = "appearance/use_system_colors";
+inline constexpr const char *ThemeSeedColor = "appearance/seed_color";
+inline constexpr const char *ThemeScheme = "appearance/scheme";
+inline constexpr const char *ThemeDarkMode = "appearance/dark_mode";
 
 // Audio & Voice
 inline constexpr const char *AudioBackend = "audio/backend";

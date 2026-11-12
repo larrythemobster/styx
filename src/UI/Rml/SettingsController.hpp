@@ -49,6 +49,7 @@ private:
 
     void renderMyAccount(std::string &rml);
     void renderAppearance(std::string &rml);
+    void applyGeneratedTheme();
     void renderChat(std::string &rml);
     void renderNotifications(std::string &rml);
     void renderVoiceVideo(std::string &rml);
@@ -75,6 +76,8 @@ private:
     Platform::Color themeSeedColor;
     int themeSchemeIndex = 0;
     bool themeDarkMode = true;
+    std::string themeError;
+    bool renderingControls = false;
     ::Rml::Element *hintSlider = nullptr;
     ::Rml::ObserverPtr<::Rml::Element> previousFocus;
     bool sliderDragging = false;

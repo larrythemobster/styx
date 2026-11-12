@@ -4,6 +4,8 @@
 #include "Core/EmojiSegmenter.hpp"
 #include "Core/ImageManager.hpp"
 #include "Core/Logging.hpp"
+#include "Core/Theme/Manager.hpp"
+#include "Core/Theme/Stylesheet.hpp"
 #include "Platform/Desktop.hpp"
 #include "Platform/Paths.hpp"
 #include "Platform/Utf8.hpp"
@@ -22,6 +24,8 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
+#include <sstream>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -82,24 +86,29 @@ public:
     ::Rml::FileHandle Open(const ::Rml::String &name) override
     {
         try {
-            auto file = std::make_unique<std::ifstream>(resourcePath(name), std::ios::binary);
+            const auto path = resourcePath(name);
+            std::unique_ptr<std::istream> file = std::make_unique<std::ifstream>(path, std::ios::binary);
             if (!*file) return 0;
+            if (path.extension() == ".rcss") {
+                std::string source{std::istreambuf_iterator<char>(*file), std::istreambuf_iterator<char>()};
+                file = std::make_unique<std::istringstream>(Core::Theme::buildStyleSheet(std::move(source)));
+            }
             return reinterpret_cast<::Rml::FileHandle>(file.release());
         } catch (const std::exception &error) {
             Core::log(Core::LogLevel::Warning, LogUI) << name << error.what();
             return 0;
         }
     }
-    void Close(::Rml::FileHandle handle) override { delete reinterpret_cast<std::ifstream *>(handle); }
+    void Close(::Rml::FileHandle handle) override { delete reinterpret_cast<std::istream *>(handle); }
     size_t Read(void *buffer, size_t size, ::Rml::FileHandle handle) override
     {
-        auto &file = *reinterpret_cast<std::ifstream *>(handle);
+        auto &file = *reinterpret_cast<std::istream *>(handle);
         file.read(static_cast<char *>(buffer), static_cast<std::streamsize>(size));
         return static_cast<size_t>(file.gcount());
     }
     bool Seek(::Rml::FileHandle handle, long offset, int origin) override
     {
-        auto &file = *reinterpret_cast<std::ifstream *>(handle);
+        auto &file = *reinterpret_cast<std::istream *>(handle);
         file.clear();
         auto direction = origin == SEEK_SET ? std::ios::beg : origin == SEEK_CUR ? std::ios::cur : std::ios::end;
         file.seekg(offset, direction);
@@ -107,7 +116,7 @@ public:
     }
     size_t Tell(::Rml::FileHandle handle) override
     {
-        auto &file = *reinterpret_cast<std::ifstream *>(handle);
+        auto &file = *reinterpret_cast<std::istream *>(handle);
         if (file.eof()) file.clear();
         const auto position = file.tellg();
         return position >= 0 ? static_cast<size_t>(position) : 0;
@@ -245,10 +254,23 @@ bool Runtime::initialise(std::string *error)
     initialised = true;
     try { loadFonts(); emoji = std::make_unique<EmojiRenderer>(); }
     catch (const std::exception &failure) { if (error) *error = failure.what(); shutdown(); return false; }
+    themeConnection = Core::Theme::Manager::instance().themeChanged.connect([this] { reloadStyleSheets(); });
+    metricsConnection = Core::Theme::Manager::instance().metricsChanged.connect([this] { reloadStyleSheets(); });
     return true;
+}
+void Runtime::reloadStyleSheets()
+{
+    for (int i = 0; i < ::Rml::GetNumContexts(); ++i) {
+        auto *context = ::Rml::GetContext(i);
+        for (int j = 0; j < context->GetNumDocuments(); ++j)
+            context->GetDocument(j)->ReloadStyleSheet();
+    }
+    stylesChanged.publish();
 }
 void Runtime::shutdown()
 {
+    themeConnection.disconnect();
+    metricsConnection.disconnect();
     if (initialised) { ::Rml::Shutdown(); initialised = false; }
     if (render) { render->flushReleasedResources(); render.reset(); RmlGL3::Shutdown(); }
     emoji.reset();

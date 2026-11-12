@@ -69,6 +69,11 @@ and content. Buttons use black borders and centered labels or icons. Sliders sho
 a value hint above the thumb on hover, focus or drag. Tab stays inside the dialog;
 Escape closes it and restores focus.
 
+Appearance applies themes to open views and new dialogs. Mode and palette choices
+apply immediately; Apply theme uses the entered accent color. Choosing a custom
+theme turns off system-color overrides. Theme choices survive restarts, and font
+size controls change rendered text. Reset Theme restores the bundled dark styling.
+
 Call controls share mute/deafen state with the user panel, even when the current
 user is absent from the participant list. Voice heartbeat acknowledgements support
 both numeric and object payloads.

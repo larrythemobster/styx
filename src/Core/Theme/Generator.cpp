@@ -127,16 +127,16 @@ std::unordered_map<Token, Platform::Color> generate(const Platform::Color &seed,
         m.emplace(Token::PrimaryText, hsl(seedHue, textSat, 0.22));
         m.emplace(Token::ButtonText, hsl(seedHue, textSat, 0.18));
         m.emplace(Token::TooltipText, hsl(seedHue, textSat, 0.16));
-        m.emplace(Token::PlaceholderText, hsl(seedHue, textSat, 0.50));
+        m.emplace(Token::PlaceholderText, hsl(seedHue, textSat, 0.40));
         m.emplace(Token::DisabledText, hsl(seedHue, textSat, 0.60));
         m.emplace(Token::BrightText, hsl(accentHue, accSat, 0.40));
 
         m.emplace(Token::Highlight, hsl(accentHue, accSat, 0.55));
         m.emplace(Token::HighlightedText, hsl(accentHue, 0.20, 0.99));
-        m.emplace(Token::LinkText, hsl(linkHue, 0.75, 0.45));
+        m.emplace(Token::LinkText, hsl(linkHue, 0.75, 0.30));
         m.emplace(Token::Divider, hsl(seedHue, bgSat, 0.78));
 
-        m.emplace(Token::MentionText, hsl(accentHue, 0.70, 0.40));
+        m.emplace(Token::MentionText, hsl(accentHue, 0.70, 0.28));
         Platform::Color mentionBg = hsl(accentHue, accSat, 0.55);
         mentionBg.a = 64; // ~25%
         m.emplace(Token::MentionBg, mentionBg);

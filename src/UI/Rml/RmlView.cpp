@@ -178,6 +178,7 @@ View::View(const std::string &contextName) : name(contextName)
     windows.emplace(SDL_GetWindowID(nativeWindow), this);
     quitting = false;
     track(Runtime::instance().texturesChanged.connect([this] { requestRender(); }));
+    track(Runtime::instance().stylesChanged.connect([this] { requestRender(); }));
     auto icon = Platform::Image::decodeFile(Platform::Resources::path("app/styx.svg"));
     if (icon) {
         auto *surface = SDL_CreateSurfaceFrom(icon->width, icon->height, SDL_PIXELFORMAT_RGBA32,

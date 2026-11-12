@@ -30,9 +30,11 @@ public:
     Platform::ImageBuffer loadImage(const std::string &source);
     bool releaseChangedTextures();
     Platform::Signal<> texturesChanged;
+    Platform::Signal<> stylesChanged;
 private:
     Runtime();
     void loadFonts();
+    void reloadStyleSheets();
     void onImageFetched(const std::string &url, Platform::Size size);
     struct ImageRequest { std::string url; Platform::Size size; Core::Snowflake accountId; };
     class System;
@@ -45,6 +47,8 @@ private:
     std::unique_ptr<EmojiRenderer> emoji;
     Platform::Guard<Core::ImageManager> images;
     Platform::Connection imageConnection;
+    Platform::Connection themeConnection;
+    Platform::Connection metricsConnection;
     std::unordered_map<std::string, int> imageIds;
     std::unordered_map<int, ImageRequest> imageRequests;
     std::unordered_map<std::string, Platform::ImageBuffer> frames;

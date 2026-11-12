@@ -2,6 +2,14 @@
 #include "UI/Rml/RmlRuntime.hpp"
 #include "UI/Rml/RmlView.hpp"
 #include "UI/Rml/ContextMenu.hpp"
+#include "Core/Theme/Manager.hpp"
+#include "Core/Theme/Generator.hpp"
+#include <RmlUi/Core/ElementUtilities.h>
+#include <RmlUi/Core/Elements/ElementFormControlInput.h>
+#include <cmath>
+#include <unordered_map>
+#include <utility>
+#include <algorithm>
 
 #include <RmlUi/Core.h>
 #include <catch2/catch_test_macros.hpp>
@@ -364,4 +372,107 @@ TEST_CASE("Context menu nested navigation stays within the viewport", "[rml][men
     key(view, SDLK_RETURN);
     REQUIRE(selected);
     REQUIRE_FALSE(menu.isVisible());
+}
+
+TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][theme]")
+{
+    namespace Theme = Styx::Core::Theme;
+    auto &theme = Theme::Manager::instance();
+    struct RestoreTheme {
+        Theme::Manager &theme;
+        std::unordered_map<Theme::Token, Styx::Platform::Color> colors;
+        std::vector<std::pair<Theme::FontRole, Theme::Font>> fonts;
+        explicit RestoreTheme(Theme::Manager &manager) : theme(manager)
+        {
+            for (const auto &token : Theme::registry())
+                if (theme.hasOverride(token.token))
+                    colors.emplace(token.token, theme.color(token.token));
+            for (const auto &font : Theme::fontRegistry())
+                if (theme.hasFontOverride(font.role))
+                    fonts.emplace_back(font.role, theme.font(font.role));
+        }
+        ~RestoreTheme()
+        {
+            theme.resetAll();
+            theme.setOverrides(colors);
+            for (const auto &[role, font] : fonts)
+                theme.setFontOverride(role, font);
+            theme.apply();
+            theme.applyFonts();
+        }
+    } restore(theme);
+    View view("theme-rendering");
+    prepare(view, 640, 480);
+    view.loadDocument("main.rml");
+    auto *document = view.document();
+    document->SetInnerRML(
+        "<button id=\"sample\" class=\"settings-btn settings-btn-primary\"><span class=\"settings-btn-label\">Theme text</span></button>"
+        "<div id=\"message\" class=\"message-body\">A message that wraps when its font changes</div>"
+        "<pre id=\"code\" class=\"code-block\">const int value = 42;</pre>"
+        "<input id=\"draft\" type=\"text\" value=\"Unsent draft\"/>");
+    view.context()->ProcessMouseMove(630, 470, 0);
+    view.renderNow();
+    auto *sample = document->GetElementById("sample");
+    auto *draft = document->GetElementById("draft");
+    REQUIRE(draft->Focus());
+    const auto widthBefore = ::Rml::ElementUtilities::GetStringWidth(sample, "Theme text");
+    auto font = theme.font(Theme::FontRole::Ui);
+    font.pointSize *= 2;
+    theme.setFontOverride(Theme::FontRole::Ui, font);
+    theme.applyFonts();
+    view.renderNow();
+    REQUIRE(::Rml::ElementUtilities::GetStringWidth(sample, "Theme text") > widthBefore * 1.5f);
+
+    RenderTarget target(view);
+    for (const auto seed : {0xf04d58u, 0x38b865u}) {
+        view.context()->ProcessMouseMove(630, 470, 0);
+        theme.setOverrides(Theme::generate(Styx::Platform::Color::rgb(seed), Theme::Scheme::Monochromatic, false));
+        theme.apply();
+        view.renderNow();
+        REQUIRE(view.document() == document);
+        REQUIRE(view.context()->GetFocusElement() == draft);
+        REQUIRE(rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(draft)->GetValue() == "Unsent draft");
+        const auto expected = theme.color(Theme::Token::Highlight);
+        const auto actual = sample->GetProperty<::Rml::Colourb>("background-color");
+        REQUIRE(actual == ::Rml::Colourb(expected.r, expected.g, expected.b, expected.a));
+        const auto background = document->GetProperty<::Rml::Colourb>("background-color");
+        REQUIRE(background.red > 220);
+        REQUIRE(background.green > 220);
+        REQUIRE(background.blue > 220);
+        view.makeCurrent();
+        std::array<unsigned char, 4> pixel{};
+        glReadPixels(int(sample->GetAbsoluteLeft()) + 8,
+                     view.context()->GetDimensions().y - int(sample->GetAbsoluteTop()) - 9,
+                     1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
+        view.doneCurrent();
+        REQUIRE(std::abs(int(pixel[0]) - expected.r) <= 1);
+        REQUIRE(std::abs(int(pixel[1]) - expected.g) <= 1);
+        REQUIRE(std::abs(int(pixel[2]) - expected.b) <= 1);
+        view.context()->ProcessMouseMove(int(sample->GetAbsoluteLeft()) + 8, int(sample->GetAbsoluteTop()) + 8, 0);
+        view.renderNow();
+        auto luminance = [](::Rml::Colourb color) {
+            auto channel = [](unsigned char value) {
+                const double c = value / 255.0;
+                return c <= .04045 ? c / 12.92 : std::pow((c + .055) / 1.055, 2.4);
+            };
+            return .2126 * channel(color.red) + .7152 * channel(color.green) + .0722 * channel(color.blue);
+        };
+        const auto foreground = luminance(sample->GetProperty<::Rml::Colourb>("color"));
+        const auto hovered = luminance(sample->GetProperty<::Rml::Colourb>("background-color"));
+        REQUIRE((std::max(foreground, hovered) + .05) / (std::min(foreground, hovered) + .05) >= 4.5);
+    }
+    {
+        View fresh("new-themed-document");
+        prepare(fresh, 320, 240);
+        fresh.loadDocument("main.rml");
+        fresh.renderNow();
+        REQUIRE(fresh.document()->GetProperty<::Rml::Colourb>("background-color")
+                == document->GetProperty<::Rml::Colourb>("background-color"));
+    }
+    theme.setOverrides(Theme::generate(Styx::Platform::Color::rgb(0x5865f2), Theme::Scheme::Monochromatic, true));
+    theme.apply();
+    view.renderNow();
+    REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").red < 60);
+    REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").green < 60);
+    REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").blue < 60);
 }

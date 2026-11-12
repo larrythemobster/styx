@@ -499,7 +499,9 @@ if(BUILD_TESTS)
         src/UI/Rml/CommandOptionsBar.cpp src/UI/Rml/PollRenderer.cpp
         vendor/rmlui-backend/RmlUi_Renderer_GL3.cpp
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
-        src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp)
+        src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp
+        src/Core/Theme/Tokens.cpp src/Core/Theme/Manager.cpp src/Core/Theme/Stylesheet.cpp src/Core/Theme/Fonts.cpp
+        src/Core/Theme/Generator.cpp)
     target_link_libraries(TestRmlRender PRIVATE RmlUi::RmlUi utf8proc SDL3::SDL3 OpenGL::GL Freetype::Freetype harfbuzz::harfbuzz)
     target_include_directories(TestRmlRender PRIVATE vendor/emoji-segmenter vendor/rmlui-backend)
     if(WIN32)

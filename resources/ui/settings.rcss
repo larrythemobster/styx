@@ -519,6 +519,7 @@ select.settings-select selectarrow
 	width: 16dp;
 	height: 16dp;
 	margin: 11dp 10dp;
+	image-color: #b5bac1;
 	decorator: image(icon:chevron-down);
 }
 

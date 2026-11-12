@@ -99,7 +99,14 @@ std::string hexDecode(const std::string &text) {
 SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
     : Controller(shell, root)
 {
-    themeSeedColor = Core::Theme::Manager::instance().color(Core::Theme::Token::Highlight);
+    const auto &theme = Core::Theme::Manager::instance();
+    const auto highlight = theme.color(Core::Theme::Token::Highlight);
+    themeSeedColor = Platform::Color::parse(getString(Keys::ThemeSeedColor, highlight.css()));
+    if (!themeSeedColor.valid)
+        themeSeedColor = highlight;
+    themeSchemeIndex = std::clamp(getInt(Keys::ThemeScheme, 0), 0, Core::Theme::schemeCount - 1);
+    const auto background = theme.color(Core::Theme::Token::WindowBg);
+    themeDarkMode = getBool(Keys::ThemeDarkMode, int(background.r) + background.g + background.b < 384);
     track(shell.settingsOpenChanged.connect([this](bool open) { onSettingsOpenChanged(open); }));
     track(shell.instanceChanged.connect([this](Core::ClientInstance *) {
         if (this->shell.isSettingsOpen())
@@ -188,7 +195,10 @@ void SettingsController::render()
     renderContent(rml);
     rml += "</div>";
 
+    // Native controls emit change events while their initial values are installed.
+    renderingControls = true;
     regionRoot->SetInnerRML(rml.c_str());
+    renderingControls = false;
     if (!focusSelector.empty()) {
         auto *focus = regionRoot->QuerySelector(focusSelector);
         if (!focus) focus = regionRoot->QuerySelector(".settings-nav-item.active");
@@ -387,6 +397,8 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"random-theme\"><span class=\"settings-btn-label\">Randomize</span></button>");
     rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-theme\"><span class=\"settings-btn-label\">Reset Theme</span></button>");
     rml += std::string("</div>");
+    rml += formatRml("<div id=\"theme-error\" class=\"settings-keybind-error\" style=\"display: %1;\">%2</div>",
+                     themeError.empty() ? "none" : "block", Rml::escape(themeError));
     rml += std::string("</div>"); // .settings-card
 
     // System theme switches
@@ -423,6 +435,42 @@ void SettingsController::renderAppearance(std::string &rml)
         rml += std::string("</div>");
     }
     rml += std::string("</div>"); // .settings-card
+}
+
+void SettingsController::applyGeneratedTheme()
+{
+    if (regionRoot) {
+        if (auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("seed-color-hex"))) {
+            const auto color = Platform::Color::parse(input->GetValue());
+            if (!color.valid) {
+                themeError = "Enter a valid hex color, such as #5865f2.";
+                if (auto *error = regionRoot->GetElementById("theme-error")) {
+                    error->SetInnerRML(Rml::escape(themeError));
+                    error->SetProperty("display", "block");
+                }
+                requestRender();
+                return;
+            }
+            themeSeedColor = color;
+        }
+    }
+    auto &theme = Core::Theme::Manager::instance();
+    const auto scheme = static_cast<Core::Theme::Scheme>(std::clamp(themeSchemeIndex, 0, Core::Theme::schemeCount - 1));
+    theme.setUseSystemColors(false);
+    theme.setOverrides(Core::Theme::generate(themeSeedColor, scheme, themeDarkMode));
+    theme.apply();
+    if (theme.save()) {
+        setString(Keys::ThemeSeedColor, themeSeedColor.css());
+        setInt(Keys::ThemeScheme, themeSchemeIndex);
+        setBool(Keys::ThemeDarkMode, themeDarkMode);
+        themeError.clear();
+    } else {
+        themeError = "Theme applied, but it could not be saved.";
+    }
+    rebuildTimer.start(std::chrono::milliseconds(0), false, [this] {
+        render();
+        requestRender(100);
+    });
 }
 
 void SettingsController::renderChat(std::string &rml)
@@ -916,6 +964,8 @@ void SettingsController::setupEventListeners()
     }, regionRoot);
 
     listen("change", [this](::Rml::Event &event) {
+        if (renderingControls)
+            return;
         auto *target = event.GetTargetElement();
         if (!target)
             return;
@@ -1045,6 +1095,7 @@ void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
         shell.refreshTaskbarBadge();
     } else if (key == std::string(Keys::ThemeUseSystemColors)) {
         Core::Theme::Manager::instance().setUseSystemColors(nowChecked);
+        Core::Theme::Manager::instance().apply();
     }
 
     requestRender(100);
@@ -1228,9 +1279,17 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
 
     // Local theme generator selects
     if (selectEl->GetId() == "theme-scheme-select") {
-        themeSchemeIndex = std::stoi(val);
+        const int scheme = std::stoi(val);
+        if (themeSchemeIndex != scheme) {
+            themeSchemeIndex = scheme;
+            applyGeneratedTheme();
+        }
     } else if (selectEl->GetId() == "theme-mode-select") {
-        themeDarkMode = (val == std::string("dark"));
+        const bool dark = (val == "dark");
+        if (themeDarkMode != dark) {
+            themeDarkMode = dark;
+            applyGeneratedTheme();
+        }
     }
 
     requestRender(50);
@@ -1285,23 +1344,7 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         Platform::Notifications::show(notification, {});
         Core::Sounds::play(Core::Sounds::Sound::Message);
     } else if (action == std::string("generate-theme")) {
-        // Read seed color hex
-        if (regionRoot) {
-            if (auto *hexEl = regionRoot->GetElementById("seed-color-hex")) {
-                if (auto *inp = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(hexEl)) {
-                    std::string hex = inp->GetValue();
-                    auto c = Platform::Color::parse(hex);
-                    if (c.valid)
-                        themeSeedColor = c;
-                }
-            }
-        }
-        const auto scheme = static_cast<Core::Theme::Scheme>(std::clamp(themeSchemeIndex, 0, Core::Theme::schemeCount - 1));
-        Core::Theme::Manager::instance().setOverrides(Core::Theme::generate(themeSeedColor, scheme, themeDarkMode));
-        Core::Theme::Manager::instance().apply();
-        Core::Theme::Manager::instance().save();
-        render();
-        requestRender(100);
+        applyGeneratedTheme();
     } else if (action == std::string("random-theme")) {
         std::random_device rng;
         std::uniform_real_distribution<double> unit(0.0, 1.0);
@@ -1316,18 +1359,24 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         const double b = h < 2 ? 0 : h < 3 ? x : h < 5 ? chroma : x;
         themeSeedColor = Platform::Color{static_cast<uint8_t>((r + m) * 255), static_cast<uint8_t>((g + m) * 255), static_cast<uint8_t>((b + m) * 255), 255, true};
         themeSchemeIndex = std::uniform_int_distribution<int>(0, Core::Theme::schemeCount - 1)(rng);
-        const auto scheme = static_cast<Core::Theme::Scheme>(std::clamp(themeSchemeIndex, 0, Core::Theme::schemeCount - 1));
-        Core::Theme::Manager::instance().setOverrides(Core::Theme::generate(themeSeedColor, scheme, themeDarkMode));
-        Core::Theme::Manager::instance().apply();
-        Core::Theme::Manager::instance().save();
-        render();
-        requestRender(100);
+        if (regionRoot) {
+            if (auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("seed-color-hex")))
+                input->SetValue(themeSeedColor.css());
+        }
+        applyGeneratedTheme();
     } else if (action == std::string("reset-theme")) {
         Core::Theme::Manager::instance().resetAll();
+        Core::Theme::Manager::instance().setUseSystemColors(false);
         Core::Theme::Manager::instance().apply();
         Core::Theme::Manager::instance().applyFonts();
         Core::Theme::Manager::instance().save();
         themeSeedColor = Core::Theme::Manager::instance().color(Core::Theme::Token::Highlight);
+        themeDarkMode = true;
+        themeSchemeIndex = 0;
+        themeError.clear();
+        setString(Keys::ThemeSeedColor, themeSeedColor.css());
+        setInt(Keys::ThemeScheme, themeSchemeIndex);
+        setBool(Keys::ThemeDarkMode, themeDarkMode);
         render();
         requestRender(100);
     } else if (action == std::string("font-size-inc") || action == std::string("font-size-dec")) {
