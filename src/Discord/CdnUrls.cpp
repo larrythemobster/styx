@@ -65,6 +65,10 @@ std::string effectiveAvatar(Core::Snowflake guild, Core::Snowflake user, const s
     return hash.empty() ? defaultUserAvatar(user, size) : userAvatar(user, hash, size);
 }
 std::string userBanner(Core::Snowflake id, const std::string &hash, int size) { return asset("banners", id, hash, size); }
+std::string guildMemberBanner(Core::Snowflake guild, Core::Snowflake user, const std::string &hash, int size) {
+    if (!guild.isValid() || !user.isValid() || hash.empty()) return {};
+    return "https://cdn.discordapp.com/guilds/" + guild.toString() + "/users/" + user.toString() + "/banners/" + hash + "." + assetExtension(hash) + "?size=" + std::to_string(size);
+}
 std::string guildIcon(Core::Snowflake id, const std::string &hash, int size) { return asset("icons", id, hash, size); }
 std::string guildBanner(Core::Snowflake id, const std::string &hash, int size) { return asset("banners", id, hash, size); }
 std::string guildSplash(Core::Snowflake id, const std::string &hash, int size) { return asset("splashes", id, hash, size); }

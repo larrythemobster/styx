@@ -83,3 +83,40 @@ TEST_CASE("Image removal alone remains an edit without writing profile text", "[
         {"banner", "data:image/jpeg;base64,/9j/4AAQSkZJRg=="}
     });
 }
+
+TEST_CASE("Server mute duration and unmute preserve untouched notification preferences", "[user-edits]")
+{
+    UserGuildSettingsEdit edit;
+    MuteConfig config;
+    config.endTime = "2026-11-12T15:30:00Z";
+    config.selectedTimeWindow = 900;
+    edit.muted = true;
+    edit.muteConfig = config;
+    REQUIRE(parseJson(edit.toJson()) == nlohmann::json{
+        {"muted", true},
+        {"mute_config", {{"end_time", "2026-11-12T15:30:00Z"}, {"selected_time_window", 900}}}
+    });
+    config.endTime = nullptr;
+    config.selectedTimeWindow = -1;
+    edit.muteConfig = config;
+    REQUIRE(parseJson(edit.toJson()).at("mute_config") == nlohmann::json{
+        {"end_time", nullptr}, {"selected_time_window", -1}
+    });
+    edit.muted = false;
+    edit.muteConfig = nullptr;
+    REQUIRE(parseJson(edit.toJson()) == nlohmann::json{{"muted", false}, {"mute_config", nullptr}});
+}
+
+TEST_CASE("Server profile removals do not overwrite the account profile", "[user-edits]")
+{
+    CurrentMemberEdit edit;
+    edit.nick = "Server name";
+    edit.pronouns = "they/them";
+    REQUIRE(parseJson(edit.toJson()) == nlohmann::json{{"nick", "Server name"}, {"pronouns", "they/them"}});
+    edit.nick = nullptr;
+    edit.avatar = nullptr;
+    edit.bio = nullptr;
+    REQUIRE(parseJson(edit.toJson()) == nlohmann::json{
+        {"nick", nullptr}, {"avatar", nullptr}, {"bio", nullptr}, {"pronouns", "they/them"}
+    });
+}

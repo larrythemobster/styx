@@ -92,3 +92,12 @@ TEST_CASE("CdnUrls: testLoopingVideoLimitAllowsEitherOrientation", "[cdn]")
     REQUIRE(!Cdn::fitsLoopingVideoLimit(Platform::Size{4000, 4000}));
 }
 
+TEST_CASE("Server profile banners use the member asset rather than the account banner", "[cdn]")
+{
+    REQUIRE(Cdn::guildMemberBanner(Core::Snowflake(10), Core::Snowflake(20), "banner", 640) ==
+            "https://cdn.discordapp.com/guilds/10/users/20/banners/banner.png?size=640");
+    REQUIRE(Cdn::guildMemberBanner(Core::Snowflake(11), Core::Snowflake(20), "a_banner", 1024) ==
+            "https://cdn.discordapp.com/guilds/11/users/20/banners/a_banner.gif?size=1024");
+    REQUIRE(Cdn::guildMemberBanner(Core::Snowflake::Invalid, Core::Snowflake(20), "banner", 640).empty());
+    REQUIRE(Cdn::guildMemberBanner(Core::Snowflake(10), Core::Snowflake(20), "", 640).empty());
+}

@@ -282,28 +282,37 @@ PrivacySettings PrivacySettings::fromProto(ProtoReader &reader)
     PrivacySettings settings;
     Tag tag;
     while (reader.readTag(tag)) {
-        if (tag.fieldNumber == 3 && tag.wireType == WireType::FIXED64) {
+        std::vector<Core::Snowflake> *restricted = nullptr;
+        switch (tag.fieldNumber) {
+        case 3: restricted = &settings.restrictedGuildIds; break;
+        case 13: restricted = &settings.activityRestrictedGuildIds; break;
+        case 15: restricted = &settings.activityJoiningRestrictedGuildIds; break;
+        case 16: restricted = &settings.messageRequestRestrictedGuildIds; break;
+        default: break;
+        }
+        if (restricted && tag.wireType == WireType::FIXED64) {
             uint64_t id = 0;
-            if (reader.readFixed64(id)) settings.restrictedGuildIds.emplace_back(id);
-        } else if (tag.fieldNumber == 3 && tag.wireType == WireType::LENGTH_DELIMITED) {
+            if (reader.readFixed64(id)) restricted->emplace_back(id);
+        } else if (restricted && tag.wireType == WireType::LENGTH_DELIMITED) {
             std::span<const uint8_t> packed;
             if (reader.readLengthDelimited(packed)) {
+                restricted->reserve(restricted->size() + packed.size() / 8);
                 ProtoReader ids(packed);
                 uint64_t id = 0;
-                while (!ids.atEnd() && ids.readFixed64(id)) settings.restrictedGuildIds.emplace_back(id);
+                while (!ids.atEnd() && ids.readFixed64(id)) restricted->emplace_back(id);
             }
-        } else if ((tag.fieldNumber == 4 || tag.fieldNumber == 5) && tag.wireType == WireType::VARINT) {
+        } else if ((tag.fieldNumber == 4 || tag.fieldNumber == 7) && tag.wireType == WireType::VARINT) {
             uint64_t value = 0;
             if (reader.readVarint(value)) {
                 if (tag.fieldNumber == 4) settings.defaultGuildsRestricted = value != 0;
                 else settings.allowAccessibilityDetection = value != 0;
             }
-        } else if ((tag.fieldNumber == 9 || tag.fieldNumber == 10) && tag.wireType == WireType::LENGTH_DELIMITED) {
+        } else if ((tag.fieldNumber == 11 || tag.fieldNumber == 12) && tag.wireType == WireType::LENGTH_DELIMITED) {
             std::span<const uint8_t> bytes;
             if (reader.readLengthDelimited(bytes)) {
                 ProtoReader wrapped(bytes);
                 if (const auto value = readUInt64Value(wrapped)) {
-                    if (tag.fieldNumber == 9) settings.friendSourceFlags = static_cast<uint32_t>(*value);
+                    if (tag.fieldNumber == 11) settings.friendSourceFlags = static_cast<uint32_t>(*value);
                     else settings.friendDiscoveryFlags = static_cast<uint32_t>(*value);
                 }
             }

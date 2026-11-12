@@ -1,5 +1,6 @@
 #include "PreloadedSettings.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <initializer_list>
 #include <map>
@@ -102,6 +103,83 @@ std::string encodeWrappedString(uint32_t fieldNumber, std::string_view value)
     return out.takeBytes();
 }
 
+Core::Result<std::string> moveGuildFolder(std::span<const uint8_t> payload, const GuildFolderMove &move)
+{
+    std::vector<WireField> groupFields;
+    if (!scanWireFields(payload, groupFields))
+        return Core::Result<std::string>::makeError("Malformed guild folders");
+    auto destinationId = move.folderId;
+    if (move.kind != GuildFolderMove::Kind::Folder) {
+        bool found = false;
+        for (const auto &field : groupFields) {
+            if (field.fieldNumber != 1 || field.wireType != WireType::LENGTH_DELIMITED) continue;
+            ProtoReader reader(field.payloadSpan);
+            const auto folder = GuildFolder::fromProto(reader);
+            if (folder.id && std::find(folder.guildIds.begin(), folder.guildIds.end(), move.guildId) != folder.guildIds.end()) {
+                destinationId = folder.id;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return Core::Result<std::string>::makeError("The server is no longer in a folder. Reopen the server menu.");
+    }
+    bool destinationFound = false;
+    std::string folders;
+    for (const auto &field : groupFields) {
+        if (field.fieldNumber != 1) continue;
+        if (field.wireType != WireType::LENGTH_DELIMITED)
+            return Core::Result<std::string>::makeError("Malformed guild folder");
+        ProtoReader reader(field.payloadSpan);
+        auto folder = GuildFolder::fromProto(reader);
+        const bool contained = std::find(folder.guildIds.begin(), folder.guildIds.end(), move.guildId) != folder.guildIds.end();
+        const bool destination = !destinationFound && folder.id == destinationId &&
+                                 (destinationId.has_value() || contained);
+        if (destination) destinationFound = true;
+        if (!contained && !destination) {
+            folders.append(reinterpret_cast<const char *>(field.rawSpan.data()), field.rawSpan.size());
+            continue;
+        }
+        if (destination && contained && move.kind == GuildFolderMove::Kind::Folder) {
+            folders.append(reinterpret_cast<const char *>(field.rawSpan.data()), field.rawSpan.size());
+            continue;
+        }
+        std::erase(folder.guildIds, move.guildId);
+        if (destination) {
+            if (move.kind == GuildFolderMove::Kind::First) folder.guildIds.insert(folder.guildIds.begin(), move.guildId);
+            else folder.guildIds.push_back(move.guildId);
+        }
+        if (folder.guildIds.empty()) continue;
+
+        std::vector<WireField> fields;
+        if (!scanWireFields(field.payloadSpan, fields))
+            return Core::Result<std::string>::makeError("Malformed guild folder");
+        const auto ids = encodePackedSnowflakes(1, folder.guildIds);
+        std::string updated;
+        bool emitted = false;
+        for (const auto &child : fields) {
+            if (child.fieldNumber == 1) {
+                if (!emitted) updated.append(ids);
+                emitted = true;
+            } else {
+                updated.append(reinterpret_cast<const char *>(child.rawSpan.data()), child.rawSpan.size());
+            }
+        }
+        if (!emitted) updated.append(ids);
+        ProtoWriter encoded;
+        encoded.writeBytes(1, updated);
+        folders.append(encoded.bytes());
+    }
+    if (!destinationFound) {
+        if (destinationId.has_value())
+            return Core::Result<std::string>::makeError("That folder no longer exists. Reopen the server menu.");
+        const Core::Snowflake id[] = {move.guildId};
+        ProtoWriter encoded;
+        encoded.writeBytes(1, encodePackedSnowflakes(1, id));
+        folders.append(encoded.bytes());
+    }
+    return Core::Result<std::string>::makeOk(std::move(folders));
+}
+
 } // namespace
 
 bool PreloadedSettingsEdit::empty() const
@@ -118,6 +196,8 @@ bool PreloadedSettingsEdit::empty() const
         && !friendSourceFlags.has_value()
         && !friendDiscoveryFlags.has_value()
         && !guildFolders.has_value()
+        && !guildPrivacy.has_value()
+        && !guildFolderMove.has_value()
         && !locale.has_value()
         && !guildPositions.has_value();
 }
@@ -249,6 +329,7 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
     const bool touchPrivacy = edit.defaultGuildsRestricted.has_value()
         || edit.allowAccessibilityDetection.has_value()
         || edit.restrictedGuildIds.has_value()
+        || edit.guildPrivacy.has_value()
         || edit.friendSourceFlags.has_value()
         || edit.friendDiscoveryFlags.has_value();
 
@@ -262,7 +343,7 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
     const bool touchLocalization = edit.locale.has_value();
 
     const bool touchGuildFolders = edit.guildFolders.has_value()
-        || edit.guildPositions.has_value();
+        || edit.guildPositions.has_value() || edit.guildFolderMove.has_value();
 
     std::vector<WireField> currentRootFields;
     if (!current.bytes().empty()) {
@@ -289,14 +370,31 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
         if (groupNumber == 8) {
             if (edit.restrictedGuildIds.has_value())
                 replacements[3] = encodePackedSnowflakes(3, *edit.restrictedGuildIds);
+            if (edit.guildPrivacy.has_value()) {
+                ProtoReader reader(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(currentPayload.data()), currentPayload.size()));
+                auto privacy = PrivacySettings::fromProto(reader);
+                auto *ids = &privacy.restrictedGuildIds;
+                const auto &change = *edit.guildPrivacy;
+                switch (change.kind) {
+                case GuildPrivacyEdit::Kind::DirectMessages:
+                    if (edit.restrictedGuildIds) privacy.restrictedGuildIds = *edit.restrictedGuildIds;
+                    break;
+                case GuildPrivacyEdit::Kind::Activity: ids = &privacy.activityRestrictedGuildIds; break;
+                case GuildPrivacyEdit::Kind::ActivityJoining: ids = &privacy.activityJoiningRestrictedGuildIds; break;
+                case GuildPrivacyEdit::Kind::MessageRequests: ids = &privacy.messageRequestRestrictedGuildIds; break;
+                }
+                std::erase(*ids, change.guildId);
+                if (change.restricted) ids->push_back(change.guildId);
+                replacements[static_cast<uint32_t>(change.kind)] = encodePackedSnowflakes(static_cast<uint32_t>(change.kind), *ids);
+            }
             if (edit.defaultGuildsRestricted.has_value())
                 replacements[4] = encodeRawVarint(4, *edit.defaultGuildsRestricted ? 1 : 0);
             if (edit.allowAccessibilityDetection.has_value())
-                replacements[5] = encodeRawVarint(5, *edit.allowAccessibilityDetection ? 1 : 0);
+                replacements[7] = encodeRawVarint(7, *edit.allowAccessibilityDetection ? 1 : 0);
             if (edit.friendSourceFlags.has_value())
-                replacements[9] = encodeWrappedVarint(9, *edit.friendSourceFlags);
+                replacements[11] = encodeWrappedVarint(11, *edit.friendSourceFlags);
             if (edit.friendDiscoveryFlags.has_value())
-                replacements[10] = encodeWrappedVarint(10, *edit.friendDiscoveryFlags);
+                replacements[12] = encodeWrappedVarint(12, *edit.friendDiscoveryFlags);
         } else if (groupNumber == 11) {
             if (edit.presenceStatus.has_value())
                 replacements[1] = encodeWrappedString(1, *edit.presenceStatus);
@@ -344,6 +442,12 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
                 } else {
                     replacements[1] = "";
                 }
+            }
+            if (edit.guildFolderMove.has_value()) {
+                const std::span<const uint8_t> payload(reinterpret_cast<const uint8_t *>(currentPayload.data()), currentPayload.size());
+                auto moved = moveGuildFolder(payload, *edit.guildFolderMove);
+                if (!moved.success()) return moved;
+                replacements[1] = std::move(*moved.value);
             }
             if (edit.guildPositions.has_value())
                 replacements[2] = encodePackedSnowflakes(2, *edit.guildPositions);

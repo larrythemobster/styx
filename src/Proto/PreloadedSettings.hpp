@@ -12,6 +12,22 @@
 
 namespace Styx::Proto {
 
+struct GuildPrivacyEdit
+{
+    enum class Kind : uint32_t { DirectMessages = 3, Activity = 13, ActivityJoining = 15, MessageRequests = 16 };
+    Core::Snowflake guildId;
+    bool restricted = false;
+    Kind kind = Kind::DirectMessages;
+};
+
+struct GuildFolderMove
+{
+    enum class Kind { Folder, First, Last };
+    Core::Snowflake guildId;
+    std::optional<int64_t> folderId;
+    Kind kind = Kind::Folder;
+};
+
 struct PreloadedSettingsEdit
 {
     std::optional<std::string> presenceStatus;
@@ -28,6 +44,8 @@ struct PreloadedSettingsEdit
     std::optional<std::vector<GuildFolder>> guildFolders;
     std::optional<std::string> locale;
     std::optional<std::vector<Core::Snowflake>> guildPositions;
+    std::optional<GuildPrivacyEdit> guildPrivacy;
+    std::optional<GuildFolderMove> guildFolderMove;
 
     bool empty() const;
 };

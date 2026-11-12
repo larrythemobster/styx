@@ -63,6 +63,7 @@ void ReadStateManager::loadFromReady(const std::vector<Discord::ReadStateEntry> 
 {
     channelReadStates.clear();
     guildSettingsMap.clear();
+    muteExpiries.clear();
     guildInfo.clear();
     channelGuildMap.clear();
     resourceChannels.clear();
@@ -87,6 +88,7 @@ void ReadStateManager::loadFromReady(const std::vector<Discord::ReadStateEntry> 
         Snowflake key = settings.guildId.isNull() ? Snowflake(0) : settings.guildId.get();
         guildSettingsMap.insert_or_assign(key, settings);
         rebuildChannelOverrideCache(key);
+        scheduleMuteExpiry(key);
     }
 
     useNewNotifications = usesNewNotifications(notificationSettingsFlags);
@@ -526,6 +528,7 @@ void ReadStateManager::removeGuild(Snowflake guildId)
 
     guildInfo.erase(guildId);
     guildSettingsMap.erase(guildId);
+    muteExpiries.erase(guildId);
     guildOverrideChannels.erase(guildId);
 }
 
@@ -548,6 +551,12 @@ bool ReadStateManager::isGuildMuted(Snowflake guildId) const
 {
     auto it = guildSettingsMap.find(guildId);
     return it != guildSettingsMap.end() && isMutedSetting(it->second);
+}
+
+const Discord::UserGuildSettings *ReadStateManager::guildSettings(Snowflake guildId) const
+{
+    auto it = guildSettingsMap.find(guildId);
+    return it == guildSettingsMap.end() ? nullptr : &it->second;
 }
 
 bool ReadStateManager::isSuppressEveryone(Snowflake guildId) const
@@ -584,6 +593,36 @@ bool ReadStateManager::isMuteActive(bool muted, const Discord::MuteConfig *muteC
     return Platform::DateTime::now() < endTime;
 }
 
+void ReadStateManager::scheduleMuteExpiry(Snowflake guildId)
+{
+    auto settings = guildSettingsMap.find(guildId);
+    if (settings == guildSettingsMap.end()) return;
+    const auto now = Platform::DateTime::now().unixMillis();
+    std::int64_t deadline = 0;
+    auto consider = [&](const auto &value) {
+        if (!value.muted.valueOr(false) || !value.muteConfig.hasValue() || !value.muteConfig->endTime.hasValue()) return;
+        const auto end = Platform::DateTime::parse(value.muteConfig->endTime.get());
+        if (end.valid() && end.unixMillis() > now && (!deadline || end.unixMillis() < deadline))
+            deadline = end.unixMillis();
+    };
+    consider(settings->second);
+    if (settings->second.channelOverrides.hasValue())
+        for (const auto &channel : settings->second.channelOverrides.get()) consider(channel);
+    if (!deadline) {
+        muteExpiries.erase(guildId);
+        return;
+    }
+    auto &expiry = muteExpiries[guildId];
+    if (expiry.deadline == deadline && expiry.timer.active()) return;
+    expiry.deadline = deadline;
+    auto token = lifetime();
+    expiry.timer.start(std::chrono::milliseconds(std::max<std::int64_t>(1, deadline - now)), false, [this, token, guildId] {
+        if (token.expired()) return;
+        scheduleMuteExpiry(guildId);
+        guildSettingsUpdated.publish(guildId);
+    });
+}
+
 Discord::ReadStateEntry &ReadStateManager::entryFor(Snowflake channelId)
 {
     auto it = channelReadStates.find(channelId);
@@ -617,8 +656,27 @@ void ReadStateManager::onUserGuildSettingsUpdate(const Discord::UserGuildSetting
 {
     Snowflake key = settings.guildId.isNull() ? Snowflake(0) : settings.guildId.get();
 
-    guildSettingsMap.insert_or_assign(key, settings);
+    auto [it, inserted] = guildSettingsMap.try_emplace(key, settings);
+    if (!inserted) {
+        auto merge = [](auto &target, const auto &source) {
+            if (!source.isUndefined()) target = source;
+        };
+        auto &stored = it->second;
+        merge(stored.channelOverrides, settings.channelOverrides);
+        merge(stored.flags, settings.flags);
+        merge(stored.hideMutedChannels, settings.hideMutedChannels);
+        merge(stored.messageNotifications, settings.messageNotifications);
+        merge(stored.mobilePush, settings.mobilePush);
+        merge(stored.muteScheduledEvents, settings.muteScheduledEvents);
+        merge(stored.muted, settings.muted);
+        merge(stored.muteConfig, settings.muteConfig);
+        merge(stored.notifyHighlights, settings.notifyHighlights);
+        merge(stored.suppressEveryone, settings.suppressEveryone);
+        merge(stored.suppressRoles, settings.suppressRoles);
+        merge(stored.version, settings.version);
+    }
     rebuildChannelOverrideCache(key);
+    scheduleMuteExpiry(key);
 
     guildSettingsUpdated.publish(key);
 }

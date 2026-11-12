@@ -8,6 +8,7 @@
 
 #include "Platform/Native.hpp"
 #include "Platform/Trackable.hpp"
+#include "Platform/Timer.hpp"
 
 #include "ChannelReadState.hpp"
 #include "Snowflake.hpp"
@@ -52,6 +53,9 @@ public:
     int getMentionCount(Snowflake channelId) const;
     bool isChannelMuted(Snowflake channelId) const;
     bool isGuildMuted(Snowflake guildId) const;
+    [[nodiscard]] const Discord::UserGuildSettings *guildSettings(Snowflake guildId) const;
+    [[nodiscard]] bool isOptInGuild(Snowflake guildId) const;
+    [[nodiscard]] bool isChannelOptedIn(Snowflake channelId) const;
     [[nodiscard]] bool isSuppressEveryone(Snowflake guildId) const;
     [[nodiscard]] bool isSuppressRoles(Snowflake guildId) const;
     Discord::MessageNotificationLevel resolveMessageNotifications(Snowflake guildId,
@@ -99,11 +103,10 @@ private:
     void tryAckActiveChannel();
 
     void rebuildChannelOverrideCache(Snowflake guildSettingsKey);
+    void scheduleMuteExpiry(Snowflake guildId);
 
     [[nodiscard]] bool unreadCountsForGuild(Snowflake guildId, Snowflake channelId, Snowflake parentId) const;
     [[nodiscard]] bool canTrackUnreads(Snowflake channelId) const;
-    [[nodiscard]] bool isOptInGuild(Snowflake guildId) const;
-    [[nodiscard]] bool isChannelOptedIn(Snowflake channelId) const;
     [[nodiscard]] bool hasRecentlyVisitedAndRead(Snowflake channelId, Snowflake lastMessageId) const;
     Snowflake guildForChannel(Snowflake channelId) const;
 
@@ -121,6 +124,11 @@ private:
     std::unordered_map<Snowflake, Snowflake> channelLastMessageIds;
     std::unordered_map<Snowflake, Snowflake> ackIdAtSelect;
     std::unordered_map<Snowflake, Discord::UserGuildSettings> guildSettingsMap; // Snowflake(0) for DMs
+    struct MuteExpiry {
+        Platform::Timer timer;
+        std::int64_t deadline = 0;
+    };
+    std::unordered_map<Snowflake, MuteExpiry> muteExpiries;
 
     std::unordered_map<Snowflake, Discord::ChannelOverride> channelOverrideCache;
     std::unordered_map<Snowflake, std::unordered_set<Snowflake>> guildOverrideChannels;

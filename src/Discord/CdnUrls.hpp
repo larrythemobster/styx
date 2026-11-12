@@ -13,6 +13,7 @@ std::string userAvatar(Core::Snowflake userId, const std::string &hash, int size
 std::string guildMemberAvatar(Core::Snowflake guildId, Core::Snowflake userId, const std::string &hash, int size = 128);
 std::string effectiveAvatar(Core::Snowflake guildId, Core::Snowflake userId, const std::string &memberHash, const std::string &userHash, int size = 128);
 std::string userBanner(Core::Snowflake userId, const std::string &hash, int size = 600);
+std::string guildMemberBanner(Core::Snowflake guildId, Core::Snowflake userId, const std::string &hash, int size = 600);
 std::string guildIcon(Core::Snowflake guildId, const std::string &hash, int size = 64);
 std::string guildBanner(Core::Snowflake guildId, const std::string &hash, int size = 480);
 std::string guildSplash(Core::Snowflake guildId, const std::string &hash, int size = 480);

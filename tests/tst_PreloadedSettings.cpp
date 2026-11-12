@@ -13,6 +13,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <algorithm>
+#include <array>
 #include <utility>
 
 using namespace Styx;
@@ -65,7 +67,7 @@ TEST_CASE("PreloadedSettings: Literal byte fixture with correct wrappers and edi
 
     const auto patch = preloadedSettingsPatch(current, edit);
     REQUIRE(patch.success());
-    REQUIRE(toHex(*patch.value) == "420620014a02080f6a0408011001");
+    REQUIRE(toHex(*patch.value) == "420620015a02080f6a0408011001");
 
     const auto decoded = PreloadedSettingsSnapshot::fromProto(*patch.value);
     REQUIRE(decoded.success());
@@ -110,7 +112,7 @@ TEST_CASE("PreloadedSettings: Unknown nested siblings preserved across all four 
 
         const auto patch = preloadedSettingsPatch(current, edit);
         REQUIRE(patch.success());
-        REQUIRE(toHex(*patch.value) == "420720019806072801");
+        REQUIRE(toHex(*patch.value) == "420720019806073801");
     }
 
     SECTION("Guild folders preserves existing positions and unknown field 99") {
@@ -217,7 +219,7 @@ TEST_CASE("PreloadedSettings: False and 0 updates serialize explicitly without o
     const auto patch = preloadedSettingsPatch(current, edit);
     REQUIRE(patch.success());
 
-    REQUIRE(toHex(*patch.value) == "420c200028004a020800520208005a0d1a0208002100000000000000006a0408001000");
+    REQUIRE(toHex(*patch.value) == "420c200038005a020800620208005a0d1a0208002100000000000000006a0408001000");
 
 }
 
@@ -495,7 +497,7 @@ TEST_CASE("Locale changes preserve other localization settings", "[proto]")
 
 TEST_CASE("Privacy settings decode explicit false and packed server IDs", "[proto]")
 {
-    const auto bytes = fromHex("421e1a1001000000000000000200000000000000200028014a020806520208026a0408021001");
+    const auto bytes = fromHex("421e1a1001000000000000000200000000000000200038015a020806620208026a0408021001");
     ProtoReader reader(bytes);
     const auto parsed = PreloadedUserSettings::fromProto(reader);
     REQUIRE(parsed.privacy.has_value());
@@ -507,4 +509,130 @@ TEST_CASE("Privacy settings decode explicit false and packed server IDs", "[prot
     REQUIRE(parsed.appearance.has_value());
     REQUIRE(parsed.appearance->theme == 2);
     REQUIRE(parsed.appearance->developerMode);
+}
+
+TEST_CASE("Friend request preferences do not overwrite passwordless or contact sync", "[proto]")
+{
+    const auto current = snapshotFromHex("42084a02080152020800");
+    PreloadedSettingsEdit edit;
+    edit.friendSourceFlags = 14;
+    const auto patch = preloadedSettingsPatch(current, edit);
+    REQUIRE(patch.success());
+    REQUIRE(toHex(*patch.value) == "420c4a020801520208005a02080e");
+}
+
+TEST_CASE("Per-server privacy changes retain every unrelated restriction and privacy field", "[proto]")
+{
+    using Kind = GuildPrivacyEdit::Kind;
+    for (const auto kind : {Kind::DirectMessages, Kind::Activity, Kind::ActivityJoining, Kind::MessageRequests}) {
+        for (bool restricted : {false, true}) {
+            CAPTURE(int(kind), restricted);
+            ProtoWriter privacy;
+            for (uint32_t field : {3u, 13u, 15u, 16u}) {
+                privacy.writeFixed64(field, 100);
+                privacy.writeFixed64(field, 200);
+            }
+            privacy.writeBytes(9, std::string("\x08\x01", 2));
+            ProtoWriter root;
+            root.writeBytes(8, privacy.bytes());
+            const auto snapshot = PreloadedSettingsSnapshot::fromProto(root.bytes());
+            REQUIRE(snapshot.success());
+            PreloadedSettingsEdit edit;
+            edit.guildPrivacy = GuildPrivacyEdit{Core::Snowflake(100), restricted, kind};
+            const auto patch = preloadedSettingsPatch(*snapshot.value, edit);
+            REQUIRE(patch.success());
+            ProtoReader reader(*patch.value);
+            const auto parsed = PreloadedUserSettings::fromProto(reader);
+            REQUIRE(parsed.privacy.has_value());
+            const std::array<std::pair<Kind, const std::vector<Core::Snowflake> *>, 4> lists{{
+                {Kind::DirectMessages, &parsed.privacy->restrictedGuildIds},
+                {Kind::Activity, &parsed.privacy->activityRestrictedGuildIds},
+                {Kind::ActivityJoining, &parsed.privacy->activityJoiningRestrictedGuildIds},
+                {Kind::MessageRequests, &parsed.privacy->messageRequestRestrictedGuildIds}}};
+            for (const auto &[setting, ids] : lists) {
+                REQUIRE(std::count(ids->begin(), ids->end(), Core::Snowflake(200)) == 1);
+                REQUIRE(std::count(ids->begin(), ids->end(), Core::Snowflake(100)) == (setting == kind && !restricted ? 0 : 1));
+                REQUIRE(ids->size() == (setting == kind && !restricted ? 1 : 2));
+            }
+            REQUIRE(toHex(*patch.value).find("4a020801") != std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("Moving servers preserves fresh folder metadata, order and unknown fields", "[proto]")
+{
+    ProtoWriter first;
+    first.writeFixed64(1, 100);
+    first.writeFixed64(1, 200);
+    ProtoWriter id;
+    id.writeVarint(1, 10);
+    first.writeBytes(2, id.bytes());
+    ProtoWriter name;
+    name.writeString(1, "First");
+    first.writeBytes(3, name.bytes());
+    first.writeVarint(99, 77);
+    ProtoWriter second;
+    second.writeFixed64(1, 300);
+    ProtoWriter secondId;
+    secondId.writeVarint(1, 20);
+    second.writeBytes(2, secondId.bytes());
+    ProtoWriter folders;
+    folders.writeBytes(1, first.bytes());
+    folders.writeBytes(1, second.bytes());
+    folders.writeFixed64(2, 100);
+    folders.writeFixed64(2, 200);
+    folders.writeFixed64(2, 300);
+    ProtoWriter root;
+    root.writeBytes(14, folders.bytes());
+    const auto snapshot = PreloadedSettingsSnapshot::fromProto(root.bytes());
+    REQUIRE(snapshot.success());
+
+    SECTION("Moving to another folder leaves unrelated servers and ordering intact") {
+        PreloadedSettingsEdit edit;
+        edit.guildFolderMove = GuildFolderMove{Core::Snowflake(100), int64_t(20)};
+        const auto patch = preloadedSettingsPatch(*snapshot.value, edit);
+        REQUIRE(patch.success());
+        ProtoReader reader(*patch.value);
+        const auto parsed = PreloadedUserSettings::fromProto(reader);
+        REQUIRE(parsed.guildFolders->folders.size() == 2);
+        REQUIRE(parsed.guildFolders->folders[0].guildIds == std::vector<Core::Snowflake>{Core::Snowflake(200)});
+        REQUIRE(parsed.guildFolders->folders[0].name == "First");
+        REQUIRE(parsed.guildFolders->folders[1].guildIds == std::vector<Core::Snowflake>{Core::Snowflake(300), Core::Snowflake(100)});
+        REQUIRE(parsed.guildFolders->guildPositions == std::vector<Core::Snowflake>{Core::Snowflake(100), Core::Snowflake(200), Core::Snowflake(300)});
+        REQUIRE(toHex(*patch.value).find("98064d") != std::string::npos);
+    }
+    SECTION("First and last operate within the folder from the fresh snapshot") {
+        PreloadedSettingsEdit edit;
+        edit.guildFolderMove = GuildFolderMove{Core::Snowflake(200), {}, GuildFolderMove::Kind::First};
+        const auto firstPatch = preloadedSettingsPatch(*snapshot.value, edit);
+        REQUIRE(firstPatch.success());
+        ProtoReader firstReader(*firstPatch.value);
+        const auto firstState = PreloadedUserSettings::fromProto(firstReader);
+        REQUIRE(firstState.guildFolders->folders[0].guildIds == std::vector<Core::Snowflake>{Core::Snowflake(200), Core::Snowflake(100)});
+        const auto moved = PreloadedSettingsSnapshot::fromProto(*firstPatch.value);
+        REQUIRE(moved.success());
+        edit.guildFolderMove->kind = GuildFolderMove::Kind::Last;
+        const auto lastPatch = preloadedSettingsPatch(*moved.value, edit);
+        REQUIRE(lastPatch.success());
+        ProtoReader lastReader(*lastPatch.value);
+        const auto lastState = PreloadedUserSettings::fromProto(lastReader);
+        REQUIRE(lastState.guildFolders->folders[0].guildIds == std::vector<Core::Snowflake>{Core::Snowflake(100), Core::Snowflake(200)});
+    }
+    SECTION("Removing the last server dissolves its empty folder without losing the server") {
+        PreloadedSettingsEdit edit;
+        edit.guildFolderMove = GuildFolderMove{Core::Snowflake(300), {}};
+        const auto patch = preloadedSettingsPatch(*snapshot.value, edit);
+        REQUIRE(patch.success());
+        ProtoReader reader(*patch.value);
+        const auto parsed = PreloadedUserSettings::fromProto(reader);
+        REQUIRE(parsed.guildFolders->folders.size() == 2);
+        REQUIRE(parsed.guildFolders->folders[0].id == int64_t(10));
+        REQUIRE_FALSE(parsed.guildFolders->folders[1].id.has_value());
+        REQUIRE(parsed.guildFolders->folders[1].guildIds == std::vector<Core::Snowflake>{Core::Snowflake(300)});
+    }
+    SECTION("A deleted destination fails rather than silently moving the server elsewhere") {
+        PreloadedSettingsEdit edit;
+        edit.guildFolderMove = GuildFolderMove{Core::Snowflake(100), int64_t(999)};
+        REQUIRE_FALSE(preloadedSettingsPatch(*snapshot.value, edit).success());
+    }
 }

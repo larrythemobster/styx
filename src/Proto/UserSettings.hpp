@@ -66,6 +66,9 @@ struct PrivacySettings
     bool defaultGuildsRestricted = false;
     bool allowAccessibilityDetection = false;
     std::vector<Core::Snowflake> restrictedGuildIds;
+    std::vector<Core::Snowflake> activityRestrictedGuildIds;
+    std::vector<Core::Snowflake> activityJoiningRestrictedGuildIds;
+    std::vector<Core::Snowflake> messageRequestRestrictedGuildIds;
     std::optional<uint32_t> friendSourceFlags;
     std::optional<uint32_t> friendDiscoveryFlags;
     static PrivacySettings fromProto(ProtoReader &reader);

@@ -1833,6 +1833,14 @@ struct MuteConfig : Core::JsonUtils::JsonObject
         get(obj, "selected_time_window", config.selectedTimeWindow);
         return config;
     }
+
+    Core::OrderedJson toJson() const
+    {
+        Core::OrderedJson obj;
+        insert(obj, "end_time", endTime);
+        insert(obj, "selected_time_window", selectedTimeWindow);
+        return obj;
+    }
 };
 
 struct ChannelOverride : Core::JsonUtils::JsonObject

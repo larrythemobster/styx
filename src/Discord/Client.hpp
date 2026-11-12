@@ -250,6 +250,9 @@ public:
     void fetchUserCommandIndex(ResultCallback<ApplicationCommandIndex> callback);
     void modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<User> callback = {});
     void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
+    void modifyUserGuildSettings(Snowflake guildId, const UserGuildSettingsEdit &edit, ActionCallback callback = {});
+    void modifyCurrentMember(Snowflake guildId, const CurrentMemberEdit &edit,
+                             const std::map<std::string, std::string> &originalMd5s, ActionCallback callback = {});
     void modifyPreloadedSettings(Proto::PreloadedSettingsEdit edit, ActionCallback callback = {});
     void setCustomStatus(const std::optional<Proto::CustomStatus> &customStatus, ActionCallback callback = {});
 

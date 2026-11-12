@@ -897,6 +897,25 @@ void Client::modifyGuildProfile(Snowflake guildId, const GuildProfileEdit &edit,
             [](const nlohmann::json &document) { return GuildProfileEdit::fromProfile(document); }));
 }
 
+void Client::modifyUserGuildSettings(Snowflake guildId, const UserGuildSettingsEdit &edit, ActionCallback callback)
+{
+    httpClient->patch("/users/@me/guilds/" + guildId.toString() + "/settings", edit.toJson(),
+        applyThen([this, guildId](const nlohmann::json &document) {
+            auto settings = UserGuildSettings::fromJson(document);
+            settings.guildId = guildId;
+            userGuildSettingsUpdated.publish(settings);
+        }, actionHandler("Saving server notification settings", std::move(callback))));
+}
+
+void Client::modifyCurrentMember(Snowflake guildId, const CurrentMemberEdit &edit,
+                                 const std::map<std::string, std::string> &hashes, ActionCallback callback)
+{
+    RequestOptions options;
+    options.originalMd5 = originalMd5Header(hashes);
+    httpClient->send(HttpClient::Method::PATCH, guildEndpoint(guildId, "/members/@me"), edit.toJson().toBytes(), options,
+        memberUpdateHandler(guildId, "Saving your server profile", std::move(callback)));
+}
+
 void Client::modifyGuild(Snowflake guildId, const GuildEdit &edit, const std::map<std::string, std::string> &hashes, ActionCallback callback)
 {
     RequestOptions options;
