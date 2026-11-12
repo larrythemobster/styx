@@ -2,6 +2,7 @@
 
 #include "Discord/CdnUrls.hpp"
 #include "Core/ClientInstance.hpp"
+#include "Core/Theme/Manager.hpp"
 #include "Discord/Client.hpp"
 #include "ImageUpload.hpp"
 #include "Platform/Desktop.hpp"
@@ -20,6 +21,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -41,8 +43,8 @@ void setControlDisabled(::Rml::Element *element, bool disabled)
 
 } // namespace
 
-ProfileEditorController::ProfileEditorController(Shell &shell)
-    : Controller(shell, nullptr)
+ProfileEditorController::ProfileEditorController(Shell &shell, ::Rml::Element &host)
+    : Controller(shell, &host)
 {
     const auto scope = std::to_string(reinterpret_cast<std::uintptr_t>(this));
     avatarFrameKey = "profile-editor-avatar-" + scope;
@@ -62,22 +64,19 @@ ProfileEditorController::~ProfileEditorController()
     loading = false;
     clearFrames();
     removeListeners();
-    if (profileEditorDocument) {
-        profileEditorDocument->Close();
-        profileEditorDocument = nullptr;
-    }
 }
 
 void ProfileEditorController::open()
 {
     ensureDocument();
-    if (!profileEditorDocument)
+    if (!regionRoot)
         return;
 
     ++generation;
     saving = false;
     loading = false;
     error.clear();
+    savedMessage.clear();
     hasSavedData = false;
     savedUser = Discord::User{};
     savedProfile = Discord::UserProfileData{};
@@ -89,20 +88,17 @@ void ProfileEditorController::open()
     editingAccountId = inst ? inst->accountId() : Core::Snowflake::Invalid;
 
     visible = true;
-    profileEditorDocument->Show(::Rml::ModalFlag::Modal);
-    profileEditorDocument->SetProperty("display", "flex");
-    profileEditorDocument->PullToFront();
 
     if (!editingAccountId.isValid() || inst->discord()->getMe().id.get() != editingAccountId) {
         error = editingAccountId.isValid() ? "Account is not ready. Retry after it connects." : "No active account.";
         render();
-        profileEditorDocument->Focus();
+        regionRoot->Focus();
         return;
     }
 
     loading = true;
     render();
-    profileEditorDocument->Focus();
+    regionRoot->Focus();
 
     const auto currentGen = generation;
     const auto accountId = editingAccountId;
@@ -122,11 +118,11 @@ void ProfileEditorController::open()
             if (auto *nameEl = self->nameInput())
                 nameEl->Focus();
             else
-                self->profileEditorDocument->Focus();
+                self->regionRoot->Focus();
         } else {
             self->error = result.error.empty() ? "Failed to load profile." : result.error;
             self->render();
-            self->profileEditorDocument->Focus();
+            self->regionRoot->Focus();
         }
     });
 }
@@ -141,41 +137,42 @@ void ProfileEditorController::close()
     loading = false;
     ++generation;
     clearDrafts();
-    if (profileEditorDocument)
-        profileEditorDocument->Hide();
-    closed.publish();
     requestRender();
 }
 
 void ProfileEditorController::ensureDocument()
 {
-    if (profileEditorDocument)
+    if (formInitialized)
         return;
 
     auto *view = shell.view();
     if (!view || !view->context())
         return;
 
-    profileEditorDocument = view->context()->LoadDocument("ui/profile_editor.rml");
-    if (!profileEditorDocument)
+    auto *form = view->context()->LoadDocument("ui/profile_editor.rml");
+    if (!form)
         return;
-
-    regionRoot = profileEditorDocument;
+    regionRoot->SetInnerRML(form->GetInnerRML());
+    form->Close();
+    formInitialized = true;
     setupEventListeners();
 }
 
 void ProfileEditorController::setupEventListeners()
 {
+    listen("change", [this](::Rml::Event &event) {
+        savedMessage.clear();
+        updatePreview(event.GetTargetElement());
+        setControlDisabled(saveButton(), loading || saving || !hasSavedData || !hasPendingChanges());
+        if (auto *state = regionRoot->GetElementById("profile-edit-state"); state && !loading && !saving)
+            state->SetProperty("display", "none");
+    });
     listen("click", [this](::Rml::Event &event) {
         auto *actionEl = closest(event.GetTargetElement(), "data-action");
         if (!actionEl)
             return;
 
         const std::string action = attribute(actionEl, "data-action");
-        if (action == "close") {
-            close();
-            return;
-        }
 
         if (action == "reset") {
             reset();
@@ -198,12 +195,6 @@ void ProfileEditorController::setupEventListeners()
         }
     });
 
-    listen("keydown", [this](::Rml::Event &event) {
-        if (event.GetParameter<int>("key_identifier", 0) != ::Rml::Input::KI_ESCAPE)
-            return;
-        event.StopPropagation();
-        close();
-    });
 
     auto submitOnEnter = [this](::Rml::Event &event) {
         const int key = event.GetParameter<int>("key_identifier", 0);
@@ -222,7 +213,7 @@ void ProfileEditorController::setupEventListeners()
 
 void ProfileEditorController::render()
 {
-    if (!profileEditorDocument)
+    if (!regionRoot)
         return;
 
     const std::string empty;
@@ -296,17 +287,57 @@ void ProfileEditorController::render()
     setControlDisabled(pronounsInput(), busy);
     setControlDisabled(bioTextarea(), busy);
     setControlDisabled(chooseAvatarButton(), busy);
-    setControlDisabled(removeAvatarButton(), busy);
+    setControlDisabled(removeAvatarButton(), busy || avatarDraft.removed ||
+        (avatarDraft.uri.empty() && (!savedUser.avatar.hasValue() || savedUser.avatar->empty())));
     setControlDisabled(chooseBannerButton(), busy);
-    setControlDisabled(removeBannerButton(), busy);
-    setControlDisabled(saveButton(), busy);
+    const auto &currentBanner = savedProfile.banner.isUndefined() ? savedUser.banner : savedProfile.banner;
+    setControlDisabled(removeBannerButton(), busy || bannerDraft.removed ||
+        (bannerDraft.uri.empty() && (!currentBanner.hasValue() || currentBanner->empty())));
+    setControlDisabled(saveButton(), busy || !hasPendingChanges());
     setControlDisabled(resetButton(), loading || saving || !editingAccountId.isValid());
-    if (auto *state = profileEditorDocument->GetElementById("profile-edit-state")) {
-        const std::string text = loading ? "Loading profile..." : saving ? "Saving changes..." : "";
+    if (auto *state = regionRoot->GetElementById("profile-edit-state")) {
+        const std::string text = loading ? "Loading profile..." : saving ? "Saving changes..." : savedMessage;
         state->SetInnerRML(text);
         state->SetProperty("display", text.empty() ? "none" : "block");
     }
+    updatePreview();
     requestRender();
+}
+
+void ProfileEditorController::updatePreview(::Rml::Element *changed)
+{
+    const std::string_view id = changed ? changed->GetId() : std::string_view{};
+    auto text = [this](const char *target, const std::string &value) {
+        if (auto *element = regionRoot->GetElementById(target))
+            element->SetInnerRML(Platform::htmlEscape(value));
+    };
+    if (!changed || id == "profile-edit-name") {
+        const auto *input = nameInput();
+        const auto name = input ? input->GetValue() : "";
+        text("profile-live-name", name.empty() ? savedUser.username.get() : name);
+    }
+    if (!changed) text("profile-live-username", savedUser.username.get());
+    if (!changed || id == "profile-edit-pronouns") {
+        const auto *input = pronounsInput();
+        text("profile-live-pronouns", input ? input->GetValue() : "");
+    }
+    if (!changed || id == "profile-edit-bio") {
+        const auto *input = bioTextarea();
+        text("profile-live-bio", input ? input->GetValue() : "");
+    }
+    if (changed) return;
+    for (const auto &[original, preview] : {std::pair{avatarPreview(), "profile-live-avatar"},
+                                          std::pair{bannerPreview(), "profile-live-banner-image"}}) {
+        if (auto *image = regionRoot->GetElementById(preview); image && original) {
+            const auto source = original->GetAttribute<std::string>("src", "");
+            image->SetAttribute("src", source);
+            image->SetProperty("display", source.empty() ? "none" : "block");
+        }
+    }
+    if (auto *banner = regionRoot->GetElementById("profile-live-banner"))
+        banner->SetProperty("background-color", savedProfile.accentColor.hasValue()
+            ? Platform::Color::rgb(uint32_t(savedProfile.accentColor.get())).css()
+            : Core::Theme::Manager::instance().color(Core::Theme::Token::Highlight).css());
 }
 
 void ProfileEditorController::reset()
@@ -321,6 +352,7 @@ void ProfileEditorController::reset()
     ++generation;
 
     error.clear();
+    savedMessage.clear();
     clearDrafts();
     applyBaselineToInputs();
     render();
@@ -376,7 +408,7 @@ void ProfileEditorController::save()
     }
 
     if (accountEdit.empty() && profileEdit.empty()) {
-        close();
+        render();
         return;
     }
 
@@ -424,8 +456,7 @@ void ProfileEditorController::saveAccount(const Discord::CurrentUserEdit &accoun
         if (!profileEdit.empty()) {
             self->saveMetadata(profileEdit, true);
         } else {
-            self->saving = false;
-            self->close();
+            self->finishSave();
         }
     });
 }
@@ -463,8 +494,33 @@ void ProfileEditorController::saveMetadata(const Discord::UserProfileEdit &profi
         }
 
         self->savedProfile = result.value.value();
-        self->close();
+        self->finishSave();
     });
+}
+
+void ProfileEditorController::finishSave()
+{
+    saving = false;
+    clearDrafts();
+    applyBaselineToInputs();
+    savedMessage = "Changes saved.";
+    render();
+}
+
+bool ProfileEditorController::hasPendingChanges() const
+{
+    if (!visible || loading || !hasSavedData)
+        return false;
+    const auto *name = nameInput();
+    const auto *pronouns = pronounsInput();
+    const auto *bio = bioTextarea();
+    const auto &banner = savedProfile.banner.isUndefined() ? savedUser.banner : savedProfile.banner;
+    return (name && name->GetValue() != savedUser.globalName.valueOr("")) ||
+        (pronouns && pronouns->GetValue() != savedProfile.pronouns.get()) ||
+        (bio && bio->GetValue() != savedProfile.bio.valueOr("")) ||
+        !avatarDraft.uri.empty() || !bannerDraft.uri.empty() ||
+        (avatarDraft.removed && savedUser.avatar.hasValue() && !savedUser.avatar->empty()) ||
+        (bannerDraft.removed && banner.hasValue() && !banner->empty());
 }
 
 void ProfileEditorController::chooseImage(ImageSlot slot)
@@ -556,72 +612,72 @@ const std::string &ProfileEditorController::frameKey(ImageSlot slot) const
 
 ::Rml::ElementFormControlInput *ProfileEditorController::nameInput() const
 {
-    return profileEditorDocument ? static_cast<::Rml::ElementFormControlInput *>(profileEditorDocument->GetElementById("profile-edit-name")) : nullptr;
+    return regionRoot ? static_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("profile-edit-name")) : nullptr;
 }
 
 ::Rml::ElementFormControlInput *ProfileEditorController::pronounsInput() const
 {
-    return profileEditorDocument ? static_cast<::Rml::ElementFormControlInput *>(profileEditorDocument->GetElementById("profile-edit-pronouns")) : nullptr;
+    return regionRoot ? static_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("profile-edit-pronouns")) : nullptr;
 }
 
 ::Rml::ElementFormControlTextArea *ProfileEditorController::bioTextarea() const
 {
-    return profileEditorDocument ? static_cast<::Rml::ElementFormControlTextArea *>(profileEditorDocument->GetElementById("profile-edit-bio")) : nullptr;
+    return regionRoot ? static_cast<::Rml::ElementFormControlTextArea *>(regionRoot->GetElementById("profile-edit-bio")) : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::avatarPreview() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-avatar-preview") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-avatar-preview") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::bannerPreview() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-banner-preview") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-banner-preview") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::avatarUnavailable() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-avatar-unavailable") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-avatar-unavailable") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::bannerUnavailable() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-banner-unavailable") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-banner-unavailable") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::chooseAvatarButton() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-choose-avatar") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-choose-avatar") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::removeAvatarButton() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-remove-avatar") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-remove-avatar") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::chooseBannerButton() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-choose-banner") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-choose-banner") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::removeBannerButton() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-remove-banner") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-remove-banner") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::saveButton() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-save") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-save") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::resetButton() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-reset") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-reset") : nullptr;
 }
 
 ::Rml::Element *ProfileEditorController::errorElement() const
 {
-    return profileEditorDocument ? profileEditorDocument->GetElementById("profile-edit-error") : nullptr;
+    return regionRoot ? regionRoot->GetElementById("profile-edit-error") : nullptr;
 }
 
 } // namespace Styx::UI::Rml

@@ -311,6 +311,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/MemberListController.cpp
     src/UI/Rml/FriendsController.cpp
     src/UI/Rml/SettingsController.cpp
+    src/UI/Rml/SettingsPages.cpp
     src/UI/Rml/ProfileEditorController.cpp
     src/UI/Rml/AccountsController.cpp
     src/UI/Rml/ConfirmModal.cpp

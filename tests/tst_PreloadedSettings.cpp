@@ -468,10 +468,43 @@ TEST_CASE("PreloadedSettings: Malformed wire rejected before writing", "[proto]"
     }
 
     SECTION("Known group with non-length-delimited wire type rejected") {
-        const uint8_t bytes[] = { 0x58, 0x01 };
-        const auto res = PreloadedSettingsSnapshot::fromProto(
-            std::string_view(reinterpret_cast<const char *>(bytes), sizeof(bytes))
-        );
-        REQUIRE_FALSE(res.success());
+        for (const uint8_t group : {1, 8, 11, 12, 13, 14}) {
+            const uint8_t bytes[] = {static_cast<uint8_t>(group << 3), 0x01};
+            const auto res = PreloadedSettingsSnapshot::fromProto(
+                std::string_view(reinterpret_cast<const char *>(bytes), sizeof(bytes)));
+            REQUIRE_FALSE(res.success());
+        }
     }
+}
+
+TEST_CASE("Locale changes preserve other localization settings", "[proto]")
+{
+    const auto current = snapshotFromHex("620b0a070a05656e2d555310075a022001");
+    PreloadedSettingsEdit edit;
+    edit.locale = "fr";
+    REQUIRE_FALSE(edit.empty());
+    const auto patch = preloadedSettingsPatch(current, edit);
+    REQUIRE(patch.success());
+    REQUIRE(toHex(*patch.value) == "62080a040a0266721007");
+    ProtoReader reader(*patch.value);
+    const auto parsed = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(parsed.localization.has_value());
+    REQUIRE(parsed.localization->locale == "fr");
+    REQUIRE_FALSE(parsed.status.has_value());
+}
+
+TEST_CASE("Privacy settings decode explicit false and packed server IDs", "[proto]")
+{
+    const auto bytes = fromHex("421e1a1001000000000000000200000000000000200028014a020806520208026a0408021001");
+    ProtoReader reader(bytes);
+    const auto parsed = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(parsed.privacy.has_value());
+    REQUIRE_FALSE(parsed.privacy->defaultGuildsRestricted);
+    REQUIRE(parsed.privacy->allowAccessibilityDetection);
+    REQUIRE(parsed.privacy->restrictedGuildIds == std::vector<Core::Snowflake>{Core::Snowflake(1), Core::Snowflake(2)});
+    REQUIRE(parsed.privacy->friendSourceFlags == 6u);
+    REQUIRE(parsed.privacy->friendDiscoveryFlags == 2u);
+    REQUIRE(parsed.appearance.has_value());
+    REQUIRE(parsed.appearance->theme == 2);
+    REQUIRE(parsed.appearance->developerMode);
 }

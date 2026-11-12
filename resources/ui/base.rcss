@@ -25,3 +25,9 @@ scrollbarvertical sliderbar { background-color: #111214; border-radius: 4dp; min
 scrollbarvertical sliderbar:hover { background-color: #19191c; }
 scrollbarvertical sliderarrowdec, scrollbarvertical sliderarrowinc { height: 0; width: 0; }
 scrollbarhorizontal { height: 0; }
+
+body.reduced-motion *
+{
+    transition: none;
+    animation: none;
+}

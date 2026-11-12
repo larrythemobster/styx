@@ -10,6 +10,7 @@
 #include <curl/curl.h>
 #include <SDL3/SDL.h>
 #include <exception>
+#include <string_view>
 #include <SDL3/SDL_main.h>
 #ifndef STYX_NO_VOICE
 #include <dave/dave.h>
@@ -57,6 +58,8 @@ int main(int argc, char *argv[])
             Core::Session session;
             UI::Shell window(&session);
             window.show();
+            for (int i = 1; i < argc; ++i)
+                if (std::string_view(argv[i]) == "--start-minimized") window.minimize();
             session.autoConnectAccounts();
             exitCode = app.exec();
         }

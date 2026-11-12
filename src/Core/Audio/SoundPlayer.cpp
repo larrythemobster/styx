@@ -6,6 +6,7 @@
 #include "Core/Audio/AudioBackends.hpp"
 #include "Core/Audio/Miniaudio.hpp"
 #include "Core/Logging.hpp"
+#include "Core/SettingsKeys.hpp"
 #include "Platform/Dispatcher.hpp"
 #include "Platform/Settings.hpp"
 
@@ -40,6 +41,7 @@ public:
     void play(Sound sound);
     void startLoop(Sound sound);
     void stopLoop(Sound sound);
+    void stopAll();
 
 private:
     SoundPlayer() = default;
@@ -116,6 +118,15 @@ void SoundPlayer::stopLoop(Sound sound)
     voices.erase(std::remove_if(voices.begin(), voices.end(), [sound](const Voice &voice) { return voice.looping && voice.sound == sound; }), voices.end());
 }
 
+void SoundPlayer::stopAll()
+{
+    {
+        std::lock_guard lock(mixMutex);
+        voices.clear();
+    }
+    stopIfIdle();
+}
+
 void SoundPlayer::armIdleTimer()
 {
     auto &dispatcher = Platform::Dispatcher::main();
@@ -188,14 +199,16 @@ void SoundPlayer::mix(float *output, ma_uint32 frameCount)
 
 void play(Sound sound)
 {
-    if (!Platform::Settings::instance().getBool(settingKey(sound), true))
+    if (!Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, true) ||
+        !Platform::Settings::instance().getBool(settingKey(sound), true))
         return;
     SoundPlayer::instance().play(sound);
 }
 
 void startLoop(Sound sound)
 {
-    if (!Platform::Settings::instance().getBool(settingKey(sound), true))
+    if (!Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, true) ||
+        !Platform::Settings::instance().getBool(settingKey(sound), true))
         return;
     SoundPlayer::instance().startLoop(sound);
 }
@@ -203,6 +216,17 @@ void startLoop(Sound sound)
 void stopLoop(Sound sound)
 {
     SoundPlayer::instance().stopLoop(sound);
+}
+
+void preview(Sound sound)
+{
+    if (Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, true))
+        SoundPlayer::instance().play(sound);
+}
+
+void stopAll()
+{
+    SoundPlayer::instance().stopAll();
 }
 
 } // namespace Styx::Core::Sounds

@@ -118,6 +118,7 @@ bool PreloadedSettingsEdit::empty() const
         && !friendSourceFlags.has_value()
         && !friendDiscoveryFlags.has_value()
         && !guildFolders.has_value()
+        && !locale.has_value()
         && !guildPositions.has_value();
 }
 
@@ -147,7 +148,7 @@ Core::Result<PreloadedSettingsSnapshot> PreloadedSettingsSnapshot::fromProto(std
 
     for (const auto &rootField : rootFields) {
         const uint32_t fn = rootField.fieldNumber;
-        const bool isKnownGroup = (fn == 1 || fn == 8 || fn == 11 || fn == 13 || fn == 14);
+        const bool isKnownGroup = (fn == 1 || fn == 8 || fn == 11 || fn == 12 || fn == 13 || fn == 14);
         if (isKnownGroup) {
             if (rootField.wireType != WireType::LENGTH_DELIMITED)
                 return Core::Result<PreloadedSettingsSnapshot>::makeError("Known group wire type must be length-delimited");
@@ -258,6 +259,7 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
 
     const bool touchAppearance = edit.theme.has_value()
         || edit.developerMode.has_value();
+    const bool touchLocalization = edit.locale.has_value();
 
     const bool touchGuildFolders = edit.guildFolders.has_value()
         || edit.guildPositions.has_value();
@@ -273,7 +275,7 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
 
     for (const auto [groupNumber, touched] : {
              std::pair{8u, touchPrivacy}, std::pair{11u, touchStatus},
-             std::pair{13u, touchAppearance}, std::pair{14u, touchGuildFolders}}) {
+             std::pair{12u, touchLocalization}, std::pair{13u, touchAppearance}, std::pair{14u, touchGuildFolders}}) {
         if (!touched)
             continue;
         std::string currentPayload;
@@ -314,6 +316,9 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
                 out.writeFixed64(4, *edit.statusExpiresAtMs);
                 replacements[4] = out.takeBytes();
             }
+        } else if (groupNumber == 12) {
+            if (edit.locale.has_value())
+                replacements[1] = encodeWrappedString(1, *edit.locale);
         } else if (groupNumber == 13) {
             if (edit.theme.has_value())
                 replacements[1] = encodeRawVarint(1, *edit.theme);

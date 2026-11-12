@@ -25,4 +25,8 @@ Point cursorPosition();
 void openFiles(std::string title, std::vector<FileFilter> filters, FileCallback callback, bool multiple = true);
 void saveFile(std::string title, std::string defaultName, FileCallback callback);
 
+bool launchAtLoginSupported();
+bool launchAtLoginEnabled();
+bool configureLaunchAtLogin(bool enabled, bool minimized);
+
 }

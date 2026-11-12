@@ -4,12 +4,10 @@
 #include "Core/Snowflake.hpp"
 #include "Discord/Entities.hpp"
 #include "Discord/UserEdits.hpp"
-#include "Platform/Signal.hpp"
 
 #include <string>
 
 namespace Rml {
-class ElementDocument;
 class ElementFormControlInput;
 class ElementFormControlTextArea;
 } // namespace Rml
@@ -21,13 +19,15 @@ namespace Rml {
 class ProfileEditorController final : public Controller
 {
 public:
-    explicit ProfileEditorController(Shell &shell);
+    ProfileEditorController(Shell &shell, ::Rml::Element &host);
     ~ProfileEditorController() override;
 
     void open();
     void close();
+    void reset();
+    [[nodiscard]] bool isSaving() const { return saving; }
+    [[nodiscard]] bool hasPendingChanges() const;
 
-    Platform::Signal<> closed;
 
 private:
     enum class ImageSlot { Avatar, Banner };
@@ -41,8 +41,9 @@ private:
     void ensureDocument();
     void setupEventListeners();
     void render();
-    void reset();
+    void updatePreview(::Rml::Element *changed = nullptr);
     void save();
+    void finishSave();
     void saveAccount(const Discord::CurrentUserEdit &accountEdit, Discord::UserProfileEdit profileEdit);
     void saveMetadata(const Discord::UserProfileEdit &profileEdit, bool accountAlreadySaved);
     void chooseImage(ImageSlot slot);
@@ -69,7 +70,8 @@ private:
     [[nodiscard]] ::Rml::Element *resetButton() const;
     [[nodiscard]] ::Rml::Element *errorElement() const;
 
-    ::Rml::ElementDocument *profileEditorDocument = nullptr;
+    bool formInitialized = false;
+    std::string savedMessage;
 
     bool visible = false;
     bool loading = false;

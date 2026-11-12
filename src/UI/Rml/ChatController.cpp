@@ -2421,9 +2421,10 @@ void ChatController::showMessageContextMenu(Core::Snowflake messageId)
         const std::string guildPart = guildId.isValid() ? std::to_string(uint64_t(guildId)) : std::string("@me");
         Platform::Desktop::setClipboardText(std::format("https://discord.com/channels/{}/{}/{}", guildPart, channelId.toString(), messageId.toString()));
     } });
-    menu.push_back({ std::string("Copy ID"), [messageId] {
-        Platform::Desktop::setClipboardText(messageId.toString());
-    } });
+    if (shell.developerModeEnabled(currentAccountId))
+        menu.push_back({ std::string("Copy ID"), [messageId] {
+            Platform::Desktop::setClipboardText(messageId.toString());
+        } });
     shell.showContextMenu(std::move(menu));
 }
 

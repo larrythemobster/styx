@@ -2,6 +2,7 @@
 #include "Discord/CurlUtils.hpp"
 #include "Logging.hpp"
 #include "TokenStore.hpp"
+#include "SettingsKeys.hpp"
 #include "Platform/Dispatcher.hpp"
 
 namespace Styx::Core {
@@ -10,6 +11,8 @@ Session::Session()
     : imageManager(std::make_unique<ImageManager>()),
       animatedImageCache(std::make_unique<AnimatedImageCache>(imageManager.get()))
 {
+    animatedImageCache->setCacheLimitMiB(Settings::getInt(Settings::Keys::AnimationCacheMb, AnimatedImageCache::CacheLimit.fallback));
+    animatedImageCache->setAnimationLimitMiB(Settings::getInt(Settings::Keys::AnimationMaxMb, AnimatedImageCache::AnimationLimit.fallback));
     for (const auto &acc : repo.getAllAccounts())
         imageManager->setAccountProxy(acc.id, acc.proxy);
 }

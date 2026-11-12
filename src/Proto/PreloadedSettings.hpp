@@ -26,6 +26,7 @@ struct PreloadedSettingsEdit
     std::optional<uint32_t> friendSourceFlags;
     std::optional<uint32_t> friendDiscoveryFlags;
     std::optional<std::vector<GuildFolder>> guildFolders;
+    std::optional<std::string> locale;
     std::optional<std::vector<Core::Snowflake>> guildPositions;
 
     bool empty() const;

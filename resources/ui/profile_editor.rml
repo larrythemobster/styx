@@ -5,15 +5,15 @@
     <link type="text/rcss" href="theme.rcss"/>
     <link type="text/rcss" href="profile_editor.rcss"/>
 </head>
-<body id="profile-editor-body">
-    <div class="profile-editor-backdrop" data-action="close"></div>
+<body>
     <div class="profile-editor-card">
         <div class="profile-editor-header">
-            <div class="profile-editor-title">Edit Profile</div>
             <div id="profile-edit-state" class="profile-edit-state" style="display: none;"></div>
         </div>
         <div id="profile-edit-error" class="profile-edit-error" style="display: none;"></div>
         <div class="profile-editor-content">
+            <div class="profile-editor-layout">
+            <div class="profile-editor-fields">
             <div class="profile-edit-section">
                 <div class="profile-edit-label">Profile Banner</div>
                 <div class="profile-edit-banner-wrap">
@@ -56,11 +56,25 @@
                 <textarea id="profile-edit-bio" class="profile-edit-textarea" maxlength="190" placeholder="Tell us about yourself"></textarea>
             </div>
 
+            </div>
+            <div class="profile-editor-preview">
+                <div class="profile-edit-label">Preview</div>
+                <div class="profile-live-card">
+                    <div id="profile-live-banner" class="profile-live-banner"><img id="profile-live-banner-image"/></div>
+                    <div class="profile-live-avatar"><img id="profile-live-avatar"/></div>
+                    <div class="profile-live-details">
+                        <div id="profile-live-name" class="profile-live-name"></div>
+                        <div id="profile-live-username" class="profile-live-username"></div>
+                        <div id="profile-live-pronouns" class="profile-live-pronouns"></div>
+                        <div class="profile-live-about"><div class="profile-edit-label">About Me</div><div id="profile-live-bio"></div></div>
+                    </div>
+                </div>
+            </div>
+            </div>
         </div>
         <div class="profile-editor-footer">
             <button id="profile-edit-reset" class="profile-editor-btn profile-editor-btn-secondary" data-action="reset">Reset</button>
             <div class="profile-editor-footer-right">
-                <button class="profile-editor-btn profile-editor-btn-secondary" data-action="close">Cancel</button>
                 <button id="profile-edit-save" class="profile-editor-btn profile-editor-btn-primary" data-action="save">Save Changes</button>
             </div>
         </div>

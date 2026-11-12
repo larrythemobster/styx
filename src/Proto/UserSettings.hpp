@@ -61,11 +61,30 @@ struct LocalizationSettings
     static LocalizationSettings fromProto(ProtoReader &reader);
 };
 
+struct PrivacySettings
+{
+    bool defaultGuildsRestricted = false;
+    bool allowAccessibilityDetection = false;
+    std::vector<Core::Snowflake> restrictedGuildIds;
+    std::optional<uint32_t> friendSourceFlags;
+    std::optional<uint32_t> friendDiscoveryFlags;
+    static PrivacySettings fromProto(ProtoReader &reader);
+};
+
+struct AppearanceSettings
+{
+    uint32_t theme = 0;
+    bool developerMode = false;
+    static AppearanceSettings fromProto(ProtoReader &reader);
+};
+
 struct PreloadedUserSettings
 {
     std::optional<GuildFolders> guildFolders;
     std::optional<StatusSettings> status;
     std::optional<LocalizationSettings> localization;
+    std::optional<PrivacySettings> privacy;
+    std::optional<AppearanceSettings> appearance;
 
     static PreloadedUserSettings fromProto(ProtoReader &reader);
 };

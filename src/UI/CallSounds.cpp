@@ -3,6 +3,7 @@
 #include "Core/Audio/Sounds.hpp"
 #include "Core/Calls/CallStore.hpp"
 #include "Core/ClientInstance.hpp"
+#include "Core/SettingsKeys.hpp"
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/VoiceManager.hpp"
 #endif
@@ -15,6 +16,17 @@ namespace {
 // Styx can't decline a call yet, so a ring the server never clears stops on its own.
 constexpr auto RING_LIMIT = std::chrono::seconds(60);
 using Core::Sounds::Sound;
+}
+
+CallSounds::CallSounds()
+{
+    track(Platform::Settings::instance().changed.connect([this](const std::string &key, const nlohmann::json &) {
+        if (key != Core::Settings::Keys::SoundsEnabled && key != Core::Sounds::settingKey(Sound::Ring))
+            return;
+        Core::Sounds::stopLoop(Sound::Ring);
+        if (!ringing.empty())
+            Core::Sounds::startLoop(Sound::Ring);
+    }));
 }
 
 CallSounds::~CallSounds()

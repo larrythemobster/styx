@@ -23,4 +23,10 @@ void play(Sound sound);
 void startLoop(Sound sound);
 void stopLoop(Sound sound);
 
+#ifdef STYX_HAVE_MINIAUDIO
+// Explicit previews respect the master switch, independently of the individual sound switch.
+void preview(Sound sound);
+void stopAll();
+#endif
+
 } // namespace Styx::Core::Sounds

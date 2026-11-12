@@ -2,6 +2,7 @@
 
 #include "Dispatcher.hpp"
 #include "Utf8.hpp"
+#include "Paths.hpp"
 #include "Core/Logging.hpp"
 
 #ifdef _WIN32
@@ -333,6 +334,48 @@ void saveFile(std::string title, std::string defaultName, FileCallback callback)
                              callback = std::move(callback)]() mutable {
         showDialog(true, title, defaultName, {}, std::move(callback), false);
     });
+#endif
+}
+
+bool launchAtLoginSupported()
+{
+#ifdef _WIN32
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool launchAtLoginEnabled()
+{
+#ifdef _WIN32
+    DWORD bytes = 0;
+    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        L"Styx", RRF_RT_REG_SZ, nullptr, nullptr, &bytes) == ERROR_SUCCESS && bytes > sizeof(wchar_t);
+#else
+    return false;
+#endif
+}
+
+bool configureLaunchAtLogin(bool enabled, bool minimized)
+{
+#ifdef _WIN32
+    constexpr auto keyPath = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    if (!enabled) {
+        const auto result = RegDeleteKeyValueW(HKEY_CURRENT_USER, keyPath, L"Styx");
+        return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
+    }
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, keyPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        return false;
+    const std::wstring command = L"\"" + Paths::executablePath().wstring() + L"\"" +
+        (minimized ? L" --start-minimized" : L"");
+    const auto result = RegSetValueExW(key, L"Styx", 0, REG_SZ,
+        reinterpret_cast<const BYTE *>(command.c_str()), DWORD((command.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS;
+#else
+    return false;
 #endif
 }
 

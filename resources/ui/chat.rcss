@@ -2138,3 +2138,28 @@ button.poll-answer.poll-answer-mine:focus
 	color: #f23f43;
 	margin-top: 6dp;
 }
+
+body.compact-messages .message-avatar-clip,
+body.message-avatars-hidden .message-avatar-clip,
+body.embeds-hidden .embed-card,
+body.reactions-hidden .reactions-container
+{
+    display: none;
+}
+
+body.compact-messages .message-row,
+body.message-avatars-hidden .message-row
+{
+    padding-left: 16dp;
+}
+
+body.compact-messages .message-row.group-start
+{
+    margin-top: 2dp;
+    padding-top: 0;
+}
+
+body.underline-links .chat-link
+{
+    text-decoration: underline;
+}

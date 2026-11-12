@@ -7,12 +7,14 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <RmlUi/Core/ObserverPtr.h>
 
 namespace Styx {
 namespace Core {
 class ClientInstance;
 }
+namespace Proto { struct PreloadedSettingsEdit; }
 namespace UI {
 namespace Rml {
 class ProfileEditorController;
@@ -30,6 +32,13 @@ public:
         Keybinds,
         GoLive,
         Advanced,
+        Profiles,
+        Privacy,
+        FriendRequests,
+        Accessibility,
+        ActivityPrivacy,
+        System,
+        Language,
     };
 
     SettingsController(Shell &shell, ::Rml::Element *root);
@@ -46,10 +55,33 @@ private:
     void render();
     void renderSidebar(std::string &rml);
     void renderContent(std::string &rml);
+    void renderNavigation(std::string &rml);
+    void refreshNavigation();
+    void selectSection(const std::string &id);
+    std::string_view sectionTitle() const;
+    void bindAccountSettings();
+    bool isRemoteSection() const;
+    bool confirmProfileLeave(std::function<void()> proceed);
+    void patchRemoteSettings(Proto::PreloadedSettingsEdit edit);
+    bool handleRemoteSwitch(::Rml::Element *element);
+    void renderRemoteStatus(std::string &rml);
+    void renderProfiles(std::string &rml);
+    void renderPrivacy(std::string &rml);
+    void renderFriendRequests(std::string &rml);
+    void renderAccessibility(std::string &rml);
+    void renderActivityPrivacy(std::string &rml);
+    void renderSystem(std::string &rml);
+    void renderLanguage(std::string &rml);
+    static void appendSwitch(std::string &rml, const std::string &key, bool checked,
+                             const std::string &title, const std::string &description, bool disabled = false);
 
     void renderMyAccount(std::string &rml);
     void renderAppearance(std::string &rml);
     void applyGeneratedTheme();
+    void readPickerColor();
+    void refreshColorPicker(bool updateHex = true);
+    void pickColorAt(float x, float y);
+    void applyPickerColor();
     void renderChat(std::string &rml);
     void renderNotifications(std::string &rml);
     void renderVoiceVideo(std::string &rml);
@@ -77,6 +109,16 @@ private:
     int themeSchemeIndex = 0;
     bool themeDarkMode = true;
     std::string themeError;
+    std::string searchQuery;
+    std::string remoteSettingsError;
+    bool remoteSettingsSaving = false;
+    std::uint64_t remoteSettingsRequest = 0;
+    Platform::Connection accountSettingsConnection;
+    bool colorPickerOpen = false;
+    bool colorDragging = false;
+    double pickerHue = 0;
+    double pickerSaturation = 0;
+    double pickerBrightness = 0;
     bool renderingControls = false;
     ::Rml::Element *hintSlider = nullptr;
     ::Rml::ObserverPtr<::Rml::Element> previousFocus;

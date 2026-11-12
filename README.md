@@ -69,15 +69,39 @@ in the same view, with keyboard navigation, nested menus and viewport clamping.
 Member moderation includes kick, ban, timeout, nickname and searchable role
 forms. CAPTCHA prompts use RmlUi while the challenge still opens in your browser.
 
-User settings open in a bounded dialog with independently scrolling navigation
-and content. Buttons use black borders and centered labels or icons. Sliders show
-a value hint above the thumb on hover, focus or drag. Tab stays inside the dialog;
-Escape closes it and restores focus.
+User settings fill the window below the application toolbar. Navigation and page
+content scroll independently, while page headings and profile Save/Reset controls
+stay visible. Search filters the navigation; Enter opens a result and Clear restores
+the full list. Buttons have black borders and centered labels or icons. Sliders
+update their percentage while dragging. Tab stays inside settings; Escape dismisses
+an open picker or dropdown before closing settings.
 
-Appearance applies themes to open views and new dialogs. Mode and palette choices
-apply immediately; Apply theme uses the entered accent color. Choosing a custom
-theme turns off system-color overrides. Theme choices survive restarts, and font
-size controls change rendered text. Reset Theme restores the bundled dark styling.
+Appearance has an interactive saturation/brightness square, hue slider and hex input.
+Mode and palette changes apply immediately; Apply theme saves the selected accent.
+Custom themes turn off system-color overrides. Open views and new dialogs repaint
+without replacing drafts. Theme and font choices survive restarts. Reset Theme
+restores the bundled dark styling.
+
+Profiles edits the global avatar, banner, display name, pronouns and biography
+through the existing Discord profile APIs. It has a live preview, save/reset,
+error reporting and a discard prompt for unsaved changes. Narrow windows hide the
+secondary preview and keep the form actions reachable. Banner changes still
+require an eligible subscription.
+
+Other settings include:
+
+- Account-backed default DM privacy for new servers, friend-request sources,
+  screen-reader detection permission and activity visibility.
+- Local embed/reaction visibility, compact message spacing, avatars, chat font
+  size, link underlines and reduced interface motion.
+- A master sound switch and previews for the five supported event sounds.
+- Windows launch-at-login, start-minimized and close-to-tray preferences.
+- Developer Mode for Copy ID menu actions and animation-memory controls in Advanced.
+- A Discord account-language selector that updates request locale headers.
+  Styx's own interface remains English.
+
+Account security editing, devices, connected accounts, authorized apps, billing,
+server-profile editing, game detection and camera settings are not implemented.
 
 Call controls share mute/deafen state with the user panel. Local speech updates
 the participant model alongside remote speech and lights the user's avatar ring.

@@ -17,6 +17,7 @@ namespace UI {
 class CallSounds : public Platform::Trackable
 {
 public:
+    CallSounds();
     ~CallSounds() override;
     void watch(Core::ClientInstance *client);
     void forget(Core::Snowflake accountId);

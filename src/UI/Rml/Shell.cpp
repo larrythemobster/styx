@@ -161,6 +161,13 @@ void showMessageNotification(Shell *shell, Core::ClientInstance *client, const D
     });
 }
 }
+bool Shell::developerModeEnabled(Snowflake account) const
+{
+    auto *client = account.isValid() ? instanceFor(account) : instance;
+    return client && client->discord()->getSettings().appearance &&
+        client->discord()->getSettings().appearance->developerMode;
+}
+
 Shell *Shell::primaryShell() { return primary; }
 Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
 {
@@ -177,6 +184,10 @@ Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
     track(channelTreeModel->reset.connect([this] { navigationHistoryChanged.publish(); }));
     track(locationChanged.connect([this](const Location &location) {
         if (!replayingHistory && navigationHistory.record(location)) navigationHistoryChanged.publish();
+    }));
+    track(Platform::Settings::instance().changed.connect([this](const std::string &key, const nlohmann::json &) {
+        if (key.starts_with("chat/") || key == Core::Settings::Keys::ReducedMotion)
+            applyBodyClasses();
     }));
     accountsModel = std::make_unique<AccountsModel>(session);
     serverRailModel = std::make_unique<ServerRailModel>(session, channelTreeModel.get());
@@ -320,6 +331,13 @@ void Shell::applyBodyClasses()
         doc->SetClass("members-hidden", !memberListVisible);
         doc->SetClass("friends-open", isFriendsOpen());
         doc->SetClass("settings-open", settingsOpen);
+        namespace Settings = Core::Settings;
+        doc->SetClass("compact-messages", Settings::getBool(Settings::Keys::CompactMessages, Settings::Defaults::CompactMessages));
+        doc->SetClass("message-avatars-hidden", !Settings::getBool(Settings::Keys::ShowAvatars, Settings::Defaults::ShowAvatars));
+        doc->SetClass("embeds-hidden", !Settings::getBool(Settings::Keys::ShowEmbeds, Settings::Defaults::ShowEmbeds));
+        doc->SetClass("reactions-hidden", !Settings::getBool(Settings::Keys::ShowReactions, Settings::Defaults::ShowReactions));
+        doc->SetClass("underline-links", Settings::getBool(Settings::Keys::UnderlineLinks, Settings::Defaults::UnderlineLinks));
+        doc->SetClass("reduced-motion", Settings::getBool(Settings::Keys::ReducedMotion, Settings::Defaults::ReducedMotion));
     }
     if (forumController && forumController->isOpen()) forumController->syncFolderState();
     requestRender(200);
@@ -974,8 +992,10 @@ void Shell::showContextMenuForUser(Snowflake userId, Snowflake guild)
         }
         if (target) MemberModeration::addModerationActions(menu, *this, client, *target);
     }
-    menu.push_back({{}, {}, false, false, true});
-    menu.push_back({"Copy User ID", [userId] { Platform::Desktop::setClipboardText(userId.toString()); }});
+    if (developerModeEnabled(current.accountId)) {
+        menu.push_back({{}, {}, false, false, true});
+        menu.push_back({"Copy User ID", [userId] { Platform::Desktop::setClipboardText(userId.toString()); }});
+    }
     showContextMenu(std::move(menu));
 }
 void Shell::showContextMenuForGuild(Snowflake account, Snowflake guild)
@@ -992,8 +1012,10 @@ void Shell::showContextMenuForGuild(Snowflake account, Snowflake guild)
     auto data = client->getGuild(guild);
     bool owner = data && data->ownerId.hasValue() && data->ownerId.get() == account;
     menu.push_back({"Leave Server", [guard, guild] { if (guard) guard->discord()->leaveGuild(guild); }, !owner, true});
-    menu.push_back({{}, {}, false, false, true});
-    menu.push_back({"Copy Server ID", [guild] { Platform::Desktop::setClipboardText(guild.toString()); }});
+    if (developerModeEnabled(account)) {
+        menu.push_back({{}, {}, false, false, true});
+        menu.push_back({"Copy Server ID", [guild] { Platform::Desktop::setClipboardText(guild.toString()); }});
+    }
     showContextMenu(std::move(menu));
 }
 void Shell::showContextMenuForChannel(Snowflake account, Snowflake guild, Snowflake channel)
@@ -1014,8 +1036,10 @@ void Shell::showContextMenuForChannel(Snowflake account, Snowflake guild, Snowfl
         menu.push_back({{}, {}, false, false, true});
     }
     menu.push_back({"Mark As Read", [this, channel] { markChannelRead(channel); }});
-    menu.push_back({{}, {}, false, false, true});
-    menu.push_back({"Copy Channel ID", [channel] { Platform::Desktop::setClipboardText(channel.toString()); }});
+    if (developerModeEnabled(account)) {
+        menu.push_back({{}, {}, false, false, true});
+        menu.push_back({"Copy Channel ID", [channel] { Platform::Desktop::setClipboardText(channel.toString()); }});
+    }
     showContextMenu(std::move(menu));
 }
 }

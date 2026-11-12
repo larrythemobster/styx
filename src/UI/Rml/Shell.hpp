@@ -146,8 +146,9 @@ public:
     // when the gateway delivers it. A later call replaces an earlier wait.
     void openGuildWhenReady(Core::Snowflake accountId, Core::Snowflake guildId);
     void applyCloseToTray();
-    // Shows the current mention count on the taskbar, or clears it when the setting is off.
+    // Refreshes the taskbar notification marker, or clears it when the setting is off.
     void refreshTaskbarBadge();
+    bool developerModeEnabled(Core::Snowflake account) const;
     Platform::Signal<> navigationHistoryChanged;
     Platform::Signal<const Location &> locationChanged;
     Platform::Signal<Core::ClientInstance *> instanceChanged;

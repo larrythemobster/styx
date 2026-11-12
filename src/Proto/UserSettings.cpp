@@ -277,6 +277,61 @@ LocalizationSettings LocalizationSettings::fromProto(ProtoReader &reader)
     return settings;
 }
 
+PrivacySettings PrivacySettings::fromProto(ProtoReader &reader)
+{
+    PrivacySettings settings;
+    Tag tag;
+    while (reader.readTag(tag)) {
+        if (tag.fieldNumber == 3 && tag.wireType == WireType::FIXED64) {
+            uint64_t id = 0;
+            if (reader.readFixed64(id)) settings.restrictedGuildIds.emplace_back(id);
+        } else if (tag.fieldNumber == 3 && tag.wireType == WireType::LENGTH_DELIMITED) {
+            std::span<const uint8_t> packed;
+            if (reader.readLengthDelimited(packed)) {
+                ProtoReader ids(packed);
+                uint64_t id = 0;
+                while (!ids.atEnd() && ids.readFixed64(id)) settings.restrictedGuildIds.emplace_back(id);
+            }
+        } else if ((tag.fieldNumber == 4 || tag.fieldNumber == 5) && tag.wireType == WireType::VARINT) {
+            uint64_t value = 0;
+            if (reader.readVarint(value)) {
+                if (tag.fieldNumber == 4) settings.defaultGuildsRestricted = value != 0;
+                else settings.allowAccessibilityDetection = value != 0;
+            }
+        } else if ((tag.fieldNumber == 9 || tag.fieldNumber == 10) && tag.wireType == WireType::LENGTH_DELIMITED) {
+            std::span<const uint8_t> bytes;
+            if (reader.readLengthDelimited(bytes)) {
+                ProtoReader wrapped(bytes);
+                if (const auto value = readUInt64Value(wrapped)) {
+                    if (tag.fieldNumber == 9) settings.friendSourceFlags = static_cast<uint32_t>(*value);
+                    else settings.friendDiscoveryFlags = static_cast<uint32_t>(*value);
+                }
+            }
+        } else {
+            reader.skipField(tag.wireType);
+        }
+    }
+    return settings;
+}
+
+AppearanceSettings AppearanceSettings::fromProto(ProtoReader &reader)
+{
+    AppearanceSettings settings;
+    Tag tag;
+    while (reader.readTag(tag)) {
+        if ((tag.fieldNumber == 1 || tag.fieldNumber == 2) && tag.wireType == WireType::VARINT) {
+            uint64_t value = 0;
+            if (reader.readVarint(value)) {
+                if (tag.fieldNumber == 1) settings.theme = static_cast<uint32_t>(value);
+                else settings.developerMode = value != 0;
+            }
+        } else {
+            reader.skipField(tag.wireType);
+        }
+    }
+    return settings;
+}
+
 PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
 {
     PreloadedUserSettings settings;
@@ -284,6 +339,20 @@ PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
 
     while (reader.readTag(tag)) {
         switch (tag.fieldNumber) {
+        case 8:
+        case 13: {
+            if (tag.wireType == WireType::LENGTH_DELIMITED) {
+                std::span<const uint8_t> bytes;
+                if (reader.readLengthDelimited(bytes)) {
+                    ProtoReader nested(bytes);
+                    if (tag.fieldNumber == 8) settings.privacy = PrivacySettings::fromProto(nested);
+                    else settings.appearance = AppearanceSettings::fromProto(nested);
+                }
+            } else {
+                reader.skipField(tag.wireType);
+            }
+            break;
+        }
         // optional StatusSettings status
         case 11: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {

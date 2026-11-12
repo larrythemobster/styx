@@ -23,6 +23,7 @@
 #include "Discord/Entities.hpp"
 
 #include "Platform/Notifications.hpp"
+#include "Platform/Desktop.hpp"
 #include <algorithm>
 #include <cmath>
 #include <random>
@@ -92,6 +93,19 @@ std::string hexDecode(const std::string &text) {
     }
     return result;
 }
+Platform::Color pickerColor(double hue, double saturation, double brightness)
+{
+    const double sector = std::fmod(hue / 60.0, 6.0);
+    const double chroma = brightness * saturation;
+    const double x = chroma * (1.0 - std::abs(std::fmod(sector, 2.0) - 1.0));
+    const double m = brightness - chroma;
+    const double r = sector < 1 ? chroma : sector < 2 ? x : sector < 4 ? 0 : sector < 5 ? x : chroma;
+    const double g = sector < 1 ? x : sector < 3 ? chroma : sector < 4 ? x : 0;
+    const double b = sector < 2 ? 0 : sector < 3 ? x : sector < 5 ? chroma : x;
+    return Platform::Color{static_cast<uint8_t>(std::lround((r + m) * 255)),
+        static_cast<uint8_t>(std::lround((g + m) * 255)),
+        static_cast<uint8_t>(std::lround((b + m) * 255)), 255, true};
+}
 }
 
 
@@ -107,9 +121,23 @@ SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
     themeSchemeIndex = std::clamp(getInt(Keys::ThemeScheme, 0), 0, Core::Theme::schemeCount - 1);
     const auto background = theme.color(Core::Theme::Token::WindowBg);
     themeDarkMode = getBool(Keys::ThemeDarkMode, int(background.r) + background.g + background.b < 384);
+    readPickerColor();
     track(shell.settingsOpenChanged.connect([this](bool open) { onSettingsOpenChanged(open); }));
     track(shell.instanceChanged.connect([this](Core::ClientInstance *) {
+        ++remoteSettingsRequest;
+        remoteSettingsSaving = false;
+        remoteSettingsError.clear();
+        bindAccountSettings();
         if (this->shell.isSettingsOpen())
+            rebuildTimer.start(std::chrono::milliseconds(0), false, [this] { rebuild(); });
+    }));
+    bindAccountSettings();
+    track(shell.accountReady.connect([this](Core::Snowflake account) {
+        auto *instance = this->shell.currentInstance();
+        if (!instance || instance->accountId() != account || !this->shell.isSettingsOpen()) return;
+        if (profileEditor && !profileEditor->hasPendingChanges() && !profileEditor->isSaving())
+            profileEditor->open();
+        else if (currentSection != Section::Profiles)
             rebuildTimer.start(std::chrono::milliseconds(0), false, [this] { rebuild(); });
     }));
 
@@ -138,6 +166,8 @@ void SettingsController::onSettingsOpenChanged(bool open)
         if (profileEditor)
             profileEditor->close();
         clearSliderHint();
+        colorDragging = false;
+        colorPickerOpen = false;
         stopRecordingKeybind();
         regionRoot->SetClass("open", false);
         regionRoot->SetProperty("display", "none");
@@ -151,7 +181,12 @@ void SettingsController::setSection(Section section)
 {
     if (currentSection == section)
         return;
+    Platform::Guard<SettingsController> self(this);
+    if (!confirmProfileLeave([self, section] { if (self) self->setSection(section); }))
+        return;
     stopRecordingKeybind();
+    colorDragging = false;
+    colorPickerOpen = false;
     currentSection = section;
     render();
     requestRender(100);
@@ -188,7 +223,8 @@ void SettingsController::render()
     }
 
     clearSliderHint();
-    std::string rml = "<div class=\"settings-backdrop\" data-action=\"close\"></div><div class=\"settings-dialog\" role=\"dialog\" aria-modal=\"true\" aria-label=\"User settings\">";
+    profileEditor.reset();
+    std::string rml = "<div class=\"settings-dialog\" role=\"dialog\" aria-modal=\"true\" aria-label=\"User settings\">";
     renderSidebar(rml);
     rml += "<div class=\"settings-close-container\"><button class=\"settings-close-btn\" data-action=\"close\" "
            "title=\"Close Settings\" aria-label=\"Close Settings\"><img src=\"icon:x\"/></button></div>";
@@ -198,6 +234,12 @@ void SettingsController::render()
     // Native controls emit change events while their initial values are installed.
     renderingControls = true;
     regionRoot->SetInnerRML(rml.c_str());
+    if (currentSection == Section::Profiles) {
+        if (auto *host = regionRoot->GetElementById("settings-profile-editor")) {
+            profileEditor = std::make_unique<ProfileEditorController>(shell, *host);
+            profileEditor->open();
+        }
+    }
     renderingControls = false;
     if (!focusSelector.empty()) {
         auto *focus = regionRoot->QuerySelector(focusSelector);
@@ -209,24 +251,28 @@ void SettingsController::render()
 void SettingsController::renderSidebar(std::string &rml)
 {
     rml += std::string("<div class=\"settings-sidebar\">");
+    if (auto *instance = shell.currentInstance()) {
+        const auto &account = instance->accountInfo();
+        const auto &me = instance->discord()->getMe();
+        const auto name = me.globalName.valueOr(account.displayName.empty() ? account.username : account.displayName);
+        const auto avatar = me.avatar.hasValue() && !me.avatar->empty()
+            ? Discord::Cdn::userAvatar(instance->accountId(), me.avatar.get(), 80)
+            : Discord::Cdn::defaultUserAvatar(instance->accountId());
+        rml += formatRml("<button class=\"settings-btn settings-account\" data-section=\"profiles\" aria-label=\"Edit profile\">"
+            "<span class=\"settings-account-avatar\"><img src=\"%1\"/></span><span class=\"settings-account-text\">"
+            "<span class=\"settings-account-name\">%2</span><span class=\"settings-account-edit\">Edit profile</span></span>"
+            "<img class=\"settings-account-pencil\" src=\"icon:pencil\"/></button>",
+            Rml::escape(shell.imageSource(avatar, {40, 40})), Rml::escape(name));
+    }
 
-    // USER SETTINGS
-    rml += std::string("<div class=\"settings-group-header\">User Settings</div>");
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"my-account\" tabindex=\"0\">My Account</div>", currentSection == Section::MyAccount ? std::string(" active") : std::string());
-
-    rml += std::string("<div class=\"settings-divider\"></div>");
-
-    // APP SETTINGS
-    rml += std::string("<div class=\"settings-group-header\">App Settings</div>");
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"appearance\" tabindex=\"0\">Appearance</div>", currentSection == Section::Appearance ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"chat\" tabindex=\"0\">Chat &amp; Accessibility</div>", currentSection == Section::Chat ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"notifications\" tabindex=\"0\">Notifications</div>", currentSection == Section::Notifications ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"voice-video\" tabindex=\"0\">Voice &amp; Video</div>", currentSection == Section::VoiceVideo ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"keybinds\" tabindex=\"0\">Keybinds</div>", currentSection == Section::Keybinds ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"go-live\" tabindex=\"0\">Go Live</div>", currentSection == Section::GoLive ? std::string(" active") : std::string());
-    rml += formatRml("<div class=\"settings-nav-item%1\" data-section=\"advanced\" tabindex=\"0\">Advanced</div>", currentSection == Section::Advanced ? std::string(" active") : std::string());
-
-    rml += std::string("<div class=\"settings-divider\"></div>");
+    rml += formatRml("<div id=\"settings-search-wrap\" class=\"settings-search-wrap%1\"><img class=\"settings-search-icon\" src=\"icon:search\"/>"
+        "<input id=\"settings-search\" class=\"settings-search\" type=\"text\" aria-label=\"Search settings\" value=\"%2\"/>"
+        "<span class=\"settings-search-placeholder\" aria-hidden=\"true\">Search settings</span>"
+        "<button class=\"settings-search-clear settings-btn\" data-action=\"clear-settings-search\" aria-label=\"Clear search\"><img src=\"icon:x\"/></button></div>",
+        searchQuery.empty() ? "" : " has-query", Rml::escape(searchQuery));
+    rml += "<div id=\"settings-navigation\">";
+    renderNavigation(rml);
+    rml += "</div>";
 
     // Footer info
     rml += std::string("<div class=\"settings-sidebar-footer\">");
@@ -239,10 +285,10 @@ void SettingsController::renderSidebar(std::string &rml)
 
 void SettingsController::renderContent(std::string &rml)
 {
-    rml += std::string("<div class=\"settings-content-pane\">");
-
-    // The close control stays outside the scrolling content pane.
-    rml += std::string("<div class=\"settings-content-wrapper\">");
+    rml += "<div class=\"settings-content-pane\"><div class=\"settings-page-header\"><div class=\"settings-section-title\">" +
+        Platform::htmlEscape(sectionTitle()) + "</div></div>";
+    rml += formatRml("<div class=\"settings-content-scroll%1\"><div class=\"settings-content-wrapper\">",
+        currentSection == Section::Profiles ? " settings-profiles-page" : "");
 
     switch (currentSection) {
     case Section::MyAccount:
@@ -269,21 +315,28 @@ void SettingsController::renderContent(std::string &rml)
     case Section::Advanced:
         renderAdvanced(rml);
         break;
+    case Section::Profiles: renderProfiles(rml); break;
+    case Section::Privacy: renderPrivacy(rml); break;
+    case Section::FriendRequests: renderFriendRequests(rml); break;
+    case Section::Accessibility: renderAccessibility(rml); break;
+    case Section::ActivityPrivacy: renderActivityPrivacy(rml); break;
+    case Section::System: renderSystem(rml); break;
+    case Section::Language: renderLanguage(rml); break;
     }
 
     rml += std::string("</div>"); // .settings-content-wrapper
+    rml += "</div>"; // .settings-content-scroll
     rml += std::string("</div>"); // .settings-content-pane
 }
 
 void SettingsController::renderMyAccount(std::string &rml)
 {
-    rml += std::string("<div class=\"settings-section-title\">My Account</div>");
 
     auto *inst = shell.currentInstance();
     std::string displayName = std::string("Not logged in");
     std::string username = std::string("none");
     std::string accountIdStr = std::string("-");
-    std::string emailStr = std::string("Not provided");
+    std::string securityStatus = "Not available";
     std::string avatarSrc;
 
     if (inst) {
@@ -303,6 +356,9 @@ void SettingsController::renderMyAccount(std::string &rml)
             displayName = info.username;
 
         username = me ? me->username.get() : info.username;
+        const auto &self = inst->discord()->getMe();
+        if (self.id.get() == accountId && self.mfaEnabled.hasValue())
+            securityStatus = self.mfaEnabled.get() ? "Enabled" : "Not enabled";
 
         std::string avatarHash = (me && me->avatar.hasValue()) ? *me->avatar : info.avatar;
         std::string avatarUrl = !avatarHash.empty()
@@ -338,9 +394,10 @@ void SettingsController::renderMyAccount(std::string &rml)
     rml += std::string("</div>");
 
     rml += std::string("<div class=\"my-account-field-card\">");
-    rml += std::string("<div class=\"my-account-field-label\">Email</div>");
-    rml += formatRml("<div class=\"my-account-field-value\">%1</div>", Rml::escape(emailStr));
+    rml += std::string("<div class=\"my-account-field-label\">Two-Factor Authentication</div>");
+    rml += formatRml("<div class=\"my-account-field-value\">%1</div>", Rml::escape(securityStatus));
     rml += std::string("</div>");
+    rml += "<div class=\"settings-description\">Email, password and security changes are not available in Styx.</div>";
 
     rml += std::string(
         "<div class=\"settings-button-group\">"
@@ -356,7 +413,6 @@ void SettingsController::renderMyAccount(std::string &rml)
 
 void SettingsController::renderAppearance(std::string &rml)
 {
-    rml += std::string("<div class=\"settings-section-title\">Appearance</div>");
 
     // Theme Generator card
     rml += std::string("<div class=\"settings-card\">");
@@ -367,9 +423,25 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += std::string("<div class=\"settings-color-field\">");
     rml += std::string("<label class=\"settings-color-label\" for=\"seed-color-hex\">Accent color</label>");
     rml += std::string("<div class=\"settings-color-input-row\">");
-    rml += formatRml("<div class=\"settings-color-swatch\" style=\"background-color: %1;\"></div>", themeSeedColor.css());
+    rml += formatRml("<button id=\"seed-color-toggle\" class=\"settings-color-swatch settings-btn\" "
+        "data-action=\"toggle-color-picker\" title=\"Choose accent color\" aria-label=\"Choose accent color\" "
+        "aria-controls=\"seed-color-picker\" aria-expanded=\"%2\" style=\"background-color: %1;\"></button>",
+        themeSeedColor.css(), colorPickerOpen ? "true" : "false");
     rml += formatRml("<input type=\"text\" class=\"settings-text-input\" id=\"seed-color-hex\" value=\"%1\"/>", themeSeedColor.css());
     rml += std::string("</div>");
+    rml += formatRml("<div id=\"seed-color-picker\" class=\"settings-color-picker\" style=\"display: %1;\">",
+        colorPickerOpen ? "block" : "none");
+    rml += formatRml("<div id=\"seed-color-plane\" class=\"settings-color-plane\" tabindex=\"0\" role=\"slider\" "
+        "aria-label=\"Color saturation and brightness. Use arrow keys to adjust.\" style=\"background-color: %1;\">",
+        pickerColor(pickerHue, 1, 1).css());
+    rml += "<div class=\"settings-color-layer\" style=\"decorator: linear-gradient(to right, #ffffff, #ffffff00);\"></div>"
+           "<div class=\"settings-color-layer\" style=\"decorator: linear-gradient(to bottom, #00000000, #000000);\"></div>";
+    rml += formatRml("<div id=\"seed-color-cursor\" class=\"settings-color-cursor\" style=\"left: %1%; top: %2%;\">"
+        "<div class=\"settings-color-cursor-inner\"></div></div></div>", pickerSaturation * 100, (1 - pickerBrightness) * 100);
+    rml += "<label class=\"settings-color-label\" for=\"seed-color-hue\">Hue</label>";
+    rml += formatRml("<input type=\"range\" id=\"seed-color-hue\" class=\"settings-color-hue\" "
+        "min=\"0\" max=\"360\" step=\"1\" value=\"%1\" aria-label=\"Color hue\"/>", int(std::lround(pickerHue)));
+    rml += "<div class=\"settings-description settings-color-help\">Drag to choose a color. Apply theme to save it.</div></div>";
     rml += std::string("</div>");
     rml += std::string("</div>");
 
@@ -437,6 +509,68 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += std::string("</div>"); // .settings-card
 }
 
+void SettingsController::readPickerColor()
+{
+    const double r = themeSeedColor.r / 255.0;
+    const double g = themeSeedColor.g / 255.0;
+    const double b = themeSeedColor.b / 255.0;
+    const double high = std::max({r, g, b});
+    const double delta = high - std::min({r, g, b});
+    pickerBrightness = high;
+    if (high > 0)
+        pickerSaturation = delta / high;
+    if (delta > 0) {
+        const double sector = high == r ? std::fmod((g - b) / delta + 6.0, 6.0) :
+            high == g ? (b - r) / delta + 2.0 : (r - g) / delta + 4.0;
+        pickerHue = sector * 60.0;
+    }
+}
+
+void SettingsController::refreshColorPicker(bool updateHex)
+{
+    if (!regionRoot)
+        return;
+    const bool wasRendering = renderingControls;
+    renderingControls = true;
+    if (auto *swatch = regionRoot->GetElementById("seed-color-toggle"))
+        swatch->SetProperty("background-color", themeSeedColor.css());
+    if (auto *plane = regionRoot->GetElementById("seed-color-plane")) {
+        plane->SetProperty("background-color", pickerColor(pickerHue, 1, 1).css());
+        plane->SetAttribute("aria-valuetext", "Saturation " + std::to_string(int(pickerSaturation * 100)) +
+            "%, brightness " + std::to_string(int(pickerBrightness * 100)) + "%");
+    }
+    if (auto *cursor = regionRoot->GetElementById("seed-color-cursor")) {
+        cursor->SetProperty("left", std::to_string(pickerSaturation * 100) + "%");
+        cursor->SetProperty("top", std::to_string((1 - pickerBrightness) * 100) + "%");
+    }
+    if (auto *hue = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("seed-color-hue")))
+        hue->SetValue(std::to_string(int(std::lround(pickerHue))));
+    if (updateHex)
+        if (auto *hex = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("seed-color-hex")))
+            hex->SetValue(themeSeedColor.css());
+    renderingControls = wasRendering;
+    requestRender();
+}
+
+void SettingsController::applyPickerColor()
+{
+    themeSeedColor = pickerColor(pickerHue, pickerSaturation, pickerBrightness);
+    themeError.clear();
+    if (auto *error = regionRoot->GetElementById("theme-error"))
+        error->SetProperty("display", "none");
+    refreshColorPicker();
+}
+
+void SettingsController::pickColorAt(float x, float y)
+{
+    auto *plane = regionRoot->GetElementById("seed-color-plane");
+    if (!plane || plane->GetOffsetWidth() <= 0 || plane->GetOffsetHeight() <= 0)
+        return;
+    pickerSaturation = std::clamp(double(x - plane->GetAbsoluteLeft()) / plane->GetOffsetWidth(), 0.0, 1.0);
+    pickerBrightness = 1.0 - std::clamp(double(y - plane->GetAbsoluteTop()) / plane->GetOffsetHeight(), 0.0, 1.0);
+    applyPickerColor();
+}
+
 void SettingsController::applyGeneratedTheme()
 {
     if (regionRoot) {
@@ -452,6 +586,7 @@ void SettingsController::applyGeneratedTheme()
                 return;
             }
             themeSeedColor = color;
+            readPickerColor();
         }
     }
     auto &theme = Core::Theme::Manager::instance();
@@ -473,106 +608,6 @@ void SettingsController::applyGeneratedTheme()
     });
 }
 
-void SettingsController::renderChat(std::string &rml)
-{
-    rml += std::string("<div class=\"settings-section-title\">Chat &amp; Accessibility</div>");
-
-    // Animation toggles
-    rml += std::string("<div class=\"settings-card\">");
-    const bool animEmoji = getBool(Keys::AnimateEmoji, Defaults::AnimateEmoji);
-    rml += std::string("<div class=\"settings-switch-row\">");
-    rml += std::string("<div class=\"settings-switch-text\">");
-    rml += std::string("<div class=\"settings-switch-title\">Animate emoji</div>");
-    rml += std::string("<div class=\"settings-switch-desc\">Play animated emoji reactions and messages continuously.</div>");
-    rml += std::string("</div>");
-    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", animEmoji ? std::string(" checked") : std::string(), Keys::AnimateEmoji);
-    rml += std::string("</div>");
-
-    const bool animStickers = getBool(Keys::AnimateStickers, Defaults::AnimateStickers);
-    rml += std::string("<div class=\"settings-switch-row\">");
-    rml += std::string("<div class=\"settings-switch-text\">");
-    rml += std::string("<div class=\"settings-switch-title\">Animate stickers</div>");
-    rml += std::string("<div class=\"settings-switch-desc\">Play animated APNG and Lottie stickers in chat.</div>");
-    rml += std::string("</div>");
-    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", animStickers ? std::string(" checked") : std::string(), Keys::AnimateStickers);
-    rml += std::string("</div>");
-    rml += std::string("</div>"); // .settings-card
-
-    // GIF playback mode (Radio cards)
-    rml += std::string("<div class=\"settings-card\">");
-    rml += std::string("<div class=\"settings-label\">GIF Playback Mode</div>");
-    const std::string gifMode = getString(Keys::GifPlayback, Defaults::GifPlayback);
-
-    auto renderRadioCard = [&](const std::string &val, const std::string &title, const std::string &desc) {
-        const bool active = (gifMode == val);
-        rml += formatRml("<div class=\"settings-radio-card%1\" data-setting=\"%2\" data-value=\"%3\" tabindex=\"0\">", active ? std::string(" active") : std::string(), Keys::GifPlayback, val);
-        rml += std::string("<div class=\"settings-radio-indicator\"><span class=\"settings-radio-dot\"></span></div>");
-        rml += std::string("<div class=\"settings-radio-info\">");
-        rml += formatRml("<div class=\"settings-radio-title\">%1</div>", title);
-        rml += formatRml("<div class=\"settings-radio-desc\">%1</div>", desc);
-        rml += std::string("</div></div>");
-    };
-
-    renderRadioCard(std::string("focused"), std::string("When Styx is focused"),
-                    std::string("Play animated GIFs automatically when the window has focus."));
-    renderRadioCard(std::string("hover"), std::string("On hover"),
-                    std::string("Only play animated GIFs when hovering cursor over them."));
-    renderRadioCard(std::string("never"), std::string("Never play"),
-                    std::string("Keep animated GIFs frozen as still pictures."));
-
-    // GIF max playing slider
-    const int maxPlaying = getInt(Keys::GifMaxPlaying, Defaults::GifMaxPlaying);
-    rml += std::string("<div class=\"settings-slider-wrap\">");
-    rml += std::string("<div class=\"settings-slider-header\">");
-    rml += std::string("<span class=\"settings-label\">Max simultaneous playing GIFs</span>");
-    rml += formatRml("<span class=\"settings-slider-val\" id=\"val-gif-max-playing\">up to %1 at once</span>", maxPlaying);
-    rml += std::string("</div>");
-    rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"1\" max=\"16\" step=\"1\" value=\"%1\" data-setting=\"%2\" data-display=\"val-gif-max-playing\" data-prefix=\"up to \" data-unit=\" at once\"/>", maxPlaying, Keys::GifMaxPlaying);
-    rml += formatRml("<div class=\"settings-slider-hint\">up to %1 at once</div>", maxPlaying);
-    rml += std::string("</div>");
-
-    // GIF max memory slider
-    const int maxGifMb = getInt(Keys::GifMaxMb, Defaults::GifMaxMb);
-    rml += std::string("<div class=\"settings-slider-wrap\">");
-    rml += std::string("<div class=\"settings-slider-header\">");
-    rml += std::string("<span class=\"settings-label\">Largest GIF memory</span>");
-    rml += formatRml("<span class=\"settings-slider-val\" id=\"val-gif-max-mb\">%1 MB</span>", maxGifMb);
-    rml += std::string("</div>");
-    rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"8\" max=\"256\" step=\"8\" value=\"%1\" data-setting=\"%2\" data-display=\"val-gif-max-mb\" data-unit=\" MB\"/>", maxGifMb, Keys::GifMaxMb);
-    rml += formatRml("<div class=\"settings-slider-hint\">%1 MB</div>", maxGifMb);
-    rml += std::string("<div class=\"settings-description\">Oversized GIFs exceeding this memory threshold stay as still pictures.</div>");
-    rml += std::string("</div>");
-
-    rml += std::string("</div>"); // .settings-card
-
-    // Animation Cache Limits
-    rml += std::string("<div class=\"settings-card\">");
-    rml += std::string("<div class=\"settings-label\">Animation Memory Limits</div>");
-
-    const int cacheMb = getInt(Keys::AnimationCacheMb, Defaults::AnimationCacheMb);
-    rml += std::string("<div class=\"settings-slider-wrap\">");
-    rml += std::string("<div class=\"settings-slider-header\">");
-    rml += std::string("<span class=\"settings-label\">Memory for animations</span>");
-    rml += formatRml("<span class=\"settings-slider-val\" id=\"val-anim-cache-mb\">%1 MB</span>", cacheMb);
-    rml += std::string("</div>");
-    rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"16\" max=\"1024\" step=\"16\" value=\"%1\" data-setting=\"%2\" data-display=\"val-anim-cache-mb\" data-unit=\" MB\"/>", cacheMb, Keys::AnimationCacheMb);
-    rml += formatRml("<div class=\"settings-slider-hint\">%1 MB</div>", cacheMb);
-    rml += std::string("<div class=\"settings-description\">Total unpacked RAM buffer for animated stickers and emoji frames.</div>");
-    rml += std::string("</div>");
-
-    const int maxAnimMb = getInt(Keys::AnimationMaxMb, Defaults::AnimationMaxMb);
-    rml += std::string("<div class=\"settings-slider-wrap\">");
-    rml += std::string("<div class=\"settings-slider-header\">");
-    rml += std::string("<span class=\"settings-label\">Largest single animation</span>");
-    rml += formatRml("<span class=\"settings-slider-val\" id=\"val-anim-max-mb\">%1 MB</span>", maxAnimMb);
-    rml += std::string("</div>");
-    rml += formatRml("<input type=\"range\" class=\"settings-slider\" min=\"4\" max=\"128\" step=\"4\" value=\"%1\" data-setting=\"%2\" data-display=\"val-anim-max-mb\" data-unit=\" MB\"/>", maxAnimMb, Keys::AnimationMaxMb);
-    rml += formatRml("<div class=\"settings-slider-hint\">%1 MB</div>", maxAnimMb);
-    rml += std::string("<div class=\"settings-description\">Animations that exceed this limit are downscaled or shown static.</div>");
-    rml += std::string("</div>");
-
-    rml += std::string("</div>"); // .settings-card
-}
 
 void SettingsController::renderNotifications(std::string &rml)
 {
@@ -586,12 +621,18 @@ void SettingsController::renderNotifications(std::string &rml)
         rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", checked ? std::string(" checked") : std::string(), key);
         rml += std::string("</div>");
     };
-    auto renderSoundSwitch = [&renderSwitch](Sound sound, const std::string &title, const std::string &desc) {
+    auto renderSoundSwitch = [&rml, &renderSwitch](Sound sound, const std::string &title, const std::string &desc) {
         const std::string key(Core::Sounds::settingKey(sound));
+        rml += "<div class=\"settings-sound-row\">";
         renderSwitch(key, getBool(key, true), title, desc);
+#ifdef STYX_HAVE_MINIAUDIO
+        rml += formatRml("<button class=\"settings-btn settings-btn-secondary\" data-action=\"preview-sound\" "
+            "data-sound=\"%1\" title=\"Preview %2 sound\"%3><span class=\"settings-btn-label\">Preview</span></button>",
+            static_cast<int>(sound), Rml::escape(title), getBool(Keys::SoundsEnabled, true) ? "" : " disabled=\"disabled\"");
+#endif
+        rml += "</div>";
     };
 
-    rml += std::string("<div class=\"settings-section-title\">Notifications</div>");
 
     rml += std::string("<div class=\"settings-card\">");
     renderSwitch(Keys::DesktopNotifications, getBool(Keys::DesktopNotifications, Defaults::DesktopNotifications),
@@ -603,8 +644,8 @@ void SettingsController::renderNotifications(std::string &rml)
                  "Flash the taskbar button",
                  "Flash Styx's taskbar button when a notification arrives and the window isn't focused.");
     renderSwitch(Keys::TaskbarBadge, getBool(Keys::TaskbarBadge, Defaults::TaskbarBadge),
-                 "Show unread mentions on the taskbar",
-                 "Put your mention count on Styx's taskbar or dock icon.");
+                 "Show the notification dot on the taskbar",
+                 "Show a red-and-white dot on Styx's Windows icon while you have unread mentions.");
     rml += std::string("<div class=\"settings-button-group\">");
     rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"test-notification\"><span class=\"settings-btn-label\">Send a test notification</span></button>");
     rml += std::string("</div>");
@@ -612,6 +653,10 @@ void SettingsController::renderNotifications(std::string &rml)
 
     rml += std::string("<div class=\"settings-card\">");
     rml += std::string("<div class=\"settings-label\">Sounds</div>");
+#ifdef STYX_HAVE_MINIAUDIO
+    appendSwitch(rml, Keys::SoundsEnabled, getBool(Keys::SoundsEnabled, true), "Enable notification sounds",
+        "Allow message, mention, incoming-call and voice join/leave sounds.");
+#endif
     renderSoundSwitch(Sound::Message, "Message", "A new message that notifies.");
     renderSoundSwitch(Sound::Mention, "Mention", "A message that mentions you, your role or @everyone.");
     renderSoundSwitch(Sound::Ring, "Incoming call", "Rings while someone is calling you in a DM.");
@@ -622,7 +667,6 @@ void SettingsController::renderNotifications(std::string &rml)
 
 void SettingsController::renderVoiceVideo(std::string &rml)
 {
-    rml += std::string("<div class=\"settings-section-title\">Voice &amp; Video</div>");
 
     // Voice Settings card
     rml += std::string("<div class=\"settings-card\">");
@@ -784,7 +828,6 @@ void SettingsController::renderVoiceVideo(std::string &rml)
 
 void SettingsController::renderKeybinds(std::string &rml)
 {
-    rml += std::string("<div class=\"settings-section-title\">Keybinds</div>");
     rml += std::string("<div class=\"settings-description\">Record a shortcut for each action. Mute and deafen shortcuts work while Styx is focused.</div>");
     rml += std::string("<div class=\"settings-card\">");
 
@@ -844,7 +887,6 @@ void SettingsController::renderKeybindRow(std::string &rml, KeybindAction action
 
 void SettingsController::renderGoLive(std::string &rml)
 {
-    rml += std::string("<div class=\"settings-section-title\">Go Live</div>");
 
     rml += std::string("<div class=\"settings-card\">");
     rml += std::string("<div class=\"settings-label\">Screenshare Quality</div>");
@@ -874,7 +916,12 @@ void SettingsController::renderGoLive(std::string &rml)
 
 void SettingsController::renderAdvanced(std::string &rml)
 {
-    rml += std::string("<div class=\"settings-section-title\">Advanced</div>");
+    if (auto *instance = shell.currentInstance(); instance && instance->discord()->getMe().id.get() == instance->accountId()) {
+        const auto &appearance = instance->discord()->getSettings().appearance;
+        appendSwitch(rml, "discord/developer-mode", appearance && appearance->developerMode, "Developer Mode",
+            "Show Copy ID actions in message, user, channel and server menus.", remoteSettingsSaving);
+        renderRemoteStatus(rml);
+    }
 
     rml += std::string("<div class=\"settings-card\">");
 
@@ -888,16 +935,18 @@ void SettingsController::renderAdvanced(std::string &rml)
     rml += std::string("</div>");
     rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", inMemory ? std::string(" checked") : std::string(), Keys::InMemoryCache);
     rml += std::string("</div>");
+    rml += "<div class=\"settings-label\">Animation memory</div>";
+    auto renderLimit = [&](const char *key, const char *id, const char *title, const Core::MiBRange &range) {
+        const int value = std::clamp(getInt(key, range.fallback), range.min, range.max);
+        rml += formatRml("<div class=\"settings-slider-wrap\"><div class=\"settings-slider-header\">"
+            "<span class=\"settings-label\">%1</span><span class=\"settings-slider-val\" id=\"%2\">%3 MiB</span></div>"
+            "<input type=\"range\" class=\"settings-slider\" min=\"%4\" max=\"%5\" step=\"4\" value=\"%3\" "
+            "data-setting=\"%6\" data-display=\"%2\" data-unit=\" MiB\"/><div class=\"settings-slider-hint\">%3 MiB</div></div>",
+            title, id, value, range.min, range.max, key);
+    };
+    renderLimit(Keys::AnimationCacheMb, "val-anim-cache-mb", "Memory for cached animations", Core::AnimatedImageCache::CacheLimit);
+    renderLimit(Keys::AnimationMaxMb, "val-anim-max-mb", "Largest decoded animation", Core::AnimatedImageCache::AnimationLimit);
 
-    // Close to tray
-    const bool closeToTray = getBool(Keys::CloseToTray, Defaults::CloseToTray);
-    rml += std::string("<div class=\"settings-switch-row\">");
-    rml += std::string("<div class=\"settings-switch-text\">");
-    rml += std::string("<div class=\"settings-switch-title\">Keep running in system tray</div>");
-    rml += std::string("<div class=\"settings-switch-desc\">Minimize Styx to the notification tray instead of exiting when the window is closed.</div>");
-    rml += std::string("</div>");
-    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", closeToTray ? std::string(" checked") : std::string(), Keys::CloseToTray);
-    rml += std::string("</div>");
 
 
     rml += std::string("</div>"); // .settings-card
@@ -905,6 +954,25 @@ void SettingsController::renderAdvanced(std::string &rml)
 
 void SettingsController::setupEventListeners()
 {
+    listen("mousedown", [this](::Rml::Event &event) {
+        if (event.GetParameter<int>("button", 0) != 0)
+            return;
+        auto *plane = regionRoot->GetElementById("seed-color-plane");
+        for (auto *target = event.GetTargetElement(); target; target = target->GetParentNode()) {
+            if (target != plane)
+                continue;
+            colorDragging = true;
+            plane->Focus();
+            pickColorAt(event.GetParameter<float>("mouse_x", 0), event.GetParameter<float>("mouse_y", 0));
+            event.StopPropagation();
+            break;
+        }
+    }, regionRoot);
+    listen("mousemove", [this](::Rml::Event &event) {
+        if (colorDragging)
+            pickColorAt(event.GetParameter<float>("mouse_x", 0), event.GetParameter<float>("mouse_y", 0));
+    }, regionRoot);
+    listen("mouseup", [this](::Rml::Event &) { colorDragging = false; }, regionRoot);
     listen("click", [this](::Rml::Event &event) {
         auto *target = event.GetTargetElement();
         if (!target)
@@ -919,23 +987,7 @@ void SettingsController::setupEventListeners()
 
         // Section tab item
         if (auto *item = closest(target, "data-section")) {
-            std::string sec = attribute(item, "data-section");
-            if (sec == std::string("my-account"))
-                setSection(Section::MyAccount);
-            else if (sec == std::string("appearance"))
-                setSection(Section::Appearance);
-            else if (sec == std::string("chat"))
-                setSection(Section::Chat);
-            else if (sec == std::string("notifications"))
-                setSection(Section::Notifications);
-            else if (sec == std::string("voice-video"))
-                setSection(Section::VoiceVideo);
-            else if (sec == std::string("keybinds"))
-                setSection(Section::Keybinds);
-            else if (sec == std::string("go-live"))
-                setSection(Section::GoLive);
-            else if (sec == std::string("advanced"))
-                setSection(Section::Advanced);
+            selectSection(attribute(item, "data-section"));
             return;
         }
 
@@ -970,6 +1022,33 @@ void SettingsController::setupEventListeners()
         if (!target)
             return;
 
+        if (target->GetId() == "settings-search") {
+            if (auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(target))
+                searchQuery = input->GetValue();
+            refreshNavigation();
+            return;
+        }
+        if (target->GetId() == "seed-color-hex") {
+            auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(target);
+            const auto color = input ? Platform::Color::parse(input->GetValue()) : Platform::Color{};
+            if (color.valid) {
+                themeSeedColor = color;
+                readPickerColor();
+                refreshColorPicker(false);
+            }
+            return;
+        }
+        if (target->GetId() == "seed-color-hue") {
+            auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(target);
+            float hue = 0;
+            const auto value = input ? input->GetValue() : std::string{};
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), hue);
+            if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() && std::isfinite(hue)) {
+                pickerHue = std::clamp(double(hue), 0.0, 360.0);
+                applyPickerColor();
+            }
+            return;
+        }
         if (target->GetTagName() == "input") {
             handleSliderChange(target);
         } else if (target->GetTagName() == "select") {
@@ -1040,14 +1119,48 @@ void SettingsController::setupEventListeners()
 
         const int key = event.GetParameter("key_identifier", 0);
         if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE) {
-            shell.closeSettings();
+            for (auto *target = event.GetTargetElement(); target && target != regionRoot; target = target->GetParentNode())
+                if (auto *select = rmlui_dynamic_cast<::Rml::ElementFormControlSelect *>(target); select && select->IsSelectBoxVisible())
+                    return;
+        }
+        if (event.GetTargetElement()->GetId() == "settings-search" &&
+            (key == ::Rml::Input::KeyIdentifier::KI_RETURN || key == ::Rml::Input::KeyIdentifier::KI_NUMPADENTER)) {
+            event.StopPropagation();
+            if (auto *first = regionRoot->QuerySelector("#settings-navigation .settings-nav-item"))
+                selectSection(attribute(first, "data-section"));
+            return;
+        }
+        if (event.GetTargetElement()->GetId() == "seed-color-plane") {
+            const double step = event.GetParameter<bool>("shift_key", false) ? 0.1 : 0.01;
+            bool adjusted = true;
+            if (key == ::Rml::Input::KeyIdentifier::KI_LEFT) pickerSaturation -= step;
+            else if (key == ::Rml::Input::KeyIdentifier::KI_RIGHT) pickerSaturation += step;
+            else if (key == ::Rml::Input::KeyIdentifier::KI_UP) pickerBrightness += step;
+            else if (key == ::Rml::Input::KeyIdentifier::KI_DOWN) pickerBrightness -= step;
+            else adjusted = false;
+            if (adjusted) {
+                pickerSaturation = std::clamp(pickerSaturation, 0.0, 1.0);
+                pickerBrightness = std::clamp(pickerBrightness, 0.0, 1.0);
+                applyPickerColor();
+                event.StopPropagation();
+                return;
+            }
+        }
+        if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE && colorPickerOpen) {
+            handleAction("toggle-color-picker", nullptr);
+            if (auto *swatch = regionRoot->GetElementById("seed-color-toggle")) swatch->Focus();
+            event.StopPropagation();
+            return;
+        }
+        if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE) {
+            handleAction("close", nullptr);
             event.StopPropagation();
             return;
         }
         if (key == ::Rml::Input::KeyIdentifier::KI_TAB) {
             ::Rml::ElementList controls;
-            regionRoot->QuerySelectorAll(controls, ".settings-nav-item, .settings-close-btn, .settings-btn, .settings-switch, .settings-radio-card, input, select");
-            std::erase_if(controls, [](auto *element) { return !element->IsVisible() || element->HasAttribute("disabled"); });
+            regionRoot->QuerySelectorAll(controls, ".settings-nav-item, .settings-switch, .settings-radio-card, #seed-color-plane, button, input, select, textarea");
+            std::erase_if(controls, [](auto *element) { return !element->IsVisible(true) || element->HasAttribute("disabled"); });
             if (controls.empty()) return;
             auto position = std::find(controls.begin(), controls.end(), regionRoot->GetContext()->GetFocusElement());
             const bool backwards = event.GetParameter<bool>("shift_key", false);
@@ -1073,11 +1186,13 @@ void SettingsController::setupEventListeners()
                 target->Click();
             }
         }
-    }, regionRoot);
+    }, regionRoot, true);
 }
 
 void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
 {
+    if (switchEl->HasAttribute("disabled") || handleRemoteSwitch(switchEl))
+        return;
     const std::string key = attribute(switchEl, "data-setting");
     if (key.empty())
         return;
@@ -1085,8 +1200,30 @@ void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
     const bool wasChecked = switchEl->IsClassSet("checked");
     const bool nowChecked = !wasChecked;
     switchEl->SetClass("checked", nowChecked);
+    if (key == "system/launch-at-login" || key == Keys::StartMinimized) {
+        const bool enabled = key == "system/launch-at-login" ? nowChecked : Platform::Desktop::launchAtLoginEnabled();
+        const bool minimized = key == Keys::StartMinimized ? nowChecked : getBool(Keys::StartMinimized, false);
+        if (!Platform::Desktop::configureLaunchAtLogin(enabled, minimized))
+            remoteSettingsError = "Could not update the Windows startup entry.";
+        else {
+            remoteSettingsError.clear();
+            if (key == Keys::StartMinimized) setBool(key, minimized);
+        }
+        render();
+        requestRender();
+        return;
+    }
 
     setBool(key, nowChecked);
+    switchEl->SetAttribute("aria-checked", nowChecked ? "true" : "false");
+#ifdef STYX_HAVE_MINIAUDIO
+    if (key == Keys::SoundsEnabled) {
+        if (!nowChecked) Core::Sounds::stopAll();
+        render();
+        requestRender();
+        return;
+    }
+#endif
 
     // Immediate action application
     if (key == std::string(Keys::CloseToTray)) {
@@ -1223,10 +1360,17 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
         showSliderHint(sliderEl);
 
     // Apply immediate settings
-    if (key == std::string(Keys::AnimationCacheMb)) {
+    if (key == Keys::AnimationCacheMb) {
         shell.session()->getAnimatedImageCache()->setCacheLimitMiB(val);
-    } else if (key == std::string(Keys::AnimationMaxMb)) {
+    } else if (key == Keys::AnimationMaxMb) {
         shell.session()->getAnimatedImageCache()->setAnimationLimitMiB(val);
+    } else if (key == "accessibility/message-font-px") {
+        auto &theme = Core::Theme::Manager::instance();
+        auto font = theme.font(Core::Theme::FontRole::Message);
+        font.pointSize = std::clamp(val, 12, 24) * Core::Theme::fontDescriptor(Core::Theme::FontRole::Message).defaultFont.pointSize / 16.0;
+        theme.setFontOverride(Core::Theme::FontRole::Message, font);
+        theme.applyFonts();
+        theme.save();
     } else if (key == std::string(Keys::VoicePushToTalkReleaseDelay)) {
         applyPushToTalk();
 #ifndef STYX_NO_VOICE
@@ -1256,6 +1400,12 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
 
     const std::string val = sel->GetValue();
 
+    if (key == "discord/locale") {
+        Proto::PreloadedSettingsEdit edit;
+        edit.locale = val;
+        patchRemoteSettings(std::move(edit));
+        return;
+    }
     if (!key.empty()) {
         setString(key, val);
 #ifndef STYX_NO_VOICE
@@ -1297,8 +1447,35 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
 
 void SettingsController::handleAction(const std::string &action, ::Rml::Element *target)
 {
-    if (action == std::string("close")) {
-        shell.closeSettings();
+    if (action == "clear-settings-search") {
+        searchQuery.clear();
+        refreshNavigation();
+        if (auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("settings-search"))) {
+            input->SetValue("");
+            input->Focus();
+        }
+        return;
+    }
+    if (action == "toggle-color-picker") {
+        colorPickerOpen = !colorPickerOpen;
+        colorDragging = false;
+        if (auto *picker = regionRoot->GetElementById("seed-color-picker"))
+            picker->SetProperty("display", colorPickerOpen ? "block" : "none");
+        if (auto *swatch = regionRoot->GetElementById("seed-color-toggle"))
+            swatch->SetAttribute("aria-expanded", colorPickerOpen ? "true" : "false");
+        if (colorPickerOpen)
+            if (auto *plane = regionRoot->GetElementById("seed-color-plane")) plane->Focus();
+        requestRender();
+    } else if (action == std::string("close")) {
+        Platform::Guard<SettingsController> self(this);
+        if (confirmProfileLeave([self] { if (self) self->shell.closeSettings(); }))
+            shell.closeSettings();
+#ifdef STYX_HAVE_MINIAUDIO
+    } else if (action == "preview-sound") {
+        const int sound = target ? target->GetAttribute<int>("data-sound", -1) : -1;
+        if (sound >= 0 && sound <= static_cast<int>(Core::Sounds::Sound::Leave))
+            Core::Sounds::preview(static_cast<Core::Sounds::Sound>(sound));
+#endif
     } else if (action == std::string("record-keybind")) {
         const int rawAction = target ? target->GetAttribute<int>("data-keybind", -1) : -1;
         if (rawAction < 0 || rawAction > 2)
@@ -1325,16 +1502,7 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         stopRecordingKeybind();
         refreshKeybinds();
     } else if (action == std::string("edit-profile")) {
-        if (!profileEditor) {
-            profileEditor = std::make_unique<ProfileEditorController>(shell);
-            track(profileEditor->closed.connect([this] {
-                if (this->shell.isSettingsOpen()) {
-                    render();
-                    requestRender();
-                }
-            }));
-        }
-        profileEditor->open();
+        setSection(Section::Profiles);
     } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
     } else if (action == std::string("test-notification")) {
@@ -1358,6 +1526,7 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         const double g = h < 1 ? x : h < 3 ? chroma : h < 4 ? x : 0;
         const double b = h < 2 ? 0 : h < 3 ? x : h < 5 ? chroma : x;
         themeSeedColor = Platform::Color{static_cast<uint8_t>((r + m) * 255), static_cast<uint8_t>((g + m) * 255), static_cast<uint8_t>((b + m) * 255), 255, true};
+        readPickerColor();
         themeSchemeIndex = std::uniform_int_distribution<int>(0, Core::Theme::schemeCount - 1)(rng);
         if (regionRoot) {
             if (auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("seed-color-hex")))
@@ -1371,6 +1540,7 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         Core::Theme::Manager::instance().applyFonts();
         Core::Theme::Manager::instance().save();
         themeSeedColor = Core::Theme::Manager::instance().color(Core::Theme::Token::Highlight);
+        readPickerColor();
         themeDarkMode = true;
         themeSchemeIndex = 0;
         themeError.clear();

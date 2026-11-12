@@ -11,20 +11,22 @@ namespace Keys {
 // General / System
 inline constexpr const char *InMemoryCache = "general/in_memory_cache";
 inline constexpr const char *CloseToTray = "general/close_to_tray";
+inline constexpr const char *StartMinimized = "general/start_minimized";
 
 // Chat / Media
-inline constexpr const char *AnimateEmoji = "chat/animate_emoji";
-inline constexpr const char *AnimateStickers = "chat/animate_stickers";
-inline constexpr const char *GifPlayback = "chat/gif_playback";
-inline constexpr const char *GifMaxPlaying = "chat/gif_max_playing";
-inline constexpr const char *GifMaxMb = "chat/gif_max_mb";
+inline constexpr const char *CompactMessages = "chat/compact_messages";
+inline constexpr const char *ShowAvatars = "chat/show_avatars";
+inline constexpr const char *ShowEmbeds = "chat/show_embeds";
+inline constexpr const char *ShowReactions = "chat/show_reactions";
+inline constexpr const char *UnderlineLinks = "chat/underline_links";
+inline constexpr const char *ReducedMotion = "accessibility/reduced_motion";
 inline constexpr const char *AnimationCacheMb = "chat/animation_cache_mb";
 inline constexpr const char *AnimationMaxMb = "chat/animation_max_mb";
-
 // Notifications
 inline constexpr const char *DesktopNotifications = "notifications/desktop";
 inline constexpr const char *FlashTaskbar = "notifications/flash_taskbar";
 inline constexpr const char *TaskbarBadge = "notifications/taskbar_badge";
+inline constexpr const char *SoundsEnabled = "sounds/enabled";
 
 // Theme / Appearance
 inline constexpr const char *ThemeUseSystemColors = "appearance/use_system_colors";
@@ -54,14 +56,13 @@ namespace Defaults {
 inline constexpr bool InMemoryCache = false;
 inline constexpr bool CloseToTray = false;
 
-// Chat
-inline constexpr bool AnimateEmoji = true;
-inline constexpr bool AnimateStickers = true;
-inline constexpr const char *GifPlayback = "focused";
-inline constexpr int GifMaxPlaying = 4;
-inline constexpr int GifMaxMb = 32;
-inline constexpr int AnimationCacheMb = 128;
-inline constexpr int AnimationMaxMb = 16;
+// Chat preferences apply to this device.
+inline constexpr bool CompactMessages = false;
+inline constexpr bool ShowAvatars = true;
+inline constexpr bool ShowEmbeds = true;
+inline constexpr bool ShowReactions = true;
+inline constexpr bool UnderlineLinks = false;
+inline constexpr bool ReducedMotion = false;
 
 // Notifications
 inline constexpr bool DesktopNotifications = true;
