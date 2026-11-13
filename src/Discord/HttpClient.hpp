@@ -57,6 +57,8 @@ struct RequestOptions
     std::optional<ContextProperties> context;
     std::optional<std::string> auditLogReason;
     std::string originalMd5;
+    // Short-lived verification from POST /mfa/finish for actions that need multi-factor confirmation.
+    std::string mfaAuthorization;
 };
 
 class HttpClient : public Platform::Trackable

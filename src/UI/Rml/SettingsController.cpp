@@ -5,6 +5,7 @@
 #include "ShortcutController.hpp"
 #include "ReleaseVersion.hpp"
 #include "Shortcuts.hpp"
+#include "QrImage.hpp"
 #include "RmlRuntime.hpp"
 #include "UI/PushToTalk.hpp"
 
@@ -137,6 +138,8 @@ SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
         ++remoteSettingsRequest;
         emailRevealed = phoneRevealed = false;
         if (!passwordSaving) passwordFormOpen = false;
+        // Backup codes stay up across the reconnect that follows enabling the authenticator.
+        if (!mfaBusy && mfaStep != MfaStep::BackupCodes) clearMfaFlow();
         remoteSettingsSaving = false;
         remoteSettingsError.clear();
         bindAccountSettings();
@@ -191,6 +194,7 @@ void SettingsController::onSettingsOpenChanged(bool open)
         colorDragging = false;
         colorPickerOpen = false;
         stopRecordingKeybind();
+        if (!mfaBusy) clearMfaFlow();
         regionRoot->SetClass("open", false);
         regionRoot->SetProperty("display", "none");
         if (previousFocus) previousFocus->Focus();
@@ -212,7 +216,8 @@ void SettingsController::setSection(Section section)
     currentSection = section;
     emailRevealed = phoneRevealed = false;
     if (!passwordSaving) passwordFormOpen = false;
-    passwordNotice.clear();
+    if (!mfaBusy) clearMfaFlow();
+    securityNotice.clear();
     currentSubsection.clear();
     render();
     requestRender(100);
@@ -402,8 +407,8 @@ void SettingsController::renderMyAccount(std::string &rml)
 
         rml += "<div class=\"account-info-divider\"></div>";
         appendSubsectionHeading(rml, "password-security");
-        if (!passwordNotice.empty() && passwordNoticeAccount == inst->accountId())
-            rml += "<div class=\"account-password-notice\" role=\"status\">" + Rml::escape(passwordNotice) + "</div>";
+        if (!securityNotice.empty() && securityNoticeAccount == inst->accountId())
+            rml += "<div class=\"account-password-notice\" role=\"status\">" + Rml::escape(securityNotice) + "</div>";
         if (!ready) {
             row("Password", muted("Loading..."));
         } else if (!passwordFormOpen) {
@@ -411,7 +416,7 @@ void SettingsController::renderMyAccount(std::string &rml)
             row("Password", std::string(), "<button class=\"settings-btn settings-btn-secondary\" data-action=\"open-password-form\" "
                 "aria-label=\"Change password\"><span class=\"settings-btn-label\">Edit</span></button>");
         } else {
-            rml += "<div class=\"account-password-form\">";
+            rml += "<div id=\"account-password-form\" class=\"account-password-form\">";
             for (const auto &[id, label] : {std::pair{"account-current-password", "Current Password"},
                      std::pair{"account-new-password", "New Password"}, std::pair{"account-confirm-password", "Confirm New Password"}})
                 rml += formatRml("<label class=\"settings-label\" for=\"%1\">%2</label>"
@@ -424,14 +429,58 @@ void SettingsController::renderMyAccount(std::string &rml)
                    "<span class=\"settings-btn-label\">Done</span></button></div>";
             rml += "</div>";
         }
-        if (!ready)
+        // Authenticator app: setup in three steps (password, key and code, backup codes) or removal with a code.
+        auto mfaForm = [&rml](const std::string &body, const char *submitLabel) {
+            rml += "<div class=\"account-password-form account-mfa-form\">" + body +
+                   "<div id=\"account-mfa-error\" class=\"settings-keybind-error\" role=\"alert\"></div><div class=\"settings-button-group\">"
+                   "<button class=\"settings-btn settings-btn-secondary\" data-action=\"mfa-cancel\"><span class=\"settings-btn-label\">Cancel</span></button>"
+                   "<button id=\"account-mfa-submit\" class=\"settings-btn settings-btn-primary\" data-action=\"mfa-submit\"><span class=\"settings-btn-label\">" +
+                   std::string(submitLabel) + "</span></button></div></div>";
+        };
+        auto input = [](const char *id, const char *label, const char *type) {
+            return formatRml("<label class=\"settings-label\" for=\"%1\">%2</label><input id=\"%1\" class=\"account-password-input\" type=\"%3\" maxlength=\"128\"/>",
+                std::string(id), std::string(label), std::string(type));
+        };
+        const bool mfaOn = ready && self.mfaEnabled.valueOr(false);
+        if (!ready) {
             row("Multi-Factor Authentication", muted("Loading..."));
-        else if (self.mfaEnabled.hasValue())
-            row("Multi-Factor Authentication", Rml::escape(std::string(self.mfaEnabled.get() ? "Enabled" : "Not enabled")));
-        else
+        } else if (mfaStep == MfaStep::Password) {
+            row("Multi-Factor Authentication", muted("Not enabled"));
+            mfaForm("<div class=\"settings-description\">Confirm your password to set up an authenticator app.</div>" +
+                input("account-mfa-password", "Password", "password"), "Continue");
+        } else if (mfaStep == MfaStep::Setup) {
+            row("Multi-Factor Authentication", muted("Not enabled"));
+            mfaForm(formatRml("<div class=\"settings-description\">Scan this code with an authenticator app such as Google Authenticator, "
+                "Microsoft Authenticator or Authy, or enter the key yourself. Then type the 6-digit code it shows.</div>"
+                "<div class=\"account-mfa-setup\"><img class=\"account-mfa-qr\" src=\"frame:account-mfa-qr\" alt=\"Authenticator setup code\"/>"
+                "<div class=\"account-mfa-key\"><div class=\"settings-label\">Key</div><div class=\"account-mfa-secret\">%1</div>"
+                "<div class=\"settings-button-group\"><button class=\"settings-btn settings-btn-secondary\" data-action=\"mfa-copy-key\">"
+                "<span class=\"settings-btn-label\">Copy Key</span></button></div></div></div>", Rml::escape(Discord::groupedTotpSecret(mfaSecret))) +
+                input("account-mfa-code", "6-digit code", "text"), "Activate");
+        } else if (mfaStep == MfaStep::BackupCodes && securityNoticeAccount == inst->accountId()) {
+            row("Multi-Factor Authentication", Rml::escape(std::string("Enabled")));
+            rml += "<div class=\"account-password-form\"><div class=\"settings-description\">Save these backup codes somewhere safe. "
+                   "Each one signs you in once if you lose your authenticator. Styx won't show them again.</div><div class=\"account-mfa-codes\">";
+            for (const auto &code : mfaBackupCodes)
+                rml += "<span class=\"account-mfa-code\">" + Rml::escape(code) + "</span>";
+            rml += "</div><div class=\"settings-button-group\"><button class=\"settings-btn settings-btn-secondary\" data-action=\"mfa-copy-codes\">"
+                   "<span class=\"settings-btn-label\">Copy Codes</span></button><button class=\"settings-btn settings-btn-primary\" data-action=\"mfa-done\">"
+                   "<span class=\"settings-btn-label\">Done</span></button></div></div>";
+        } else if (mfaStep == MfaStep::Remove) {
+            row("Multi-Factor Authentication", Rml::escape(std::string("Enabled")));
+            mfaForm("<div class=\"settings-description\">Enter a code from your authenticator app, or a backup code, to remove it.</div>" +
+                input("account-mfa-code", "Authentication or backup code", "text"), "Remove");
+        } else if (mfaOn) {
+            row("Multi-Factor Authentication", Rml::escape(std::string("Enabled")), "<button class=\"settings-btn settings-btn-secondary\" "
+                "data-action=\"mfa-remove\" aria-label=\"Remove authenticator app\"><span class=\"settings-btn-label\">Remove</span></button>");
+        } else if (self.mfaEnabled.hasValue()) {
+            row("Multi-Factor Authentication", muted("Not enabled"), "<button class=\"settings-btn settings-btn-secondary\" "
+                "data-action=\"mfa-enable\" aria-label=\"Enable authenticator app\"><span class=\"settings-btn-label\">Enable</span></button>");
+        } else {
             row("Multi-Factor Authentication", muted("Unknown"));
-        rml += "<div class=\"settings-description\">Changing your username, email or phone number, and managing "
-               "authentication methods and logged-in devices, aren't available in Styx yet. Use the official Discord app for them.</div>";
+        }
+        rml += "<div class=\"settings-description\">Changing your username, email or phone number, SMS and security-key sign-in, "
+               "viewing backup codes later and logged-in devices aren't available in Styx yet. Use the official Discord app for them.</div>";
     }
 
     rml += "<div class=\"account-info-divider\"></div>";
@@ -1243,14 +1292,16 @@ void SettingsController::setupEventListeners()
                     return;
         }
         if (event.GetTargetElement()->IsClassSet("account-password-input")) {
+            const bool mfa = event.GetTargetElement()->GetId().starts_with("account-mfa-");
             if (key == ::Rml::Input::KeyIdentifier::KI_RETURN || key == ::Rml::Input::KeyIdentifier::KI_NUMPADENTER) {
                 event.StopPropagation();
-                submitPasswordChange();
+                if (mfa) submitMfaStep();
+                else submitPasswordChange();
                 return;
             }
-            if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE && !passwordSaving) {
+            if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE && !(mfa ? mfaBusy : passwordSaving)) {
                 event.StopPropagation();
-                handleAction("cancel-password", nullptr);
+                handleAction(mfa ? "mfa-cancel" : "cancel-password", nullptr);
                 return;
             }
         }
@@ -1627,6 +1678,34 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
     requestRender(50);
 }
 
+namespace {
+// Discord revoked the account's earlier tokens: keep the replacement and reconnect with it, even if
+// Settings has closed meanwhile. Returns a message when the sign-in couldn't be saved.
+std::string adoptReplacementToken(const Platform::Guard<Core::Session> &session, Core::Snowflake account, const std::string &token)
+{
+    if (!Core::TokenStore::saveToken(account, token).success())
+        return "The change was made, but Styx couldn't save the new sign-in. Use Set Token in Accounts to sign in again.";
+    Storage::AccountRepository().clearHeartbeatSession(account);
+    Platform::Dispatcher::main().post([session, account] {
+        if (!session) return;
+        session->disconnectAccount(account);
+        session->connectAccount(account);
+    });
+    return {};
+}
+
+void setFormBusy(::Rml::Element *root, const char *form, const char *submitLabel, bool busy)
+{
+    ::Rml::ElementList controls;
+    root->QuerySelectorAll(controls, std::string(form) + " input, " + form + " button");
+    for (auto *control : controls) {
+        if (busy) control->SetAttribute("disabled", "disabled");
+        else control->RemoveAttribute("disabled");
+    }
+    if (auto *label = root->QuerySelector(std::string(form) + " .settings-btn-primary .settings-btn-label")) label->SetInnerRML(submitLabel);
+}
+}
+
 void SettingsController::showPasswordError(const std::string &message)
 {
     if (auto *error = regionRoot->GetElementById("account-password-error"))
@@ -1653,10 +1732,7 @@ void SettingsController::submitPasswordChange()
 
     // The form stays in place while the request runs; only its controls are disabled.
     passwordSaving = true;
-    ::Rml::ElementList controls;
-    regionRoot->QuerySelectorAll(controls, ".account-password-form input, .account-password-form button");
-    for (auto *control : controls) control->SetAttribute("disabled", "disabled");
-    if (auto *label = regionRoot->QuerySelector("#account-password-submit .settings-btn-label")) label->SetInnerRML("Updating...");
+    setFormBusy(regionRoot, "#account-password-form", "Updating...", true);
     showPasswordError("");
 
     const auto account = instance->accountId();
@@ -1664,39 +1740,176 @@ void SettingsController::submitPasswordChange()
     Platform::Guard<SettingsController> self(this);
     Platform::Guard<Core::Session> session(shell.session());
     client->changePassword(current->GetValue(), next->GetValue(), [self, session, account, request](const Core::Result<std::string> &result) {
-        std::string error = result.success() ? std::string() : result.error;
-        if (result.success()) {
-            // Discord revoked every earlier token, so keep the new sign-in even if Settings closed meanwhile.
-            if (Core::TokenStore::saveToken(account, *result.value).success()) {
-                Storage::AccountRepository().clearHeartbeatSession(account);
-                Platform::Dispatcher::main().post([session, account] {
-                    if (!session) return;
-                    session->disconnectAccount(account);
-                    session->connectAccount(account);
-                });
-            } else {
-                error = "Your password was changed, but Styx couldn't save the new sign-in. Use Set Token in Accounts to sign in again.";
-            }
-        }
+        const std::string error = result.success() ? adoptReplacementToken(session, account, *result.value) : result.error;
         if (!self || self->passwordRequest != request) return;
         self->passwordSaving = false;
         if (result.success()) {
             self->passwordFormOpen = false;
-            self->passwordNotice = error.empty()
+            self->securityNotice = error.empty()
                 ? "Password changed. Discord signed out your other devices; Styx is reconnecting with the new sign-in."
                 : error;
-            self->passwordNoticeAccount = account;
+            self->securityNoticeAccount = account;
             if (self->shell.isSettingsOpen() && self->currentSection == Section::MyAccount) self->render();
-        } else if (self->regionRoot->QuerySelector(".account-password-form")) {
-            ::Rml::ElementList controls;
-            self->regionRoot->QuerySelectorAll(controls, ".account-password-form input, .account-password-form button");
-            for (auto *control : controls) control->RemoveAttribute("disabled");
-            if (auto *label = self->regionRoot->QuerySelector("#account-password-submit .settings-btn-label")) label->SetInnerRML("Done");
+        } else if (self->regionRoot->GetElementById("account-password-form")) {
+            setFormBusy(self->regionRoot, "#account-password-form", "Done", false);
             self->showPasswordError(error);
             if (auto *input = self->regionRoot->GetElementById("account-current-password")) input->Focus();
         }
         self->requestRender();
     });
+}
+
+void SettingsController::clearMfaFlow()
+{
+    mfaStep = MfaStep::None;
+    mfaBusy = false;
+    ++mfaRequest;
+    // Overwrite before releasing: these are a password, a second-factor secret and recovery codes.
+    std::fill(mfaPassword.begin(), mfaPassword.end(), '\0');
+    mfaPassword.clear();
+    std::fill(mfaSecret.begin(), mfaSecret.end(), '\0');
+    mfaSecret.clear();
+    std::fill(mfaAuthorization.begin(), mfaAuthorization.end(), '\0');
+    mfaAuthorization.clear();
+    for (auto &code : mfaBackupCodes) std::fill(code.begin(), code.end(), '\0');
+    mfaBackupCodes.clear();
+    Runtime::instance().clearFrame("account-mfa-qr");
+}
+
+void SettingsController::finishMfaRequest(const std::string &error)
+{
+    mfaBusy = false;
+    if (!regionRoot->GetElementById("account-mfa-submit")) return;
+    setFormBusy(regionRoot, ".account-mfa-form", mfaStep == MfaStep::Password ? "Continue" : mfaStep == MfaStep::Setup ? "Activate" : "Remove", false);
+    if (auto *message = regionRoot->GetElementById("account-mfa-error")) message->SetInnerRML(Rml::escape(error));
+    for (const char *id : {"account-mfa-password", "account-mfa-code"})
+        if (auto *input = regionRoot->GetElementById(id)) { input->Focus(); break; }
+    requestRender();
+}
+
+void SettingsController::submitMfaStep()
+{
+    auto *instance = shell.currentInstance();
+    auto *client = readyClient(shell);
+    if (!instance || !client || mfaBusy) return;
+    auto value = [this](const char *id) {
+        auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById(id));
+        return input ? input->GetValue() : std::string();
+    };
+    const auto account = instance->accountId();
+    const auto request = ++mfaRequest;
+    Platform::Guard<SettingsController> self(this);
+    Platform::Guard<Core::Session> session(shell.session());
+    auto current = [self, request] { return self && self->mfaRequest == request; };
+
+    if (mfaStep == MfaStep::Password) {
+        auto password = value("account-mfa-password");
+        if (password.empty()) { finishMfaRequest("Enter your password."); return; }
+        mfaBusy = true;
+        setFormBusy(regionRoot, ".account-mfa-form", "Checking...", true);
+        // Password accepted: keep it and the confirmation for the enable request, and show a new key.
+        auto showSetup = [self, current](std::string password, std::string authorization) {
+            if (!current()) return;
+            self->mfaBusy = false;
+            self->mfaPassword = std::move(password);
+            self->mfaAuthorization = std::move(authorization);
+            try {
+                self->mfaSecret = Discord::totpSecretFromBytes(Platform::secureRandomBytes(20));
+            } catch (const std::exception &) {
+                self->finishMfaRequest("Styx couldn't create a secure key on this system.");
+                return;
+            }
+            std::string name = "Discord";
+            if (auto *instance = self->shell.currentInstance()) name = instance->discord()->getMe().username.get();
+            if (auto image = qrImage(Discord::totpUri(self->mfaSecret, name), 200))
+                Runtime::instance().setFrame("account-mfa-qr", *image);
+            self->mfaStep = MfaStep::Setup;
+            self->render();
+            if (auto *code = self->regionRoot->GetElementById("account-mfa-code")) code->Focus();
+        };
+        // Discord first asks accounts without a second factor to confirm with their password, then checks it again.
+        client->checkTotpPassword(password, {}, [self, current, password, showSetup](const Core::Result<void> &result,
+                                                                                    const std::optional<Discord::MfaRequirement> &challenge) {
+            if (!current()) return;
+            if (result.success()) { showSetup(password, {}); return; }
+            if (!challenge) { self->finishMfaRequest(result.error); return; }
+            if (!challenge->password) {
+                self->finishMfaRequest("Discord wants this account's existing two-factor method. Set up the authenticator in the official Discord app.");
+                return;
+            }
+            auto *client = readyClient(self->shell);
+            if (!client) { self->finishMfaRequest("The account disconnected. Try again."); return; }
+            client->verifyMfa(challenge->ticket, Discord::mfaPasswordProof(password), [self, current, password, showSetup](const Core::Result<std::string> &verified) {
+                if (!current()) return;
+                if (!verified.success()) { self->finishMfaRequest(verified.error); return; }
+                auto *client = readyClient(self->shell);
+                if (!client) { self->finishMfaRequest("The account disconnected. Try again."); return; }
+                const auto authorization = *verified.value;
+                client->checkTotpPassword(password, authorization, [self, current, password, authorization, showSetup](
+                                              const Core::Result<void> &again, const std::optional<Discord::MfaRequirement> &stillGuarded) {
+                    if (!current()) return;
+                    if (!again.success()) {
+                        self->finishMfaRequest(stillGuarded ? "Discord didn't accept the confirmation. Try again." : again.error);
+                        return;
+                    }
+                    showSetup(password, authorization);
+                });
+            });
+        });
+    } else if (mfaStep == MfaStep::Setup) {
+        const auto code = Discord::normalizedTotpCode(value("account-mfa-code"));
+        if (code.empty()) { finishMfaRequest("Enter the 6-digit code from your authenticator app."); return; }
+        mfaBusy = true;
+        setFormBusy(regionRoot, ".account-mfa-form", "Activating...", true);
+        client->enableTotp(mfaPassword, mfaSecret, code, mfaAuthorization, [self, session, current, account](const Core::Result<Discord::TotpEnabled> &result) {
+            const std::string error = result.success() ? adoptReplacementToken(session, account, result.value->token) : result.error;
+            if (!current()) return;
+            if (!result.success()) { self->finishMfaRequest(error); return; }
+            auto codes = result.value->backupCodes;
+            self->clearMfaFlow();
+            self->mfaBackupCodes = std::move(codes);
+            self->mfaStep = MfaStep::BackupCodes;
+            self->securityNotice = error.empty()
+                ? "Authenticator app enabled. Discord signed out your other devices; Styx is reconnecting with the new sign-in."
+                : error;
+            self->securityNoticeAccount = account;
+            if (self->shell.isSettingsOpen() && self->currentSection == Section::MyAccount) self->render();
+        });
+    } else if (mfaStep == MfaStep::Remove) {
+        const auto code = value("account-mfa-code");
+        if (code.empty()) { finishMfaRequest("Enter a code from your authenticator app or a backup code."); return; }
+        mfaBusy = true;
+        setFormBusy(regionRoot, ".account-mfa-form", "Removing...", true);
+        auto *discord = client;
+        // Discord asks for a second factor first; confirm it with the typed code, then remove with that confirmation.
+        discord->disableTotp({}, [self, session, current, account, code](const Core::Result<std::string> &first,
+                                                                         const std::optional<Discord::MfaRequirement> &challenge) {
+            if (!current()) return;
+            auto removed = [self, session, current, account](const Core::Result<std::string> &result) {
+                const std::string error = result.success() ? adoptReplacementToken(session, account, *result.value) : result.error;
+                if (!current()) return;
+                if (!result.success()) { self->finishMfaRequest(error); return; }
+                self->clearMfaFlow();
+                self->securityNotice = error.empty()
+                    ? "Authenticator app removed. Discord signed out your other devices; Styx is reconnecting with the new sign-in."
+                    : error;
+                self->securityNoticeAccount = account;
+                if (self->shell.isSettingsOpen() && self->currentSection == Section::MyAccount) self->render();
+            };
+            if (!challenge) { removed(first); return; }
+            auto *client = readyClient(self->shell);
+            if (!client) { self->finishMfaRequest("The account disconnected. Try again."); return; }
+            client->verifyMfa(challenge->ticket, Discord::mfaCodeProof(code), [self, current, removed](const Core::Result<std::string> &verified) {
+                if (!current()) return;
+                if (!verified.success()) { self->finishMfaRequest(verified.error); return; }
+                auto *client = readyClient(self->shell);
+                if (!client) { self->finishMfaRequest("The account disconnected. Try again."); return; }
+                client->disableTotp(*verified.value, [removed](const Core::Result<std::string> &result, const std::optional<Discord::MfaRequirement> &again) {
+                    removed(again ? Core::Result<std::string>::makeError("Discord didn't accept the confirmation. Try again.") : result);
+                });
+            });
+        });
+    }
 }
 
 void SettingsController::handleAction(const std::string &action, ::Rml::Element *target)
@@ -1757,7 +1970,7 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         refreshKeybinds();
     } else if (action == std::string("open-password-form")) {
         passwordFormOpen = true;
-        passwordNotice.clear();
+        securityNotice.clear();
         render();
         if (auto *input = regionRoot->GetElementById("account-current-password")) input->Focus();
     } else if (action == std::string("cancel-password")) {
@@ -1767,6 +1980,26 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         if (auto *edit = regionRoot->QuerySelector("button[data-action=\"open-password-form\"]")) edit->Focus();
     } else if (action == std::string("submit-password")) {
         submitPasswordChange();
+    } else if (action == std::string("mfa-enable") || action == std::string("mfa-remove")) {
+        clearMfaFlow();
+        mfaStep = action == std::string("mfa-enable") ? MfaStep::Password : MfaStep::Remove;
+        securityNotice.clear();
+        render();
+        if (auto *input = regionRoot->QuerySelector(".account-mfa-form input")) input->Focus();
+    } else if (action == std::string("mfa-submit")) {
+        submitMfaStep();
+    } else if (action == std::string("mfa-cancel") || action == std::string("mfa-done")) {
+        if (mfaBusy) return;
+        const bool wasOn = mfaStep == MfaStep::BackupCodes || mfaStep == MfaStep::Remove;
+        clearMfaFlow();
+        render();
+        if (auto *button = regionRoot->QuerySelector(wasOn ? "button[data-action=\"mfa-remove\"]" : "button[data-action=\"mfa-enable\"]")) button->Focus();
+    } else if (action == std::string("mfa-copy-key")) {
+        Platform::Desktop::setClipboardText(mfaSecret);
+    } else if (action == std::string("mfa-copy-codes")) {
+        std::string text;
+        for (const auto &code : mfaBackupCodes) text += code + "\n";
+        Platform::Desktop::setClipboardText(text);
     } else if (action == std::string("reveal-email")) {
         emailRevealed = !emailRevealed;
         render();

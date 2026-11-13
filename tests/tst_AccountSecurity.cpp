@@ -71,3 +71,84 @@ TEST_CASE("Accounts that need multi-factor verification are told to use the offi
     CHECK(mfa.code == MfaRequiredCode);
     CHECK(mfa.error.find("multi-factor") != std::string::npos);
 }
+
+TEST_CASE("Authenticator secrets are unpadded base32", "[account]")
+{
+    CHECK(totpSecretFromBytes({'f', 'o', 'o', 'b', 'a', 'r'}) == "MZXW6YTBOI");
+    const auto secret = totpSecretFromBytes(std::vector<unsigned char>(20, 0xFF));
+    CHECK(secret.size() == 32);
+    CHECK(secret == std::string(32, '7'));
+    CHECK(groupedTotpSecret("ABCDEFGHIJ") == "abcd efgh ij");
+}
+
+TEST_CASE("The setup link names the account and escapes it", "[account]")
+{
+    CHECK(totpUri("MZXW6YTB", "larry_the.mobster") == "otpauth://totp/Discord:larry_the.mobster?secret=MZXW6YTB&issuer=Discord");
+    CHECK(totpUri("MZXW6YTB", "a b&c") == "otpauth://totp/Discord:a%20b%26c?secret=MZXW6YTB&issuer=Discord");
+}
+
+TEST_CASE("Authenticator codes are six digits, spaces allowed", "[account]")
+{
+    CHECK(normalizedTotpCode("123 456") == "123456");
+    CHECK(normalizedTotpCode("12345").empty());
+    CHECK(normalizedTotpCode("12345a").empty());
+    CHECK(normalizedTotpCode("1234567").empty());
+}
+
+TEST_CASE("Setting up the authenticator first checks only the password", "[account]")
+{
+    CHECK(totpEnableBody("pw") == nlohmann::json{{"password", "pw"}});
+    CHECK(totpEnableBody("pw", "SECRET", "123456") == nlohmann::json{{"password", "pw"}, {"secret", "SECRET"}, {"code", "123456"}});
+    CHECK(totpPasswordCheckResult(response(400, R"({"code":60005,"message":"Invalid two-factor secret"})")).success());
+    const auto wrong = totpPasswordCheckResult(response(400,
+        R"({"code":50035,"errors":{"password":{"_errors":[{"code":"PASSWORD_DOES_NOT_MATCH","message":"Password does not match."}]}}})"));
+    REQUIRE_FALSE(wrong.success());
+    CHECK(wrong.error == "Password does not match.");
+}
+
+TEST_CASE("Enabling the authenticator returns the new token and backup codes", "[account]")
+{
+    const auto enabled = totpEnableResult(response(200,
+        R"({"token":"MTIzNDU2Nzg5MDEyMzQ1Njc4.abc.def","backup_codes":[{"user_id":"1","code":"zqs8oqxk","consumed":false},{"code":"abcd1234"}]})"), self);
+    REQUIRE(enabled.success());
+    CHECK(enabled.value->token == "MTIzNDU2Nzg5MDEyMzQ1Njc4.abc.def");
+    CHECK(enabled.value->backupCodes == std::vector<std::string>{"zqs8oqxk", "abcd1234"});
+    CHECK_FALSE(totpEnableResult(response(200, R"({"token":"OTk5OTk5OTk5OTk5OTk5OTk5.abc.def"})"), self).success());
+    CHECK_FALSE(totpEnableResult(response(400, R"({"code":60008,"message":"Invalid two-factor code"})"), self).success());
+}
+
+TEST_CASE("Actions needing a second factor expose Discord's challenge", "[account]")
+{
+    const auto challenge = mfaChallenge(response(401,
+        R"({"code":60003,"message":"Two factor is required for this operation","mfa":{"ticket":"T1","methods":[{"type":"webauthn","challenge":"{}"},{"type":"totp","backup_codes_allowed":true}]}})"));
+    REQUIRE(challenge);
+    CHECK(challenge->ticket == "T1");
+    CHECK(challenge->totp);
+    CHECK(challenge->backup);
+    CHECK_FALSE(challenge->password);
+    // Accounts without a second factor confirm with their password.
+    const auto passwordOnly = mfaChallenge(response(401, R"({"code":60003,"mfa":{"ticket":"T2","methods":[{"type":"password"}]}})"));
+    REQUIRE(passwordOnly);
+    CHECK(passwordOnly->password);
+    CHECK_FALSE(passwordOnly->totp);
+    CHECK_FALSE(mfaChallenge(response(401, R"({"code":60003,"message":"no ticket"})")));
+    CHECK_FALSE(mfaChallenge(response(400, R"({"code":50035})")));
+    CHECK_FALSE(mfaChallenge(response(200, R"({"token":"x"})")));
+}
+
+TEST_CASE("Second-factor codes pick their method by shape", "[account]")
+{
+    CHECK(mfaFinishBody("T", mfaCodeProof("123 456")) == nlohmann::json{{"ticket", "T"}, {"mfa_type", "totp"}, {"data", "123456"}});
+    CHECK(mfaFinishBody("T", mfaCodeProof("ZQS8-OQXK")) == nlohmann::json{{"ticket", "T"}, {"mfa_type", "backup"}, {"data", "zqs8oqxk"}});
+    CHECK(mfaFinishBody("T", mfaPasswordProof("Pass Word")) == nlohmann::json{{"ticket", "T"}, {"mfa_type", "password"}, {"data", "Pass Word"}});
+    const auto verified = mfaFinishResult(response(200, R"({"token":"jwt"})"));
+    REQUIRE(verified.success());
+    CHECK(*verified.value == "jwt");
+    CHECK_FALSE(mfaFinishResult(response(400, R"({"code":60008,"message":"Invalid two-factor code"})")).success());
+}
+
+TEST_CASE("Removing the authenticator returns this account's new token", "[account]")
+{
+    CHECK(*totpDisableResult(response(200, R"({"token":"MTIzNDU2Nzg5MDEyMzQ1Njc4.abc.def"})"), self).value == "MTIzNDU2Nzg5MDEyMzQ1Njc4.abc.def");
+    CHECK_FALSE(totpDisableResult(response(200, R"({})"), self).success());
+}

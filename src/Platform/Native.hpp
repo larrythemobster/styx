@@ -87,6 +87,8 @@ std::string fileUrl(const std::filesystem::path &path);
 std::filesystem::path localFilePath(std::string_view url);
 std::string mimeType(const std::filesystem::path &path);
 std::string randomUuid();
+// Cryptographically secure random bytes; throws when the system can't provide them.
+std::vector<unsigned char> secureRandomBytes(std::size_t count);
 std::vector<char32_t> codepoints(std::string_view utf8);
 std::string fromCodepoints(const std::vector<char32_t> &values);
 std::string unicodeLower(std::string_view utf8);

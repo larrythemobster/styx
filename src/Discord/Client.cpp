@@ -980,6 +980,55 @@ void Client::changePassword(const std::string &currentPassword, const std::strin
         });
 }
 
+void Client::checkTotpPassword(const std::string &password, const std::string &mfaAuthorization, GuardedCallback<void> callback)
+{
+    RequestOptions options;
+    options.mfaAuthorization = mfaAuthorization;
+    httpClient->send(HttpClient::Method::POST, "/users/@me/mfa/totp/enable", totpEnableBody(password).dump(), options,
+        [callback = std::move(callback)](const HttpResponse &response) {
+            if (!callback) return;
+            if (auto challenge = mfaChallenge(response))
+                callback(Core::Result<void>::makeError("Discord asked to confirm this change.", MfaRequiredCode), challenge);
+            else
+                callback(totpPasswordCheckResult(response), std::nullopt);
+        });
+}
+
+void Client::enableTotp(const std::string &password, const std::string &secret, const std::string &code,
+                        const std::string &mfaAuthorization, ResultCallback<TotpEnabled> callback)
+{
+    const Snowflake userId = me.id.get();
+    RequestOptions options;
+    options.mfaAuthorization = mfaAuthorization;
+    httpClient->send(HttpClient::Method::POST, "/users/@me/mfa/totp/enable", totpEnableBody(password, secret, code).dump(), options,
+        [userId, callback = std::move(callback)](const HttpResponse &response) {
+            if (callback) callback(totpEnableResult(response, userId));
+        });
+}
+
+void Client::disableTotp(const std::string &mfaAuthorization, GuardedCallback<std::string> callback)
+{
+    const Snowflake userId = me.id.get();
+    RequestOptions options;
+    options.mfaAuthorization = mfaAuthorization;
+    httpClient->send(HttpClient::Method::POST, "/users/@me/mfa/totp/disable", "{}", options,
+        [userId, callback = std::move(callback)](const HttpResponse &response) {
+            if (!callback) return;
+            if (auto challenge = mfaChallenge(response))
+                callback(Core::Result<std::string>::makeError("Discord asked to confirm this change.", MfaRequiredCode), challenge);
+            else
+                callback(totpDisableResult(response, userId), std::nullopt);
+        });
+}
+
+void Client::verifyMfa(const std::string &ticket, const MfaProof &proof, ResultCallback<std::string> callback)
+{
+    httpClient->send(HttpClient::Method::POST, "/mfa/finish", mfaFinishBody(ticket, proof).dump(), {},
+        [callback = std::move(callback)](const HttpResponse &response) {
+            if (callback) callback(mfaFinishResult(response));
+        });
+}
+
 void Client::modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback)
 {
     RequestOptions options;

@@ -173,6 +173,7 @@ void HttpClient::executeRequest(Method method, const std::string &url, const std
         descriptor.contextProperties = options.context->toHeaderValue();
     descriptor.auditLogReason = options.auditLogReason;
     descriptor.originalMd5 = options.originalMd5;
+    descriptor.mfaAuthorization = options.mfaAuthorization;
     descriptor.callback = std::move(callback);
     worker->submit(std::move(descriptor));
 }
@@ -195,6 +196,7 @@ void HttpClient::executeMultipartRequest(const std::string &url, const std::stri
         descriptor.contextProperties = options.context->toHeaderValue();
     descriptor.auditLogReason = options.auditLogReason;
     descriptor.originalMd5 = options.originalMd5;
+    descriptor.mfaAuthorization = options.mfaAuthorization;
     descriptor.callback = std::move(callback);
     worker->submit(std::move(descriptor));
 }

@@ -377,6 +377,12 @@ std::string randomUuid()
     for (size_t i = 0; i < data.size(); ++i) { if (i == 4 || i == 6 || i == 8 || i == 10) out += '-'; out += digits[data[i] >> 4]; out += digits[data[i] & 15]; }
     return out;
 }
+std::vector<unsigned char> secureRandomBytes(std::size_t count)
+{
+    std::vector<unsigned char> data(count);
+    if (count && RAND_bytes(data.data(), static_cast<int>(count)) != 1) throw std::runtime_error("Unable to generate random bytes");
+    return data;
+}
 std::vector<char32_t> codepoints(std::string_view utf8)
 {
     std::vector<char32_t> result;

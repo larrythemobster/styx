@@ -14,7 +14,7 @@
 #include "Storage/AccountRepository.hpp"
 #include "UI/Accounts/AccountsModel.hpp"
 
-#include "qrcodegen.hpp"
+#include "QrImage.hpp"
 #include "Platform/Utf8.hpp"
 #include <charconv>
 #include <format>
@@ -693,34 +693,12 @@ void AccountsController::stopQrClient()
 
 void AccountsController::renderQr(const std::string &fingerprint)
 {
-    const std::string url = "https://discord.com/ra/" + fingerprint;
-    try {
-        const auto qr = qrcodegen::QrCode::encodeText(url.c_str(), qrcodegen::QrCode::Ecc::QUARTILE);
-        const int modules = qr.getSize();
-        constexpr int border = 4;
-        const int side = modules + border * 2;
-        Platform::ImageBuffer image{256, 256, 4, std::vector<uint8_t>(256 * 256 * 4, 255)};
-        for (int y = 0; y < 256; ++y) for (int x = 0; x < 256; ++x) {
-            const int mx = x * side / 256 - border, my = y * side / 256 - border;
-            if (mx >= 0 && my >= 0 && mx < modules && my < modules && qr.getModule(mx, my)) {
-                auto *pixel = image.pixels.data() + (y * 256 + x) * 4;
-                pixel[0] = pixel[1] = pixel[2] = 0;
-            }
-        }
-        Runtime::instance().setFrame("ra-qr", image);
-
-        if (modalDocument) {
-            if (auto *st = modalDocument->GetElementById("qr-status-text"))
-                st->SetInnerRML("Ready to scan");
-        }
-        requestRender(100);
-    } catch (...) {
-        if (modalDocument) {
-            if (auto *st = modalDocument->GetElementById("qr-status-text"))
-                st->SetInnerRML("Failed to generate QR code.");
-        }
-        requestRender(100);
-    }
+    const auto image = qrImage("https://discord.com/ra/" + fingerprint, 256);
+    if (image) Runtime::instance().setFrame("ra-qr", *image);
+    if (modalDocument)
+        if (auto *st = modalDocument->GetElementById("qr-status-text"))
+            st->SetInnerRML(image ? "Ready to scan" : "Failed to generate QR code.");
+    requestRender(100);
 }
 
 void AccountsController::handleTokenSubmit()

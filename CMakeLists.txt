@@ -319,6 +319,7 @@ set(PROJECT_SOURCES
     src/UI/Rml/ProfileEditorController.cpp
     src/UI/Rml/ServerMenuController.cpp
     src/UI/Rml/AccountsController.cpp
+    src/UI/Rml/QrImage.cpp
     src/UI/Rml/ConfirmModal.cpp
     src/UI/Rml/UserProfileController.cpp
     src/UI/Rml/ImageViewerController.cpp

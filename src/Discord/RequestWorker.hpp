@@ -44,6 +44,7 @@ struct RequestDescriptor
     std::string contextProperties;
     std::optional<std::string> auditLogReason;
     std::string originalMd5;
+    std::string mfaAuthorization;
     HttpCallback callback;
     std::function<void(int64_t sent, int64_t total)> progressCallback; // worker thread!
     std::shared_ptr<std::atomic<bool>> cancelFlag;

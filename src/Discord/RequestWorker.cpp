@@ -212,6 +212,8 @@ CURL *RequestWorker::buildEasyHandle(TransferContext *ctx)
             headers = curl_slist_append(headers, "Content-Type: application/json");
         if (!desc.originalMd5.empty())
             headers = curl_slist_append(headers, ("X-Discord-Original-MD5: " + desc.originalMd5).data());
+        if (!desc.mfaAuthorization.empty())
+            headers = curl_slist_append(headers, ("X-Discord-MFA-Authorization: " + desc.mfaAuthorization).data());
         if (desc.auditLogReason) {
             const std::string reason = encodeUriComponent(*desc.auditLogReason);
             headers = curl_slist_append(headers, reason.empty() ? "X-Audit-Log-Reason;" : ("X-Audit-Log-Reason: " + reason).data());

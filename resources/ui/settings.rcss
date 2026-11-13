@@ -928,6 +928,51 @@ input.account-password-input:disabled
 	font-size: 14dp;
 }
 
+.account-mfa-setup
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin: 12dp 0 4dp 0;
+}
+
+.account-mfa-qr
+{
+	width: 160dp;
+	height: 160dp;
+	margin-right: 20dp;
+	border-radius: 8dp;
+	flex-shrink: 0;
+}
+
+.account-mfa-key
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.account-mfa-secret, .account-mfa-code
+{
+	font-family: mono;
+	font-size: 14dp;
+	color: #f2f3f5;
+	word-break: break-all;
+}
+
+.account-mfa-codes
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	margin: 8dp 0;
+}
+
+.account-mfa-code
+{
+	width: 50%;
+	padding: 6dp 0;
+}
+
 .settings-btn.account-info-reveal
 {
 	height: auto;

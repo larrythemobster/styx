@@ -12,6 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <RmlUi/Core/ObserverPtr.h>
 
 namespace Rml { class ElementFormControlInput; }
@@ -117,6 +118,10 @@ private:
     void handleAction(const std::string &action, ::Rml::Element *target);
     void submitPasswordChange();
     void showPasswordError(const std::string &message);
+    // Authenticator app setup/removal: runs the step that's on screen.
+    void submitMfaStep();
+    void finishMfaRequest(const std::string &error);
+    void clearMfaFlow();
     void renderKeybindRow(std::string &rml, KeybindAction action);
     void refreshKeybinds();
     void stopRecordingKeybind();
@@ -145,8 +150,19 @@ private:
     bool passwordFormOpen = false;
     bool passwordSaving = false;
     std::uint64_t passwordRequest = 0;
-    std::string passwordNotice;
-    Core::Snowflake passwordNoticeAccount;
+    // Outcome of the last password or authenticator change, shown for that account only.
+    std::string securityNotice;
+    Core::Snowflake securityNoticeAccount;
+    // Authenticator app flow. The password, secret and Discord's confirmation are held only between
+    // its steps and the backup codes only until the user leaves them; clearMfaFlow wipes them all.
+    enum class MfaStep { None, Password, Setup, BackupCodes, Remove };
+    MfaStep mfaStep = MfaStep::None;
+    bool mfaBusy = false;
+    std::uint64_t mfaRequest = 0;
+    std::string mfaPassword;
+    std::string mfaSecret;
+    std::string mfaAuthorization;
+    std::vector<std::string> mfaBackupCodes;
     bool colorDragging = false;
     double pickerHue = 0;
     double pickerSaturation = 0;
