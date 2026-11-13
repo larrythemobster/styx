@@ -403,10 +403,24 @@ void View::handleEvent(const SDL_Event &event)
 void View::dispatchEvent(const SDL_Event &event)
 {
     if (event.type == SDL_EVENT_QUIT) { quitting = true; return; }
+    if (event.type == SDL_EVENT_SYSTEM_THEME_CHANGED) { systemThemeChanged().publish(); return; }
     auto id = SDL_GetWindowID(SDL_GetWindowFromEvent(&event));
     if (auto it = windows.find(id); it != windows.end()) it->second->handleEvent(event);
 }
 void View::processEvents() { SDL_Event event; while (SDL_PollEvent(&event)) dispatchEvent(event); }
+Core::Theme::DeviceTheme View::systemTheme()
+{
+    switch (SDL_GetSystemTheme()) {
+    case SDL_SYSTEM_THEME_LIGHT: return Core::Theme::DeviceTheme::Light;
+    case SDL_SYSTEM_THEME_DARK: return Core::Theme::DeviceTheme::Dark;
+    default: return Core::Theme::DeviceTheme::Unknown;
+    }
+}
+Platform::Signal<> &View::systemThemeChanged()
+{
+    static Platform::Signal<> signal;
+    return signal;
+}
 void View::renderPending()
 {
     const auto now = std::chrono::steady_clock::now();

@@ -4,6 +4,7 @@
 #include "Core/Migration.hpp"
 #include "Core/Session.hpp"
 #include "Core/Logging.hpp"
+#include "Core/Theme/Appearance.hpp"
 #include "Core/Theme/Manager.hpp"
 #include "Platform/Settings.hpp"
 
@@ -46,7 +47,7 @@ int main(int argc, char *argv[])
         Core::Migration::migrateKeychain();
         auto &theme = Core::Theme::Manager::instance();
         theme.load();
-        theme.apply();
+        Core::Theme::restoreAppearance(UI::Rml::View::systemTheme());
         theme.applyFonts();
 #ifndef STYX_NO_VOICE
         discord::dave::SetLogSink(DaveLogSink);

@@ -36,7 +36,7 @@ constexpr SectionInfo sections[] = {
     {SettingsController::Section::Privacy, "privacy", "Privacy & Safety", "User Settings", "privacy direct messages dms server members screen reader detection", "shield-alert"},
     {SettingsController::Section::FriendRequests, "friend-requests", "Friend Requests", "User Settings", "friends requests everyone mutual server members", "user-plus"},
     {SettingsController::Section::VoiceVideo, "voice-video", "Voice & Video", "Experience", "voice audio microphone speakers input output volume push to talk devices", "volume-2"},
-    {SettingsController::Section::Appearance, "appearance", "Appearance", "Experience", "theme accent color colour picker light dark palette fonts", "palette"},
+    {SettingsController::Section::Appearance, "appearance", "Appearance", "Experience", "theme default light ash dark onyx device sync accent color colour picker palette custom fonts", "palette"},
     {SettingsController::Section::Chat, "chat", "Text & Images", "Experience", "chat messages embeds links reactions media", "messages-square"},
     {SettingsController::Section::Accessibility, "accessibility", "Accessibility", "Experience", "font text size compact avatars underlines readability reduced motion", "accessibility"},
     {SettingsController::Section::GoLive, "go-live", "Screen Sharing", "Experience", "screen sharing streaming quality resolution frame rate system audio", "monitor"},
@@ -52,15 +52,16 @@ std::string lower(std::string text)
     for (auto &c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return text;
 }
-Discord::Client *readyClient(Shell &shell)
-{
-    auto *instance = shell.currentInstance();
-    return instance && instance->discord()->getMe().id.get() == instance->accountId() ? instance->discord() : nullptr;
-}
 void description(std::string &rml, std::string_view text)
 {
     rml += "<div class=\"settings-description\">" + Platform::htmlEscape(text) + "</div>";
 }
+}
+
+Discord::Client *SettingsController::readyClient(Shell &shell)
+{
+    auto *instance = shell.currentInstance();
+    return instance && instance->discord()->getMe().id.get() == instance->accountId() ? instance->discord() : nullptr;
 }
 
 void SettingsController::renderNavigation(std::string &rml)
@@ -159,7 +160,7 @@ void SettingsController::renderRemoteStatus(std::string &rml)
 }
 bool SettingsController::isRemoteSection() const
 {
-    return currentSection == Section::Privacy || currentSection == Section::FriendRequests ||
+    return currentSection == Section::Privacy || currentSection == Section::FriendRequests || currentSection == Section::Appearance ||
         currentSection == Section::ActivityPrivacy || currentSection == Section::Language || currentSection == Section::Advanced;
 }
 
@@ -170,8 +171,9 @@ void SettingsController::bindAccountSettings()
     if (!instance) return;
     const auto account = instance->accountId();
     accountSettingsConnection = instance->discord()->settingsChanged.connect([this, account] {
-        if (shell.currentInstance() && shell.currentInstance()->accountId() == account &&
-            shell.isSettingsOpen() && isRemoteSection() && !remoteSettingsSaving)
+        if (!shell.currentInstance() || shell.currentInstance()->accountId() != account) return;
+        adoptAccountTheme();
+        if (shell.isSettingsOpen() && isRemoteSection() && !remoteSettingsSaving)
             rebuildTimer.start(std::chrono::milliseconds(0), false, [this] { rebuild(); });
     });
     accountSettingsConnection.setAutoDisconnect(true);

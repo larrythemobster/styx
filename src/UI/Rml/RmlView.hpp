@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Theme/Appearance.hpp"
 #include "Platform/Native.hpp"
 #include "Platform/Timer.hpp"
 #include "Platform/Trackable.hpp"
@@ -88,6 +89,9 @@ public:
     static void renderPending();
     static std::optional<std::chrono::milliseconds> nextRenderDelay();
     static bool quitRequested();
+    // The operating system's light/dark preference and its change notifications.
+    static Core::Theme::DeviceTheme systemTheme();
+    static Platform::Signal<> &systemThemeChanged();
 
 private:
     void initialise();

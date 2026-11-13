@@ -2,6 +2,7 @@
 #include "UI/Rml/RmlRuntime.hpp"
 #include "UI/Rml/RmlView.hpp"
 #include "UI/Rml/ContextMenu.hpp"
+#include "Core/Theme/Appearance.hpp"
 #include "Core/Theme/Manager.hpp"
 #include "Core/Theme/Generator.hpp"
 #include <RmlUi/Core/ElementUtilities.h>
@@ -173,6 +174,33 @@ private:
     GLuint texture = 0;
     PFNGLBINDFRAMEBUFFERPROC bind = nullptr;
     PFNGLDELETEFRAMEBUFFERSPROC destroy = nullptr;
+};
+
+// Restores the process-wide theme so later cases render with the palette they expect.
+struct RestoreTheme {
+    Styx::Core::Theme::Manager &theme;
+    std::unordered_map<Styx::Core::Theme::Token, Styx::Platform::Color> colors;
+    std::vector<std::pair<Styx::Core::Theme::FontRole, Styx::Core::Theme::Font>> fonts;
+    explicit RestoreTheme(Styx::Core::Theme::Manager &manager) : theme(manager)
+    {
+        for (const auto &token : Styx::Core::Theme::registry())
+            if (theme.hasOverride(token.token))
+                colors.emplace(token.token, theme.color(token.token));
+        for (const auto &font : Styx::Core::Theme::fontRegistry())
+            if (theme.hasFontOverride(font.role))
+                fonts.emplace_back(font.role, theme.font(font.role));
+    }
+    RestoreTheme(const RestoreTheme &) = delete;
+    RestoreTheme &operator=(const RestoreTheme &) = delete;
+    ~RestoreTheme()
+    {
+        theme.resetAll();
+        theme.setOverrides(colors);
+        for (const auto &[role, font] : fonts)
+            theme.setFontOverride(role, font);
+        theme.apply();
+        theme.applyFonts();
+    }
 };
 }
 
@@ -652,29 +680,7 @@ TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][the
 {
     namespace Theme = Styx::Core::Theme;
     auto &theme = Theme::Manager::instance();
-    struct RestoreTheme {
-        Theme::Manager &theme;
-        std::unordered_map<Theme::Token, Styx::Platform::Color> colors;
-        std::vector<std::pair<Theme::FontRole, Theme::Font>> fonts;
-        explicit RestoreTheme(Theme::Manager &manager) : theme(manager)
-        {
-            for (const auto &token : Theme::registry())
-                if (theme.hasOverride(token.token))
-                    colors.emplace(token.token, theme.color(token.token));
-            for (const auto &font : Theme::fontRegistry())
-                if (theme.hasFontOverride(font.role))
-                    fonts.emplace_back(font.role, theme.font(font.role));
-        }
-        ~RestoreTheme()
-        {
-            theme.resetAll();
-            theme.setOverrides(colors);
-            for (const auto &[role, font] : fonts)
-                theme.setFontOverride(role, font);
-            theme.apply();
-            theme.applyFonts();
-        }
-    } restore(theme);
+    RestoreTheme restore(theme);
     View view("theme-rendering");
     prepare(view, 640, 480);
     view.loadDocument("main.rml");
@@ -751,6 +757,36 @@ TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][the
     REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").red < 60);
     REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").green < 60);
     REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").blue < 60);
+}
+
+TEST_CASE("Default themes restyle an open document", "[rml][theme]")
+{
+    namespace Theme = Styx::Core::Theme;
+    auto &theme = Theme::Manager::instance();
+    RestoreTheme restore(theme);
+    View view("default-themes");
+    prepare(view, 640, 480);
+    view.loadDocument("main.rml");
+    auto *document = view.document();
+    document->SetInnerRML("<div id=\"body\" class=\"message-body\">Theme text</div>");
+    auto *body = document->GetElementById("body");
+    auto show = [&](Theme::ThemeChoice choice) {
+        Theme::Appearance appearance;
+        appearance.choice = choice;
+        theme.setOverrides(Theme::appearancePalette(appearance, Theme::DeviceTheme::Unknown));
+        theme.apply();
+        view.renderNow();
+        REQUIRE(view.document() == document);
+        return std::pair{document->GetProperty<::Rml::Colourb>("background-color"), body->GetProperty<::Rml::Colourb>("color")};
+    };
+    const auto [lightBackground, lightText] = show(Theme::ThemeChoice::Light);
+    REQUIRE(lightBackground == ::Rml::Colourb(255, 255, 255, 255));
+    REQUIRE(lightText.red < 80);
+    REQUIRE(show(Theme::ThemeChoice::Ash).first == ::Rml::Colourb(0x32, 0x33, 0x39, 255));
+    REQUIRE(show(Theme::ThemeChoice::Dark).first == ::Rml::Colourb(0x1a, 0x1a, 0x1e, 255));
+    const auto [onyxBackground, onyxText] = show(Theme::ThemeChoice::Onyx);
+    REQUIRE(onyxBackground == ::Rml::Colourb(0, 0, 0, 255));
+    REQUIRE(onyxText.red > 200);
 }
 
 TEST_CASE("The last server remains reachable above the account and voice dock", "[rml][rail]")

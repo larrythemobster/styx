@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Controller.hpp"
+#include "Core/Theme/Appearance.hpp"
 #include "Keybinds.hpp"
 #include "Platform/Native.hpp"
 #include "Platform/Timer.hpp"
@@ -14,6 +15,7 @@ namespace Styx {
 namespace Core {
 class ClientInstance;
 }
+namespace Discord { class Client; }
 namespace Proto { struct PreloadedSettingsEdit; }
 namespace UI {
 namespace Rml {
@@ -78,6 +80,12 @@ private:
     void renderMyAccount(std::string &rml);
     void renderAppearance(std::string &rml);
     void applyGeneratedTheme();
+    void applyAppearanceChoice(Core::Theme::Appearance appearance, bool explicitChoice);
+    void selectDefaultTheme(Core::Theme::ThemeChoice choice);
+    void pushThemeToAccount(Core::Theme::ThemeChoice choice);
+    void adoptAccountTheme();
+    void onDeviceThemeChanged();
+    static Discord::Client *readyClient(Shell &shell);
     void readPickerColor();
     void refreshColorPicker(bool updateHex = true);
     void pickColorAt(float x, float y);
@@ -109,6 +117,7 @@ private:
     int themeSchemeIndex = 0;
     bool themeDarkMode = true;
     std::string themeError;
+    std::string appearanceSaveError;
     std::string searchQuery;
     std::string remoteSettingsError;
     bool remoteSettingsSaving = false;

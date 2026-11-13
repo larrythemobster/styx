@@ -33,6 +33,9 @@ inline constexpr const char *ThemeUseSystemColors = "appearance/use_system_color
 inline constexpr const char *ThemeSeedColor = "appearance/seed_color";
 inline constexpr const char *ThemeScheme = "appearance/scheme";
 inline constexpr const char *ThemeDarkMode = "appearance/dark_mode";
+inline constexpr const char *ThemeChoice = "appearance/theme";
+inline constexpr const char *ThemeFollowDevice = "appearance/follow_device";
+inline constexpr const char *ThemeSync = "appearance/sync_theme";
 
 // Audio & Voice
 inline constexpr const char *AudioBackend = "audio/backend";
@@ -71,6 +74,8 @@ inline constexpr bool TaskbarBadge = true;
 
 // Theme
 inline constexpr bool ThemeUseSystemColors = false;
+inline constexpr bool ThemeFollowDevice = false;
+inline constexpr bool ThemeSync = true;
 
 // Audio & Voice
 inline constexpr const char *AudioBackend = "";

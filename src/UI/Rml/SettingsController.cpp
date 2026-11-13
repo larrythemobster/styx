@@ -21,6 +21,7 @@
 #include "Core/UserManager.hpp"
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Entities.hpp"
+#include "Proto/PreloadedSettings.hpp"
 
 #include "Platform/Notifications.hpp"
 #include "Platform/Desktop.hpp"
@@ -30,6 +31,8 @@
 #include <sstream>
 #include <vector>
 #include <charconv>
+#include <format>
+#include <tuple>
 
 #ifndef STYX_NO_VOICE
 #include "Core/Audio/AudioBackends.hpp"
@@ -113,14 +116,10 @@ Platform::Color pickerColor(double hue, double saturation, double brightness)
 SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
     : Controller(shell, root)
 {
-    const auto &theme = Core::Theme::Manager::instance();
-    const auto highlight = theme.color(Core::Theme::Token::Highlight);
-    themeSeedColor = Platform::Color::parse(getString(Keys::ThemeSeedColor, highlight.css()));
-    if (!themeSeedColor.valid)
-        themeSeedColor = highlight;
-    themeSchemeIndex = std::clamp(getInt(Keys::ThemeScheme, 0), 0, Core::Theme::schemeCount - 1);
-    const auto background = theme.color(Core::Theme::Token::WindowBg);
-    themeDarkMode = getBool(Keys::ThemeDarkMode, int(background.r) + background.g + background.b < 384);
+    const auto appearance = Core::Theme::loadAppearance();
+    themeSeedColor = appearance.seed;
+    themeSchemeIndex = static_cast<int>(appearance.scheme);
+    themeDarkMode = appearance.customDark;
     readPickerColor();
     track(shell.settingsOpenChanged.connect([this](bool open) { onSettingsOpenChanged(open); }));
     track(shell.instanceChanged.connect([this](Core::ClientInstance *) {
@@ -134,12 +133,15 @@ SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
     bindAccountSettings();
     track(shell.accountReady.connect([this](Core::Snowflake account) {
         auto *instance = this->shell.currentInstance();
-        if (!instance || instance->accountId() != account || !this->shell.isSettingsOpen()) return;
+        if (!instance || instance->accountId() != account) return;
+        adoptAccountTheme();
+        if (!this->shell.isSettingsOpen()) return;
         if (profileEditor && !profileEditor->hasPendingChanges() && !profileEditor->isSaving())
             profileEditor->open();
         else if (currentSection != Section::Profiles)
             rebuildTimer.start(std::chrono::milliseconds(0), false, [this] { rebuild(); });
     }));
+    track(View::systemThemeChanged().connect([this] { onDeviceThemeChanged(); }));
 
     setupEventListeners();
     if (regionRoot)
@@ -413,12 +415,50 @@ void SettingsController::renderMyAccount(std::string &rml)
 
 void SettingsController::renderAppearance(std::string &rml)
 {
+    using Core::Theme::ThemeChoice;
+    const auto appearance = Core::Theme::loadAppearance();
+    const auto device = View::systemTheme();
+    const auto shown = Core::Theme::effectiveChoice(appearance, device);
 
-    // Theme Generator card
+    // Discord's Theme section: device following, default themes and account sync.
     rml += std::string("<div class=\"settings-card\">");
-    rml += std::string("<div class=\"settings-label\">Theme Generator</div>");
-    rml += std::string("<div class=\"settings-description\">Build a color theme from an accent color.</div>");
+    rml += std::string("<div class=\"settings-theme-heading\">Theme</div>");
+    if (!appearanceSaveError.empty())
+        rml += "<div class=\"settings-keybind-error\" role=\"alert\">" + Rml::escape(appearanceSaveError) + "</div>";
+    appendSwitch(rml, Keys::ThemeFollowDevice, appearance.followDevice && device != Core::Theme::DeviceTheme::Unknown,
+        "Same as Device Theme", device == Core::Theme::DeviceTheme::Unknown
+            ? "Your system does not report a light or dark preference."
+            : "Match your device's light or dark mode.",
+        device == Core::Theme::DeviceTheme::Unknown);
+    rml += std::string("<div class=\"settings-label\">Default Themes</div>");
+    rml += std::string("<div class=\"settings-theme-swatches\" role=\"radiogroup\" aria-label=\"Default themes\">");
+    for (const auto &[choice, label, preview] : {std::tuple{ThemeChoice::Light, "Light", "#ffffff"},
+             std::tuple{ThemeChoice::Ash, "Ash", "#323339"}, std::tuple{ThemeChoice::Dark, "Dark", "#1a1a1e"},
+             std::tuple{ThemeChoice::Onyx, "Onyx", "#000000"}}) {
+        const bool selected = shown == choice;
+        rml += std::format("<button class=\"settings-theme-swatch{}\" data-action=\"select-theme\" data-theme=\"{}\" "
+            "role=\"radio\" aria-checked=\"{}\" aria-label=\"{}\" title=\"{}\" style=\"background-color: {};\">"
+            "<span class=\"settings-theme-check\">&#10003;</span></button>",
+            selected ? " selected" : "", Core::Theme::choiceId(choice), selected ? "true" : "false", label, label, preview);
+    }
+    rml += std::string("</div>");
+    if (appearance.followDevice && device != Core::Theme::DeviceTheme::Unknown)
+        rml += std::string("<div class=\"settings-description\">Your device chooses light or dark. Picking a theme stops following it.</div>");
+    rml += std::string("<div class=\"settings-description\">Discord's Nitro color themes are not available in Styx. "
+        "Use the Styx custom theme below to build your own palette.</div>");
+    appendSwitch(rml, Keys::ThemeSync, appearance.syncTheme, "Sync theme across devices",
+        readyClient(shell) ? "Save the default theme to your Discord account and follow changes made on other devices."
+                           : "Uses your Discord account's theme once an account is connected.");
+    if (appearance.syncTheme)
+        renderRemoteStatus(rml);
+    rml += std::string("</div>"); // .settings-card
 
+    // Styx custom theme, generated locally and never synced
+    rml += std::string("<div class=\"settings-card\">");
+    rml += std::string("<div class=\"settings-label\">Styx Custom Theme</div>");
+    rml += formatRml("<div class=\"settings-description\">%1</div>", appearance.choice == ThemeChoice::Custom
+        ? std::string("Your custom theme is active on this device.")
+        : std::string("Build a theme for this device from an accent color. Applying it replaces the default theme."));
     rml += std::string("<div class=\"settings-color-row\">");
     rml += std::string("<div class=\"settings-color-field\">");
     rml += std::string("<label class=\"settings-color-label\" for=\"seed-color-hex\">Accent color</label>");
@@ -441,7 +481,7 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += "<label class=\"settings-color-label\" for=\"seed-color-hue\">Hue</label>";
     rml += formatRml("<input type=\"range\" id=\"seed-color-hue\" class=\"settings-color-hue\" "
         "min=\"0\" max=\"360\" step=\"1\" value=\"%1\" aria-label=\"Color hue\"/>", int(std::lround(pickerHue)));
-    rml += "<div class=\"settings-description settings-color-help\">Drag to choose a color. Apply theme to save it.</div></div>";
+    rml += "<div class=\"settings-description settings-color-help\">Drag to choose a color, then apply the custom theme.</div></div>";
     rml += std::string("</div>");
     rml += std::string("</div>");
 
@@ -456,35 +496,34 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += std::string("</select>");
     rml += std::string("</div>");
 
+    const bool modeFollowsDevice = appearance.followDevice && device != Core::Theme::DeviceTheme::Unknown;
     rml += std::string("<div class=\"settings-row\">");
     rml += std::string("<label class=\"settings-label\" for=\"theme-mode-select\">Mode</label>");
-    rml += std::string("<select class=\"settings-select\" id=\"theme-mode-select\">");
-    rml += formatRml("<option value=\"dark\"%1>Dark</option>", themeDarkMode ? std::string(" selected") : std::string());
-    rml += formatRml("<option value=\"light\"%1>Light</option>", !themeDarkMode ? std::string(" selected") : std::string());
+    rml += formatRml("<select class=\"settings-select\" id=\"theme-mode-select\"%1>", modeFollowsDevice ? std::string(" disabled=\"disabled\"") : std::string());
+    const bool dark = Core::Theme::effectiveCustomDark(appearance, device);
+    rml += formatRml("<option value=\"dark\"%1>Dark</option>", dark ? std::string(" selected") : std::string());
+    rml += formatRml("<option value=\"light\"%1>Light</option>", !dark ? std::string(" selected") : std::string());
     rml += std::string("</select>");
+    if (modeFollowsDevice)
+        rml += std::string("<div class=\"settings-description\">Following your device's light or dark mode.</div>");
     rml += std::string("</div>");
 
     rml += std::string("<div class=\"settings-button-group\">");
-    rml += std::string("<button class=\"settings-btn settings-btn-primary\" data-action=\"generate-theme\"><span class=\"settings-btn-label\">Apply theme</span></button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-primary\" data-action=\"generate-theme\"><span class=\"settings-btn-label\">Apply custom theme</span></button>");
     rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"random-theme\"><span class=\"settings-btn-label\">Randomize</span></button>");
-    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-theme\"><span class=\"settings-btn-label\">Reset Theme</span></button>");
+    rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"reset-theme\"><span class=\"settings-btn-label\">Reset to default theme</span></button>");
     rml += std::string("</div>");
     rml += formatRml("<div id=\"theme-error\" class=\"settings-keybind-error\" style=\"display: %1;\">%2</div>",
                      themeError.empty() ? "none" : "block", Rml::escape(themeError));
     rml += std::string("</div>"); // .settings-card
 
-    // System theme switches
+#ifdef _WIN32
+    // Windows contrast colors override every palette above while enabled.
     rml += std::string("<div class=\"settings-card\">");
-    const bool useSysColors = getBool(Keys::ThemeUseSystemColors, Defaults::ThemeUseSystemColors);
-    rml += std::string("<div class=\"settings-switch-row\">");
-    rml += std::string("<div class=\"settings-switch-text\">");
-    rml += std::string("<div class=\"settings-switch-title\">Use system colors</div>");
-    rml += std::string("<div class=\"settings-switch-desc\">Follow operating system color scheme overrides.</div>");
-    rml += std::string("</div>");
-    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", useSysColors ? std::string(" checked") : std::string(), Keys::ThemeUseSystemColors);
-    rml += std::string("</div>");
-
+    appendSwitch(rml, Keys::ThemeUseSystemColors, getBool(Keys::ThemeUseSystemColors, Defaults::ThemeUseSystemColors),
+        "Use Windows system colors", "Use Windows color settings, such as contrast themes, instead of the theme above.");
     rml += std::string("</div>"); // .settings-card
+#endif
 
     // Font overrides
     rml += std::string("<div class=\"settings-card\">");
@@ -589,23 +628,77 @@ void SettingsController::applyGeneratedTheme()
             readPickerColor();
         }
     }
-    auto &theme = Core::Theme::Manager::instance();
-    const auto scheme = static_cast<Core::Theme::Scheme>(std::clamp(themeSchemeIndex, 0, Core::Theme::schemeCount - 1));
-    theme.setUseSystemColors(false);
-    theme.setOverrides(Core::Theme::generate(themeSeedColor, scheme, themeDarkMode));
-    theme.apply();
-    if (theme.save()) {
-        setString(Keys::ThemeSeedColor, themeSeedColor.css());
-        setInt(Keys::ThemeScheme, themeSchemeIndex);
-        setBool(Keys::ThemeDarkMode, themeDarkMode);
-        themeError.clear();
-    } else {
-        themeError = "Theme applied, but it could not be saved.";
-    }
+    auto appearance = Core::Theme::loadAppearance();
+    appearance.choice = Core::Theme::ThemeChoice::Custom;
+    appearance.seed = themeSeedColor;
+    appearance.scheme = static_cast<Core::Theme::Scheme>(std::clamp(themeSchemeIndex, 0, Core::Theme::schemeCount - 1));
+    appearance.customDark = themeDarkMode;
+    themeError.clear();
+    applyAppearanceChoice(appearance, true);
+}
+
+void SettingsController::applyAppearanceChoice(Core::Theme::Appearance appearance, bool explicitChoice)
+{
+    // A deliberate theme choice replaces Windows contrast colors; device or account updates do not.
+    if (explicitChoice)
+        Core::Theme::Manager::instance().setUseSystemColors(false);
+    const bool stored = Core::Theme::storeAppearance(appearance);
+    const bool saved = Core::Theme::applyAppearance(appearance, View::systemTheme());
+    appearanceSaveError = stored && saved ? std::string() : std::string("Theme applied, but it could not be saved.");
+    if (!shell.isSettingsOpen() || currentSection != Section::Appearance)
+        return;
     rebuildTimer.start(std::chrono::milliseconds(0), false, [this] {
         render();
         requestRender(100);
     });
+}
+
+void SettingsController::selectDefaultTheme(Core::Theme::ThemeChoice choice)
+{
+    auto appearance = Core::Theme::loadAppearance();
+    appearance.choice = choice;
+    appearance.followDevice = false;
+    applyAppearanceChoice(appearance, true);
+    if (appearance.syncTheme)
+        pushThemeToAccount(choice);
+}
+
+void SettingsController::pushThemeToAccount(Core::Theme::ThemeChoice choice)
+{
+    auto *client = readyClient(shell);
+    const auto value = Core::Theme::protoFromChoice(choice);
+    if (!client || !value)
+        return;
+    const auto &remote = client->getSettings().appearance;
+    if (remote && Core::Theme::choiceFromProto(remote->theme) == choice)
+        return;
+    Proto::PreloadedSettingsEdit edit;
+    edit.theme = *value;
+    patchRemoteSettings(std::move(edit));
+}
+
+void SettingsController::adoptAccountTheme()
+{
+    auto *client = readyClient(shell);
+    // While a write is pending, an older account snapshot must not undo the local choice.
+    if (!client || remoteSettingsSaving)
+        return;
+    const auto &remote = client->getSettings().appearance;
+    auto appearance = Core::Theme::loadAppearance();
+    if (!remote || !appearance.syncTheme || appearance.choice == Core::Theme::ThemeChoice::Custom)
+        return;
+    const auto choice = Core::Theme::choiceFromProto(remote->theme);
+    if (!choice || *choice == appearance.choice)
+        return;
+    appearance.choice = *choice;
+    applyAppearanceChoice(appearance, false);
+}
+
+void SettingsController::onDeviceThemeChanged()
+{
+    const auto appearance = Core::Theme::loadAppearance();
+    if (appearance.followDevice)
+        applyAppearanceChoice(appearance, false);
 }
 
 
@@ -1233,6 +1326,16 @@ void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
     } else if (key == std::string(Keys::ThemeUseSystemColors)) {
         Core::Theme::Manager::instance().setUseSystemColors(nowChecked);
         Core::Theme::Manager::instance().apply();
+    } else if (key == std::string(Keys::ThemeFollowDevice)) {
+        applyAppearanceChoice(Core::Theme::loadAppearance(), false);
+    } else if (key == std::string(Keys::ThemeSync)) {
+        // Turning sync on publishes this device's default theme to the account.
+        const auto appearance = Core::Theme::loadAppearance();
+        if (!Core::Theme::storeAppearance(appearance))
+            appearanceSaveError = "Theme sync changed, but it could not be saved.";
+        if (nowChecked)
+            pushThemeToAccount(appearance.choice);
+        render();
     }
 
     requestRender(100);
@@ -1427,18 +1530,21 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
 #endif
     }
 
-    // Local theme generator selects
+    // Custom theme draft: an active custom theme updates live; otherwise Apply custom theme uses the draft.
+    const bool customActive = Core::Theme::loadAppearance().choice == Core::Theme::ThemeChoice::Custom;
     if (selectEl->GetId() == "theme-scheme-select") {
         const int scheme = std::stoi(val);
         if (themeSchemeIndex != scheme) {
             themeSchemeIndex = scheme;
-            applyGeneratedTheme();
+            if (customActive)
+                applyGeneratedTheme();
         }
     } else if (selectEl->GetId() == "theme-mode-select") {
         const bool dark = (val == "dark");
         if (themeDarkMode != dark) {
             themeDarkMode = dark;
-            applyGeneratedTheme();
+            if (customActive)
+                applyGeneratedTheme();
         }
     }
 
@@ -1513,6 +1619,10 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         Core::Sounds::play(Core::Sounds::Sound::Message);
     } else if (action == std::string("generate-theme")) {
         applyGeneratedTheme();
+    } else if (action == std::string("select-theme")) {
+        const auto choice = Core::Theme::choiceFromId(attribute(target, "data-theme"));
+        if (choice && *choice != Core::Theme::ThemeChoice::Custom)
+            selectDefaultTheme(*choice);
     } else if (action == std::string("random-theme")) {
         std::random_device rng;
         std::uniform_real_distribution<double> unit(0.0, 1.0);
@@ -1534,21 +1644,18 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         }
         applyGeneratedTheme();
     } else if (action == std::string("reset-theme")) {
-        Core::Theme::Manager::instance().resetAll();
-        Core::Theme::Manager::instance().setUseSystemColors(false);
-        Core::Theme::Manager::instance().apply();
-        Core::Theme::Manager::instance().applyFonts();
-        Core::Theme::Manager::instance().save();
-        themeSeedColor = Core::Theme::Manager::instance().color(Core::Theme::Token::Highlight);
+        // Clears the custom draft and returns to the default theme: the account's when synced, otherwise Onyx.
+        themeSeedColor = Platform::Color::rgb(0x5865f2);
         readPickerColor();
         themeDarkMode = true;
         themeSchemeIndex = 0;
         themeError.clear();
-        setString(Keys::ThemeSeedColor, themeSeedColor.css());
-        setInt(Keys::ThemeScheme, themeSchemeIndex);
-        setBool(Keys::ThemeDarkMode, themeDarkMode);
-        render();
-        requestRender(100);
+        Core::Theme::Appearance appearance;
+        appearance.syncTheme = Core::Theme::loadAppearance().syncTheme;
+        appearance.seed = themeSeedColor;
+        if (auto *client = readyClient(shell); client && appearance.syncTheme && client->getSettings().appearance)
+            appearance.choice = Core::Theme::choiceFromProto(client->getSettings().appearance->theme).value_or(appearance.choice);
+        applyAppearanceChoice(appearance, true);
     } else if (action == std::string("font-size-inc") || action == std::string("font-size-dec")) {
         int roleInt = std::stoi(attribute(target, "data-role"));
         auto role = static_cast<Core::Theme::FontRole>(roleInt);

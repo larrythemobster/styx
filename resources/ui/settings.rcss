@@ -855,6 +855,67 @@ select.settings-select selectbox option:hover
     border: 2dp #00a8fc;
 }
 
+.settings-theme-heading
+{
+    font-size: 20dp;
+    font-weight: 600;
+    color: #f2f3f5;
+    margin-bottom: 8dp;
+}
+
+.settings-theme-swatches
+{
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-bottom: 12dp;
+}
+
+.settings-theme-swatch
+{
+    position: relative;
+    width: 56dp;
+    height: 48dp;
+    padding: 0;
+    margin: 8dp 10dp 0 0;
+    border-radius: 8dp;
+    border: 1dp #000000;
+    box-sizing: border-box;
+    tab-index: auto;
+    cursor: pointer;
+}
+
+.settings-theme-swatch.selected
+{
+    border: 2dp #5865f2;
+}
+
+.settings-theme-swatch:focus
+{
+    border: 2dp #00a8fc;
+}
+
+.settings-theme-check
+{
+    display: none;
+    position: absolute;
+    top: -8dp;
+    right: -8dp;
+    width: 20dp;
+    height: 20dp;
+    border-radius: 10dp;
+    background-color: #5865f2;
+    color: #ffffff;
+    font-size: 12dp;
+    line-height: 20dp;
+    text-align: center;
+}
+
+.settings-theme-swatch.selected .settings-theme-check
+{
+    display: block;
+}
+
 .settings-color-picker
 {
     width: 320dp;
