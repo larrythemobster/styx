@@ -56,6 +56,9 @@ Current priorities, not a complete feature list:
 
 ## Build from source
 
+GitHub Actions builds are manual. Choose a platform; Windows is the default.
+Artifact uploads are optional and expire after three days.
+
 <details>
 <summary>Windows build instructions</summary>
 

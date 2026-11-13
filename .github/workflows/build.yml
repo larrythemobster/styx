@@ -1,13 +1,30 @@
 name: Build
 
 on:
-  push:
-    branches: [main, ci/**]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        type: choice
+        required: true
+        default: windows
+        options:
+          - windows
+          - windows-minimal
+          - linux
+          - appimage
+          - macos
+          - all
+      upload_artifacts:
+        description: Upload build downloads (kept for 3 days)
+        type: boolean
+        required: true
+        default: false
 
-# A newer push to the same branch makes an in-progress run pointless.
+permissions:
+  contents: read
+
+# Keep only the newest manual build for each branch.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -31,11 +48,9 @@ env:
 
 jobs:
   build-windows:
+    if: ${{ inputs.target == 'windows' || inputs.target == 'all' }}
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        build_type: [MinSizeRel, RelWithDebInfo]
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -92,7 +107,7 @@ jobs:
           $curlDir = "${{ github.workspace }}/curl-impersonate"
           $ffmpegDir = "${{ github.workspace }}/ffmpeg"
           cmake -B build -S . `
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
             -DCMAKE_PREFIX_PATH="$ffmpegDir" `
             -DCURL_INCLUDE_DIR="$curlDir/include" `
@@ -100,26 +115,27 @@ jobs:
             -DBUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+        run: cmake --build build --config RelWithDebInfo --parallel
 
       - name: Save vcpkg binary cache
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/cache/save@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
+          key: vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}
 
       - name: Install software Mesa for tests
         uses: ssciwr/setup-mesa-dist-win@v3
 
       - name: Test
-        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
+        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
 
       - name: Prepare artifact
+        if: ${{ inputs.upload_artifacts }}
         shell: pwsh
         run: |
-          $out = "styx-windows-${{ matrix.build_type }}"
-          $binDir = "build/${{ matrix.build_type }}"
+          $out = "styx-windows-RelWithDebInfo"
+          $binDir = "build/RelWithDebInfo"
           $curlDir = "${{ github.workspace }}/curl-impersonate"
           New-Item -ItemType Directory -Path $out -Force
 
@@ -133,13 +149,17 @@ jobs:
             -Recurse -ErrorAction SilentlyContinue
 
       - name: Upload artifact
+        if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@v7
         with:
-          name: styx-windows-${{ matrix.build_type }}
-          path: styx-windows-${{ matrix.build_type }}
+          name: styx-windows-RelWithDebInfo
+          path: styx-windows-RelWithDebInfo
+          retention-days: 3
 
   build-windows-minimal:
+    if: ${{ inputs.target == 'windows-minimal' || inputs.target == 'all' }}
     runs-on: windows-latest
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -192,11 +212,11 @@ jobs:
         run: cmake --build build --config RelWithDebInfo --parallel
 
       - name: Save vcpkg binary cache
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/cache/save@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
+          key: vcpkg-bin-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}
 
       - name: Install software Mesa for tests
         uses: ssciwr/setup-mesa-dist-win@v3
@@ -205,6 +225,7 @@ jobs:
         run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
 
       - name: Prepare artifact
+        if: ${{ inputs.upload_artifacts }}
         shell: pwsh
         run: |
           $out = "styx-windows-minimal"
@@ -222,13 +243,17 @@ jobs:
             -Recurse -ErrorAction SilentlyContinue
 
       - name: Upload artifact
+        if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@v7
         with:
           name: styx-windows-minimal
           path: styx-windows-minimal
+          retention-days: 3
 
   build-linux:
+    if: ${{ inputs.target == 'linux' || inputs.target == 'all' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -292,11 +317,11 @@ jobs:
         run: cmake --build build --parallel $(nproc)
 
       - name: Save vcpkg binary cache
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/cache/save@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-bin-x64-linux-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
+          key: vcpkg-bin-x64-linux-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}
 
       - name: Test
         run: |
@@ -315,8 +340,10 @@ jobs:
           '
 
   build-appimage:
+    if: ${{ inputs.target == 'appimage' || inputs.target == 'all' }}
     # The builder's glibc is the minimum version supported by the AppImage.
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -395,11 +422,11 @@ jobs:
         run: cmake --build build --parallel $(nproc)
 
       - name: Save vcpkg binary cache
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/cache/save@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-bin-x64-linux-jammy-gcc13-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
+          key: vcpkg-bin-x64-linux-jammy-gcc13-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}
 
       - name: Test
         env:
@@ -466,13 +493,17 @@ jobs:
           done
 
       - name: Upload artifact
+        if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@v7
         with:
           name: styx-appimage
           path: Styx*.AppImage
+          retention-days: 3
 
   build-macos:
+    if: ${{ inputs.target == 'macos' || inputs.target == 'all' }}
     runs-on: macos-latest
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -523,11 +554,11 @@ jobs:
         run: cmake --build build --parallel $(sysctl -n hw.logicalcpu) -- -k
 
       - name: Save vcpkg binary cache
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/cache/save@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-bin-arm64-osx-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
+          key: vcpkg-bin-arm64-osx-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.job }}
 
       - name: Test
         # Styx has no macOS camera backend, and the camera pipeline tests assert
@@ -536,6 +567,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -E '^CameraCaptureTests$'
 
       - name: Prepare artifact
+        if: ${{ inputs.upload_artifacts }}
         run: |
           # Create a .app bundle manually since the binary isn't built as MACOSX_BUNDLE
           app="styx-macos/Styx.app/Contents"
@@ -574,7 +606,9 @@ jobs:
 
 
       - name: Upload artifact
+        if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@v7
         with:
           name: styx-macos
           path: styx-macos
+          retention-days: 3
