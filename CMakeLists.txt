@@ -210,6 +210,7 @@ set(PROJECT_SOURCES
     src/Core/Theme/Icons.cpp
     src/Core/Theme/Generator.cpp
     src/Core/Theme/Appearance.cpp
+    src/Core/Theme/Scale.cpp
     src/Core/Theme/Stylesheet.cpp
     src/Core/Theme/Fonts.cpp
     src/Core/Media/Player.cpp
@@ -497,7 +498,7 @@ if(BUILD_TESTS)
     styx_test(TestEmojiGrid EmojiGridTests tests/tst_EmojiGrid.cpp
         src/UI/Rml/EmojiGridModel.cpp src/Core/Snowflake.cpp)
     styx_test(TestCdnUrls CdnUrlTests tests/tst_CdnUrls.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
-    styx_test(TestRmlRender RmlRenderTests tests/tst_RmlRender.cpp tests/tst_ThemeAppearance.cpp tests/tst_MessageComponentRendering.cpp tests/tst_CommandOptionsBar.cpp
+    styx_test(TestRmlRender RmlRenderTests tests/tst_RmlRender.cpp tests/tst_ThemeAppearance.cpp tests/tst_ThemeScale.cpp tests/tst_MessageComponentRendering.cpp tests/tst_CommandOptionsBar.cpp
         tests/tst_PollRendering.cpp
         tests/tst_PollCreateForm.cpp src/UI/Rml/PollCreateForm.cpp
         tests/tst_GroupDmCreateForm.cpp src/UI/Rml/GroupDmCreateForm.cpp
@@ -510,7 +511,7 @@ if(BUILD_TESTS)
         src/Core/ImageManager.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp
         src/Core/EmojiSegmenter.cpp src/Core/Logging.cpp src/Discord/CdnUrls.cpp
         src/Core/Theme/Tokens.cpp src/Core/Theme/Manager.cpp src/Core/Theme/Stylesheet.cpp src/Core/Theme/Fonts.cpp
-        src/Core/Theme/Generator.cpp src/Core/Theme/Appearance.cpp)
+        src/Core/Theme/Generator.cpp src/Core/Theme/Appearance.cpp src/Core/Theme/Scale.cpp)
     target_link_libraries(TestRmlRender PRIVATE RmlUi::RmlUi utf8proc SDL3::SDL3 OpenGL::GL Freetype::Freetype harfbuzz::harfbuzz)
     target_include_directories(TestRmlRender PRIVATE vendor/emoji-segmenter vendor/rmlui-backend)
     if(WIN32)

@@ -25,6 +25,8 @@ HGLRC sharedNativeContext = nullptr;
 #endif
 std::unordered_map<SDL_WindowID, View *> windows;
 bool quitting = false;
+// Interface zoom multiplies the display scale for every window; 1 is 100%.
+float zoomFactor = 1.f;
 
 #ifdef _WIN32
 struct CustomTitleBar {
@@ -68,7 +70,7 @@ SDL_HitTestResult SDLCALL customTitleBarHitTest(SDL_Window *window, const SDL_Po
     SDL_GetWindowSize(window, &width, &height);
     SDL_GetWindowSizeInPixels(window, &pixelWidth, nullptr);
     const float pixelDensity = width > 0 ? float(pixelWidth) / width : 1.f;
-    const float displayScale = SDL_GetWindowDisplayScale(window);
+    const float displayScale = SDL_GetWindowDisplayScale(window) * zoomFactor;
     const float scale = pixelDensity > 0 && displayScale > 0 ? displayScale / pixelDensity : 1.f;
     return titleBarHitTest(SDL_GetWindowFlags(window), width, height, scale,
                            titleBar.heightDp, titleBar.controlsWidthDp, titleBar.leftControlsWidthDp, *point);
@@ -271,7 +273,7 @@ void View::initialise()
     SDL_GetWindowSizeInPixels(nativeWindow, &w, &h);
     rmlContext = ::Rml::CreateContext(name, {w, h});
     if (!rmlContext) { doneCurrent(); throw std::runtime_error("Cannot create RmlUi context: " + name); }
-    rmlContext->SetDensityIndependentPixelRatio(SDL_GetWindowDisplayScale(nativeWindow));
+    rmlContext->SetDensityIndependentPixelRatio(SDL_GetWindowDisplayScale(nativeWindow) * zoomFactor);
     doneCurrent();
     SDL_StartTextInput(nativeWindow);
     if (!pendingDocument.empty()) {
@@ -300,9 +302,16 @@ void View::updateDimensions()
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(nativeWindow, &w, &h);
     rmlContext->SetDimensions({w, h});
-    rmlContext->SetDensityIndependentPixelRatio(SDL_GetWindowDisplayScale(nativeWindow));
+    rmlContext->SetDensityIndependentPixelRatio(SDL_GetWindowDisplayScale(nativeWindow) * zoomFactor);
     requestRender();
 }
+void View::setInterfaceZoom(int percent)
+{
+    zoomFactor = float(percent) / 100.f;
+    for (auto [id, view] : windows)
+        view->updateDimensions();
+}
+int View::interfaceZoom() { return int(std::lround(zoomFactor * 100)); }
 void View::renderNow()
 {
     if (!rmlContext || !isVisible() || SDL_GetWindowFlags(nativeWindow) & SDL_WINDOW_MINIMIZED) return;

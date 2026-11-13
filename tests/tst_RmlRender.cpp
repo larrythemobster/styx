@@ -4,6 +4,7 @@
 #include "UI/Rml/ContextMenu.hpp"
 #include "Core/Theme/Appearance.hpp"
 #include "Core/Theme/Manager.hpp"
+#include "Core/Theme/Scale.hpp"
 #include "Core/Theme/Generator.hpp"
 #include <RmlUi/Core/ElementUtilities.h>
 #include <RmlUi/Core/Elements/ElementFormControlInput.h>
@@ -696,14 +697,6 @@ TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][the
     auto *sample = document->GetElementById("sample");
     auto *draft = document->GetElementById("draft");
     REQUIRE(draft->Focus());
-    const auto widthBefore = ::Rml::ElementUtilities::GetStringWidth(sample, "Theme text");
-    auto font = theme.font(Theme::FontRole::Ui);
-    font.pointSize *= 2;
-    theme.setFontOverride(Theme::FontRole::Ui, font);
-    theme.applyFonts();
-    view.renderNow();
-    REQUIRE(::Rml::ElementUtilities::GetStringWidth(sample, "Theme text") > widthBefore * 1.5f);
-
     RenderTarget target(view);
     for (const auto seed : {0xf04d58u, 0x38b865u}) {
         view.context()->ProcessMouseMove(630, 470, 0);
@@ -757,6 +750,59 @@ TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][the
     REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").red < 60);
     REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").green < 60);
     REQUIRE(document->GetProperty<::Rml::Colourb>("background-color").blue < 60);
+}
+
+TEST_CASE("Chat text size and zoom change rendered text and wrapping", "[rml][theme]")
+{
+    namespace Theme = Styx::Core::Theme;
+    auto &theme = Theme::Manager::instance();
+    RestoreTheme restore(theme);
+    struct RestoreZoom {
+        ~RestoreZoom() { View::setInterfaceZoom(100); }
+    } restoreZoom;
+    View view("text-scaling");
+    prepare(view, 640, 480);
+    view.loadDocument("main.rml");
+    auto *document = view.document();
+    document->SetInnerRML(
+        "<div style=\"display: block; width: 300dp;\">"
+        "<div id=\"author\" class=\"message-author\">Larry</div>"
+        "<div id=\"message\" class=\"message-body\">A message long enough to wrap onto more lines once the chat text grows</div>"
+        "<pre id=\"code\" class=\"code-block\">const int value = 42;</pre>"
+        "<span id=\"label\" class=\"settings-btn-label\">Interface label</span></div>");
+    view.renderNow();
+    auto *author = document->GetElementById("author");
+    auto *message = document->GetElementById("message");
+    auto *code = document->GetElementById("code");
+    auto *label = document->GetElementById("label");
+    auto width = [](::Rml::Element *element, const char *text) {
+        return float(::Rml::ElementUtilities::GetStringWidth(element, ::Rml::String(text)));
+    };
+    const float messageHeight = message->GetOffsetHeight();
+    const float authorWidth = width(author, "Larry");
+    const float codeWidth = width(code, "const int value = 42;");
+    const float labelWidth = width(label, "Interface label");
+
+    Theme::setChatTextSize(24);
+    theme.applyFonts();
+    view.renderNow();
+    REQUIRE(width(author, "Larry") > authorWidth * 1.4f);
+    REQUIRE(width(code, "const int value = 42;") > codeWidth * 1.4f);
+    // Larger glyphs in the same width wrap onto more, taller lines.
+    REQUIRE(message->GetOffsetHeight() > messageHeight * 1.8f);
+    REQUIRE(width(label, "Interface label") == labelWidth);
+
+    Theme::setChatTextSize(16);
+    theme.applyFonts();
+    view.renderNow();
+    REQUIRE(message->GetOffsetHeight() == messageHeight);
+
+    const float boxWidth = message->GetOffsetWidth();
+    View::setInterfaceZoom(150);
+    view.renderNow();
+    // Zoom scales boxes and glyphs together, so labels keep their place inside controls.
+    REQUIRE(std::abs(width(label, "Interface label") - labelWidth * 1.5f) <= labelWidth * 0.1f);
+    REQUIRE(std::abs(message->GetOffsetWidth() - boxWidth * 1.5f) <= 1);
 }
 
 TEST_CASE("Default themes restyle an open document", "[rml][theme]")

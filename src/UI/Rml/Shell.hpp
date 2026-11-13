@@ -112,6 +112,8 @@ public:
     void closeSettings();
     void setSettingsOpen(bool open);
     bool isSettingsOpen() const { return settingsOpen; }
+    // Sets the interface zoom for every window, snapped to a zoom level, and saves it.
+    void setInterfaceZoom(int percent);
     void openAccounts();
     void openLogin();
     void openGuildSettings(Core::Snowflake accountId, Core::Snowflake guildId, GuildSettingsSection section);
@@ -154,6 +156,7 @@ public:
     Platform::Signal<const Location &> locationChanged;
     Platform::Signal<Core::ClientInstance *> instanceChanged;
     Platform::Signal<bool> callOpenChanged, memberListVisibleChanged, selfMuteChanged, selfDeafChanged, settingsOpenChanged;
+    Platform::Signal<int> interfaceZoomChanged;
     Platform::Signal<Core::Snowflake> accountReady;
     Platform::Signal<Core::Snowflake, Core::Snowflake> jumpRequested;
 private:

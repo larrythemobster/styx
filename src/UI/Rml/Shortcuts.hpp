@@ -25,7 +25,10 @@ enum class ShortcutAction {
     MarkChannelRead,
     ToggleMute,
     ToggleDeafen,
-    ShortcutsHelp
+    ShortcutsHelp,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset
 };
 
 // Modifier bits in Shortcut::modifiers. Primary is Ctrl, or Cmd on macOS, as in the official client.

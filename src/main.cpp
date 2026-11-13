@@ -6,6 +6,7 @@
 #include "Core/Logging.hpp"
 #include "Core/Theme/Appearance.hpp"
 #include "Core/Theme/Manager.hpp"
+#include "Core/Theme/Scale.hpp"
 #include "Platform/Settings.hpp"
 
 #include <curl/curl.h>
@@ -47,6 +48,11 @@ int main(int argc, char *argv[])
         Core::Migration::migrateKeychain();
         auto &theme = Core::Theme::Manager::instance();
         theme.load();
+        if (Core::Theme::migrateFontScaling()) {
+            theme.save();
+            Platform::Settings::instance().save();
+        }
+        UI::Rml::View::setInterfaceZoom(Core::Theme::savedZoom());
         Core::Theme::restoreAppearance(UI::Rml::View::systemTheme());
         theme.applyFonts();
 #ifndef STYX_NO_VOICE

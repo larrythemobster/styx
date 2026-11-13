@@ -42,6 +42,7 @@
 #include "Core/ForumManager.hpp"
 #include "Core/ImageManager.hpp"
 #include "Core/Logging.hpp"
+#include "Core/Theme/Scale.hpp"
 #include "Core/NotificationText.hpp"
 #include "Core/PendingAttachment.hpp"
 #include "Core/PermissionManager.hpp"
@@ -311,6 +312,15 @@ void Shell::onDocumentLoaded(::Rml::ElementDocument *doc)
     auto help = std::make_unique<Rml::ShortcutsHelpController>(*this);
     shortcutsHelpController = help.get();
     shortcutController->setHandler(ShortcutAction::ShortcutsHelp, [this] { toggleShortcutHelp(); return true; });
+    shortcutController->setHandler(ShortcutAction::ZoomIn, [this] {
+        setInterfaceZoom(Core::Theme::stepStop(Core::Theme::zoomLevels, View::interfaceZoom(), 1));
+        return true;
+    });
+    shortcutController->setHandler(ShortcutAction::ZoomOut, [this] {
+        setInterfaceZoom(Core::Theme::stepStop(Core::Theme::zoomLevels, View::interfaceZoom(), -1));
+        return true;
+    });
+    shortcutController->setHandler(ShortcutAction::ZoomReset, [this] { setInterfaceZoom(Core::Theme::defaultZoom); return true; });
     controllers.push_back(std::move(help));
     accountsController = std::make_unique<Rml::AccountsController>(*this);
     if (accountsModel->rowCount() == 0) accountsController->showLogin();
@@ -763,6 +773,16 @@ void Shell::showFullUserProfile(Snowflake user, Snowflake guild) { if (instance 
 void Shell::openSettings() { setSettingsOpen(true); }
 void Shell::closeSettings() { setSettingsOpen(false); }
 void Shell::setSettingsOpen(bool open) { if (settingsOpen == open) return; settingsOpen = open; applyBodyClasses(); settingsOpenChanged.publish(open); }
+void Shell::setInterfaceZoom(int percent)
+{
+    const int zoom = Core::Theme::nearestStop(Core::Theme::zoomLevels, percent);
+    if (zoom == View::interfaceZoom())
+        return;
+    View::setInterfaceZoom(zoom);
+    if (!Core::Theme::saveZoom(zoom))
+        Core::log(Core::LogLevel::Warning, LogUI) << "Shell: could not save the zoom level";
+    interfaceZoomChanged.publish(zoom);
+}
 void Shell::openGoLivePicker(bool screens)
 {
 #ifdef STYX_HAVE_SCREENSHARE

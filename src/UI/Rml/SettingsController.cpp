@@ -16,7 +16,9 @@
 #include "Core/Stream/StreamQuality.hpp"
 #include "Core/Theme/Fonts.hpp"
 #include "Core/Theme/Generator.hpp"
+#include "Core/Logging.hpp"
 #include "Core/Theme/Manager.hpp"
+#include "Core/Theme/Scale.hpp"
 #include "Core/Theme/Tokens.hpp"
 #include "Core/UserManager.hpp"
 #include "Discord/CdnUrls.hpp"
@@ -140,6 +142,12 @@ SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
             profileEditor->open();
         else if (currentSection != Section::Profiles)
             rebuildTimer.start(std::chrono::milliseconds(0), false, [this] { rebuild(); });
+    }));
+    track(shell.interfaceZoomChanged.connect([this](int zoom) {
+        // Ctrl +/- while the slider is visible keeps it in step with the applied zoom.
+        if (regionRoot && this->shell.isSettingsOpen())
+            if (auto *slider = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("interface-zoom")))
+                showSteppedValue(slider, zoom);
     }));
     track(View::systemThemeChanged().connect([this] { onDeviceThemeChanged(); }));
 
@@ -422,7 +430,7 @@ void SettingsController::renderAppearance(std::string &rml)
 
     // Discord's Theme section: device following, default themes and account sync.
     rml += std::string("<div class=\"settings-card\">");
-    rml += std::string("<div class=\"settings-theme-heading\">Theme</div>");
+    rml += std::string("<div class=\"settings-section-heading\">Theme</div>");
     if (!appearanceSaveError.empty())
         rml += "<div class=\"settings-keybind-error\" role=\"alert\">" + Rml::escape(appearanceSaveError) + "</div>";
     appendSwitch(rml, Keys::ThemeFollowDevice, appearance.followDevice && device != Core::Theme::DeviceTheme::Unknown,
@@ -524,28 +532,7 @@ void SettingsController::renderAppearance(std::string &rml)
         "Use Windows system colors", "Use Windows color settings, such as contrast themes, instead of the theme above.");
     rml += std::string("</div>"); // .settings-card
 #endif
-
-    // Font overrides
-    rml += std::string("<div class=\"settings-card\">");
-    rml += std::string("<div class=\"settings-label\">Font Overrides</div>");
-    rml += std::string("<div class=\"settings-description\">Tune typography sizes across Styx interface roles.</div>");
-
-    for (const auto &fd : Core::Theme::fontRegistry()) {
-        const auto role = fd.role;
-        const auto currentFont = Core::Theme::Manager::instance().font(role);
-        const int ptSize = static_cast<int>(currentFont.pointSize);
-
-        rml += std::string("<div class=\"settings-font-row\">");
-        rml += formatRml("<span class=\"settings-font-name\">%1</span>", std::string(fd.label));
-        rml += formatRml("<span class=\"settings-font-size\">%1 pt</span>", ptSize);
-        rml += std::string("<div class=\"settings-font-controls\">");
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-adjust\" data-action=\"font-size-dec\" data-role=\"%1\" title=\"Decrease %2 font size\" aria-label=\"Decrease %2 font size\"><img class=\"settings-btn-icon\" src=\"icon:minus\"/></button>", static_cast<int>(role), std::string(fd.label));
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-adjust\" data-action=\"font-size-inc\" data-role=\"%1\" title=\"Increase %2 font size\" aria-label=\"Increase %2 font size\"><img class=\"settings-btn-icon\" src=\"icon:plus\"/></button>", static_cast<int>(role), std::string(fd.label));
-        rml += formatRml("<button class=\"settings-btn settings-btn-secondary settings-font-reset\" data-action=\"reset-font\" data-role=\"%1\"><span class=\"settings-btn-label\">Reset</span></button>", static_cast<int>(role));
-        rml += std::string("</div>");
-        rml += std::string("</div>");
-    }
-    rml += std::string("</div>"); // .settings-card
+    rml += std::string("<div class=\"settings-description\">Text size in chat and zoom level are in Accessibility.</div>");
 }
 
 void SettingsController::readPickerColor()
@@ -1182,6 +1169,12 @@ void SettingsController::setupEventListeners()
         if (!sliderDragging)
             return;
         sliderDragging = false;
+        // Zoom changes the slider's own size, so a dragged zoom level applies once the drag ends.
+        if (pendingZoom) {
+            const int zoom = *pendingZoom;
+            pendingZoom.reset();
+            shell.setInterfaceZoom(zoom);
+        }
         if (hintSlider) {
             const float x = event.GetParameter<float>("mouse_x", -1);
             const float y = event.GetParameter<float>("mouse_y", -1);
@@ -1448,6 +1441,10 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
     if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !std::isfinite(value))
         return;
     const int val = static_cast<int>(std::lround(value));
+    if (sliderEl->IsClassSet("settings-stepped-slider")) {
+        handleSteppedSlider(input, key, val);
+        return;
+    }
     setInt(key, val);
 
     // Update display label
@@ -1467,13 +1464,6 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
         shell.session()->getAnimatedImageCache()->setCacheLimitMiB(val);
     } else if (key == Keys::AnimationMaxMb) {
         shell.session()->getAnimatedImageCache()->setAnimationLimitMiB(val);
-    } else if (key == "accessibility/message-font-px") {
-        auto &theme = Core::Theme::Manager::instance();
-        auto font = theme.font(Core::Theme::FontRole::Message);
-        font.pointSize = std::clamp(val, 12, 24) * Core::Theme::fontDescriptor(Core::Theme::FontRole::Message).defaultFont.pointSize / 16.0;
-        theme.setFontOverride(Core::Theme::FontRole::Message, font);
-        theme.applyFonts();
-        theme.save();
     } else if (key == std::string(Keys::VoicePushToTalkReleaseDelay)) {
         applyPushToTalk();
 #ifndef STYX_NO_VOICE
@@ -1492,6 +1482,47 @@ void SettingsController::handleSliderChange(::Rml::Element *sliderEl)
 #endif
     }
     requestRender(50);
+}
+
+void SettingsController::handleSteppedSlider(::Rml::ElementFormControlInput *input, const std::string &key, int raw)
+{
+    const bool zoom = key == Keys::InterfaceZoom;
+    const std::span<const int> stops = zoom ? std::span<const int>(Core::Theme::zoomLevels)
+                                            : std::span<const int>(Core::Theme::chatTextSizes);
+    const int current = zoom ? pendingZoom.value_or(View::interfaceZoom()) : Core::Theme::chatTextSize();
+    // Arrow keys move the value by one; take that as a step to the neighbouring stop rather than snapping back.
+    const int value = !sliderDragging && std::abs(raw - current) == 1
+        ? Core::Theme::stepStop(stops, current, raw - current)
+        : Core::Theme::nearestStop(stops, raw);
+    showSteppedValue(input, value);
+    if (zoom) {
+        if (sliderDragging)
+            pendingZoom = value;
+        else
+            shell.setInterfaceZoom(value);
+        return;
+    }
+    if (value == Core::Theme::chatTextSize())
+        return;
+    auto &theme = Core::Theme::Manager::instance();
+    Core::Theme::setChatTextSize(value);
+    theme.applyFonts();
+    if (!theme.save())
+        Core::log(Core::LogLevel::Warning, LogUI) << "SettingsController: could not save the chat text size";
+}
+
+void SettingsController::showSteppedValue(::Rml::ElementFormControlInput *input, int value)
+{
+    // Snaps the knob to the stop and marks its label without reporting another change.
+    const bool wasRendering = renderingControls;
+    renderingControls = true;
+    input->SetValue(std::to_string(value));
+    renderingControls = wasRendering;
+    ::Rml::ElementList ticks;
+    input->GetParentNode()->GetElementsByClassName(ticks, "settings-slider-tick");
+    for (auto *tick : ticks)
+        tick->SetClass("active", tick->GetAttribute<int>("data-value", 0) == value);
+    requestRender();
 }
 
 void SettingsController::handleSelectChange(::Rml::Element *selectEl)
@@ -1656,26 +1687,6 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         if (auto *client = readyClient(shell); client && appearance.syncTheme && client->getSettings().appearance)
             appearance.choice = Core::Theme::choiceFromProto(client->getSettings().appearance->theme).value_or(appearance.choice);
         applyAppearanceChoice(appearance, true);
-    } else if (action == std::string("font-size-inc") || action == std::string("font-size-dec")) {
-        int roleInt = std::stoi(attribute(target, "data-role"));
-        auto role = static_cast<Core::Theme::FontRole>(roleInt);
-        auto f = Core::Theme::Manager::instance().font(role);
-        int curPt = static_cast<int>(f.pointSize);
-        int newPt = (action == std::string("font-size-inc")) ? curPt + 1 : std::max(6, curPt - 1);
-        f.pointSize = newPt;
-        Core::Theme::Manager::instance().setFontOverride(role, f);
-        Core::Theme::Manager::instance().applyFonts();
-        Core::Theme::Manager::instance().save();
-        render();
-        requestRender(100);
-    } else if (action == std::string("reset-font")) {
-        int roleInt = std::stoi(attribute(target, "data-role"));
-        auto role = static_cast<Core::Theme::FontRole>(roleInt);
-        Core::Theme::Manager::instance().clearFontOverride(role);
-        Core::Theme::Manager::instance().applyFonts();
-        Core::Theme::Manager::instance().save();
-        render();
-        requestRender(100);
     }
 }
 

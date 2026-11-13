@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <initializer_list>
 #include <optional>
 #include <string_view>
 
@@ -167,6 +168,17 @@ std::optional<Platform::Color> coloredBackground(std::string_view block)
         return accent;
     return color;
 }
+
+// Chat text size scales everything drawn inside messages and the composer text, as in Discord.
+bool chatSelector(std::string_view selector)
+{
+    for (const auto token : {".message-", ".system-", ".date-separator", ".blocked-run", ".edited-marker", ".reply-bar",
+             ".inline-code", ".code-block", ".attachment-", ".spoiler", ".embed-", ".reaction-", ".mention", ".component-",
+             ".ephemeral-", ".poll-", ".gutter-timestamp", ".composer-textarea", ".composer-placeholder"})
+        if (selector.find(token) != selector.npos)
+            return true;
+    return false;
+}
 }
 
 std::string buildStyleSheet(std::string source)
@@ -175,9 +187,8 @@ std::string buildStyleSheet(std::string source)
     bool colors = manager.usesSystemColors();
     for (const auto &token : registry())
         colors = colors || manager.hasOverride(token.token);
-    bool fonts = false;
-    for (const auto &font : fontRegistry())
-        fonts = fonts || manager.hasFontOverride(font.role);
+    const double chatScale = manager.font(FontRole::Message).pointSize / fontDescriptor(FontRole::Message).defaultFont.pointSize;
+    const bool fonts = chatScale != 1;
     if (!colors && !fonts)
         return source;
 
@@ -234,17 +245,14 @@ std::string buildStyleSheet(std::string source)
                 }
             }
             i = end - 1;
-        } else if (fonts && property == "font-size" && text[i] >= '0' && text[i] <= '9') {
+        } else if (fonts && (property == "font-size" || property == "line-height") && text[i] >= '0' && text[i] <= '9') {
             double size = 0;
             const auto parsed = std::from_chars(text.data() + i, text.data() + text.size(), size);
             const size_t end = size_t(parsed.ptr - text.data());
             if (parsed.ec == std::errc{} && text.substr(end, 2) == "dp") {
-                const auto role = selector.find("code") != selector.npos ? FontRole::Code
-                    : selector.find(".message-body") != selector.npos ? FontRole::Message : FontRole::Ui;
-                const double scale = manager.font(role).pointSize / fontDescriptor(role).defaultFont.pointSize;
-                if (scale != 1) {
+                if (chatSelector(selector)) {
                     result.append(text.substr(copied, i - copied));
-                    result += std::to_string(size * scale);
+                    result += std::to_string(size * chatScale);
                     copied = end;
                 }
                 i = end + 1;

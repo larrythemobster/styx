@@ -36,6 +36,7 @@ inline constexpr const char *ThemeDarkMode = "appearance/dark_mode";
 inline constexpr const char *ThemeChoice = "appearance/theme";
 inline constexpr const char *ThemeFollowDevice = "appearance/follow_device";
 inline constexpr const char *ThemeSync = "appearance/sync_theme";
+inline constexpr const char *InterfaceZoom = "accessibility/zoom";
 
 // Audio & Voice
 inline constexpr const char *AudioBackend = "audio/backend";

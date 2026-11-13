@@ -36,6 +36,8 @@ std::string keyName(int key)
         return std::string(1, static_cast<char>('A' + (key - ::Rml::Input::KI_A)));
     if (key >= ::Rml::Input::KI_F1 && key <= ::Rml::Input::KI_F24)
         return "F" + std::to_string(key - ::Rml::Input::KI_F1 + 1);
+    if (key >= ::Rml::Input::KI_0 && key <= ::Rml::Input::KI_9)
+        return std::string(1, static_cast<char>('0' + (key - ::Rml::Input::KI_0)));
 
     switch (key) {
     case ::Rml::Input::KI_UP:
@@ -50,6 +52,10 @@ std::string keyName(int key)
         return "Escape";
     case ::Rml::Input::KI_OEM_2:
         return "/";
+    case ::Rml::Input::KI_OEM_PLUS:
+        return "=";
+    case ::Rml::Input::KI_OEM_MINUS:
+        return "-";
     case ::Rml::Input::KI_OEM_3:
         return "`";
     case ::Rml::Input::KI_LSHIFT:
@@ -138,6 +144,9 @@ const std::vector<Shortcut> &shortcutTable()
         {ShortcutAction::ToggleMute, ::Rml::Input::KI_M, Primary | Shift, "Toggle mute"},
         {ShortcutAction::ToggleDeafen, ::Rml::Input::KI_D, Primary | Shift, "Toggle deafen"},
         {ShortcutAction::ShortcutsHelp, ::Rml::Input::KI_OEM_2, Primary, "Show keyboard shortcuts"},
+        {ShortcutAction::ZoomIn, ::Rml::Input::KI_OEM_PLUS, Primary, "Zoom in"},
+        {ShortcutAction::ZoomOut, ::Rml::Input::KI_OEM_MINUS, Primary, "Zoom out"},
+        {ShortcutAction::ZoomReset, ::Rml::Input::KI_0, Primary, "Reset zoom"},
     };
     return shortcuts;
 }

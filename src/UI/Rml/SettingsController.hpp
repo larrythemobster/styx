@@ -7,9 +7,12 @@
 #include "Platform/Timer.hpp"
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <RmlUi/Core/ObserverPtr.h>
+
+namespace Rml { class ElementFormControlInput; }
 
 namespace Styx {
 namespace Core {
@@ -76,6 +79,9 @@ private:
     void renderLanguage(std::string &rml);
     static void appendSwitch(std::string &rml, const std::string &key, bool checked,
                              const std::string &title, const std::string &description, bool disabled = false);
+    // A slider with labeled stops that snaps to them, as Discord's text size and zoom sliders do.
+    static void appendSteppedSlider(std::string &rml, const std::string &id, const std::string &key, const std::string &title,
+                                    const std::string &description, std::span<const int> stops, int value, const std::string &unit);
 
     void renderMyAccount(std::string &rml);
     void renderAppearance(std::string &rml);
@@ -102,6 +108,8 @@ private:
     void handleRadioClick(::Rml::Element *radioEl);
     void handleSliderChange(::Rml::Element *sliderEl);
     void showSliderHint(::Rml::Element *sliderEl);
+    void handleSteppedSlider(::Rml::ElementFormControlInput *input, const std::string &key, int raw);
+    void showSteppedValue(::Rml::ElementFormControlInput *input, int value);
     void clearSliderHint();
     void handleSelectChange(::Rml::Element *selectEl);
     void handleAction(const std::string &action, ::Rml::Element *target);
@@ -132,6 +140,7 @@ private:
     ::Rml::Element *hintSlider = nullptr;
     ::Rml::ObserverPtr<::Rml::Element> previousFocus;
     bool sliderDragging = false;
+    std::optional<int> pendingZoom;
     std::optional<KeybindAction> recordingKeybind;
     std::string keybindError;
     std::unique_ptr<ProfileEditorController> profileEditor;

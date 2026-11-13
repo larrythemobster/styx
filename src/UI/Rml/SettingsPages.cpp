@@ -8,6 +8,7 @@
 #include "Core/SettingsKeys.hpp"
 #include "Core/Theme/Fonts.hpp"
 #include "Core/Theme/Manager.hpp"
+#include "Core/Theme/Scale.hpp"
 #include "Platform/Desktop.hpp"
 #include "Proto/PreloadedSettings.hpp"
 
@@ -36,9 +37,9 @@ constexpr SectionInfo sections[] = {
     {SettingsController::Section::Privacy, "privacy", "Privacy & Safety", "User Settings", "privacy direct messages dms server members screen reader detection", "shield-alert"},
     {SettingsController::Section::FriendRequests, "friend-requests", "Friend Requests", "User Settings", "friends requests everyone mutual server members", "user-plus"},
     {SettingsController::Section::VoiceVideo, "voice-video", "Voice & Video", "Experience", "voice audio microphone speakers input output volume push to talk devices", "volume-2"},
-    {SettingsController::Section::Appearance, "appearance", "Appearance", "Experience", "theme default light ash dark onyx device sync accent color colour picker palette custom fonts", "palette"},
+    {SettingsController::Section::Appearance, "appearance", "Appearance", "Experience", "theme default light ash dark onyx device sync accent color colour picker palette custom", "palette"},
     {SettingsController::Section::Chat, "chat", "Text & Images", "Experience", "chat messages embeds links reactions media", "messages-square"},
-    {SettingsController::Section::Accessibility, "accessibility", "Accessibility", "Experience", "font text size compact avatars underlines readability reduced motion", "accessibility"},
+    {SettingsController::Section::Accessibility, "accessibility", "Accessibility", "Experience", "font text size chat zoom scale compact avatars underlines readability reduced motion", "accessibility"},
     {SettingsController::Section::GoLive, "go-live", "Screen Sharing", "Experience", "screen sharing streaming quality resolution frame rate system audio", "monitor"},
     {SettingsController::Section::Notifications, "notifications", "Notifications", "Experience", "notification sounds taskbar dot badge flash alerts", "bell"},
     {SettingsController::Section::Keybinds, "keybinds", "Keybinds", "Experience", "keybinds shortcuts mute deafen push to talk", "keyboard"},
@@ -281,20 +282,39 @@ void SettingsController::renderAccessibility(std::string &rml)
         avatar = shell.imageSource(url, {40, 40});
     }
     rml += std::format("<div class=\"settings-message-preview\"><div class=\"message-row group-start\">"
-        "<div class=\"message-avatar-clip\"><img class=\"message-avatar\" src=\"{}\"/></div>"
+        "<div class=\"message-avatar-clip\"><img class=\"message-avatar\" src=\"{0}\"/></div>"
         "<div class=\"message-header\"><span class=\"message-author\">You</span><span class=\"message-timestamp\">12:00</span></div>"
-        "<div class=\"message-body\">This is how your messages will look. <span class=\"chat-link\">Example link</span></div></div></div>", Platform::htmlEscape(avatar));
-    const int pixels = int(std::lround(16.0 * Core::Theme::Manager::instance().font(Core::Theme::FontRole::Message).pointSize /
-        Core::Theme::fontDescriptor(Core::Theme::FontRole::Message).defaultFont.pointSize));
-    rml += std::format("<div class=\"settings-slider-wrap\"><div class=\"settings-slider-header\">"
-        "<label class=\"settings-label\" for=\"message-font-size\">Chat font size</label><span id=\"val-message-font-size\" class=\"settings-slider-val\">{}px</span></div>"
-        "<input id=\"message-font-size\" type=\"range\" class=\"settings-slider\" min=\"12\" max=\"24\" step=\"1\" value=\"{}\" "
-        "data-setting=\"accessibility/message-font-px\" data-display=\"val-message-font-size\" data-unit=\"px\"/>"
-        "<div class=\"settings-slider-hint\">{}px</div></div>", pixels, pixels, pixels);
+        "<div class=\"message-body\">This is how your messages will look when a long line wraps onto the next one. "
+        "<span class=\"chat-link\">Example link</span></div></div>"
+        "<div class=\"message-row\"><div class=\"message-body\">Code uses <span class=\"inline-code\">inline code</span> and blocks:"
+        "<pre class=\"code-block\">const int size = 16;</pre></div></div></div>", Platform::htmlEscape(avatar));
+    rml += "<div class=\"settings-section-heading\">Text Readability</div>";
+    appendSteppedSlider(rml, "message-font-size", "accessibility/message-font-px", "Text size in chat",
+        "Adjust the size of the chat font.", Core::Theme::chatTextSizes, Core::Theme::chatTextSize(), "px");
+    appendSteppedSlider(rml, "interface-zoom", Keys::InterfaceZoom, "Zoom level",
+        "Adjust the size of the interface. You can also change this with Ctrl +/-.", Core::Theme::zoomLevels,
+        View::interfaceZoom(), "");
     appendSwitch(rml, Keys::CompactMessages, getBool(Keys::CompactMessages, Defaults::CompactMessages), "Compact message spacing", "Use less space between message groups and hide message avatars.");
     appendSwitch(rml, Keys::ShowAvatars, getBool(Keys::ShowAvatars, Defaults::ShowAvatars), "Show message avatars", "Show profile pictures beside messages in the standard layout.");
     appendSwitch(rml, Keys::UnderlineLinks, getBool(Keys::UnderlineLinks, Defaults::UnderlineLinks), "Always underline links", "Make links stand out in messages.");
     appendSwitch(rml, Keys::ReducedMotion, getBool(Keys::ReducedMotion, Defaults::ReducedMotion), "Reduce interface motion", "Turn off interface transitions and CSS animations.");
+}
+
+void SettingsController::appendSteppedSlider(std::string &rml, const std::string &id, const std::string &key,
+    const std::string &title, const std::string &detail, std::span<const int> stops, int value, const std::string &unit)
+{
+    const int low = stops.front(), high = stops.back();
+    rml += std::format("<div class=\"settings-slider-wrap\"><label class=\"settings-label\" for=\"{0}\">{1}</label>"
+        "<div class=\"settings-description\">{2}</div><div class=\"settings-slider-ticks\">",
+        id, Platform::htmlEscape(title), Platform::htmlEscape(detail));
+    for (const int stop : stops)
+        rml += std::format("<span class=\"settings-slider-tick{}{}{}\" data-value=\"{}\" style=\"left: {}%;\">{}{}</span>",
+            stop == low ? " start" : "", stop == high ? " end" : "", stop == value ? " active" : "", stop,
+            (stop - low) * 100.0 / (high - low), stop, unit);
+    // The highlighted stop label shows the value, as in Discord, so these sliders have no floating hint.
+    rml += std::format("</div><input id=\"{0}\" type=\"range\" class=\"settings-slider settings-stepped-slider\" min=\"{1}\" max=\"{2}\" "
+        "step=\"1\" value=\"{3}\" data-setting=\"{4}\" aria-label=\"{5}\"/></div>",
+        id, low, high, value, Platform::htmlEscape(key), Platform::htmlEscape(title));
 }
 
 void SettingsController::renderSystem(std::string &rml)

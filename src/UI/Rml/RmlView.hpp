@@ -92,6 +92,9 @@ public:
     // The operating system's light/dark preference and its change notifications.
     static Core::Theme::DeviceTheme systemTheme();
     static Platform::Signal<> &systemThemeChanged();
+    // Interface zoom in percent, applied on top of the display scale in every window.
+    static void setInterfaceZoom(int percent);
+    static int interfaceZoom();
 
 private:
     void initialise();

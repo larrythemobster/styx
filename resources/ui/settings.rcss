@@ -496,6 +496,29 @@ input.settings-slider sliderarrowinc
 	height: 0;
 }
 
+/* Labeled stops above stepped sliders, as on Discord's text size and zoom sliders */
+.settings-slider-ticks
+{
+	position: relative;
+	display: block;
+	height: 16dp;
+	margin-top: 4dp;
+}
+
+.settings-slider-tick
+{
+	position: absolute;
+	top: 0;
+	transform: translateX(-50%);
+	font-size: 11dp;
+	color: #b5bac1;
+	white-space: nowrap;
+}
+
+.settings-slider-tick.start { transform: none; }
+.settings-slider-tick.end { transform: translateX(-100%); }
+.settings-slider-tick.active { color: #23a55a; font-weight: 600; }
+
 /* Dropdown Select */
 
 select.settings-select
@@ -855,7 +878,7 @@ select.settings-select selectbox option:hover
     border: 2dp #00a8fc;
 }
 
-.settings-theme-heading
+.settings-section-heading
 {
     font-size: 20dp;
     font-weight: 600;
@@ -1030,66 +1053,6 @@ input.settings-color-hue sliderarrowdec, input.settings-color-hue sliderarrowinc
     flex-wrap: wrap;
     gap: 8dp;
     margin-top: 12dp;
-}
-
-
-/* Font override rows */
-
-.settings-font-row
-{
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    min-height: 48dp;
-    padding: 6dp 0;
-    border-bottom: 1dp #202024;
-}
-
-.settings-font-row:last-child
-{
-    border-bottom-width: 0;
-}
-
-.settings-font-name
-{
-    flex: 1;
-    min-width: 0;
-    font-size: 14dp;
-    font-weight: 500;
-    color: #dbdee1;
-}
-
-.settings-font-size
-{
-    font-size: 13dp;
-    color: #949ba4;
-    width: 56dp;
-    flex-shrink: 0;
-    text-align: right;
-    margin-right: 12dp;
-}
-
-.settings-font-controls
-{
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-}
-
-.settings-font-adjust
-{
-    width: 32dp;
-    height: 32dp;
-    padding: 0;
-    margin-right: 6dp;
-    font-size: 16dp;
-}
-
-.settings-font-reset
-{
-    min-width: 56dp;
-    height: 32dp;
-    padding: 0 10dp;
 }
 
 .settings-keybind
