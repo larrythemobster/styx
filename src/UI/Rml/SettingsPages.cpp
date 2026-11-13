@@ -37,7 +37,7 @@ struct SectionInfo {
 // Discord's sidebar order. Billing, Data & Privacy, Registered Games, Game Overlay, Connected Apps and
 // Developer have no Styx page yet, so they are not listed.
 constexpr SectionInfo sections[] = {
-    {SettingsController::Section::MyAccount, "my-account", "Account", "", "account username email security authentication mfa", "id-card"},
+    {SettingsController::Section::MyAccount, "my-account", "Account", "", "account username email phone number reveal password security authentication mfa switch manage accounts", "id-card"},
     {SettingsController::Section::Profiles, "profiles", "Profiles", "", "profile avatar banner display name pronouns about me bio", "image", false},
     {SettingsController::Section::MessagingPermissions, "messaging-permissions", "Messaging Permissions", "",
         "privacy direct messages dms server members screen reader detection friends requests everyone mutual", "message-circle"},
