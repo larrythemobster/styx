@@ -25,13 +25,17 @@
 #include "Core/Theme/Scale.hpp"
 #include "Core/Theme/Tokens.hpp"
 #include "Core/UserManager.hpp"
+#include "Core/TokenStore.hpp"
+#include "Discord/AccountSecurity.hpp"
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Entities.hpp"
 #include "Proto/PreloadedSettings.hpp"
+#include "Storage/AccountRepository.hpp"
 
 #include "Platform/Badge.hpp"
 #include "Platform/Notifications.hpp"
 #include "Platform/Desktop.hpp"
+#include "Platform/Dispatcher.hpp"
 #include <algorithm>
 #include <cmath>
 #include <random>
@@ -132,6 +136,7 @@ SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
     track(shell.instanceChanged.connect([this](Core::ClientInstance *) {
         ++remoteSettingsRequest;
         emailRevealed = phoneRevealed = false;
+        if (!passwordSaving) passwordFormOpen = false;
         remoteSettingsSaving = false;
         remoteSettingsError.clear();
         bindAccountSettings();
@@ -206,6 +211,8 @@ void SettingsController::setSection(Section section)
     colorPickerOpen = false;
     currentSection = section;
     emailRevealed = phoneRevealed = false;
+    if (!passwordSaving) passwordFormOpen = false;
+    passwordNotice.clear();
     currentSubsection.clear();
     render();
     requestRender(100);
@@ -395,13 +402,35 @@ void SettingsController::renderMyAccount(std::string &rml)
 
         rml += "<div class=\"account-info-divider\"></div>";
         appendSubsectionHeading(rml, "password-security");
+        if (!passwordNotice.empty() && passwordNoticeAccount == inst->accountId())
+            rml += "<div class=\"account-password-notice\" role=\"status\">" + Rml::escape(passwordNotice) + "</div>";
+        if (!ready) {
+            row("Password", muted("Loading..."));
+        } else if (!passwordFormOpen) {
+            // Reference 007 shows Password with an Edit button; the form opens in place below it.
+            row("Password", std::string(), "<button class=\"settings-btn settings-btn-secondary\" data-action=\"open-password-form\" "
+                "aria-label=\"Change password\"><span class=\"settings-btn-label\">Edit</span></button>");
+        } else {
+            rml += "<div class=\"account-password-form\">";
+            for (const auto &[id, label] : {std::pair{"account-current-password", "Current Password"},
+                     std::pair{"account-new-password", "New Password"}, std::pair{"account-confirm-password", "Confirm New Password"}})
+                rml += formatRml("<label class=\"settings-label\" for=\"%1\">%2</label>"
+                    "<input id=\"%1\" class=\"account-password-input\" type=\"password\" maxlength=\"128\"/>",
+                    std::string(id), std::string(label));
+            rml += "<div id=\"account-password-error\" class=\"settings-keybind-error\" role=\"alert\"></div>"
+                   "<div class=\"settings-button-group\">"
+                   "<button class=\"settings-btn settings-btn-secondary\" data-action=\"cancel-password\"><span class=\"settings-btn-label\">Cancel</span></button>"
+                   "<button id=\"account-password-submit\" class=\"settings-btn settings-btn-primary\" data-action=\"submit-password\">"
+                   "<span class=\"settings-btn-label\">Done</span></button></div>";
+            rml += "</div>";
+        }
         if (!ready)
             row("Multi-Factor Authentication", muted("Loading..."));
         else if (self.mfaEnabled.hasValue())
             row("Multi-Factor Authentication", Rml::escape(std::string(self.mfaEnabled.get() ? "Enabled" : "Not enabled")));
         else
             row("Multi-Factor Authentication", muted("Unknown"));
-        rml += "<div class=\"settings-description\">Changing your username, email, phone number or password, and managing "
+        rml += "<div class=\"settings-description\">Changing your username, email or phone number, and managing "
                "authentication methods and logged-in devices, aren't available in Styx yet. Use the official Discord app for them.</div>";
     }
 
@@ -1051,8 +1080,9 @@ void SettingsController::setupEventListeners()
         if (!target)
             return;
 
-        // Close button
+        // Action buttons; disabled ones are inert.
         if (auto *btn = closest(target, "data-action")) {
+            if (btn->HasAttribute("disabled")) return;
             std::string action = attribute(btn, "data-action");
             handleAction(action, btn);
             return;
@@ -1211,6 +1241,18 @@ void SettingsController::setupEventListeners()
             for (auto *target = event.GetTargetElement(); target && target != regionRoot; target = target->GetParentNode())
                 if (auto *select = rmlui_dynamic_cast<::Rml::ElementFormControlSelect *>(target); select && select->IsSelectBoxVisible())
                     return;
+        }
+        if (event.GetTargetElement()->IsClassSet("account-password-input")) {
+            if (key == ::Rml::Input::KeyIdentifier::KI_RETURN || key == ::Rml::Input::KeyIdentifier::KI_NUMPADENTER) {
+                event.StopPropagation();
+                submitPasswordChange();
+                return;
+            }
+            if (key == ::Rml::Input::KeyIdentifier::KI_ESCAPE && !passwordSaving) {
+                event.StopPropagation();
+                handleAction("cancel-password", nullptr);
+                return;
+            }
         }
         if (event.GetTargetElement()->GetId() == "settings-search" &&
             (key == ::Rml::Input::KeyIdentifier::KI_RETURN || key == ::Rml::Input::KeyIdentifier::KI_NUMPADENTER)) {
@@ -1585,6 +1627,78 @@ void SettingsController::handleSelectChange(::Rml::Element *selectEl)
     requestRender(50);
 }
 
+void SettingsController::showPasswordError(const std::string &message)
+{
+    if (auto *error = regionRoot->GetElementById("account-password-error"))
+        error->SetInnerRML(Rml::escape(message));
+    requestRender();
+}
+
+void SettingsController::submitPasswordChange()
+{
+    auto *instance = shell.currentInstance();
+    auto *client = readyClient(shell);
+    if (!instance || !client || passwordSaving) return;
+    auto field = [this](const char *id) {
+        return rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById(id));
+    };
+    auto *current = field("account-current-password");
+    auto *next = field("account-new-password");
+    auto *confirm = field("account-confirm-password");
+    if (!current || !next || !confirm) return;
+    if (auto problem = Discord::passwordChangeProblem(current->GetValue(), next->GetValue(), confirm->GetValue())) {
+        showPasswordError(*problem);
+        return;
+    }
+
+    // The form stays in place while the request runs; only its controls are disabled.
+    passwordSaving = true;
+    ::Rml::ElementList controls;
+    regionRoot->QuerySelectorAll(controls, ".account-password-form input, .account-password-form button");
+    for (auto *control : controls) control->SetAttribute("disabled", "disabled");
+    if (auto *label = regionRoot->QuerySelector("#account-password-submit .settings-btn-label")) label->SetInnerRML("Updating...");
+    showPasswordError("");
+
+    const auto account = instance->accountId();
+    const auto request = ++passwordRequest;
+    Platform::Guard<SettingsController> self(this);
+    Platform::Guard<Core::Session> session(shell.session());
+    client->changePassword(current->GetValue(), next->GetValue(), [self, session, account, request](const Core::Result<std::string> &result) {
+        std::string error = result.success() ? std::string() : result.error;
+        if (result.success()) {
+            // Discord revoked every earlier token, so keep the new sign-in even if Settings closed meanwhile.
+            if (Core::TokenStore::saveToken(account, *result.value).success()) {
+                Storage::AccountRepository().clearHeartbeatSession(account);
+                Platform::Dispatcher::main().post([session, account] {
+                    if (!session) return;
+                    session->disconnectAccount(account);
+                    session->connectAccount(account);
+                });
+            } else {
+                error = "Your password was changed, but Styx couldn't save the new sign-in. Use Set Token in Accounts to sign in again.";
+            }
+        }
+        if (!self || self->passwordRequest != request) return;
+        self->passwordSaving = false;
+        if (result.success()) {
+            self->passwordFormOpen = false;
+            self->passwordNotice = error.empty()
+                ? "Password changed. Discord signed out your other devices; Styx is reconnecting with the new sign-in."
+                : error;
+            self->passwordNoticeAccount = account;
+            if (self->shell.isSettingsOpen() && self->currentSection == Section::MyAccount) self->render();
+        } else if (self->regionRoot->QuerySelector(".account-password-form")) {
+            ::Rml::ElementList controls;
+            self->regionRoot->QuerySelectorAll(controls, ".account-password-form input, .account-password-form button");
+            for (auto *control : controls) control->RemoveAttribute("disabled");
+            if (auto *label = self->regionRoot->QuerySelector("#account-password-submit .settings-btn-label")) label->SetInnerRML("Done");
+            self->showPasswordError(error);
+            if (auto *input = self->regionRoot->GetElementById("account-current-password")) input->Focus();
+        }
+        self->requestRender();
+    });
+}
+
 void SettingsController::handleAction(const std::string &action, ::Rml::Element *target)
 {
     if (action == "clear-settings-search") {
@@ -1641,6 +1755,18 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         applyPushToTalk();
         stopRecordingKeybind();
         refreshKeybinds();
+    } else if (action == std::string("open-password-form")) {
+        passwordFormOpen = true;
+        passwordNotice.clear();
+        render();
+        if (auto *input = regionRoot->GetElementById("account-current-password")) input->Focus();
+    } else if (action == std::string("cancel-password")) {
+        if (passwordSaving) return;
+        passwordFormOpen = false;
+        render();
+        if (auto *edit = regionRoot->QuerySelector("button[data-action=\"open-password-form\"]")) edit->Focus();
+    } else if (action == std::string("submit-password")) {
+        submitPasswordChange();
     } else if (action == std::string("reveal-email")) {
         emailRevealed = !emailRevealed;
         render();

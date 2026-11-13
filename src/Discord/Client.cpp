@@ -8,6 +8,7 @@
 #include <utility>
 #include <string_view>
 
+#include "AccountSecurity.hpp"
 #include "ApiError.hpp"
 #include "Enums.hpp"
 #include "Core/Logging.hpp"
@@ -966,6 +967,16 @@ void Client::modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::
 
             if (callback)
                 callback(Core::Result<User>::makeOk(std::move(user)));
+        });
+}
+
+void Client::changePassword(const std::string &currentPassword, const std::string &newPassword, ResultCallback<std::string> callback)
+{
+    const Snowflake userId = me.id.get();
+    httpClient->send(HttpClient::Method::PATCH, "/users/@me", passwordChangeBody(currentPassword, newPassword).dump(), {},
+        [userId, callback = std::move(callback)](const HttpResponse &response) {
+            if (callback)
+                callback(passwordChangeResult(response, userId));
         });
 }
 

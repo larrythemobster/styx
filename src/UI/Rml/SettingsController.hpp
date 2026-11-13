@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Controller.hpp"
+#include "Core/Snowflake.hpp"
 #include "Core/Theme/Appearance.hpp"
 #include "Keybinds.hpp"
 #include "Platform/Native.hpp"
 #include "Platform/Timer.hpp"
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -113,6 +115,8 @@ private:
     void clearSliderHint();
     void handleSelectChange(::Rml::Element *selectEl);
     void handleAction(const std::string &action, ::Rml::Element *target);
+    void submitPasswordChange();
+    void showPasswordError(const std::string &message);
     void renderKeybindRow(std::string &rml, KeybindAction action);
     void refreshKeybinds();
     void stopRecordingKeybind();
@@ -137,6 +141,12 @@ private:
     // Account page: whether the full email/phone are shown. Cleared when leaving the page or account.
     bool emailRevealed = false;
     bool phoneRevealed = false;
+    // Account page password change. Passwords live only in the form's inputs.
+    bool passwordFormOpen = false;
+    bool passwordSaving = false;
+    std::uint64_t passwordRequest = 0;
+    std::string passwordNotice;
+    Core::Snowflake passwordNoticeAccount;
     bool colorDragging = false;
     double pickerHue = 0;
     double pickerSaturation = 0;

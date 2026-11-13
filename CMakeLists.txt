@@ -281,6 +281,7 @@ set(PROJECT_SOURCES
     src/Discord/IngestThread.cpp
     src/Discord/HttpClient.cpp
     src/Discord/ApiError.cpp
+    src/Discord/AccountSecurity.cpp
     src/Discord/RequestWorker.cpp
     src/Discord/CurlUtils.cpp
     src/Discord/CdnUrls.cpp
@@ -528,6 +529,8 @@ if(BUILD_TESTS)
         src/Discord/PollProtocol.cpp src/Discord/ApiError.cpp src/Core/Snowflake.cpp)
     styx_test(TestPollCreate PollCreateTests tests/tst_PollCreate.cpp
         src/Discord/PollCreate.cpp src/Core/Snowflake.cpp)
+    styx_test(TestAccountSecurity AccountSecurityTests tests/tst_AccountSecurity.cpp
+        src/Discord/AccountSecurity.cpp src/Discord/ApiError.cpp src/Core/Snowflake.cpp)
     target_link_libraries(TestPollCreate PRIVATE utf8proc)
     styx_test(TestGroupDm GroupDmTests tests/tst_GroupDm.cpp tests/tst_GroupDmEvents.cpp
         src/Discord/GroupDm.cpp src/Discord/ApiError.cpp src/Core/OrderedJson.cpp src/Core/Snowflake.cpp)

@@ -249,6 +249,8 @@ public:
     void fetchChannelCommandIndex(Snowflake channelId, ResultCallback<ApplicationCommandIndex> callback);
     void fetchUserCommandIndex(ResultCallback<ApplicationCommandIndex> callback);
     void modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<User> callback = {});
+    // Changes the account password. Discord revokes every token; the callback gets the replacement.
+    void changePassword(const std::string &currentPassword, const std::string &newPassword, ResultCallback<std::string> callback);
     void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
     void modifyUserGuildSettings(Snowflake guildId, const UserGuildSettingsEdit &edit, ActionCallback callback = {});
     void modifyCurrentMember(Snowflake guildId, const CurrentMemberEdit &edit,
