@@ -21,8 +21,8 @@ textarea { white-space: pre-wrap; }
 
 scrollbarvertical { width: 8dp; scrollbar-margin: 0; margin: 2dp; }
 scrollbarvertical slidertrack { background-color: transparent; }
-scrollbarvertical sliderbar { background-color: #111214; border-radius: 4dp; min-height: 24dp; }
-scrollbarvertical sliderbar:hover { background-color: #19191c; }
+scrollbarvertical sliderbar { background-color: #303035; border-radius: 4dp; min-height: 24dp; }
+scrollbarvertical sliderbar:hover { background-color: #4e5058; }
 scrollbarvertical sliderarrowdec, scrollbarvertical sliderarrowinc { height: 0; width: 0; }
 scrollbarhorizontal { height: 0; }
 

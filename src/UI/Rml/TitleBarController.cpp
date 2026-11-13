@@ -104,23 +104,25 @@ void TitleBarController::refresh() {
 }
 ::Rml::Element *TitleBarController::hintButton() const
 {
-    if (!regionRoot || !regionRoot->GetContext()) return nullptr;
-    auto *context = regionRoot->GetContext();
+    auto *document = shell.document();
+    auto *context = document ? document->GetContext() : nullptr;
+    if (!context) return nullptr;
     auto *target = keyboardHints ? context->GetFocusElement() : context->GetHoverElement();
-    auto *button = closest(target, "data-toolbar-action");
-    if (!button) button = closest(target, "data-window-action");
-    for (auto *parent = button; parent; parent = parent->GetParentNode())
-        if (parent == regionRoot) return button;
+    // Any titled control in the main window shows its title. Settings sliders show their value instead.
+    for (auto *element = target; element; element = element->GetParentNode()) {
+        if (element->GetOwnerDocument() != document || element->IsClassSet("settings-slider")) return nullptr;
+        if (!attribute(element, "title").empty()) return element;
+    }
     return nullptr;
 }
 
 void TitleBarController::updateHint()
 {
     auto *button = hintsDismissed ? nullptr : hintButton();
-    if (button != hintOwner) {
+    if (button != hintOwner.get()) {
         hideHint();
-        hintOwner = button;
         if (button) {
+            hintOwner = button->GetObserverPtr();
             if (keyboardHints) showHint();
             else hintDelay.start(std::chrono::milliseconds(350), false, [this] { showHint(); });
         }
@@ -133,15 +135,20 @@ void TitleBarController::updateHint()
 
 void TitleBarController::showHint()
 {
-    if (!hint || !hintOwner || hintsDismissed || hintOwner != hintButton()) return;
-    const auto label = attribute(hintOwner, "title");
+    if (!hint || !hintOwner || hintsDismissed || hintOwner.get() != hintButton()) return;
+    const auto label = attribute(hintOwner.get(), "title");
     if (label.empty()) return;
     hint->SetInnerRML(Platform::htmlEscape(label));
     hintScale = ::Rml::ElementUtilities::GetDensityIndependentPixelRatio(hint);
-    hintWidth = static_cast<float>(::Rml::ElementUtilities::GetStringWidth(hint, label));
+    // Short hints fit their text on one line; long ones wrap at a readable width.
+    const float textWidth = static_cast<float>(::Rml::ElementUtilities::GetStringWidth(hint, label));
+    const float maxWidth = 280 * hintScale;
+    hintWidth = std::min(textWidth, maxWidth);
+    hint->SetProperty("white-space", textWidth > maxWidth ? "normal" : "nowrap");
     hint->SetProperty(::Rml::PropertyId::Width, ::Rml::Property(hintWidth, ::Rml::Unit::PX));
     hint->SetProperty("display", "block");
     hintOwner->SetAttribute("aria-describedby", "titlebar-hint");
+    hintLeft = hintTop = -1;
     positionHint();
     requestRender();
 }
@@ -150,17 +157,23 @@ void TitleBarController::hideHint()
 {
     hintDelay.stop();
     if (hintOwner) hintOwner->RemoveAttribute("aria-describedby");
-    hintOwner = nullptr;
+    hintOwner.reset();
     if (hint) hint->SetProperty("display", "none");
 }
 
 void TitleBarController::positionHint()
 {
+    const auto view = hint->GetContext()->GetDimensions();
     const float width = hintWidth + 16 * hintScale;
-    const float margin = 4 * hintScale;
+    const float height = hint->GetOffsetHeight();
+    const float margin = 4 * hintScale, gap = 6 * hintScale;
     const float left = std::clamp(hintOwner->GetAbsoluteLeft() + (hintOwner->GetOffsetWidth() - width) / 2,
-                                  margin, std::max(margin, hint->GetContext()->GetDimensions().x - width - margin));
-    const float top = hintOwner->GetAbsoluteTop() + hintOwner->GetOffsetHeight() + 6 * hintScale;
+                                  margin, std::max(margin, view.x - width - margin));
+    // Below the control, or above it when the window's bottom edge would cut the hint off.
+    float top = hintOwner->GetAbsoluteTop() + hintOwner->GetOffsetHeight() + gap;
+    if (top + height + margin > view.y)
+        top = hintOwner->GetAbsoluteTop() - height - gap;
+    top = std::clamp(top, margin, std::max(margin, view.y - height - margin));
     if (left == hintLeft && top == hintTop) return;
     hintLeft = left; hintTop = top;
     hint->SetProperty(::Rml::PropertyId::Left, ::Rml::Property(std::round(left), ::Rml::Unit::PX));

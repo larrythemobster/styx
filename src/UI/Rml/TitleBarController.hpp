@@ -1,6 +1,7 @@
 #pragma once
 #include "Controller.hpp"
 #include "Platform/Timer.hpp"
+#include <RmlUi/Core/ObserverPtr.h>
 
 namespace Styx::UI::Rml {
 class InboxController;
@@ -11,6 +12,7 @@ public:
     ~TitleBarController() override;
 private:
     void refresh();
+    // The hovered (or keyboard-focused) control in the main window whose title is shown as a hint.
     ::Rml::Element *hintButton() const;
     void updateHint();
     void showHint();
@@ -19,7 +21,8 @@ private:
     InboxController &inbox;
     UpdatesController &updates;
     ::Rml::Element *hint = nullptr;
-    ::Rml::Element *hintOwner = nullptr;
+    // Controls can be rebuilt while their hint is shown, so the owner is observed rather than held.
+    ::Rml::ObserverPtr<::Rml::Element> hintOwner;
     Platform::Timer hintDelay;
     bool keyboardHints = false, hintsDismissed = false;
     float hintWidth = 0;

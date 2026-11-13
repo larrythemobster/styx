@@ -387,7 +387,7 @@ body.custom-titlebar #settings-overlay
 	width: 44dp;
 	height: 24dp;
 	flex-shrink: 0;
-	background-color: #4e5058;
+	background-color: #80848e;
 	border-radius: 12dp;
 	position: relative;
 	cursor: pointer;
@@ -395,19 +395,37 @@ body.custom-titlebar #settings-overlay
 	tab-index: auto;
 }
 
-.settings-switch:hover, .settings-switch:focus
+.settings-switch:hover
 {
-	background-color: #6d6f78;
+	background-color: #949ba4;
 }
 
+/* On switches use the accent, as in Discord, so they follow the applied theme. */
 .settings-switch.checked
 {
-	background-color: #23a55a;
+	background-color: #5865f2;
 }
 
-.settings-switch.checked:hover, .settings-switch.checked:focus
+.settings-switch.checked:hover
 {
-	background-color: #2dc76d;
+	background-color: #4752c4;
+}
+
+/* Keyboard focus draws a ring; the thumb keeps its place inside it. */
+.settings-switch:focus
+{
+	border: 2dp #00a8fc;
+}
+
+.settings-switch:focus .settings-switch-thumb
+{
+	top: 1dp;
+	left: 1dp;
+}
+
+.settings-switch.checked:focus .settings-switch-thumb
+{
+	left: 21dp;
 }
 
 .settings-switch-thumb
@@ -716,12 +734,18 @@ select.settings-select selectbox option:hover
 	height: 38dp;
 	padding: 0 16dp;
 	border: 1dp #000000;
-	border-radius: 4dp;
+	border-radius: 8dp;
 	font-size: 14dp;
 	font-weight: 600;
 	cursor: pointer;
 	tab-index: auto;
 	box-sizing: border-box;
+}
+
+/* Keyboard focus is a blue ring in place of the black border. */
+.settings-btn:focus
+{
+	border-color: #00a8fc;
 }
 
 .settings-btn-label
@@ -752,13 +776,13 @@ select.settings-select selectbox option:hover
 
 .settings-btn-secondary
 {
-	background-color: #303035;
+	background-color: #111214;
 	color: #ffffff;
 }
 
 .settings-btn-secondary:hover, .settings-btn-secondary:focus
 {
-	background-color: #48484e;
+	background-color: #242428;
 }
 
 .settings-btn-danger
