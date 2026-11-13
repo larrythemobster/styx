@@ -387,9 +387,12 @@ void CallController::updateCallView()
             tileContent += std::format("<img class=\"call-video-frame\" src=\"frame:{0}\"/>", uid.toString());
             tileContent += std::format("<button class=\"call-stop-watch-btn\" data-action-stop-watch=\"{0}\">Stop watching</button>", uid.toString());
         } else {
-            tileContent += std::format("<div class=\"call-tile-avatar-center\"><img class=\"call-tile-avatar\" src=\"{0}\"/></div>", Rml::escape(avatarSrc));
-            if (isSelf && isSelfStreaming)
+            // Avatar and any caption stack in the middle of the tile; small strip tiles show only the avatar.
+            tileContent += std::format("<div class=\"call-tile-center\"><div class=\"call-tile-avatar-center\"><img class=\"call-tile-avatar\" src=\"{0}\"/></div>",
+                Rml::escape(avatarSrc));
+            if (isSelf && isSelfStreaming && !inStrip)
                 tileContent += "<div class=\"call-self-preview-text\">You are sharing your screen</div>";
+            tileContent += "</div>";
         }
 
         if (isStreaming) {
@@ -474,7 +477,8 @@ void CallController::updateCallView()
     const std::string muteIcon = selfMuted ? "icon:mic-off" : "icon:mic";
     const std::string deafBtnClass = selfDeafened ? "call-btn active" : "call-btn";
     const std::string deafIcon = selfDeafened ? "icon:headphone-off" : "icon:headphones";
-    const std::string shareBtnClass = isSelfStreaming ? "call-btn active" : "call-btn";
+    // Sharing is a state, not a warning: the button lights up rather than turning red like mute and disconnect.
+    const std::string shareBtnClass = isSelfStreaming ? "call-btn on" : "call-btn";
     const std::string fullscreenIcon = isFullscreen ? "icon:minimize" : "icon:maximize";
 
     std::string shareButton;

@@ -68,9 +68,11 @@ std::optional<Platform::Color> accentColor(uint32_t value)
 std::optional<Platform::Color> paletteColor(Platform::Color source, std::string_view property,
                                           std::string_view selector, std::optional<Platform::Color> buttonBackground)
 {
-    // Media overlays keep their dark palette independently of the application theme.
+    // Media overlays keep their dark palette independently of the application theme. Call tile name
+    // pills and the Stop watching button sit on top of video, so they count as overlays too.
     if (selector.find("viewer-") != selector.npos || selector.find("#image-viewer") != selector.npos
-        || selector.find(".call-video-frame") != selector.npos)
+        || selector.find(".call-video-frame") != selector.npos || selector.find(".call-tile-pill") != selector.npos
+        || selector.find(".call-tile-name") != selector.npos || selector.find(".call-stop-watch-btn") != selector.npos)
         return {};
     // Status dots and mention badges cut a ring out of the surface behind them.
     if (property.starts_with("border")

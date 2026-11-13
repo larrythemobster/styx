@@ -228,6 +228,13 @@ body.call-open #header { display: none; }
     border: 3dp #23a55a;
 }
 
+.call-tile-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
 .call-tile-avatar-center {
     display: flex;
     flex-direction: column;
@@ -336,14 +343,32 @@ body.call-open #header { display: none; }
     z-index: 5;
 }
 
+/* Strip tiles are 160x90: keep the badge and name small and in the corners, clear of the avatar. */
+.call-focus-strip .call-badge-live {
+    top: 6dp;
+    left: 6dp;
+    font-size: 10dp;
+    padding: 2dp 5dp;
+}
+
+.call-focus-strip .call-tile-pill {
+    bottom: 6dp;
+    left: 6dp;
+    min-height: 22dp;
+    padding: 0 6dp;
+}
+
+.call-focus-strip .call-tile-name {
+    font-size: 12dp;
+    max-width: 120dp;
+}
+
 .call-self-preview-text {
-    position: absolute;
-    color: #949ba4;
-    font-size: 13dp;
+    margin-top: 12dp;
+    color: #b5bac1;
+    font-size: 14dp;
     font-weight: 500;
-    bottom: 48dp;
     text-align: center;
-    z-index: 5;
 }
 
 .call-controls {
@@ -416,9 +441,24 @@ body.call-open #header { display: none; }
     background-color: #f23f43;
 }
 
+.call-btn.on {
+    background-color: #f2f3f5;
+}
+
+.call-btn.on img,
+.call-btn.on span {
+    image-color: #111214;
+    color: #111214;
+}
+
+.call-btn.on:hover {
+    background-color: #dbdee1;
+}
+
 .call-btn-disconnect {
     min-width: 108dp;
-    height: 60dp;
+    /* Same height as the mute/deafen/share group beside it (60dp buttons plus 6dp padding). */
+    height: 72dp;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -499,13 +539,14 @@ body.call-open #header { display: none; }
     top: 10dp;
     right: 10dp;
     z-index: 7;
-    min-height: 40dp;
-    background-color: #19191c;
-    color: #ffffff;
-    border-width: 0;
-    border-radius: 6dp;
+    min-height: 32dp;
+    background-color: #000000b3;
+    color: #f2f3f5;
+    border: 1dp #000000;
+    border-radius: 8dp;
     padding: 0 12dp;
-    font-size: 12dp;
+    font-size: 13dp;
+    font-weight: 600;
     cursor: pointer;
 }
 
