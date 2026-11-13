@@ -12,6 +12,8 @@ constexpr const char *APP_URI = "application://io.github.larrythemobster.styx.de
 
 } // namespace
 
+bool supported() { return true; }
+
 // KDE Plasma, Ubuntu's dock and Dash to Dock show this count on the launcher.
 void setCount(void *, int count)
 {

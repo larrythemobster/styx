@@ -14,6 +14,9 @@
 #include "Core/Session.hpp"
 #include "Core/SettingsKeys.hpp"
 #include "Core/Stream/StreamQuality.hpp"
+#ifdef STYX_HAVE_SCREENSHARE
+#include "Core/Stream/LoopbackCapture.hpp"
+#endif
 #include "Core/Theme/Fonts.hpp"
 #include "Core/Theme/Generator.hpp"
 #include "Core/Logging.hpp"
@@ -25,6 +28,7 @@
 #include "Discord/Entities.hpp"
 #include "Proto/PreloadedSettings.hpp"
 
+#include "Platform/Badge.hpp"
 #include "Platform/Notifications.hpp"
 #include "Platform/Desktop.hpp"
 #include <algorithm>
@@ -693,41 +697,41 @@ void SettingsController::onDeviceThemeChanged()
 void SettingsController::renderNotifications(std::string &rml)
 {
     using Core::Sounds::Sound;
-    auto renderSwitch = [&rml](const std::string &key, bool checked, const std::string &title, const std::string &desc) {
-        rml += std::string("<div class=\"settings-switch-row\">");
-        rml += std::string("<div class=\"settings-switch-text\">");
-        rml += formatRml("<div class=\"settings-switch-title\">%1</div>", title);
-        rml += formatRml("<div class=\"settings-switch-desc\">%1</div>", desc);
-        rml += std::string("</div>");
-        rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", checked ? std::string(" checked") : std::string(), key);
-        rml += std::string("</div>");
-    };
-    auto renderSoundSwitch = [&rml, &renderSwitch](Sound sound, const std::string &title, const std::string &desc) {
+#ifdef STYX_HAVE_MINIAUDIO
+    const bool soundsAvailable = true;
+#else
+    const bool soundsAvailable = false;
+#endif
+    const bool soundsOn = soundsAvailable && getBool(Keys::SoundsEnabled, Defaults::SoundsEnabled);
+    // Individual sounds keep their choice while sounds are off, but cannot be changed until they're back on.
+    auto renderSoundSwitch = [this, &rml, soundsOn](Sound sound, const std::string &title, const std::string &desc) {
         const std::string key(Core::Sounds::settingKey(sound));
         rml += "<div class=\"settings-sound-row\">";
-        renderSwitch(key, getBool(key, true), title, desc);
+        appendSwitch(rml, key, getBool(key, true), title, desc, !soundsOn);
 #ifdef STYX_HAVE_MINIAUDIO
         rml += formatRml("<button class=\"settings-btn settings-btn-secondary\" data-action=\"preview-sound\" "
             "data-sound=\"%1\" title=\"Preview %2 sound\"%3><span class=\"settings-btn-label\">Preview</span></button>",
-            static_cast<int>(sound), Rml::escape(title), getBool(Keys::SoundsEnabled, true) ? "" : " disabled=\"disabled\"");
+            static_cast<int>(sound), Rml::escape(title), soundsOn ? "" : " disabled=\"disabled\"");
 #endif
         rml += "</div>";
     };
 
-
     appendSubsectionHeading(rml, "overview");
     rml += std::string("<div class=\"settings-card\">");
-    renderSwitch(Keys::DesktopNotifications, getBool(Keys::DesktopNotifications, Defaults::DesktopNotifications),
+    appendSwitch(rml, Keys::DesktopNotifications, getBool(Keys::DesktopNotifications, Defaults::DesktopNotifications),
                  "Desktop notifications",
                  "Show a notification for new messages your server and channel settings allow, unless you're looking at that channel.");
     if (!Platform::Notifications::available())
         rml += std::string("<div class=\"settings-note\">This system isn't accepting notifications from Styx right now.</div>");
-    renderSwitch(Keys::FlashTaskbar, getBool(Keys::FlashTaskbar, Defaults::FlashTaskbar),
+    appendSwitch(rml, Keys::FlashTaskbar, getBool(Keys::FlashTaskbar, Defaults::FlashTaskbar),
                  "Flash the taskbar button",
                  "Flash Styx's taskbar button when a notification arrives and the window isn't focused.");
-    renderSwitch(Keys::TaskbarBadge, getBool(Keys::TaskbarBadge, Defaults::TaskbarBadge),
-                 "Show the notification dot on the taskbar",
-                 "Show a red-and-white dot on Styx's Windows icon while you have unread mentions.");
+    const bool badgeSupported = Platform::Badge::supported();
+    appendSwitch(rml, Keys::TaskbarBadge, badgeSupported && getBool(Keys::TaskbarBadge, Defaults::TaskbarBadge),
+                 "Show the unread mention marker",
+                 "Mark Styx's taskbar or dock icon while you have unread mentions.", !badgeSupported);
+    if (!badgeSupported)
+        rml += std::string("<div class=\"settings-note\">This system has no icon marker Styx can set.</div>");
     rml += std::string("<div class=\"settings-button-group\">");
     rml += std::string("<button class=\"settings-btn settings-btn-secondary\" data-action=\"test-notification\"><span class=\"settings-btn-label\">Send a test notification</span></button>");
     rml += std::string("</div>");
@@ -735,10 +739,11 @@ void SettingsController::renderNotifications(std::string &rml)
 
     appendSubsectionHeading(rml, "sounds");
     rml += std::string("<div class=\"settings-card\">");
-#ifdef STYX_HAVE_MINIAUDIO
-    appendSwitch(rml, Keys::SoundsEnabled, getBool(Keys::SoundsEnabled, true), "Enable notification sounds",
-        "Allow message, mention, incoming-call and voice join/leave sounds.");
-#endif
+    if (soundsAvailable)
+        appendSwitch(rml, Keys::SoundsEnabled, soundsOn, "Enable notification sounds",
+            "Allow message, mention, incoming-call and voice join/leave sounds.");
+    else
+        rml += std::string("<div class=\"settings-note\">This build of Styx can't play sounds.</div>");
     renderSoundSwitch(Sound::Message, "Message", "A new message that notifies.");
     renderSoundSwitch(Sound::Mention, "Mention", "A message that mentions you, your role or @everyone.");
     renderSoundSwitch(Sound::Ring, "Incoming call", "Rings while someone is calling you in a DM.");
@@ -969,8 +974,10 @@ void SettingsController::renderKeybindRow(std::string &rml, KeybindAction action
 
 void SettingsController::renderGoLive(std::string &rml)
 {
-
     rml += std::string("<div class=\"settings-card\">");
+#ifndef STYX_HAVE_SCREENSHARE
+    rml += std::string("<div class=\"settings-note\">Screen sharing isn't available in this build of Styx.</div>");
+#else
     rml += std::string("<div class=\"settings-label\">Screenshare Quality</div>");
     rml += std::string("<div class=\"settings-description\">Default resolution and frame rate when sharing a screen or application window.</div>");
 
@@ -984,15 +991,13 @@ void SettingsController::renderGoLive(std::string &rml)
     rml += std::string("</select>");
     rml += std::string("</div>");
 
-    const bool shareAudio = getBool(Keys::StreamAudio, Defaults::StreamAudio);
-    rml += std::string("<div class=\"settings-switch-row\">");
-    rml += std::string("<div class=\"settings-switch-text\">");
-    rml += std::string("<div class=\"settings-switch-title\">Share system audio</div>");
-    rml += std::string("<div class=\"settings-switch-desc\">Capture application sound when sharing a window, or system audio when sharing screen.</div>");
-    rml += std::string("</div>");
-    rml += formatRml("<div class=\"settings-switch%1\" data-setting=\"%2\" tabindex=\"0\"><div class=\"settings-switch-thumb\"></div></div>", shareAudio ? std::string(" checked") : std::string(), Keys::StreamAudio);
-    rml += std::string("</div>");
-
+    // The Go Live window reads the same preference and also refuses audio where loopback capture is missing.
+    const bool audioSupported = Core::Stream::LoopbackCapture::isSupported();
+    appendSwitch(rml, Keys::StreamAudio, audioSupported && getBool(Keys::StreamAudio, Defaults::StreamAudio), "Share system audio",
+        "Capture application sound when sharing a window, or system audio when sharing screen.", !audioSupported);
+    if (!audioSupported)
+        rml += std::string("<div class=\"settings-note\">This system can't capture audio for a stream.</div>");
+#endif
     rml += std::string("</div>"); // .settings-card
 }
 
@@ -1300,7 +1305,7 @@ void SettingsController::handleSwitchClick(::Rml::Element *switchEl)
     switchEl->SetClass("checked", nowChecked);
     if (key == "system/launch-at-login" || key == Keys::StartMinimized) {
         const bool enabled = key == "system/launch-at-login" ? nowChecked : Platform::Desktop::launchAtLoginEnabled();
-        const bool minimized = key == Keys::StartMinimized ? nowChecked : getBool(Keys::StartMinimized, false);
+        const bool minimized = key == Keys::StartMinimized ? nowChecked : getBool(Keys::StartMinimized, Defaults::StartMinimized);
         if (!Platform::Desktop::configureLaunchAtLogin(enabled, minimized))
             remoteSettingsError = "Could not update the Windows startup entry.";
         else {

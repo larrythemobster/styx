@@ -13,4 +13,7 @@ namespace Styx::Platform::Badge {
 // red-and-white dot and exposes the count to accessibility. window is an HWND.
 void setCount(void *window, int count);
 
+// Whether this platform can show the marker at all.
+[[nodiscard]] bool supported();
+
 } // namespace Styx::Platform::Badge

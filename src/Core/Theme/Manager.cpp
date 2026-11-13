@@ -1,4 +1,5 @@
 #include "Core/Theme/Manager.hpp"
+#include "Core/SettingsKeys.hpp"
 #include "Platform/Paths.hpp"
 #include "Platform/Settings.hpp"
 #include <cstdio>
@@ -12,7 +13,7 @@
 
 namespace Styx::Core::Theme {
 namespace {
-constexpr const char *UseSystemColorsKey = "appearance/use_system_colors";
+constexpr const char *UseSystemColorsKey = Settings::Keys::ThemeUseSystemColors;
 std::string hex(Platform::Color c) {
     char buf[10];
     if (c.a == 255) std::snprintf(buf, sizeof(buf), "#%02x%02x%02x", c.r, c.g, c.b);
@@ -95,7 +96,7 @@ void Manager::loadFromObject(const nlohmann::json &obj) {
     }
 }
 bool Manager::load() {
-    overrides.clear(); fontOverrides.clear(); systemColors = Platform::Settings::instance().getBool(UseSystemColorsKey);
+    overrides.clear(); fontOverrides.clear(); systemColors = Platform::Settings::instance().getBool(UseSystemColorsKey, Settings::Defaults::ThemeUseSystemColors);
     const auto path = defaultThemePath();
     if (!std::filesystem::exists(path)) return false;
     auto data = Platform::Resources::readFile(path);

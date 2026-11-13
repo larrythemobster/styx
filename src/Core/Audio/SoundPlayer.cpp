@@ -199,7 +199,7 @@ void SoundPlayer::mix(float *output, ma_uint32 frameCount)
 
 void play(Sound sound)
 {
-    if (!Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, true) ||
+    if (!Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, Core::Settings::Defaults::SoundsEnabled) ||
         !Platform::Settings::instance().getBool(settingKey(sound), true))
         return;
     SoundPlayer::instance().play(sound);
@@ -207,7 +207,7 @@ void play(Sound sound)
 
 void startLoop(Sound sound)
 {
-    if (!Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, true) ||
+    if (!Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, Core::Settings::Defaults::SoundsEnabled) ||
         !Platform::Settings::instance().getBool(settingKey(sound), true))
         return;
     SoundPlayer::instance().startLoop(sound);
@@ -220,7 +220,7 @@ void stopLoop(Sound sound)
 
 void preview(Sound sound)
 {
-    if (Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, true))
+    if (Platform::Settings::instance().getBool(Core::Settings::Keys::SoundsEnabled, Core::Settings::Defaults::SoundsEnabled))
         SoundPlayer::instance().play(sound);
 }
 

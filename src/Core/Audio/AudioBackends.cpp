@@ -2,6 +2,7 @@
 #include "Core/Audio/Miniaudio.hpp"
 #include "Core/Logging.hpp"
 
+#include "Core/SettingsKeys.hpp"
 #include "Platform/Settings.hpp"
 
 namespace Styx {
@@ -10,7 +11,7 @@ namespace Audio {
 
 namespace {
 
-constexpr auto BackendKey = "audio/backend";
+constexpr auto BackendKey = Settings::Keys::AudioBackend;
 
 std::vector<ma_backend> enabledBackends()
 {

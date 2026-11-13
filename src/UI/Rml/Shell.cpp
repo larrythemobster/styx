@@ -74,9 +74,12 @@
 #ifdef STYX_HAVE_SCREENSHARE
 #include "GoLiveController.hpp"
 #endif
+#include <RmlUi/Core/Context.h>
+#include <RmlUi/Core/Core.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/Input.h>
+#include <RmlUi/Core/Plugin.h>
 #include <algorithm>
 #include <format>
 #include <filesystem>
@@ -89,6 +92,18 @@ using Core::ClientInstance;
 namespace {
 Shell *primary = nullptr;
 std::string guildChannelKey(Snowflake account, Snowflake guild) { return account.toString() + ":" + guild.toString(); }
+
+bool reducedMotion()
+{
+    return Core::Settings::getBool(Core::Settings::Keys::ReducedMotion, Core::Settings::Defaults::ReducedMotion);
+}
+
+// Popovers and dialogs are separate documents; each needs the motion preference on its own body.
+struct MotionPreference final : ::Rml::Plugin
+{
+    int GetEventClasses() override { return EVT_DOCUMENT; }
+    void OnDocumentLoad(::Rml::ElementDocument *document) override { document->SetClass("reduced-motion", reducedMotion()); }
+} motionPreference;
 
 void showMessageNotification(Shell *shell, Core::ClientInstance *client, const Discord::Message &msg)
 {
@@ -174,6 +189,7 @@ Shell *Shell::primaryShell() { return primary; }
 Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
 {
     primary = this;
+    ::Rml::RegisterPlugin(&motionPreference);
     Rml::Runtime::instance().setImageManager(session->getImageManager());
     captchaResolver = std::make_unique<BrowserCaptchaResolver>(*this);
     session->setCaptchaResolver(captchaResolver.get());
@@ -256,6 +272,7 @@ Shell::Shell(Core::Session *session) : View("main"), coreSession(session)
 Shell::~Shell()
 {
     saveWindowState();
+    ::Rml::UnregisterPlugin(&motionPreference);
     activeConnections.clear();
     coreSession->setCaptchaResolver(nullptr);
     Rml::Runtime::instance().setImageManager(nullptr);
@@ -348,7 +365,11 @@ void Shell::applyBodyClasses()
         doc->SetClass("embeds-hidden", !Settings::getBool(Settings::Keys::ShowEmbeds, Settings::Defaults::ShowEmbeds));
         doc->SetClass("reactions-hidden", !Settings::getBool(Settings::Keys::ShowReactions, Settings::Defaults::ShowReactions));
         doc->SetClass("underline-links", Settings::getBool(Settings::Keys::UnderlineLinks, Settings::Defaults::UnderlineLinks));
-        doc->SetClass("reduced-motion", Settings::getBool(Settings::Keys::ReducedMotion, Settings::Defaults::ReducedMotion));
+    }
+    if (auto *ctx = context()) {
+        const bool reduced = reducedMotion();
+        for (int i = 0; i < ctx->GetNumDocuments(); ++i)
+            ctx->GetDocument(i)->SetClass("reduced-motion", reduced);
     }
     if (forumController && forumController->isOpen()) forumController->syncFolderState();
     requestRender(200);
@@ -359,7 +380,7 @@ void Shell::showFromTray() { if (!isMaximized()) showNormal(); else show(); rais
 void Shell::quitFromTray() { saveWindowState(); App::quit(); }
 void Shell::applyCloseToTray()
 {
-    bool wanted = Platform::Settings::instance().getBool("general/close_to_tray", false);
+    bool wanted = Core::Settings::getBool(Core::Settings::Keys::CloseToTray, Core::Settings::Defaults::CloseToTray);
     if (wanted == bool(trayIcon)) return;
     if (!wanted) { if (!isVisible()) showFromTray(); trayIcon.reset(); return; }
     trayIcon = std::make_unique<TrayIcon>();

@@ -1,5 +1,6 @@
 #include "DatabaseManager.hpp"
 
+#include "Core/SettingsKeys.hpp"
 #include "Platform/Settings.hpp"
 
 #include "Core/Logging.hpp"
@@ -75,7 +76,7 @@ std::string DatabaseManager::openCacheDatabase(Core::Snowflake accountId)
         return key;
 
     auto db = std::make_unique<Platform::Database>();
-    bool inMemory = Platform::Settings::instance().getBool("general/in_memory_cache", false);
+    bool inMemory = Platform::Settings::instance().getBool(Core::Settings::Keys::InMemoryCache, Core::Settings::Defaults::InMemoryCache);
 
     try {
         if (inMemory) {

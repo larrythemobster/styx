@@ -59,6 +59,7 @@ namespace Defaults {
 // General
 inline constexpr bool InMemoryCache = false;
 inline constexpr bool CloseToTray = false;
+inline constexpr bool StartMinimized = false;
 
 // Chat preferences apply to this device.
 inline constexpr bool CompactMessages = false;
@@ -72,6 +73,7 @@ inline constexpr bool ReducedMotion = false;
 inline constexpr bool DesktopNotifications = true;
 inline constexpr bool FlashTaskbar = true;
 inline constexpr bool TaskbarBadge = true;
+inline constexpr bool SoundsEnabled = true;
 
 // Theme
 inline constexpr bool ThemeUseSystemColors = false;

@@ -4,6 +4,7 @@
 #include "RmlRuntime.hpp"
 #include "RmlView.hpp"
 #include "Core/ClientInstance.hpp"
+#include "Core/SettingsKeys.hpp"
 #include "Core/Stream/LoopbackCapture.hpp"
 #include "Core/Stream/StreamManager.hpp"
 #include "Platform/Dispatcher.hpp"
@@ -241,7 +242,9 @@ void GoLiveController::populate()
     }
 
     auto &settings = Platform::Settings::instance();
-    selectedQualityId = Core::Stream::StreamQuality::byId(settings.getString("stream/quality", "720p30")).id;
+    namespace Keys = Core::Settings::Keys;
+    namespace Defaults = Core::Settings::Defaults;
+    selectedQualityId = Core::Stream::StreamQuality::byId(settings.getString(Keys::StreamQuality, Defaults::StreamQuality)).id;
     streamMode = settings.getString("stream/mode", "custom");
     if ((streamMode == "gaming" && selectedQualityId != "1440p60") ||
         (streamMode == "screenshare" && selectedQualityId != "source15") ||
@@ -249,7 +252,7 @@ void GoLiveController::populate()
         streamMode = "custom";
     captureCursor = settings.getBool("stream/capture_cursor", true);
     audioSupported = Core::Stream::LoopbackCapture::isSupported();
-    audioEnabled = audioSupported && settings.getBool("stream/audio", true);
+    audioEnabled = audioSupported && settings.getBool(Keys::StreamAudio, Defaults::StreamAudio);
 
     // Update Tab UI
     if (auto *appTab = modalDoc->GetElementById("tab-applications"))
@@ -396,9 +399,9 @@ void GoLiveController::updateSharingAvailability()
 void GoLiveController::savePreferences()
 {
     auto &settings = Platform::Settings::instance();
-    settings.setString("stream/quality", selectedQualityId);
+    settings.setString(Core::Settings::Keys::StreamQuality, selectedQualityId);
     settings.setString("stream/mode", streamMode);
-    settings.setBool("stream/audio", audioEnabled);
+    settings.setBool(Core::Settings::Keys::StreamAudio, audioEnabled);
     settings.setBool("stream/capture_cursor", captureCursor);
     settings.save();
 }

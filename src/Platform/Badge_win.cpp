@@ -141,6 +141,7 @@ struct IconCache {
 
 } // namespace
 
+bool supported() { return true; }
 
 void setCount(void *window, int count)
 {

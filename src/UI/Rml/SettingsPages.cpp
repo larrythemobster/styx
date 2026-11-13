@@ -423,7 +423,7 @@ void SettingsController::renderSystem(std::string &rml)
     if (Platform::Desktop::launchAtLoginSupported()) {
         const bool enabled = Platform::Desktop::launchAtLoginEnabled();
         appendSwitch(rml, "system/launch-at-login", enabled, "Open Styx when your computer starts", "Launch Styx when you sign into Windows.");
-        appendSwitch(rml, Keys::StartMinimized, getBool(Keys::StartMinimized, false), "Start Styx minimized", "Applies when Windows launches Styx at sign-in.", !enabled);
+        appendSwitch(rml, Keys::StartMinimized, getBool(Keys::StartMinimized, Defaults::StartMinimized), "Start Styx minimized", "Applies when Windows launches Styx at sign-in.", !enabled);
     }
     appendSwitch(rml, Keys::CloseToTray, getBool(Keys::CloseToTray, Defaults::CloseToTray), "Minimize to system tray", "Closing the window keeps Styx running in the notification tray.");
     if (!remoteSettingsError.empty()) renderRemoteStatus(rml);
