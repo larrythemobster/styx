@@ -683,7 +683,8 @@ TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][the
         "<button id=\"sample\" class=\"settings-btn settings-btn-primary\"><span class=\"settings-btn-label\">Theme text</span></button>"
         "<div id=\"message\" class=\"message-body\">A message that wraps when its font changes</div>"
         "<pre id=\"code\" class=\"code-block\">const int value = 42;</pre>"
-        "<input id=\"draft\" type=\"text\" value=\"Unsent draft\"/>");
+        "<input id=\"draft\" type=\"text\" value=\"Unsent draft\"/>"
+        "<button id=\"add-friend\" class=\"friends-tab-add\">Add Friend</button>");
     view.context()->ProcessMouseMove(630, 470, 0);
     view.renderNow();
     auto *sample = document->GetElementById("sample");
@@ -709,6 +710,7 @@ TEST_CASE("Theme changes repaint open documents and preserve drafts", "[rml][the
         const auto expected = theme.color(Theme::Token::Highlight);
         const auto actual = sample->GetProperty<::Rml::Colourb>("background-color");
         REQUIRE(actual == ::Rml::Colourb(expected.r, expected.g, expected.b, expected.a));
+        REQUIRE(document->GetElementById("add-friend")->GetProperty<::Rml::Colourb>("background-color") == actual);
         const auto background = document->GetProperty<::Rml::Colourb>("background-color");
         REQUIRE(background.red > 220);
         REQUIRE(background.green > 220);

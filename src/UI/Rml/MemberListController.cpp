@@ -293,17 +293,18 @@ void MemberListController::renderSingleDmProfile(Snowflake targetUserId)
     auto *users = currentInstance->users();
     auto user = users ? users->getUser(targetUserId) : std::nullopt;
     std::string displayName = targetUserId.toString(), username = displayName;
-    std::string url, bannerColor = "#19191c";
+    std::string url, bannerStyle;
     if (user) {
         displayName = user->getDisplayName();
         username = user->tag();
         if (user->avatar.hasValue() && !user->avatar->empty()) url = Discord::Cdn::userAvatar(targetUserId, user->avatar.get(), 128);
-        if (user->accentColor.hasValue() && user->accentColor.get() != 0) bannerColor = Platform::Color::rgb(user->accentColor.get()).css();
+        if (user->accentColor.hasValue() && user->accentColor.get() != 0)
+            bannerStyle = " style=\"background-color: " + Platform::Color::rgb(user->accentColor.get()).css() + ";\"";
     }
     if (url.empty()) url = Discord::Cdn::defaultUserAvatar(targetUserId, 128);
     const auto badge = currentPresenceManager ? currentPresenceManager->badge(targetUserId) : Core::PresenceBadge{};
     const auto activity = activityText(currentPresenceManager.get(), targetUserId);
-    std::string rml = "<div class=\"dm-profile-panel\" data-user-id=\"" + targetUserId.toString() + "\"><div class=\"dm-profile-banner\" style=\"background-color: " + bannerColor + ";\"></div><div class=\"dm-profile-body\"><div class=\"dm-profile-avatar-wrap\"><div class=\"dm-profile-avatar-clip\"><img class=\"dm-profile-avatar\" src=\"" + escape(shell.imageSource(url, {80, 80})) + "\"/></div><div class=\"dm-profile-status-dot " + statusClass(badge) + "\"></div></div><div class=\"dm-profile-display-name\">" + escape(displayName) + "</div><div class=\"dm-profile-username\">" + escape(username) + "</div>";
+    std::string rml = "<div class=\"dm-profile-panel\" data-user-id=\"" + targetUserId.toString() + "\"><div class=\"dm-profile-banner\"" + bannerStyle + "></div><div class=\"dm-profile-body\"><div class=\"dm-profile-avatar-wrap\"><div class=\"dm-profile-avatar-clip\"><img class=\"dm-profile-avatar\" src=\"" + escape(shell.imageSource(url, {80, 80})) + "\"/></div><div class=\"dm-profile-status-dot " + statusClass(badge) + "\"></div></div><div class=\"dm-profile-display-name\">" + escape(displayName) + "</div><div class=\"dm-profile-username\">" + escape(username) + "</div>";
     if (!activity.empty()) rml += "<div class=\"dm-profile-divider\"></div><div class=\"dm-profile-section-title\">Activity</div><div class=\"dm-profile-activity\">" + richText(activity) + "</div>";
     rml += "<button class=\"dm-profile-view\" data-profile-view=\"true\">View Profile</button></div></div>";
     regionRoot->SetInnerRML(rml);

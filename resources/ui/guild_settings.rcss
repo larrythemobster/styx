@@ -291,6 +291,17 @@ textarea.settings-textarea
 .col-channel { flex: 2; min-width: 0; color: #949ba4; font-size: 13dp; }
 .col-uses { width: 90dp; flex-shrink: 0; color: #949ba4; font-size: 13dp; }
 .col-expires { width: 120dp; flex-shrink: 0; color: #949ba4; font-size: 13dp; }
+.guild-text-strong { font-weight: 600; color: #f2f3f5; }
+.guild-text-muted { color: #949ba4; }
+.guild-invite-code { color: #00a8fc; }
+.guild-danger-text { color: #f23f43; }
+.guild-sidebar-title { color: #f2f3f5; font-size: 14dp; margin-bottom: 12dp; }
+.guild-image-hint { color: #949ba4; font-style: normal; }
+.guild-boost-count { font-size: 16dp; font-weight: bold; color: #f2f3f5; }
+.guild-boost-description { font-size: 13dp; color: #949ba4; }
+.guild-delete-question { font-size: 15dp; font-weight: bold; color: #f23f43; margin-bottom: 8dp; }
+.guild-delete-description { color: #dbdee1; }
+.guild-role-delete { margin-top: 24dp; border-top: 1dp #202024; padding-top: 16dp; }
 
 /* --- Members List --- */
 

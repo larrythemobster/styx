@@ -45,6 +45,7 @@
 .menu-item.disabled { color: #949ba4; background-color: transparent; cursor: default; }
 .menu-label { cursor: default; }
 .menu-text { flex: 1; min-width: 0; word-break: break-all; }
+.menu-text.accent { color: #00a8fc; }
 .menu-subtitle { color: #b5bac1; font-size: 12dp; margin-top: 3dp; }
 .menu-avatar { width: 48dp; height: 48dp; border-radius: 24dp; margin-right: 10dp; flex-shrink: 0; }
 .menu-arrow { margin-left: 10dp; }

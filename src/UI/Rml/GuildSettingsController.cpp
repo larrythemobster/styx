@@ -322,7 +322,7 @@ void GuildSettingsController::renderSidebar()
     auto g = guild();
     std::string guildName = g ? g->name.valueOr("Server") : "Server";
 
-    rml += "<div class=\"settings-group-header\" style=\"color:#ffffff; font-size:14dp; margin-bottom:12dp;\">" +
+    rml += "<div class=\"settings-group-header guild-sidebar-title\">" +
            escape(guildName) + "</div>";
 
     auto sections = GuildSettingsAccess::visibleSections(instance(), currentGuildId);
@@ -426,7 +426,7 @@ void GuildSettingsController::renderProfile(std::string &rml)
     rml += "<div class=\"settings-btn settings-btn-primary\" data-action=\"choose-icon\">Change Icon</div>";
     if (!iconSrc.empty())
         rml += "<div class=\"settings-btn settings-btn-danger\" data-action=\"remove-icon\">Remove Icon</div>";
-    rml += "<div class=\"settings-note\" style=\"color:#949ba4; font-style:normal;\">Minimum Size: 128x128</div>";
+    rml += "<div class=\"settings-note guild-image-hint\">Minimum Size: 128x128</div>";
     rml += "</div>";
     rml += "</div>";
 
@@ -591,8 +591,8 @@ void GuildSettingsController::renderBoostPerks(std::string &rml)
     rml += "<div class=\"settings-card\" style=\"display:flex; flex-direction:row; align-items:center; justify-content:space-between;\">";
     rml += "<div>";
     rml += "<div class=\"boost-badge\">LEVEL " + std::to_string(tier) + "</div>";
-    rml += "<div style=\"font-size:16dp; font-weight:bold; color:#ffffff;\">" + std::to_string(boostCount) + " Server Boosts</div>";
-    rml += "<div style=\"font-size:13dp; color:#949ba4;\">Unlock custom banners, vanity URLs, and extra emoji slots.</div>";
+    rml += "<div class=\"guild-boost-count\">" + std::to_string(boostCount) + " Server Boosts</div>";
+    rml += "<div class=\"guild-boost-description\">Unlock custom banners, vanity URLs, and extra emoji slots.</div>";
     rml += "</div>";
     rml += "</div>";
 
@@ -667,7 +667,7 @@ void GuildSettingsController::renderEmoji(std::string &rml)
         rml += "<div class=\"guild-table-row\">";
         const std::string emSrc = shell.imageSource(Discord::Cdn::emoji(em.id.get(), 32, em.animated.valueOr(false)), {32, 32});
         rml += "<div class=\"col-image\"><img class=\"emoji-preview-img\" src=\"" + escape(emSrc) + "\"/></div>";
-        rml += "<div class=\"col-name\" style=\"font-weight:600; color:#f2f3f5;\">:" + escape(em.name.valueOr("emoji")) + ":</div>";
+        rml += "<div class=\"col-name guild-text-strong\">:" + escape(em.name.valueOr("emoji")) + ":</div>";
         const std::string uploaderName = em.user.hasValue() ? em.user->username.valueOr("Unknown") : "Server";
         rml += "<div class=\"col-uploader\">" + escape(uploaderName) + "</div>";
         rml += "<div class=\"col-actions\"><div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"delete-emoji\" data-id=\"" +
@@ -700,7 +700,7 @@ void GuildSettingsController::renderStickers(std::string &rml)
         std::string stUrl = Discord::Cdn::stickerStill(st.id.get(), st.formatType.valueOr(Discord::StickerFormatType::PNG), 64);
         std::string stSrc = shell.imageSource(stUrl, Platform::Size(48, 48));
         rml += std::format("<div class=\"col-image\"><img class=\"sticker-preview-img\" src=\"{0}\"/></div>", escape(stSrc));
-        rml += std::format("<div class=\"col-name\"><span style=\"font-weight:600; color:#f2f3f5;\">{0}</span> <span style=\"color:#949ba4;\">(:{1}:)</span></div>", escape(st.name.valueOr("sticker")), escape(st.tags.valueOr("")));
+        rml += std::format("<div class=\"col-name\"><span class=\"guild-text-strong\">{0}</span> <span class=\"guild-text-muted\">(:{1}:)</span></div>", escape(st.name.valueOr("sticker")), escape(st.tags.valueOr("")));
         rml += std::format("<div class=\"col-uploader\">{0}</div>", escape(st.description.valueOr("")));
         rml += std::format("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-danger\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"delete-sticker\" data-id=\"{0}\">Delete</div></div>", std::to_string(uint64_t(st.id.get())));
         rml += std::string("</div>");
@@ -889,7 +889,7 @@ void GuildSettingsController::renderRoles(std::string &rml)
 
         // Delete Role
         if (selectedRoleId != currentGuildId) {
-            rml += std::string("<div style=\"margin-top:24dp; border-top:1dp #202024; padding-top:16dp;\">");
+            rml += std::string("<div class=\"guild-role-delete\">");
             rml += std::format("<div class=\"settings-btn settings-btn-danger\" data-action=\"delete-role\" data-id=\"{0}\">Delete Role</div>", std::to_string(uint64_t(selectedRoleId)));
             rml += std::string("</div>");
         }
@@ -946,8 +946,8 @@ void GuildSettingsController::renderInvites(std::string &rml)
         rml += std::string("<div class=\"guild-table-row\">");
 
         std::string inviterName = inv.inviter.hasValue() ? inv.inviter->username.valueOr("Unknown") : "System";
-        rml += std::format("<div class=\"col-name\" style=\"font-weight:600; color:#f2f3f5;\">{0}</div>", escape(inviterName));
-        rml += std::format("<div class=\"col-name\" style=\"color:#00a8fc;\">{0}</div>", escape(inv.code.valueOr("")));
+        rml += std::format("<div class=\"col-name guild-text-strong\">{0}</div>", escape(inviterName));
+        rml += std::format("<div class=\"col-name guild-invite-code\">{0}</div>", escape(inv.code.valueOr("")));
         std::string chName = inv.channel.hasValue() ? inv.channel->name.valueOr("channel") : "—";
         rml += std::format("<div class=\"col-channel\"># {0}</div>", escape(chName));
         rml += std::format("<div class=\"col-uses\">{0}</div>", std::to_string(inv.uses.valueOr(0)));
@@ -1046,7 +1046,7 @@ void GuildSettingsController::renderBans(std::string &rml)
             continue;
 
         rml += std::string("<div class=\"guild-table-row\">");
-        rml += std::format("<div class=\"col-name\"><span style=\"font-weight:600; color:#f2f3f5;\">{0}</span> <span style=\"color:#949ba4;\">(ID: {1})</span></div>", escape(userTag), std::to_string(uint64_t(b.user->id.get())));
+        rml += std::format("<div class=\"col-name\"><span class=\"guild-text-strong\">{0}</span> <span class=\"guild-text-muted\">(ID: {1})</span></div>", escape(userTag), std::to_string(uint64_t(b.user->id.get())));
         rml += std::format("<div class=\"col-uploader\">{0}</div>", escape(reason));
         rml += std::format("<div class=\"col-actions\"><div class=\"settings-btn settings-btn-secondary\" style=\"padding:4dp 8dp; font-size:12dp;\" data-action=\"revoke-ban\" data-id=\"{0}\" data-name=\"{1}\">Revoke Ban</div></div>", std::to_string(uint64_t(b.user->id.get())), escape(userTag));
         rml += std::string("</div>");
@@ -1057,10 +1057,10 @@ void GuildSettingsController::renderBans(std::string &rml)
 // 11. Delete Server
 void GuildSettingsController::renderDeleteServer(std::string &rml)
 {
-    rml += std::string("<div class=\"settings-section-title\" style=\"color:#f23f43;\">Delete Server</div>");
+    rml += std::string("<div class=\"settings-section-title guild-danger-text\">Delete Server</div>");
     rml += std::string("<div class=\"settings-card danger-card\">");
-    rml += std::string("<div style=\"font-size:15dp; font-weight:bold; color:#f23f43; margin-bottom:8dp;\">Are you sure you want to delete this server?</div>");
-    rml += std::string("<div class=\"settings-description\" style=\"color:#dbdee1;\">Deleting this server is permanent and cannot be undone. All channels, messages, roles, and members will be immediately removed.</div>");
+    rml += std::string("<div class=\"guild-delete-question\">Are you sure you want to delete this server?</div>");
+    rml += std::string("<div class=\"settings-description guild-delete-description\">Deleting this server is permanent and cannot be undone. All channels, messages, roles, and members will be immediately removed.</div>");
     rml += std::string("<div class=\"settings-btn settings-btn-danger\" style=\"margin-top:12dp;\" data-action=\"delete-server\">Delete Server</div>");
     rml += std::string("</div>");
 }

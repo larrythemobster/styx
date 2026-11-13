@@ -32,6 +32,7 @@ struct MenuItem
     std::string subtitle;
     std::string imageSource;
     std::string color;
+    bool accent = false;
     std::optional<bool> checked;
     bool radio = false;
     std::string iconText;

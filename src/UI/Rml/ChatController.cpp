@@ -1829,8 +1829,9 @@ std::string ChatController::buildMessageHtml(int row)
 
     // Embeds
     for (const auto &embed : embeds) {
-        std::string borderStyle = std::format("border-left: 4dp {0};", embed.color.valid ? embed.color.css() : std::string("#202225"));
-        out += std::format("<div class=\"embed-card\" style=\"{0}\">", borderStyle);
+        // Embeds without their own color keep the themed stylesheet border.
+        out += embed.color.valid ? std::format("<div class=\"embed-card\" style=\"border-left: 4dp {0};\">", embed.color.css())
+                                 : std::string("<div class=\"embed-card\">");
 
         if (!embed.authorName.empty()) {
             out += std::string("<div class=\"embed-author\">");

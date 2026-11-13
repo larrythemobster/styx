@@ -132,7 +132,7 @@ void ContextMenu::renderPanel(std::size_t depth)
             markup += "<span class='menu-icon-text'><span>" + Platform::htmlEscape(item.iconText) + "</span></span>";
         if (!item.imageSource.empty())
             markup += "<img class='menu-avatar' src='" + Platform::htmlEscape(item.imageSource) + "'/>";
-        markup += "<div class='menu-text'";
+        markup += item.enabled && item.accent ? "<div class='menu-text accent'" : "<div class='menu-text'";
         if (item.enabled && !item.color.empty()) markup += " style='color:" + Platform::htmlEscape(item.color) + ";'";
         markup += ">" + Platform::htmlEscape(item.label);
         if (!item.subtitle.empty())

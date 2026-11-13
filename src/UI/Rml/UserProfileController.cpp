@@ -218,8 +218,11 @@ void UserProfileController::updateProfileData()
         el->SetClass("visible", !banner.empty());
     }
     if (auto *el = profileDocument->GetElementById("profile-banner")) {
-        auto color = resolvedAccentColor();
-        el->SetProperty("background-color", color ? Platform::Color::rgb(color).css() : "#303136");
+        // Without an accent color the themed stylesheet supplies the banner.
+        if (auto color = resolvedAccentColor())
+            el->SetProperty("background-color", Platform::Color::rgb(color).css());
+        else
+            el->RemoveProperty("background-color");
     }
     std::string bio;
     if (hasProfile && profile.guildMemberProfile.hasValue()) bio = profile.guildMemberProfile.get().bio.valueOr();

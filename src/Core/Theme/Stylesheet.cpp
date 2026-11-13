@@ -32,6 +32,38 @@ Platform::Color contrastText(Platform::Color background)
     return Platform::Color::rgb(luminance > .179 ? 0x000000 : 0xffffff);
 }
 
+Platform::Color blend(Platform::Color over, Platform::Color under, double amount)
+{
+    auto channel = [amount](uint8_t a, uint8_t b) { return uint8_t(std::lround(a * amount + b * (1 - amount))); };
+    return Platform::Color{channel(over.r, under.r), channel(over.g, under.g), channel(over.b, under.b), 255, true};
+}
+
+// Stylesheets are written against Discord's default accents; these values follow the applied highlight.
+std::optional<Platform::Color> accentColor(uint32_t value)
+{
+    const auto &manager = Manager::instance();
+    auto highlight = manager.color(Token::Highlight);
+    switch (value) {
+    case 0x5865f2: case 0x007aa7:
+        return highlight;
+    case 0x4752c4: case 0x00658a: {
+        const bool darkText = contrastText(highlight).r == 0;
+        auto shade = [darkText](uint8_t channel) {
+            return uint8_t(darkText ? channel + (255 - channel) * .12 : channel * .85);
+        };
+        highlight.r = shade(highlight.r);
+        highlight.g = shade(highlight.g);
+        highlight.b = shade(highlight.b);
+        return highlight;
+    }
+    case 0x3c4270: case 0x0b1f29:
+        return blend(highlight, manager.color(Token::AlternateBaseBg), .3);
+    case 0x29b6f6: case 0x8fa5ff:
+        return manager.color(Token::BrightText);
+    }
+    return {};
+}
+
 std::optional<Platform::Color> paletteColor(Platform::Color source, std::string_view property,
                                           std::string_view selector, std::optional<Platform::Color> buttonBackground)
 {
@@ -39,6 +71,10 @@ std::optional<Platform::Color> paletteColor(Platform::Color source, std::string_
     if (selector.find("viewer-") != selector.npos || selector.find("#image-viewer") != selector.npos
         || selector.find(".call-video-frame") != selector.npos)
         return {};
+    // Status dots and mention badges cut a ring out of the surface behind them.
+    if (property.starts_with("border")
+        && (selector.find("status-dot") != selector.npos || selector.find("mention-badge") != selector.npos))
+        property = "background-color";
     auto &manager = Manager::instance();
     const auto value = rgb(source);
     std::optional<Platform::Color> result;
@@ -67,25 +103,14 @@ std::optional<Platform::Color> paletteColor(Platform::Color source, std::string_
     case 0xdbdee1:
         result = manager.color(Token::PrimaryText);
         break;
-    case 0x5865f2:
-        result = manager.color(Token::Highlight);
-        break;
-    case 0x4752c4: {
-        result = manager.color(Token::Highlight);
-        const bool darkText = contrastText(*result).r == 0;
-        auto shade = [darkText](uint8_t channel) {
-            return uint8_t(darkText ? channel + (255 - channel) * .12 : channel * .85);
-        };
-        result->r = shade(result->r);
-        result->g = shade(result->g);
-        result->b = shade(result->b);
-        break;
-    }
     case 0x00a8fc:
         result = manager.color(Token::LinkText);
         break;
     case 0xc9cdfb:
         result = manager.color(Token::MentionText);
+        break;
+    case 0xff7378: case 0xf28b82:
+        result = manager.color(Token::ChatError);
         break;
     case 0xffffff:
         if (property == "image-color" && selector.find("icon") == selector.npos && selector.find("btn") == selector.npos)
@@ -102,6 +127,9 @@ std::optional<Platform::Color> paletteColor(Platform::Color source, std::string_
             result = manager.color(Token::WindowText);
         break;
     default:
+        result = accentColor(value);
+        if (result)
+            break;
         if (std::max({source.r, source.g, source.b}) - std::min({source.r, source.g, source.b}) > 16)
             return {};
         if (property.starts_with("border"))
@@ -135,8 +163,8 @@ std::optional<Platform::Color> coloredBackground(std::string_view block)
     auto color = Platform::Color::parse(trim(block.substr(hash, end - hash)));
     if (!color.valid || std::max({color.r, color.g, color.b}) - std::min({color.r, color.g, color.b}) < 32)
         return {};
-    if (rgb(color) == 0x5865f2 || rgb(color) == 0x4752c4)
-        return Manager::instance().color(Token::Highlight);
+    if (auto accent = accentColor(rgb(color)))
+        return accent;
     return color;
 }
 }

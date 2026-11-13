@@ -112,7 +112,7 @@ void ServerMenuController::show(Snowflake account, Snowflake guild, bool develop
     bool canInvite = false;
     visitChannels(node, [&](const auto *channel) { if (invitable(instance, channel)) canInvite = true; });
     MenuItem invite{"Invite to Server", [self, account, guild] { if (self) self->openPage(account, guild, Page::Invite); }, canInvite};
-    invite.color = "#00a8fc";
+    invite.accent = true;
     menu.push_back(std::move(invite));
     menu.push_back(separator());
     auto *readState = instance->readState();
