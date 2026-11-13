@@ -198,6 +198,7 @@ void SettingsController::setSection(Section section)
     colorDragging = false;
     colorPickerOpen = false;
     currentSection = section;
+    currentSubsection.clear();
     render();
     requestRender(100);
 }
@@ -268,10 +269,10 @@ void SettingsController::renderSidebar(std::string &rml)
         const auto avatar = me.avatar.hasValue() && !me.avatar->empty()
             ? Discord::Cdn::userAvatar(instance->accountId(), me.avatar.get(), 80)
             : Discord::Cdn::defaultUserAvatar(instance->accountId());
-        rml += formatRml("<button class=\"settings-btn settings-account\" data-section=\"profiles\" aria-label=\"Edit profile\">"
+        rml += formatRml("<button class=\"settings-btn settings-account\" data-section=\"profiles\" aria-label=\"Edit profiles\">"
             "<span class=\"settings-account-avatar\"><img src=\"%1\"/></span><span class=\"settings-account-text\">"
-            "<span class=\"settings-account-name\">%2</span><span class=\"settings-account-edit\">Edit profile</span></span>"
-            "<img class=\"settings-account-pencil\" src=\"icon:pencil\"/></button>",
+            "<span class=\"settings-account-name\">%2</span><span class=\"settings-account-edit\"><span>Edit Profiles</span>"
+            "<img class=\"settings-account-pencil\" src=\"icon:pencil\"/></span></span></button>",
             Rml::escape(shell.imageSource(avatar, {40, 40})), Rml::escape(name));
     }
 
@@ -301,37 +302,37 @@ void SettingsController::renderContent(std::string &rml)
         currentSection == Section::Profiles ? " settings-profiles-page" : "");
 
     switch (currentSection) {
-    case Section::MyAccount:
-        renderMyAccount(rml);
+    case Section::MyAccount: renderMyAccount(rml); break;
+    case Section::Profiles: renderProfiles(rml); break;
+    case Section::MessagingPermissions:
+        appendSubsectionHeading(rml, "direct-messages");
+        renderPrivacy(rml);
+        appendSubsectionHeading(rml, "friend-requests");
+        renderFriendRequests(rml);
+        break;
+    case Section::Notifications: renderNotifications(rml); break;
+    case Section::VoiceVideo:
+        appendSubsectionHeading(rml, "voice");
+        renderVoiceVideo(rml);
+        appendSubsectionHeading(rml, "streaming");
+        renderGoLive(rml);
         break;
     case Section::Appearance:
         renderAppearance(rml);
-        break;
-    case Section::Chat:
+        appendSubsectionHeading(rml, "messages");
         renderChat(rml);
         break;
-    case Section::Notifications:
-        renderNotifications(rml);
-        break;
-    case Section::VoiceVideo:
-        renderVoiceVideo(rml);
-        break;
-    case Section::Keybinds:
+    case Section::Accessibility: renderAccessibility(rml); break;
+    case Section::System:
+        appendSubsectionHeading(rml, "general");
+        renderSystem(rml);
+        appendSubsectionHeading(rml, "custom-keybinds");
         renderKeybinds(rml);
-        break;
-    case Section::GoLive:
-        renderGoLive(rml);
-        break;
-    case Section::Advanced:
+        appendSubsectionHeading(rml, "advanced");
         renderAdvanced(rml);
         break;
-    case Section::Profiles: renderProfiles(rml); break;
-    case Section::Privacy: renderPrivacy(rml); break;
-    case Section::FriendRequests: renderFriendRequests(rml); break;
-    case Section::Accessibility: renderAccessibility(rml); break;
-    case Section::ActivityPrivacy: renderActivityPrivacy(rml); break;
-    case Section::System: renderSystem(rml); break;
     case Section::Language: renderLanguage(rml); break;
+    case Section::ActivityPrivacy: renderActivityPrivacy(rml); break;
     }
 
     rml += std::string("</div>"); // .settings-content-wrapper
@@ -429,8 +430,8 @@ void SettingsController::renderAppearance(std::string &rml)
     const auto shown = Core::Theme::effectiveChoice(appearance, device);
 
     // Discord's Theme section: device following, default themes and account sync.
+    appendSubsectionHeading(rml, "theme");
     rml += std::string("<div class=\"settings-card\">");
-    rml += std::string("<div class=\"settings-section-heading\">Theme</div>");
     if (!appearanceSaveError.empty())
         rml += "<div class=\"settings-keybind-error\" role=\"alert\">" + Rml::escape(appearanceSaveError) + "</div>";
     appendSwitch(rml, Keys::ThemeFollowDevice, appearance.followDevice && device != Core::Theme::DeviceTheme::Unknown,
@@ -462,8 +463,8 @@ void SettingsController::renderAppearance(std::string &rml)
     rml += std::string("</div>"); // .settings-card
 
     // Styx custom theme, generated locally and never synced
+    appendSubsectionHeading(rml, "custom-theme");
     rml += std::string("<div class=\"settings-card\">");
-    rml += std::string("<div class=\"settings-label\">Styx Custom Theme</div>");
     rml += formatRml("<div class=\"settings-description\">%1</div>", appearance.choice == ThemeChoice::Custom
         ? std::string("Your custom theme is active on this device.")
         : std::string("Build a theme for this device from an accent color. Applying it replaces the default theme."));
@@ -714,6 +715,7 @@ void SettingsController::renderNotifications(std::string &rml)
     };
 
 
+    appendSubsectionHeading(rml, "overview");
     rml += std::string("<div class=\"settings-card\">");
     renderSwitch(Keys::DesktopNotifications, getBool(Keys::DesktopNotifications, Defaults::DesktopNotifications),
                  "Desktop notifications",
@@ -731,8 +733,8 @@ void SettingsController::renderNotifications(std::string &rml)
     rml += std::string("</div>");
     rml += std::string("</div>"); // .settings-card
 
+    appendSubsectionHeading(rml, "sounds");
     rml += std::string("<div class=\"settings-card\">");
-    rml += std::string("<div class=\"settings-label\">Sounds</div>");
 #ifdef STYX_HAVE_MINIAUDIO
     appendSwitch(rml, Keys::SoundsEnabled, getBool(Keys::SoundsEnabled, true), "Enable notification sounds",
         "Allow message, mention, incoming-call and voice join/leave sounds.");
@@ -1065,6 +1067,11 @@ void SettingsController::setupEventListeners()
             return;
         }
 
+        // Subsection links open their page at the heading
+        if (auto *link = closest(target, "data-subsection")) {
+            openSubsection(attribute(link, "data-section"), attribute(link, "data-subsection"));
+            return;
+        }
         // Section tab item
         if (auto *item = closest(target, "data-section")) {
             selectSection(attribute(item, "data-section"));
@@ -1158,6 +1165,11 @@ void SettingsController::setupEventListeners()
     listen("blur", [this](::Rml::Event &event) {
         if (!sliderDragging && event.GetTargetElement() == hintSlider)
             clearSliderHint();
+    }, regionRoot, true);
+    // The highlighted subsection link follows the page while it scrolls.
+    listen("scroll", [this](::Rml::Event &event) {
+        if (event.GetTargetElement() && event.GetTargetElement()->IsClassSet("settings-content-scroll"))
+            trackVisibleSubsection();
     }, regionRoot, true);
     listen("dragstart", [this, sliderTarget](::Rml::Event &event) {
         if (auto *slider = sliderTarget(event.GetTargetElement())) {
@@ -1266,7 +1278,7 @@ void SettingsController::setupEventListeners()
                 return;
             if (target->HasAttribute("disabled")) return;
             if (target->IsClassSet("settings-switch") || target->IsClassSet("settings-radio-card") ||
-                target->IsClassSet("settings-nav-item") || target->IsClassSet("settings-close-btn") ||
+                target->IsClassSet("settings-nav-item") || target->IsClassSet("settings-nav-subitem") || target->IsClassSet("settings-close-btn") ||
                 target->IsClassSet("settings-btn")) {
                 event.StopPropagation();
                 target->Click();

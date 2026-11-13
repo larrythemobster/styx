@@ -14,6 +14,7 @@
 
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/Elements/ElementFormControlInput.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -30,23 +31,49 @@ struct SectionInfo {
     const char *group;
     const char *keywords;
     const char *icon;
+    // Profiles opens from the account summary, as in Discord, and is listed only in search results.
+    bool listed = true;
 };
+// Discord's sidebar order. Billing, Data & Privacy, Registered Games, Game Overlay, Connected Apps and
+// Developer have no Styx page yet, so they are not listed.
 constexpr SectionInfo sections[] = {
-    {SettingsController::Section::MyAccount, "my-account", "My Account", "User Settings", "account username email security authentication", "id-card"},
-    {SettingsController::Section::Profiles, "profiles", "Profiles", "User Settings", "profile avatar banner display name pronouns about me bio", "image"},
-    {SettingsController::Section::Privacy, "privacy", "Privacy & Safety", "User Settings", "privacy direct messages dms server members screen reader detection", "shield-alert"},
-    {SettingsController::Section::FriendRequests, "friend-requests", "Friend Requests", "User Settings", "friends requests everyone mutual server members", "user-plus"},
-    {SettingsController::Section::VoiceVideo, "voice-video", "Voice & Video", "Experience", "voice audio microphone speakers input output volume push to talk devices", "volume-2"},
-    {SettingsController::Section::Appearance, "appearance", "Appearance", "Experience", "theme default light ash dark onyx device sync accent color colour picker palette custom", "palette"},
-    {SettingsController::Section::Chat, "chat", "Text & Images", "Experience", "chat messages embeds links reactions media", "messages-square"},
-    {SettingsController::Section::Accessibility, "accessibility", "Accessibility", "Experience", "font text size chat zoom scale compact avatars underlines readability reduced motion", "accessibility"},
-    {SettingsController::Section::GoLive, "go-live", "Screen Sharing", "Experience", "screen sharing streaming quality resolution frame rate system audio", "monitor"},
-    {SettingsController::Section::Notifications, "notifications", "Notifications", "Experience", "notification sounds taskbar dot badge flash alerts", "bell"},
-    {SettingsController::Section::Keybinds, "keybinds", "Keybinds", "Experience", "keybinds shortcuts mute deafen push to talk", "keyboard"},
-    {SettingsController::Section::System, "system", "System", "Experience", "system windows startup login minimized tray", "settings"},
-    {SettingsController::Section::Language, "language", "Language", "Experience", "language locale english", "languages"},
-    {SettingsController::Section::Advanced, "advanced", "Advanced", "Experience", "advanced developer mode copy id cache memory", "sliders-horizontal"},
-    {SettingsController::Section::ActivityPrivacy, "activity-privacy", "Activity Privacy", "Activity Settings", "activity presence share games privacy", "chart-column"},
+    {SettingsController::Section::MyAccount, "my-account", "Account", "", "account username email security authentication mfa", "id-card"},
+    {SettingsController::Section::Profiles, "profiles", "Profiles", "", "profile avatar banner display name pronouns about me bio", "image", false},
+    {SettingsController::Section::MessagingPermissions, "messaging-permissions", "Messaging Permissions", "",
+        "privacy direct messages dms server members screen reader detection friends requests everyone mutual", "message-circle"},
+    {SettingsController::Section::Notifications, "notifications", "Notifications", "", "notification sounds taskbar dot badge flash alerts", "bell"},
+    {SettingsController::Section::VoiceVideo, "voice-video", "Voice & Video", "Experience",
+        "voice audio microphone speakers input output volume push to talk devices screen sharing streaming quality resolution frame rate", "mic"},
+    {SettingsController::Section::Appearance, "appearance", "Appearance", "Experience",
+        "theme default light ash dark onyx device sync accent color colour picker palette custom messages embeds links reactions", "palette"},
+    {SettingsController::Section::Accessibility, "accessibility", "Accessibility", "Experience",
+        "font text size chat zoom scale compact avatars underlines readability density reduced motion", "accessibility"},
+    {SettingsController::Section::System, "system", "System", "Experience",
+        "system windows startup login minimized tray keybinds shortcuts mute deafen advanced developer mode copy id cache memory", "keyboard"},
+    {SettingsController::Section::Language, "language", "Language & Time", "Experience", "language locale english", "languages"},
+    {SettingsController::Section::ActivityPrivacy, "activity-privacy", "Activity Privacy", "Games & Apps", "activity presence share games privacy", "chart-column"},
+};
+struct SubsectionInfo {
+    SettingsController::Section section;
+    const char *id;
+    const char *label;
+};
+constexpr SubsectionInfo subsections[] = {
+    {SettingsController::Section::MessagingPermissions, "direct-messages", "Direct Messages"},
+    {SettingsController::Section::MessagingPermissions, "friend-requests", "Friend Requests"},
+    {SettingsController::Section::Notifications, "overview", "Overview"},
+    {SettingsController::Section::Notifications, "sounds", "Sounds"},
+    {SettingsController::Section::VoiceVideo, "voice", "Voice"},
+    {SettingsController::Section::VoiceVideo, "streaming", "Streaming"},
+    {SettingsController::Section::Appearance, "theme", "Theme"},
+    {SettingsController::Section::Appearance, "custom-theme", "Styx Custom Theme"},
+    {SettingsController::Section::Appearance, "messages", "Messages"},
+    {SettingsController::Section::Accessibility, "text-readability", "Text Readability"},
+    {SettingsController::Section::Accessibility, "visual-density", "Visual Density"},
+    {SettingsController::Section::Accessibility, "reduced-motion", "Reduced Motion"},
+    {SettingsController::Section::System, "general", "General"},
+    {SettingsController::Section::System, "custom-keybinds", "Custom Keybinds"},
+    {SettingsController::Section::System, "advanced", "Advanced"},
 };
 std::string lower(std::string text)
 {
@@ -68,11 +95,16 @@ Discord::Client *SettingsController::readyClient(Shell &shell)
 void SettingsController::renderNavigation(std::string &rml)
 {
     const auto query = lower(searchQuery);
+    auto matches = [&query](std::string_view text) { return lower(std::string(text)).find(query) != std::string::npos; };
     std::string_view group;
     bool found = false;
     for (const auto &entry : sections) {
-        if (!query.empty() && std::string_view(entry.keywords).find(query) == std::string_view::npos &&
-            lower(entry.label).find(query) == std::string::npos)
+        std::vector<const SubsectionInfo *> links;
+        for (const auto &sub : subsections)
+            if (sub.section == entry.section && (query.empty() ? entry.section == currentSection : matches(sub.label)))
+                links.push_back(&sub);
+        const bool sectionMatch = query.empty() ? entry.listed : matches(entry.keywords) || matches(entry.label);
+        if (!sectionMatch && links.empty())
             continue;
         if (entry.group != group) {
             if (found) rml += "<div class=\"settings-divider\"></div>";
@@ -82,9 +114,76 @@ void SettingsController::renderNavigation(std::string &rml)
         rml += std::format("<div class=\"settings-nav-item{}\" data-section=\"{}\" role=\"button\" tabindex=\"0\">"
             "<img src=\"icon:{}\"/><span>{}</span></div>",
             currentSection == entry.section ? " active" : "", entry.id, entry.icon, Platform::htmlEscape(entry.label));
+        if (!links.empty()) {
+            rml += "<div class=\"settings-nav-subsections\">";
+            for (const auto *sub : links) {
+                const bool active = query.empty() && (currentSubsection.empty() ? sub == links.front() : currentSubsection == sub->id);
+                rml += std::format("<div class=\"settings-nav-subitem{}\" data-section=\"{}\" data-subsection=\"{}\" role=\"button\" "
+                    "tabindex=\"0\"><span>{}</span></div>", active ? " active" : "", entry.id, sub->id, Platform::htmlEscape(sub->label));
+            }
+            rml += "</div>";
+        }
         found = true;
     }
     if (!found) description(rml, "No settings match your search.");
+}
+
+void SettingsController::appendSubsectionHeading(std::string &rml, std::string_view id)
+{
+    for (const auto &sub : subsections)
+        if (id == sub.id)
+            rml += std::format("<div class=\"settings-section-heading\" id=\"settings-sub-{}\" data-subsection-anchor=\"{}\">{}</div>",
+                sub.id, sub.id, Platform::htmlEscape(sub.label));
+}
+
+void SettingsController::openSubsection(const std::string &sectionId, const std::string &subsectionId)
+{
+    // A search result link leaves search, like choosing a section does after searching.
+    searchQuery.clear();
+    if (auto *input = rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById("settings-search")))
+        input->SetValue("");
+    selectSection(sectionId);
+    for (const auto &entry : sections)
+        if (sectionId == entry.id && entry.section != currentSection)
+            return; // Leaving the profile editor was declined.
+    currentSubsection = subsectionId;
+    refreshNavigation();
+    // Scroll once the page's new layout exists.
+    subsectionTimer.start(std::chrono::milliseconds(0), false, [this, subsectionId] {
+        if (auto *anchor = regionRoot ? regionRoot->GetElementById("settings-sub-" + subsectionId) : nullptr) {
+            anchor->ScrollIntoView(true);
+            requestRender();
+        }
+    });
+}
+
+void SettingsController::trackVisibleSubsection()
+{
+    auto *scroll = regionRoot ? regionRoot->QuerySelector(".settings-content-scroll") : nullptr;
+    if (!scroll || !searchQuery.empty())
+        return;
+    ::Rml::ElementList anchors;
+    scroll->QuerySelectorAll(anchors, "[data-subsection-anchor]");
+    std::string visible;
+    // The last heading at or above the top of the visible page owns the reading position.
+    for (auto *anchor : anchors)
+        if (visible.empty() || anchor->GetAbsoluteTop() <= scroll->GetAbsoluteTop() + 32)
+            visible = attribute(anchor, "data-subsection-anchor");
+    // Headings near the end of a page cannot reach the top. At the bottom, a chosen heading that is
+    // on screen stays selected instead of reverting to the one above it.
+    const bool atBottom = scroll->GetScrollTop() + scroll->GetClientHeight() >= scroll->GetScrollHeight() - 1;
+    if (atBottom && !currentSubsection.empty())
+        if (auto *chosen = scroll->GetElementById("settings-sub-" + currentSubsection);
+            chosen && chosen->GetAbsoluteTop() < scroll->GetAbsoluteTop() + scroll->GetClientHeight())
+            visible = currentSubsection;
+    if (visible == currentSubsection)
+        return;
+    currentSubsection = visible;
+    ::Rml::ElementList links;
+    regionRoot->QuerySelectorAll(links, ".settings-nav-subitem");
+    for (auto *link : links)
+        link->SetClass("active", attribute(link, "data-subsection") == currentSubsection);
+    requestRender();
 }
 
 void SettingsController::refreshNavigation()
@@ -161,8 +260,8 @@ void SettingsController::renderRemoteStatus(std::string &rml)
 }
 bool SettingsController::isRemoteSection() const
 {
-    return currentSection == Section::Privacy || currentSection == Section::FriendRequests || currentSection == Section::Appearance ||
-        currentSection == Section::ActivityPrivacy || currentSection == Section::Language || currentSection == Section::Advanced;
+    return currentSection == Section::MessagingPermissions || currentSection == Section::Appearance || currentSection == Section::System ||
+        currentSection == Section::ActivityPrivacy || currentSection == Section::Language;
 }
 
 void SettingsController::bindAccountSettings()
@@ -288,15 +387,17 @@ void SettingsController::renderAccessibility(std::string &rml)
         "<span class=\"chat-link\">Example link</span></div></div>"
         "<div class=\"message-row\"><div class=\"message-body\">Code uses <span class=\"inline-code\">inline code</span> and blocks:"
         "<pre class=\"code-block\">const int size = 16;</pre></div></div></div>", Platform::htmlEscape(avatar));
-    rml += "<div class=\"settings-section-heading\">Text Readability</div>";
+    appendSubsectionHeading(rml, "text-readability");
     appendSteppedSlider(rml, "message-font-size", "accessibility/message-font-px", "Text size in chat",
         "Adjust the size of the chat font.", Core::Theme::chatTextSizes, Core::Theme::chatTextSize(), "px");
+    appendSwitch(rml, Keys::UnderlineLinks, getBool(Keys::UnderlineLinks, Defaults::UnderlineLinks), "Always underline links", "Make links stand out in messages.");
+    appendSubsectionHeading(rml, "visual-density");
+    appendSwitch(rml, Keys::CompactMessages, getBool(Keys::CompactMessages, Defaults::CompactMessages), "Compact message spacing", "Use less space between message groups and hide message avatars.");
+    appendSwitch(rml, Keys::ShowAvatars, getBool(Keys::ShowAvatars, Defaults::ShowAvatars), "Show message avatars", "Show profile pictures beside messages in the standard layout.");
     appendSteppedSlider(rml, "interface-zoom", Keys::InterfaceZoom, "Zoom level",
         "Adjust the size of the interface. You can also change this with Ctrl +/-.", Core::Theme::zoomLevels,
         View::interfaceZoom(), "");
-    appendSwitch(rml, Keys::CompactMessages, getBool(Keys::CompactMessages, Defaults::CompactMessages), "Compact message spacing", "Use less space between message groups and hide message avatars.");
-    appendSwitch(rml, Keys::ShowAvatars, getBool(Keys::ShowAvatars, Defaults::ShowAvatars), "Show message avatars", "Show profile pictures beside messages in the standard layout.");
-    appendSwitch(rml, Keys::UnderlineLinks, getBool(Keys::UnderlineLinks, Defaults::UnderlineLinks), "Always underline links", "Make links stand out in messages.");
+    appendSubsectionHeading(rml, "reduced-motion");
     appendSwitch(rml, Keys::ReducedMotion, getBool(Keys::ReducedMotion, Defaults::ReducedMotion), "Reduce interface motion", "Turn off interface transitions and CSS animations.");
 }
 

@@ -59,12 +59,11 @@ body.custom-titlebar #settings-overlay
 
 .settings-group-header
 {
-	font-size: 11dp;
-	font-weight: bold;
+	font-size: 12dp;
+	font-weight: 500;
 	color: #949ba4;
-	text-transform: uppercase;
-	padding: 6dp 10dp;
-	margin-top: 14dp;
+	padding: 6dp 10dp 4dp 10dp;
+	margin-top: 2dp;
 	margin-bottom: 2dp;
 }
 
@@ -107,6 +106,44 @@ body.custom-titlebar #settings-overlay
 {
 	background-color: #242428;
 	color: #ffffff;
+}
+
+/* Subsections of the open page, indented under it with a guide line as in Discord */
+.settings-nav-subsections
+{
+	display: block;
+	margin: 2dp 0 6dp 22dp;
+	border-left: 1dp #4e5058;
+}
+
+.settings-nav-subitem
+{
+	display: block;
+	padding: 6dp 12dp;
+	margin-left: -1dp;
+	border-left: 2dp transparent;
+	color: #949ba4;
+	font-size: 14dp;
+	cursor: pointer;
+	tab-index: auto;
+}
+
+.settings-nav-subitem:hover
+{
+	color: #dbdee1;
+}
+
+.settings-nav-subitem.active
+{
+	color: #f2f3f5;
+	font-weight: 500;
+	border-left-color: #f2f3f5;
+}
+
+.settings-nav-subitem:focus
+{
+	color: #f2f3f5;
+	background-color: #19191c;
 }
 
 .settings-divider
@@ -156,7 +193,7 @@ body.custom-titlebar #settings-overlay
 {
     display: flex;
     align-items: center;
-    height: 56dp;
+    height: 48dp;
     flex-shrink: 0;
     padding: 0 64dp 0 28dp;
     border-bottom: 1dp #202024;
@@ -173,16 +210,16 @@ body.custom-titlebar #settings-overlay
 .settings-content-wrapper
 {
     width: 100%;
-    max-width: 820dp;
+    max-width: 776dp;
     margin-left: auto;
     margin-right: auto;
-    padding: 32dp 40dp 40dp;
+    padding: 48dp 40dp 40dp;
     box-sizing: border-box;
 }
 
 .settings-section-title
 {
-	font-size: 16dp;
+	font-size: 15dp;
 	font-weight: 600;
 	color: #f2f3f5;
 }
@@ -192,7 +229,7 @@ body.custom-titlebar #settings-overlay
 .settings-close-container
 {
 	position: absolute;
-	top: 12dp;
+	top: 8dp;
 	right: 16dp;
 	display: flex;
 	flex-direction: column;
@@ -1107,16 +1144,17 @@ input.settings-color-hue sliderarrowdec, input.settings-color-hue sliderarrowinc
     padding: 8dp;
     margin-bottom: 12dp;
     justify-content: flex-start;
-    background-color: transparent;
+    background-color: #111214;
+    border-radius: 8dp;
     flex-shrink: 0;
 }
-.settings-account:hover, .settings-account:focus { background-color: #111214; }
+.settings-account:hover, .settings-account:focus { background-color: #19191c; }
 .settings-account-avatar { display: block; width: 40dp; height: 40dp; border-radius: 20dp; margin-right: 12dp; overflow: hidden; flex-shrink: 0; }
 .settings-account-avatar img { width: 100%; height: 100%; }
 .settings-account-text { flex: 1; min-width: 0; overflow: hidden; text-align: left; }
 .settings-account-name { display: block; white-space: nowrap; font-weight: 600; }
-.settings-account-edit { display: block; font-size: 12dp; color: #949ba4; line-height: 20dp; }
-.settings-account-pencil { width: 14dp; height: 14dp; margin-left: 8dp; image-color: #949ba4; }
+.settings-account-edit { display: flex; flex-direction: row; align-items: center; font-size: 12dp; color: #dbdee1; line-height: 18dp; }
+.settings-account-pencil { width: 12dp; height: 12dp; margin-left: 4dp; image-color: #dbdee1; }
 
 .settings-search-wrap
 {

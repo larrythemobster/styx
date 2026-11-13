@@ -28,22 +28,18 @@ class ProfileEditorController;
 class SettingsController final : public Controller
 {
 public:
+    // Pages in Discord's settings order. Several pages combine former Styx pages as subsections.
     enum class Section {
         MyAccount,
-        Appearance,
-        Chat,
+        Profiles,
+        MessagingPermissions,
         Notifications,
         VoiceVideo,
-        Keybinds,
-        GoLive,
-        Advanced,
-        Profiles,
-        Privacy,
-        FriendRequests,
+        Appearance,
         Accessibility,
-        ActivityPrivacy,
         System,
         Language,
+        ActivityPrivacy,
     };
 
     SettingsController(Shell &shell, ::Rml::Element *root);
@@ -63,6 +59,10 @@ private:
     void renderNavigation(std::string &rml);
     void refreshNavigation();
     void selectSection(const std::string &id);
+    // Opens a page at one of its subsection headings, as Discord's nested sidebar links do.
+    void openSubsection(const std::string &sectionId, const std::string &subsectionId);
+    static void appendSubsectionHeading(std::string &rml, std::string_view id);
+    void trackVisibleSubsection();
     std::string_view sectionTitle() const;
     void bindAccountSettings();
     bool isRemoteSection() const;
@@ -127,6 +127,8 @@ private:
     std::string themeError;
     std::string appearanceSaveError;
     std::string searchQuery;
+    std::string currentSubsection;
+    Platform::Timer subsectionTimer;
     std::string remoteSettingsError;
     bool remoteSettingsSaving = false;
     std::uint64_t remoteSettingsRequest = 0;
