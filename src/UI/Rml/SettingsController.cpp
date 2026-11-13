@@ -8,6 +8,7 @@
 #include "RmlRuntime.hpp"
 #include "UI/PushToTalk.hpp"
 
+#include "Core/AccountDetails.hpp"
 #include "Core/AnimatedImageCache.hpp"
 #include "Core/Audio/Sounds.hpp"
 #include "Core/ClientInstance.hpp"
@@ -130,6 +131,7 @@ SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
     track(shell.settingsOpenChanged.connect([this](bool open) { onSettingsOpenChanged(open); }));
     track(shell.instanceChanged.connect([this](Core::ClientInstance *) {
         ++remoteSettingsRequest;
+        emailRevealed = phoneRevealed = false;
         remoteSettingsSaving = false;
         remoteSettingsError.clear();
         bindAccountSettings();
@@ -168,6 +170,7 @@ void SettingsController::onSettingsOpenChanged(bool open)
         return;
 
     if (open) {
+        emailRevealed = phoneRevealed = false;
         if (auto *focused = regionRoot->GetContext()->GetFocusElement())
             previousFocus = focused->GetObserverPtr();
         regionRoot->SetProperty("display", "flex");
@@ -202,6 +205,7 @@ void SettingsController::setSection(Section section)
     colorDragging = false;
     colorPickerOpen = false;
     currentSection = section;
+    emailRevealed = phoneRevealed = false;
     currentSubsection.clear();
     render();
     requestRender(100);
@@ -346,84 +350,66 @@ void SettingsController::renderContent(std::string &rml)
 
 void SettingsController::renderMyAccount(std::string &rml)
 {
-
     auto *inst = shell.currentInstance();
-    std::string displayName = std::string("Not logged in");
-    std::string username = std::string("none");
-    std::string accountIdStr = std::string("-");
-    std::string securityStatus = "Not available";
-    std::string avatarSrc;
+    auto row = [&rml](std::string_view label, const std::string &valueRml, const std::string &actionRml = {}) {
+        rml += formatRml("<div class=\"account-info-row\"><div class=\"account-info-label\">%1</div>"
+            "<div class=\"account-info-value\">%2</div>%3</div>",
+            Rml::escape(std::string(label)), valueRml, actionRml);
+    };
+    // Reveal and Hide only change what this page shows; the values come from the signed-in account.
+    auto revealButton = [](const char *action, bool revealed, const char *what) {
+        return formatRml("<button class=\"settings-btn account-info-reveal\" data-action=\"%1\" aria-label=\"%2 %3\">"
+            "<span class=\"settings-btn-label\">%2</span></button>",
+            std::string(action), std::string(revealed ? "Hide" : "Reveal"), std::string(what));
+    };
+    auto muted = [](std::string_view text) {
+        return "<span class=\"account-info-muted\">" + Rml::escape(std::string(text)) + "</span>";
+    };
 
-    if (inst) {
-        const auto &info = inst->accountInfo();
-        const auto accountId = inst->accountId();
-        accountIdStr = accountId.toString();
-
-        auto *userMgr = inst->users();
-        std::optional<Discord::User> me;
-        if (userMgr)
-            me = userMgr->getUser(accountId);
-
-        displayName = (me && me->globalName.hasValue() && !me->globalName->empty())
-                          ? *me->globalName
-                          : (info.displayName.empty() ? info.username : info.displayName);
-        if (displayName.empty())
-            displayName = info.username;
-
-        username = me ? me->username.get() : info.username;
+    appendSubsectionHeading(rml, "account-info");
+    if (!inst) {
+        rml += "<div class=\"settings-description\">Sign in to an account to see its details.</div>";
+    } else {
         const auto &self = inst->discord()->getMe();
-        if (self.id.get() == accountId && self.mfaEnabled.hasValue())
-            securityStatus = self.mfaEnabled.get() ? "Enabled" : "Not enabled";
+        const bool ready = self.id.get() == inst->accountId();
+        const auto username = ready ? self.username.get() : inst->accountInfo().username;
+        row("Username", Rml::escape(username));
+        if (!ready) {
+            row("Email", muted("Loading..."));
+            row("Phone Number", muted("Loading..."));
+        } else {
+            if (self.email.hasValue() && !self.email->empty()) {
+                std::string value = Rml::escape(emailRevealed ? self.email.get() : Core::maskEmail(self.email.get()));
+                if (self.verified.hasValue() && !self.verified.get())
+                    value += " " + muted("(unverified)");
+                row("Email", value, revealButton("reveal-email", emailRevealed, "email"));
+            } else {
+                row("Email", muted("No email address"));
+            }
+            if (self.phone.hasValue() && !self.phone->empty())
+                row("Phone Number", Rml::escape(phoneRevealed ? self.phone.get() : Core::maskPhone(self.phone.get())),
+                    revealButton("reveal-phone", phoneRevealed, "phone number"));
+            else
+                row("Phone Number", muted("No phone number"));
+        }
 
-        std::string avatarHash = (me && me->avatar.hasValue()) ? *me->avatar : info.avatar;
-        std::string avatarUrl = !avatarHash.empty()
-                             ? Discord::Cdn::userAvatar(accountId, avatarHash, 80)
-                             : Discord::Cdn::defaultUserAvatar(accountId);
-        avatarSrc = shell.imageSource(avatarUrl, Platform::Size{80, 80});
+        rml += "<div class=\"account-info-divider\"></div>";
+        appendSubsectionHeading(rml, "password-security");
+        if (!ready)
+            row("Multi-Factor Authentication", muted("Loading..."));
+        else if (self.mfaEnabled.hasValue())
+            row("Multi-Factor Authentication", Rml::escape(std::string(self.mfaEnabled.get() ? "Enabled" : "Not enabled")));
+        else
+            row("Multi-Factor Authentication", muted("Unknown"));
+        rml += "<div class=\"settings-description\">Changing your username, email, phone number or password, and managing "
+               "authentication methods and logged-in devices, aren't available in Styx yet. Use the official Discord app for them.</div>";
     }
 
-    rml += std::string("<div class=\"my-account-card\">");
-    rml += std::string("<div class=\"my-account-profile-header\">");
-    if (!avatarSrc.empty()) {
-        rml += formatRml("<img class=\"my-account-avatar\" src=\"%1\"/>", Rml::escape(avatarSrc));
-    }
-    rml += std::string("<div class=\"my-account-names\">");
-    rml += formatRml("<div class=\"my-account-display-name\">%1</div>", Rml::escape(displayName));
-    rml += formatRml("<div class=\"my-account-username\">@%1</div>", Rml::escape(username));
-    rml += std::string("</div>"); // .my-account-names
-    rml += std::string("</div>"); // .my-account-profile-header
-
-    rml += std::string("<div class=\"my-account-field-card\">");
-    rml += std::string("<div class=\"my-account-field-label\">Display Name</div>");
-    rml += formatRml("<div class=\"my-account-field-value\">%1</div>", Rml::escape(displayName));
-    rml += std::string("</div>");
-
-    rml += std::string("<div class=\"my-account-field-card\">");
-    rml += std::string("<div class=\"my-account-field-label\">Username</div>");
-    rml += formatRml("<div class=\"my-account-field-value\">@%1</div>", Rml::escape(username));
-    rml += std::string("</div>");
-
-    rml += std::string("<div class=\"my-account-field-card\">");
-    rml += std::string("<div class=\"my-account-field-label\">User ID</div>");
-    rml += formatRml("<div class=\"my-account-field-value\">%1</div>", Rml::escape(accountIdStr));
-    rml += std::string("</div>");
-
-    rml += std::string("<div class=\"my-account-field-card\">");
-    rml += std::string("<div class=\"my-account-field-label\">Two-Factor Authentication</div>");
-    rml += formatRml("<div class=\"my-account-field-value\">%1</div>", Rml::escape(securityStatus));
-    rml += std::string("</div>");
-    rml += "<div class=\"settings-description\">Email, password and security changes are not available in Styx.</div>";
-
-    rml += std::string(
-        "<div class=\"settings-button-group\">"
-        "<button class=\"settings-btn settings-btn-primary\" data-action=\"edit-profile\">"
-        "<span class=\"settings-btn-label\">Edit Profile</span>"
-        "</button>"
-        "<button class=\"settings-btn settings-btn-secondary\" data-action=\"manage-accounts\">"
-        "<span class=\"settings-btn-label\">Switch / Manage Accounts</span>"
-        "</button>"
-        "</div>");
-    rml += std::string("</div>"); // .my-account-card
+    rml += "<div class=\"account-info-divider\"></div>";
+    appendSubsectionHeading(rml, "styx-accounts");
+    rml += "<div class=\"settings-description\">Styx can stay signed in to several Discord accounts at once.</div>"
+           "<div class=\"settings-button-group\"><button class=\"settings-btn settings-btn-secondary\" data-action=\"manage-accounts\">"
+           "<span class=\"settings-btn-label\">Switch / Manage Accounts</span></button></div>";
 }
 
 void SettingsController::renderAppearance(std::string &rml)
@@ -1655,8 +1641,12 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         applyPushToTalk();
         stopRecordingKeybind();
         refreshKeybinds();
-    } else if (action == std::string("edit-profile")) {
-        setSection(Section::Profiles);
+    } else if (action == std::string("reveal-email")) {
+        emailRevealed = !emailRevealed;
+        render();
+    } else if (action == std::string("reveal-phone")) {
+        phoneRevealed = !phoneRevealed;
+        render();
     } else if (action == std::string("manage-accounts")) {
         shell.openAccounts();
     } else if (action == std::string("test-notification")) {

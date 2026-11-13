@@ -37,6 +37,10 @@ struct User : Core::JsonUtils::JsonObject
     Field<PremiumType, true, true> premiumType;
     Field<std::string, true> discriminator;
     Field<bool, true> mfaEnabled;
+    // Only the current user's own object carries these. Never log them.
+    Field<std::string, true, true> email;
+    Field<std::string, true, true> phone;
+    Field<bool, true> verified;
 
     // Required identity fields may be omitted in private-channel user updates.
     unsigned char identityFieldsPresent = 7;
@@ -59,6 +63,9 @@ struct User : Core::JsonUtils::JsonObject
         get(obj, "premium_type", user.premiumType);
         get(obj, "discriminator", user.discriminator);
         get(obj, "mfa_enabled", user.mfaEnabled);
+        get(obj, "email", user.email);
+        get(obj, "phone", user.phone);
+        get(obj, "verified", user.verified);
         return user;
     }
 

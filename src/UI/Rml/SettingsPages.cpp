@@ -59,6 +59,9 @@ struct SubsectionInfo {
     const char *label;
 };
 constexpr SubsectionInfo subsections[] = {
+    {SettingsController::Section::MyAccount, "account-info", "Account Info"},
+    {SettingsController::Section::MyAccount, "password-security", "Password & Security"},
+    {SettingsController::Section::MyAccount, "styx-accounts", "Styx Accounts"},
     {SettingsController::Section::MessagingPermissions, "direct-messages", "Direct Messages"},
     {SettingsController::Section::MessagingPermissions, "friend-requests", "Friend Requests"},
     {SettingsController::Section::Notifications, "overview", "Overview"},

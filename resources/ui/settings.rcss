@@ -836,78 +836,72 @@ select.settings-select selectbox option:checked
 	cursor: default;
 }
 
-/* My Account Section */
+/* Account page (reference 006): label on the left, value and action on the right. */
 
-.my-account-card
-{
-	background-color: #08080a;
-	border: 1dp #202024;
-	border-radius: 6dp;
-	padding: 20dp;
-	margin-bottom: 20dp;
-	box-sizing: border-box;
-}
-
-.my-account-profile-header
+.account-info-row
 {
 	display: flex;
 	flex-direction: row;
 	align-items: center;
-	margin-bottom: 20dp;
+	min-height: 48dp;
+	margin-bottom: 8dp;
 }
 
-.my-account-avatar
-{
-	width: 80dp;
-	height: 80dp;
-	border-radius: 40dp;
-	margin-right: 20dp;
-	border: 3dp #08080a;
-}
-
-.my-account-names
+.account-info-label
 {
 	flex: 1;
-	min-width: 0;
-}
-
-.my-account-display-name
-{
-	font-size: 20dp;
-	font-weight: bold;
+	font-size: 14dp;
+	font-weight: 600;
 	color: #f2f3f5;
-	margin-bottom: 4dp;
 }
 
-.my-account-username
+.account-info-value
 {
 	font-size: 14dp;
-	color: #949ba4;
-}
-
-.my-account-field-card
-{
-	border-bottom: 1dp #202024;
-	padding: 12dp 0;
-	margin-bottom: 0;
-	display: flex;
-	flex-direction: column;
-}
-
-.my-account-field-label
-{
-	font-size: 11dp;
-	font-weight: bold;
-	color: #949ba4;
-	text-transform: uppercase;
-	margin-bottom: 4dp;
-}
-
-.my-account-field-value
-{
-	font-size: 14dp;
-	color: #f2f3f5;
+	color: #dbdee1;
+	text-align: right;
+	margin-left: 16dp;
 	word-break: break-all;
+}
+
+.account-info-muted
+{
+	color: #949ba4;
+}
+
+/* Groups on the account page are separated by a rule with generous space, as in the reference. */
+.account-info-divider
+{
+	height: 1dp;
+	background-color: #303035;
+	margin: 24dp 0 32dp 0;
+}
+
+.settings-btn.account-info-reveal
+{
+	height: auto;
+	min-width: 0;
+	margin-left: 4dp;
+	padding: 2dp 4dp;
+	border-width: 0;
+	border-radius: 4dp;
+	background-color: transparent;
+	color: #00a8fc;
+	font-size: 14dp;
+	font-weight: 500;
+}
+
+.settings-btn.account-info-reveal:hover
+{
+	background-color: transparent;
+	text-decoration: underline;
+}
+
+.settings-btn.account-info-reveal:focus
+{
+	border-width: 2dp;
+	border-color: #00a8fc;
+	padding: 0 2dp;
 }
 
 /* Appearance generator controls */

@@ -186,6 +186,7 @@ set(PROJECT_SOURCES
     src/Core/ReadStateManager.cpp
     src/Core/NotificationPolicy.cpp
     src/Core/NotificationText.cpp
+    src/Core/AccountDetails.cpp
     src/Core/SearchSyntax.cpp
     src/Core/SearchQuery.cpp
     src/Core/SearchCompletion.cpp
@@ -450,6 +451,7 @@ if(BUILD_TESTS)
     target_link_libraries(TestMarkdown PRIVATE PCRE2::8BIT utf8proc)
     styx_test(TestFrecency FrecencyTests tests/tst_Frecency.cpp src/Core/Emoji/FrecencyTracker.cpp)
     styx_test(TestNotificationPolicy NotificationPolicyTests tests/tst_NotificationPolicy.cpp src/Core/NotificationPolicy.cpp src/Core/NotificationText.cpp)
+    styx_test(TestAccountDetails AccountDetailsTests tests/tst_AccountDetails.cpp src/Core/AccountDetails.cpp)
     styx_test(TestSearchSyntax SearchSyntaxTests tests/tst_SearchSyntax.cpp src/Core/SearchSyntax.cpp src/Core/Snowflake.cpp)
     styx_test(TestSearchQuery SearchQueryTests tests/tst_SearchQuery.cpp src/Core/SearchQuery.cpp src/Core/Snowflake.cpp)
     styx_test(TestSearchCompletion SearchCompletionTests tests/tst_SearchCompletion.cpp src/Core/SearchCompletion.cpp src/Core/Snowflake.cpp)

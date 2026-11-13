@@ -134,6 +134,9 @@ private:
     std::uint64_t remoteSettingsRequest = 0;
     Platform::Connection accountSettingsConnection;
     bool colorPickerOpen = false;
+    // Account page: whether the full email/phone are shown. Cleared when leaving the page or account.
+    bool emailRevealed = false;
+    bool phoneRevealed = false;
     bool colorDragging = false;
     double pickerHue = 0;
     double pickerSaturation = 0;
