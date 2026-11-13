@@ -158,7 +158,7 @@ body.custom-titlebar #titlebar
 	border-right: 1dp #f2f3f5;
 }
 .titlebar-close-icon { width: 14dp; height: 14dp; image-color: #f2f3f5; }
-#titlebar-hint
+#titlebar-hint, .app-hint
 {
 	display: none;
 	position: absolute;

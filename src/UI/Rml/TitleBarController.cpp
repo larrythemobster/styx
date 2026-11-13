@@ -5,7 +5,9 @@
 #include "UI/ChannelList/ChannelTreeModel.hpp"
 #include "Platform/Native.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <string>
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/ElementUtilities.h>
@@ -14,12 +16,32 @@
 #include <RmlUi/Core/Input.h>
 
 namespace Styx::UI::Rml {
+namespace {
+// The hint for a control: its title, or the accessible name of an icon-only button.
+std::string hintText(::Rml::Element *element)
+{
+    auto title = element->GetAttribute<std::string>("title", "");
+    if (!title.empty()) return title;
+    if (element->GetTagName() != "button" && element->GetAttribute<std::string>("role", "") != "button") return {};
+    // Buttons that show their own text need no hint.
+    bool tag = false;
+    for (const char c : element->GetInnerRML()) {
+        if (c == '<') tag = true;
+        else if (c == '>') tag = false;
+        else if (!tag && !std::isspace(static_cast<unsigned char>(c))) return {};
+    }
+    return element->GetAttribute<std::string>("aria-label", "");
+}
+}
+
 TitleBarController::TitleBarController(Shell &shell, ::Rml::Element *root, InboxController &inbox, UpdatesController &updates)
     : Controller(shell, root), inbox(inbox), updates(updates)
 {
-    hint = shell.document()->GetElementById("titlebar-hint");
-    listen("mousemove", [this](::Rml::Event &) { keyboardHints = false; hintsDismissed = false; }, shell.document(), true);
-    listen("mousedown", [this](::Rml::Event &) { keyboardHints = false; hintsDismissed = true; hideHint(); }, shell.document(), true);
+    hint = shell.document()->GetElementById("titlebar-hint")->GetObserverPtr();
+    // Popovers are separate documents in the same context, so pointer state is tracked on the context root.
+    auto *contextRoot = shell.context()->GetRootElement();
+    listen("mousemove", [this](::Rml::Event &) { keyboardHints = false; hintsDismissed = false; }, contextRoot, true);
+    listen("mousedown", [this](::Rml::Event &) { keyboardHints = false; hintsDismissed = true; hideHint(); }, contextRoot, true);
     track(shell.keyChanged.connect([this](int key, int, bool down) {
         if (down && key == ::Rml::Input::KI_TAB) {
             keyboardHints = true;
@@ -104,16 +126,30 @@ void TitleBarController::refresh() {
 }
 ::Rml::Element *TitleBarController::hintButton() const
 {
-    auto *document = shell.document();
-    auto *context = document ? document->GetContext() : nullptr;
+    auto *context = shell.context();
     if (!context) return nullptr;
     auto *target = keyboardHints ? context->GetFocusElement() : context->GetHoverElement();
-    // Any titled control in the main window shows its title. Settings sliders show their value instead.
+    // Settings sliders show their value instead of a hint.
     for (auto *element = target; element; element = element->GetParentNode()) {
-        if (element->GetOwnerDocument() != document || element->IsClassSet("settings-slider")) return nullptr;
-        if (!attribute(element, "title").empty()) return element;
+        if (element->IsClassSet("settings-slider")) return nullptr;
+        if (!hintText(element).empty()) return element;
     }
     return nullptr;
+}
+
+::Rml::Element *TitleBarController::hintElementFor(::Rml::ElementDocument *document) const
+{
+    // A hint drawn by the main window would sit beneath popovers, so each document gets its own.
+    if (document == shell.document()) return document->GetElementById("titlebar-hint");
+    if (auto *existing = document->GetElementById("app-hint")) return existing;
+    auto element = document->CreateElement("div");
+    element->SetId("app-hint");
+    element->SetClass("app-hint", true);
+    element->SetAttribute("role", "tooltip");
+    auto *created = document->AppendChild(std::move(element));
+    // Text is measured with the hint's font as soon as it is shown, so resolve its styles now.
+    document->UpdateDocument();
+    return created;
 }
 
 void TitleBarController::updateHint()
@@ -128,26 +164,29 @@ void TitleBarController::updateHint()
         }
     }
     if (hintOwner && hint && hint->IsVisible()) {
-        if (hintScale != ::Rml::ElementUtilities::GetDensityIndependentPixelRatio(hint)) showHint();
+        if (hintScale != ::Rml::ElementUtilities::GetDensityIndependentPixelRatio(hint.get())) showHint();
         else positionHint();
     }
 }
 
 void TitleBarController::showHint()
 {
-    if (!hint || !hintOwner || hintsDismissed || hintOwner.get() != hintButton()) return;
-    const auto label = attribute(hintOwner.get(), "title");
+    if (!hintOwner || hintsDismissed || hintOwner.get() != hintButton()) return;
+    const auto label = hintText(hintOwner.get());
     if (label.empty()) return;
+    auto *target = hintElementFor(hintOwner->GetOwnerDocument());
+    if (hint && hint.get() != target) hint->SetProperty("display", "none");
+    hint = target->GetObserverPtr();
     hint->SetInnerRML(Platform::htmlEscape(label));
-    hintScale = ::Rml::ElementUtilities::GetDensityIndependentPixelRatio(hint);
+    hintScale = ::Rml::ElementUtilities::GetDensityIndependentPixelRatio(hint.get());
     // Short hints fit their text on one line; long ones wrap at a readable width.
-    const float textWidth = static_cast<float>(::Rml::ElementUtilities::GetStringWidth(hint, label));
+    const float textWidth = static_cast<float>(::Rml::ElementUtilities::GetStringWidth(hint.get(), label));
     const float maxWidth = 280 * hintScale;
     hintWidth = std::min(textWidth, maxWidth);
     hint->SetProperty("white-space", textWidth > maxWidth ? "normal" : "nowrap");
     hint->SetProperty(::Rml::PropertyId::Width, ::Rml::Property(hintWidth, ::Rml::Unit::PX));
     hint->SetProperty("display", "block");
-    hintOwner->SetAttribute("aria-describedby", "titlebar-hint");
+    hintOwner->SetAttribute("aria-describedby", hint->GetId());
     hintLeft = hintTop = -1;
     positionHint();
     requestRender();
@@ -176,8 +215,10 @@ void TitleBarController::positionHint()
     top = std::clamp(top, margin, std::max(margin, view.y - height - margin));
     if (left == hintLeft && top == hintTop) return;
     hintLeft = left; hintTop = top;
-    hint->SetProperty(::Rml::PropertyId::Left, ::Rml::Property(std::round(left), ::Rml::Unit::PX));
-    hint->SetProperty(::Rml::PropertyId::Top, ::Rml::Property(std::round(top), ::Rml::Unit::PX));
+    // Window coordinates become offsets within the hint's own document, which may itself be positioned.
+    auto *document = hint->GetOwnerDocument();
+    hint->SetProperty(::Rml::PropertyId::Left, ::Rml::Property(std::round(left - document->GetAbsoluteLeft()), ::Rml::Unit::PX));
+    hint->SetProperty(::Rml::PropertyId::Top, ::Rml::Property(std::round(top - document->GetAbsoluteTop()), ::Rml::Unit::PX));
     requestRender();
 }
 }

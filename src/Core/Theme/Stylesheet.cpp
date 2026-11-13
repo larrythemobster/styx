@@ -122,7 +122,8 @@ std::optional<Platform::Color> paletteColor(Platform::Color source, std::string_
             result = contrastText(*buttonBackground);
         else if (selector.find("primary") != selector.npos || selector.find("confirm") != selector.npos
                  || selector.find("badge") != selector.npos || selector.find("kind-home") != selector.npos
-                 || selector.find("component-button") != selector.npos || selector.find("poll-vote") != selector.npos)
+                 || selector.find("component-button") != selector.npos || selector.find("poll-vote") != selector.npos
+                 || selector.find("radio-dot") != selector.npos)
             result = contrastText(manager.color(Token::Highlight));
         else
             result = manager.color(Token::WindowText);

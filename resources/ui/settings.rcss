@@ -582,15 +582,20 @@ select.settings-select
 	height: 40dp;
 	background-color: #111214;
 	border: 1dp #303035;
-	border-radius: 4dp;
+	border-radius: 8dp;
 	color: #dbdee1;
 	font-size: 14dp;
 	box-sizing: border-box;
 }
 
-select.settings-select:hover, select.settings-select:focus
+select.settings-select:hover
 {
-	border-color: #72767d;
+	border-color: #4e5058;
+}
+
+select.settings-select:focus
+{
+	border-color: #00a8fc;
 }
 
 select.settings-select selectvalue
@@ -611,27 +616,39 @@ select.settings-select selectarrow
 	decorator: image(icon:chevron-down);
 }
 
+/* The open list flips the chevron, as in Discord's device pickers. RmlUi marks the open arrow :checked. */
+select.settings-select selectarrow:checked
+{
+	decorator: image(icon:chevron-down flip-vertical);
+}
+
 select.settings-select selectbox
 {
 	background-color: #111214;
-	border: 1dp #202024;
-	border-radius: 4dp;
-	padding: 4dp;
+	border: 1dp #303035;
+	border-radius: 8dp;
+	margin-top: 8dp;
+	padding: 0;
 	z-index: 200;
-	max-height: 220dp;
+	max-height: 240dp;
 	overflow-y: auto;
 }
 
 select.settings-select selectbox option
 {
-	padding: 8dp 10dp;
-	border-radius: 4dp;
+	padding: 10dp 12dp;
 	color: #dbdee1;
 }
 
 select.settings-select selectbox option:hover
 {
 	background-color: #242428;
+	color: #ffffff;
+}
+
+select.settings-select selectbox option:checked
+{
+	background-color: #303035;
 	color: #ffffff;
 }
 
@@ -650,25 +667,19 @@ select.settings-select selectbox option:hover
 	flex-direction: row;
 	align-items: center;
 	background-color: transparent;
-	border: 1dp transparent;
-	border-radius: 4dp;
-	padding: 10dp 8dp;
-	margin-bottom: 2dp;
+	border: 2dp transparent;
+	border-radius: 8dp;
+	padding: 6dp 8dp;
+	margin-bottom: 4dp;
 	cursor: pointer;
 	box-sizing: border-box;
 	tab-index: auto;
 }
 
-.settings-radio-card:hover, .settings-radio-card:focus
+/* Discord lists radio options as plain rows; only keyboard focus draws a frame. */
+.settings-radio-card:focus
 {
-	background-color: #19191c;
-	border-color: #4e5058;
-}
-
-.settings-radio-card.active
-{
-	background-color: #19191c;
-	border-color: #4e5058;
+	border-color: #00a8fc;
 }
 
 .settings-radio-indicator
@@ -676,15 +687,21 @@ select.settings-select selectbox option:hover
 	width: 20dp;
 	height: 20dp;
 	border-radius: 10dp;
-	border: 2dp #4e5058;
+	border: 2dp #80848e;
 	margin-right: 12dp;
 	flex-shrink: 0;
 	box-sizing: border-box;
 	position: relative;
 }
 
+.settings-radio-card:hover .settings-radio-indicator
+{
+	border-color: #b5bac1;
+}
+
 .settings-radio-card.active .settings-radio-indicator
 {
+	background-color: #5865f2;
 	border-color: #5865f2;
 }
 
@@ -700,7 +717,7 @@ select.settings-select selectbox option:hover
 
 .settings-radio-card.active .settings-radio-dot
 {
-	background-color: #5865f2;
+	background-color: #ffffff;
 }
 
 .settings-radio-info
