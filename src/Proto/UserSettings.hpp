@@ -71,6 +71,8 @@ struct PrivacySettings
     std::vector<Core::Snowflake> messageRequestRestrictedGuildIds;
     std::optional<uint32_t> friendSourceFlags;
     std::optional<uint32_t> friendDiscoveryFlags;
+    // Message requests for server members are off by default when set (field 17).
+    std::optional<bool> defaultMessageRequestRestricted;
     static PrivacySettings fromProto(ProtoReader &reader);
 };
 
@@ -81,6 +83,14 @@ struct AppearanceSettings
     static AppearanceSettings fromProto(ProtoReader &reader);
 };
 
+struct TextAndImagesSettings
+{
+    // DmSpamFilterV2: 0 unset (acts as NonFriends), 1 off, 2 non-friends, 3 everyone.
+    enum DmSpamFilter : uint32_t { SpamFilterUnset = 0, SpamFilterOff = 1, SpamFilterNonFriends = 2, SpamFilterEveryone = 3 };
+    uint32_t dmSpamFilter = SpamFilterUnset;
+    static TextAndImagesSettings fromProto(ProtoReader &reader);
+};
+
 struct PreloadedUserSettings
 {
     std::optional<GuildFolders> guildFolders;
@@ -88,6 +98,7 @@ struct PreloadedUserSettings
     std::optional<LocalizationSettings> localization;
     std::optional<PrivacySettings> privacy;
     std::optional<AppearanceSettings> appearance;
+    std::optional<TextAndImagesSettings> textAndImages;
 
     static PreloadedUserSettings fromProto(ProtoReader &reader);
 };

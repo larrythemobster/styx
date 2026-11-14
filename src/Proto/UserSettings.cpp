@@ -307,13 +307,14 @@ PrivacySettings PrivacySettings::fromProto(ProtoReader &reader)
                 if (tag.fieldNumber == 4) settings.defaultGuildsRestricted = value != 0;
                 else settings.allowAccessibilityDetection = value != 0;
             }
-        } else if ((tag.fieldNumber == 11 || tag.fieldNumber == 12) && tag.wireType == WireType::LENGTH_DELIMITED) {
+        } else if ((tag.fieldNumber == 11 || tag.fieldNumber == 12 || tag.fieldNumber == 17) && tag.wireType == WireType::LENGTH_DELIMITED) {
             std::span<const uint8_t> bytes;
             if (reader.readLengthDelimited(bytes)) {
                 ProtoReader wrapped(bytes);
                 if (const auto value = readUInt64Value(wrapped)) {
                     if (tag.fieldNumber == 11) settings.friendSourceFlags = static_cast<uint32_t>(*value);
-                    else settings.friendDiscoveryFlags = static_cast<uint32_t>(*value);
+                    else if (tag.fieldNumber == 12) settings.friendDiscoveryFlags = static_cast<uint32_t>(*value);
+                    else settings.defaultMessageRequestRestricted = *value != 0;
                 }
             }
         } else {
@@ -341,6 +342,21 @@ AppearanceSettings AppearanceSettings::fromProto(ProtoReader &reader)
     return settings;
 }
 
+TextAndImagesSettings TextAndImagesSettings::fromProto(ProtoReader &reader)
+{
+    TextAndImagesSettings settings;
+    Tag tag;
+    while (reader.readTag(tag)) {
+        uint64_t value = 0;
+        if (tag.fieldNumber == 27 && tag.wireType == WireType::VARINT) {
+            if (reader.readVarint(value)) settings.dmSpamFilter = static_cast<uint32_t>(value);
+        } else {
+            reader.skipField(tag.wireType);
+        }
+    }
+    return settings;
+}
+
 PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
 {
     PreloadedUserSettings settings;
@@ -348,13 +364,15 @@ PreloadedUserSettings PreloadedUserSettings::fromProto(ProtoReader &reader)
 
     while (reader.readTag(tag)) {
         switch (tag.fieldNumber) {
+        case 6:
         case 8:
         case 13: {
             if (tag.wireType == WireType::LENGTH_DELIMITED) {
                 std::span<const uint8_t> bytes;
                 if (reader.readLengthDelimited(bytes)) {
                     ProtoReader nested(bytes);
-                    if (tag.fieldNumber == 8) settings.privacy = PrivacySettings::fromProto(nested);
+                    if (tag.fieldNumber == 6) settings.textAndImages = TextAndImagesSettings::fromProto(nested);
+                    else if (tag.fieldNumber == 8) settings.privacy = PrivacySettings::fromProto(nested);
                     else settings.appearance = AppearanceSettings::fromProto(nested);
                 }
             } else {

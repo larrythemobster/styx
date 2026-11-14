@@ -73,9 +73,12 @@ private:
     bool confirmProfileLeave(std::function<void()> proceed);
     void patchRemoteSettings(Proto::PreloadedSettingsEdit edit);
     bool handleRemoteSwitch(::Rml::Element *element);
+    // Account-backed radio groups (the spam filter); false when the radio is a local setting.
+    bool handleRemoteRadio(::Rml::Element *element);
     void renderRemoteStatus(std::string &rml);
     void renderProfiles(std::string &rml);
     void renderPrivacy(std::string &rml);
+    void renderSpamFilters(std::string &rml);
     void renderFriendRequests(std::string &rml);
     void renderAccessibility(std::string &rml);
     void renderActivityPrivacy(std::string &rml);

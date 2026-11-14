@@ -331,6 +331,8 @@ void SettingsController::renderContent(std::string &rml)
     case Section::MyAccount: renderMyAccount(rml); break;
     case Section::Profiles: renderProfiles(rml); break;
     case Section::MessagingPermissions:
+        appendSubsectionHeading(rml, "spam-filters");
+        renderSpamFilters(rml);
         appendSubsectionHeading(rml, "direct-messages");
         renderPrivacy(rml);
         appendSubsectionHeading(rml, "friend-requests");
@@ -1560,7 +1562,7 @@ void SettingsController::handleRadioClick(::Rml::Element *radioEl)
 {
     const std::string key = attribute(radioEl, "data-setting");
     const std::string val = attribute(radioEl, "data-value");
-    if (key.empty() || val.empty())
+    if (key.empty() || val.empty() || handleRemoteRadio(radioEl))
         return;
 
     setString(key, val);

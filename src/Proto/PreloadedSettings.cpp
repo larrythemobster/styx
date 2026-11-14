@@ -195,6 +195,8 @@ bool PreloadedSettingsEdit::empty() const
         && !restrictedGuildIds.has_value()
         && !friendSourceFlags.has_value()
         && !friendDiscoveryFlags.has_value()
+        && !defaultMessageRequestRestricted.has_value()
+        && !dmSpamFilter.has_value()
         && !guildFolders.has_value()
         && !guildPrivacy.has_value()
         && !guildFolderMove.has_value()
@@ -331,7 +333,9 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
         || edit.restrictedGuildIds.has_value()
         || edit.guildPrivacy.has_value()
         || edit.friendSourceFlags.has_value()
-        || edit.friendDiscoveryFlags.has_value();
+        || edit.friendDiscoveryFlags.has_value()
+        || edit.defaultMessageRequestRestricted.has_value();
+    const bool touchTextAndImages = edit.dmSpamFilter.has_value();
 
     const bool touchStatus = edit.presenceStatus.has_value()
         || edit.customStatus.has_value()
@@ -355,7 +359,7 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
     ProtoWriter patchWriter;
 
     for (const auto [groupNumber, touched] : {
-             std::pair{8u, touchPrivacy}, std::pair{11u, touchStatus},
+             std::pair{6u, touchTextAndImages}, std::pair{8u, touchPrivacy}, std::pair{11u, touchStatus},
              std::pair{12u, touchLocalization}, std::pair{13u, touchAppearance}, std::pair{14u, touchGuildFolders}}) {
         if (!touched)
             continue;
@@ -367,7 +371,9 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
 
         std::map<uint32_t, std::string> replacements;
 
-        if (groupNumber == 8) {
+        if (groupNumber == 6) {
+            replacements[27] = encodeRawVarint(27, *edit.dmSpamFilter);
+        } else if (groupNumber == 8) {
             if (edit.restrictedGuildIds.has_value())
                 replacements[3] = encodePackedSnowflakes(3, *edit.restrictedGuildIds);
             if (edit.guildPrivacy.has_value()) {
@@ -395,6 +401,8 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
                 replacements[11] = encodeWrappedVarint(11, *edit.friendSourceFlags);
             if (edit.friendDiscoveryFlags.has_value())
                 replacements[12] = encodeWrappedVarint(12, *edit.friendDiscoveryFlags);
+            if (edit.defaultMessageRequestRestricted.has_value())
+                replacements[17] = encodeWrappedVarint(17, *edit.defaultMessageRequestRestricted ? 1 : 0);
         } else if (groupNumber == 11) {
             if (edit.presenceStatus.has_value())
                 replacements[1] = encodeWrappedString(1, *edit.presenceStatus);

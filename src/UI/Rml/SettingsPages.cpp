@@ -6,6 +6,7 @@
 #include "Core/ClientInstance.hpp"
 #include "Discord/CdnUrls.hpp"
 #include "Core/SettingsKeys.hpp"
+#include "Core/TokenUtils.hpp"
 #include "Core/Theme/Fonts.hpp"
 #include "Core/Theme/Manager.hpp"
 #include "Core/Theme/Scale.hpp"
@@ -40,7 +41,7 @@ constexpr SectionInfo sections[] = {
     {SettingsController::Section::MyAccount, "my-account", "Account", "", "account username email phone number reveal password security authentication mfa switch manage accounts", "id-card"},
     {SettingsController::Section::Profiles, "profiles", "Profiles", "", "profile avatar banner display name pronouns about me bio", "image", false},
     {SettingsController::Section::MessagingPermissions, "messaging-permissions", "Messaging Permissions", "",
-        "privacy direct messages dms server members screen reader detection friends requests everyone mutual", "message-circle"},
+        "privacy direct messages dms server members message requests spam filter screen reader detection friends requests everyone mutual", "message-circle"},
     {SettingsController::Section::Notifications, "notifications", "Notifications", "", "notification sounds taskbar dot badge flash alerts", "bell"},
     {SettingsController::Section::VoiceVideo, "voice-video", "Voice & Video", "Experience",
         "voice audio microphone speakers input output volume push to talk devices screen sharing streaming quality resolution frame rate", "mic"},
@@ -62,6 +63,7 @@ constexpr SubsectionInfo subsections[] = {
     {SettingsController::Section::MyAccount, "account-info", "Account Info"},
     {SettingsController::Section::MyAccount, "password-security", "Password & Security"},
     {SettingsController::Section::MyAccount, "styx-accounts", "Styx Accounts"},
+    {SettingsController::Section::MessagingPermissions, "spam-filters", "Spam Filters"},
     {SettingsController::Section::MessagingPermissions, "direct-messages", "Direct Messages"},
     {SettingsController::Section::MessagingPermissions, "friend-requests", "Friend Requests"},
     {SettingsController::Section::Notifications, "overview", "Overview"},
@@ -314,6 +316,7 @@ bool SettingsController::handleRemoteSwitch(::Rml::Element *element)
     if (key == "discord/default-dms") edit.defaultGuildsRestricted = !checked;
     else if (key == "discord/accessibility-detection") edit.allowAccessibilityDetection = checked;
     else if (key == "discord/activity") edit.showCurrentGame = checked;
+    else if (key == "discord/message-requests") edit.defaultMessageRequestRestricted = !checked;
     else if (key == "discord/developer-mode") edit.developerMode = checked;
     else if (key.starts_with("discord/friend-")) {
         const auto &privacy = client->getSettings().privacy;
@@ -337,9 +340,42 @@ void SettingsController::renderPrivacy(std::string &rml)
     const auto privacy = client->getSettings().privacy.value_or(Proto::PrivacySettings{});
     appendSwitch(rml, "discord/default-dms", !privacy.defaultGuildsRestricted, "Allow direct messages from server members",
         "Applies to new servers you join. Existing server preferences are unchanged.", remoteSettingsSaving);
+    appendSwitch(rml, "discord/message-requests", !privacy.defaultMessageRequestRestricted.value_or(false), "Message requests",
+        "Filter messages from server members you may not know into Message Requests. Applies to new servers you join.", remoteSettingsSaving);
     appendSwitch(rml, "discord/accessibility-detection", privacy.allowAccessibilityDetection, "Allow screen reader detection",
         "Allow Discord clients to detect screen reader usage. Styx does not collect this information.", remoteSettingsSaving);
     renderRemoteStatus(rml);
+}
+
+void SettingsController::renderSpamFilters(std::string &rml)
+{
+    auto *client = readyClient(shell);
+    if (!client) { description(rml, "Connect your account to change its spam filter."); return; }
+    // Reference 022. Discord treats an unset filter as "non-friends".
+    using Filter = Proto::TextAndImagesSettings;
+    const auto &text = client->getSettings().textAndImages;
+    const uint32_t current = text && text->dmSpamFilter != Filter::SpamFilterUnset ? text->dmSpamFilter : uint32_t(Filter::SpamFilterNonFriends);
+    rml += "<div class=\"settings-switch-title\">Automatically filter suspected spam messages</div>";
+    description(rml, "Discord can filter out some messages that contain spam. These messages go to your Spam inbox.");
+    for (const auto &[value, title] : {std::pair{uint32_t(Filter::SpamFilterEveryone), "Filter all spam"},
+             std::pair{uint32_t(Filter::SpamFilterNonFriends), "Filter messages from non-friends (Recommended)"},
+             std::pair{uint32_t(Filter::SpamFilterOff), "Don't filter spam"}})
+        rml += std::format("<div class=\"settings-radio-card{}\" data-setting=\"discord/spam-filter\" data-value=\"{}\" role=\"radio\" "
+            "aria-checked=\"{}\" {}><div class=\"settings-radio-indicator\"><span class=\"settings-radio-dot\"></span></div>"
+            "<div class=\"settings-radio-info\"><div class=\"settings-radio-title\">{}</div></div></div>",
+            value == current ? " active" : "", value, value == current ? "true" : "false",
+            remoteSettingsSaving ? "disabled=\"disabled\"" : "tabindex=\"0\"", title);
+}
+
+bool SettingsController::handleRemoteRadio(::Rml::Element *element)
+{
+    if (attribute(element, "data-setting") != "discord/spam-filter") return false;
+    const auto value = Core::TokenUtils::parseId(attribute(element, "data-value"));
+    if (!readyClient(shell) || remoteSettingsSaving || element->HasAttribute("disabled") || !value || *value > 3) return true;
+    Proto::PreloadedSettingsEdit edit;
+    edit.dmSpamFilter = static_cast<uint32_t>(*value);
+    patchRemoteSettings(std::move(edit));
+    return true;
 }
 
 void SettingsController::renderFriendRequests(std::string &rml)

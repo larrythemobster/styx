@@ -521,6 +521,24 @@ TEST_CASE("Friend request preferences do not overwrite passwordless or contact s
     REQUIRE(toHex(*patch.value) == "420c4a020801520208005a02080e");
 }
 
+TEST_CASE("Spam filter and message request defaults are written beside unrelated settings", "[proto]")
+{
+    // text_and_images keeps its BoolValue field 2; privacy is created for field 17.
+    const auto current = snapshotFromHex("320412020801");
+    PreloadedSettingsEdit edit;
+    edit.dmSpamFilter = TextAndImagesSettings::SpamFilterEveryone;
+    edit.defaultMessageRequestRestricted = true;
+    const auto patch = preloadedSettingsPatch(current, edit);
+    REQUIRE(patch.success());
+    REQUIRE(toHex(*patch.value) == "320712020801d8010342058a01020801");
+    ProtoReader reader(*patch.value);
+    const auto parsed = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(parsed.textAndImages.has_value());
+    CHECK(parsed.textAndImages->dmSpamFilter == TextAndImagesSettings::SpamFilterEveryone);
+    REQUIRE(parsed.privacy.has_value());
+    CHECK(parsed.privacy->defaultMessageRequestRestricted == true);
+}
+
 TEST_CASE("Per-server privacy changes retain every unrelated restriction and privacy field", "[proto]")
 {
     using Kind = GuildPrivacyEdit::Kind;

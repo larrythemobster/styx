@@ -41,6 +41,8 @@ struct PreloadedSettingsEdit
     std::optional<std::vector<Core::Snowflake>> restrictedGuildIds;
     std::optional<uint32_t> friendSourceFlags;
     std::optional<uint32_t> friendDiscoveryFlags;
+    std::optional<bool> defaultMessageRequestRestricted;
+    std::optional<uint32_t> dmSpamFilter; // TextAndImagesSettings::DmSpamFilter
     std::optional<std::vector<GuildFolder>> guildFolders;
     std::optional<std::string> locale;
     std::optional<std::vector<Core::Snowflake>> guildPositions;
