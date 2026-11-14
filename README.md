@@ -24,6 +24,21 @@ support is incomplete. Calls and streaming still need more live testing.
 > Third-party clients violate Discord's Terms of Service and may put your account
 > at risk. Styx is not affiliated with Discord.
 
+## Local credentials and logs
+
+Discord tokens and proxy usernames and passwords are stored in the operating
+system's credential store. SQLite keeps proxy endpoints and credential references,
+not proxy passwords. Unlock the system credential store before starting Styx.
+
+Existing proxy credentials migrate automatically. Migration removes plaintext
+credentials from Styx's active account database and WAL, but cannot clean copies
+in backups or snapshots.
+
+Older versions logged complete gateway payloads, including private messages and
+voice-session credentials. Treat existing `styx.log` files and rotated copies as
+private. Do not attach them to public issues. Remove old copies you no longer need
+and replace any credentials exposed through shared logs or database backups.
+
 ## Features
 
 - Multiple accounts with account switching.
@@ -78,6 +93,13 @@ scripts\build-windows.bat configure
 Run `build\styx.exe`, keeping its DLLs and resources beside it. For later builds,
 run `scripts\build-windows.bat` without `configure`. Set `BUILD_DIR` to override
 `build`. Linux and macOS build configurations are in the [CI workflow](.github/workflows/build.yml).
+
+The credential tests use the native credential store with disposable entries.
+
+```bat
+cmake --build build --target TestAccountRepository TestGatewayLogging TestProxy
+ctest --test-dir build -R "^(AccountRepositoryTests|GatewayLoggingTests|ProxyTests)$" --output-on-failure
+```
 
 To run the renderer and animation tests from an MSVC prompt:
 
