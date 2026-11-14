@@ -45,11 +45,18 @@ inline constexpr int TotpPasswordAcceptedCode = 60005;
 // The password check succeeds when Discord answers with TotpPasswordAcceptedCode.
 [[nodiscard]] Core::Result<void> totpPasswordCheckResult(const HttpResponse &response);
 
+// A backup code; consumed ones have already been used to sign in.
+struct BackupCode
+{
+    std::string code;
+    bool consumed = false;
+};
+
 struct TotpEnabled
 {
     std::string token;
     // Shown once after setup; never stored or logged.
-    std::vector<std::string> backupCodes;
+    std::vector<BackupCode> backupCodes;
 };
 // Enabling replaces the session token; reject one for another user.
 [[nodiscard]] Core::Result<TotpEnabled> totpEnableResult(const HttpResponse &response, Core::Snowflake userId);
@@ -79,5 +86,17 @@ struct MfaProof
 
 // Removing the authenticator replaces the session token as well.
 [[nodiscard]] Core::Result<std::string> totpDisableResult(const HttpResponse &response, Core::Snowflake userId);
+
+// Viewing backup codes later: the password makes Discord email a verification key and return one
+// single-use nonce for viewing and one for generating new codes. Each lasts 30 minutes.
+struct BackupCodeNonces
+{
+    std::string view;
+    std::string regenerate;
+};
+[[nodiscard]] Core::Result<BackupCodeNonces> backupCodesChallengeResult(const HttpResponse &response);
+// POST /users/@me/mfa/codes-verification with the emailed key and the nonce for the action.
+[[nodiscard]] nlohmann::json backupCodesBody(const std::string &key, const std::string &nonce, bool regenerate);
+[[nodiscard]] Core::Result<std::vector<BackupCode>> backupCodesResult(const HttpResponse &response);
 
 } // namespace Styx::Discord

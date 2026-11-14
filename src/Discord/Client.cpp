@@ -1035,6 +1035,23 @@ void Client::verifyMfa(const std::string &ticket, const MfaProof &proof, ResultC
         });
 }
 
+void Client::requestBackupCodes(const std::string &password, ResultCallback<BackupCodeNonces> callback)
+{
+    httpClient->send(HttpClient::Method::POST, "/auth/verify/view-backup-codes-challenge", nlohmann::json{{"password", password}}.dump(), {},
+        [callback = std::move(callback)](const HttpResponse &response) {
+            if (callback) callback(backupCodesChallengeResult(response));
+        });
+}
+
+void Client::fetchBackupCodes(const std::string &key, const std::string &nonce, bool regenerate,
+                              ResultCallback<std::vector<BackupCode>> callback)
+{
+    httpClient->send(HttpClient::Method::POST, "/users/@me/mfa/codes-verification", backupCodesBody(key, nonce, regenerate).dump(), {},
+        [callback = std::move(callback)](const HttpResponse &response) {
+            if (callback) callback(backupCodesResult(response));
+        });
+}
+
 void Client::modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback)
 {
     RequestOptions options;

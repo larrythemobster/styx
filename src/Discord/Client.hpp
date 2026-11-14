@@ -264,6 +264,11 @@ public:
     void disableTotp(const std::string &mfaAuthorization, GuardedCallback<std::string> callback);
     // Confirms a challenge; the result is sent as X-Discord-MFA-Authorization (valid for five minutes).
     void verifyMfa(const std::string &ticket, const MfaProof &proof, ResultCallback<std::string> callback);
+    // Backup codes: the password makes Discord email a verification key; the key and a nonce then
+    // show the codes, or replace them when regenerate is set.
+    void requestBackupCodes(const std::string &password, ResultCallback<BackupCodeNonces> callback);
+    void fetchBackupCodes(const std::string &key, const std::string &nonce, bool regenerate,
+                          ResultCallback<std::vector<BackupCode>> callback);
     void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
     void modifyUserGuildSettings(Snowflake guildId, const UserGuildSettingsEdit &edit, ActionCallback callback = {});
     void modifyCurrentMember(Snowflake guildId, const CurrentMemberEdit &edit,

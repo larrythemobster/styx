@@ -71,6 +71,16 @@ Core::Result<T> apiFailure(const HttpResponse &response)
     auto error = ApiError::fromResponse(response);
     return Core::Result<T>::makeError(std::move(error.message), error.code);
 }
+
+std::vector<BackupCode> backupCodesFrom(const nlohmann::json &codes)
+{
+    std::vector<BackupCode> result;
+    result.reserve(codes.size());
+    for (const auto &entry : codes)
+        if (entry.is_object() && entry.contains("code") && entry["code"].is_string())
+            result.push_back({entry["code"].get<std::string>(), entry.value("consumed", false)});
+    return result;
+}
 }
 
 std::string totpSecretFromBytes(const std::vector<unsigned char> &bytes)
@@ -162,9 +172,7 @@ Core::Result<TotpEnabled> totpEnableResult(const HttpResponse &response, Core::S
     if (!token.success()) return Core::Result<TotpEnabled>::makeError(std::move(token.error));
     TotpEnabled enabled{std::move(*token.value), {}};
     if (const auto codes = body.find("backup_codes"); codes != body.end() && codes->is_array())
-        for (const auto &entry : *codes)
-            if (entry.is_object() && entry.contains("code") && entry["code"].is_string())
-                enabled.backupCodes.push_back(entry["code"].get<std::string>());
+        enabled.backupCodes = backupCodesFrom(*codes);
     return Core::Result<TotpEnabled>::makeOk(std::move(enabled));
 }
 
@@ -227,6 +235,35 @@ Core::Result<std::string> totpDisableResult(const HttpResponse &response, Core::
 {
     if (!response.success) return apiFailure<std::string>(response);
     return sessionToken(nlohmann::json::parse(response.body, nullptr, false), userId);
+}
+
+Core::Result<BackupCodeNonces> backupCodesChallengeResult(const HttpResponse &response)
+{
+    if (!response.success) return apiFailure<BackupCodeNonces>(response);
+    const auto body = nlohmann::json::parse(response.body, nullptr, false);
+    auto text = [&body](const char *key) {
+        const auto it = body.is_object() ? body.find(key) : body.end();
+        return it != body.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    BackupCodeNonces nonces{text("nonce"), text("regenerate_nonce")};
+    if (nonces.view.empty() || nonces.regenerate.empty())
+        return Core::Result<BackupCodeNonces>::makeError("Discord didn't start the backup code check. Try again.");
+    return Core::Result<BackupCodeNonces>::makeOk(std::move(nonces));
+}
+
+nlohmann::json backupCodesBody(const std::string &key, const std::string &nonce, bool regenerate)
+{
+    return {{"key", key}, {"nonce", nonce}, {"regenerate", regenerate}};
+}
+
+Core::Result<std::vector<BackupCode>> backupCodesResult(const HttpResponse &response)
+{
+    if (!response.success) return apiFailure<std::vector<BackupCode>>(response);
+    const auto body = nlohmann::json::parse(response.body, nullptr, false);
+    const auto codes = body.is_object() ? body.find("backup_codes") : body.end();
+    if (codes == body.end() || !codes->is_array() || codes->empty())
+        return Core::Result<std::vector<BackupCode>>::makeError("Discord didn't return the backup codes. Try again.");
+    return Core::Result<std::vector<BackupCode>>::makeOk(backupCodesFrom(*codes));
 }
 
 } // namespace Styx::Discord

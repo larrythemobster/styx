@@ -984,6 +984,12 @@ input.account-password-input:disabled
 	padding: 6dp 0;
 }
 
+.account-mfa-code.consumed
+{
+	color: #80848e;
+	text-decoration: line-through;
+}
+
 .settings-btn.account-info-reveal
 {
 	height: auto;

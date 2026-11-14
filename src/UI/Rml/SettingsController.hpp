@@ -2,6 +2,7 @@
 
 #include "Controller.hpp"
 #include "Core/Snowflake.hpp"
+#include "Discord/AccountSecurity.hpp"
 #include "Core/Theme/Appearance.hpp"
 #include "Keybinds.hpp"
 #include "Platform/Native.hpp"
@@ -123,9 +124,12 @@ private:
                             std::string code, std::string authorization);
     void finishPasswordRequest(const std::string &error);
     void showPasswordError(const std::string &message);
-    // Authenticator app setup/removal: runs the step that's on screen.
+    // Authenticator app setup/removal and backup codes: runs the step that's on screen.
     void submitMfaStep();
     void finishMfaRequest(const std::string &error);
+    [[nodiscard]] const char *mfaSubmitLabel() const;
+    // Replaces the backup codes on screen with new ones, after confirmation.
+    void regenerateBackupCodes();
     void clearMfaFlow();
     void renderKeybindRow(std::string &rml, KeybindAction action);
     void refreshKeybinds();
@@ -160,16 +164,21 @@ private:
     // Outcome of the last password or authenticator change, shown for that account only.
     std::string securityNotice;
     Core::Snowflake securityNoticeAccount;
-    // Authenticator app flow. The password, secret and Discord's confirmation are held only between
-    // its steps and the backup codes only until the user leaves them; clearMfaFlow wipes them all.
-    enum class MfaStep { None, Password, Setup, BackupCodes, Remove };
+    // Authenticator app and backup code flows. The password, secret, emailed key, nonces and Discord's
+    // confirmation are held only between their steps and the backup codes only until the user leaves
+    // them; clearMfaFlow wipes them all. BackupCodes follows setup; BackupPassword, BackupKey and
+    // BackupList show the codes again later.
+    enum class MfaStep { None, Password, Setup, BackupCodes, Remove, BackupPassword, BackupKey, BackupList };
     MfaStep mfaStep = MfaStep::None;
     bool mfaBusy = false;
     std::uint64_t mfaRequest = 0;
     std::string mfaPassword;
     std::string mfaSecret;
     std::string mfaAuthorization;
-    std::vector<std::string> mfaBackupCodes;
+    std::string backupKey;
+    std::string backupNonce;
+    std::string backupRegenerateNonce;
+    std::vector<Discord::BackupCode> mfaBackupCodes;
     bool colorDragging = false;
     double pickerHue = 0;
     double pickerSaturation = 0;
