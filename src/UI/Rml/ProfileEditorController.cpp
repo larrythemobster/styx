@@ -42,6 +42,13 @@ void setControlDisabled(::Rml::Element *element, bool disabled)
         element->SetPseudoClass("disabled", disabled);
 }
 
+// Profile banners and per-server avatars, banners, pronouns and bios come with Nitro (not Classic or
+// Basic). An account whose plan isn't known isn't restricted; Discord still checks on save.
+bool hasFullNitro(const Discord::User &user)
+{
+    return user.premiumType.isUndefined() || (user.premiumType.hasValue() && user.premiumType.get() == Discord::PremiumType::TIER_2);
+}
+
 } // namespace
 
 ProfileEditorController::ProfileEditorController(Shell &shell, ::Rml::Element &host)
@@ -94,6 +101,7 @@ void ProfileEditorController::open(Core::Snowflake guildId, Core::Snowflake acco
     editingAccountId = inst ? inst->accountId() : Core::Snowflake::Invalid;
 
     visible = true;
+    nitroFeatures = !inst || hasFullNitro(inst->discord()->getMe());
 
     if (!editingAccountId.isValid() || inst->discord()->getMe().id.get() != editingAccountId) {
         error = editingAccountId.isValid() ? "Account is not ready. Retry after it connects." : "No active account.";
@@ -226,7 +234,8 @@ void ProfileEditorController::setupEventListeners()
             return;
         }
 
-        if (loading || saving || !editingAccountId.isValid())
+        // Disabled buttons still deliver clicks here, e.g. a banner picker without Nitro.
+        if (loading || saving || !editingAccountId.isValid() || actionEl->HasAttribute("disabled"))
             return;
 
         if (action == "choose-avatar") {
@@ -332,18 +341,23 @@ void ProfileEditorController::render()
 
     if (auto *label = regionRoot->GetElementById("profile-edit-name-label"))
         label->SetInnerRML(editingGuildId.isValid() ? "Server Nickname" : "Display Name");
+    // Without Nitro a server profile keeps only its nickname, and the main profile has no banner (the
+    // banner hint under its picker says so). Existing values stay editable so they can be cleared.
+    const bool serverIdentity = !editingGuildId.isValid() || nitroFeatures;
     if (auto *note = regionRoot->GetElementById("profile-edit-scope-note")) {
-        note->SetInnerRML("Changes apply only to this server. Empty fields use your main profile.");
+        note->SetInnerRML(serverIdentity ? "Changes apply only to this server. Empty fields use your main profile."
+                                         : "Changes apply only to this server. Server avatars, banners, pronouns and bios need Nitro; "
+                                           "you can still change your nickname.");
         note->SetProperty("display", editingGuildId.isValid() ? "block" : "none");
     }
     const bool busy = loading || saving || !editingAccountId.isValid() || !hasSavedData;
     setControlDisabled(nameInput(), busy || !nicknameEditable);
-    setControlDisabled(pronounsInput(), busy);
-    setControlDisabled(bioTextarea(), busy);
-    setControlDisabled(chooseAvatarButton(), busy);
+    setControlDisabled(pronounsInput(), busy || (!serverIdentity && savedProfile.pronouns.get().empty()));
+    setControlDisabled(bioTextarea(), busy || (!serverIdentity && (!savedProfile.bio.hasValue() || savedProfile.bio->empty())));
+    setControlDisabled(chooseAvatarButton(), busy || !serverIdentity);
     setControlDisabled(removeAvatarButton(), busy || avatarDraft.removed ||
         (avatarDraft.uri.empty() && baselineAvatar().empty()));
-    setControlDisabled(chooseBannerButton(), busy);
+    setControlDisabled(chooseBannerButton(), busy || !nitroFeatures);
     setControlDisabled(removeBannerButton(), busy || bannerDraft.removed ||
         (bannerDraft.uri.empty() && (!currentBanner.hasValue() || currentBanner->empty())));
     setControlDisabled(saveButton(), busy || !hasPendingChanges());

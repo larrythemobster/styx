@@ -86,6 +86,8 @@ private:
     std::string error;
     Core::Snowflake editingGuildId;
     bool nicknameEditable = true;
+    // The editing account has full Nitro (or its plan isn't known): banners and server identities.
+    bool nitroFeatures = true;
 
     Discord::User savedUser;
     Discord::UserProfileData savedProfile;
