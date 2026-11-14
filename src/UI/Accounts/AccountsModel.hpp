@@ -36,7 +36,7 @@ public:
     void removeAccount(int row);
     void setConnectionState(int row, Core::ConnectionState state);
     void setAutoConnect(int row, bool enabled);
-    void setProxy(int row, const Core::ProxyConfig &proxy);
+    Core::Result<void> setProxy(int row, const Core::ProxyConfig &proxy);
     bool moveAccount(int sourceRow, int targetRow);
 
     Platform::Signal<int> changed;

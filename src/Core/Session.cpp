@@ -14,7 +14,7 @@ Session::Session()
     animatedImageCache->setCacheLimitMiB(Settings::getInt(Settings::Keys::AnimationCacheMb, AnimatedImageCache::CacheLimit.fallback));
     animatedImageCache->setAnimationLimitMiB(Settings::getInt(Settings::Keys::AnimationMaxMb, AnimatedImageCache::AnimationLimit.fallback));
     for (const auto &acc : repo.getAllAccounts())
-        imageManager->setAccountProxy(acc.id, acc.proxy);
+        if (acc.proxyError.empty()) imageManager->setAccountProxy(acc.id, acc.proxy);
 }
 Session::~Session() { shutdown(); }
 void Session::start() { Core::log(Core::LogLevel::Debug, LogCore) << "Session started"; }
@@ -38,6 +38,10 @@ void Session::connectAccount(Snowflake accountId)
     AccountInfo acc = repo.getAccount(accountId);
     if (!acc.id.isValid()) {
         Core::log(Core::LogLevel::Warning, LogCore) << "Account not found: " << accountId.toString();
+        return;
+    }
+    if (!acc.proxyError.empty()) {
+        connectFailed(accountId, acc.proxyError);
         return;
     }
     auto token = TokenStore::loadToken(accountId);
@@ -80,10 +84,11 @@ void Session::autoConnectAccounts()
 {
     for (const auto &acc : repo.getAllAccounts()) if (acc.autoConnect) connectAccount(acc.id);
 }
-void Session::setAccountProxy(Snowflake accountId, const ProxyConfig &proxy)
+Result<void> Session::setAccountProxy(Snowflake accountId, const ProxyConfig &proxy)
 {
-    repo.updateProxy(accountId, proxy);
-    imageManager->setAccountProxy(accountId, proxy);
+    auto result = repo.updateProxy(accountId, proxy);
+    if (result.success()) imageManager->setAccountProxy(accountId, proxy);
+    return result;
 }
 void Session::disconnectAccount(Snowflake accountId)
 {

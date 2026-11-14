@@ -895,7 +895,14 @@ void AccountsController::handleSaveProxy()
         }
         return;
     }
-    model->setProxy(model->rowForId(activeTargetAccountId), *parsed);
+    auto result = model->setProxy(model->rowForId(activeTargetAccountId), *parsed);
+    if (!result.success()) {
+        if (err) {
+            err->SetInnerRML(escape(result.error));
+            err->SetProperty("display", "block");
+        }
+        return;
+    }
     switchView(ViewMode::Accounts);
 }
 

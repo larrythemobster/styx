@@ -21,6 +21,7 @@ struct AccountInfo
     std::string cdnUrl = "https://cdn.discordapp.com";
 
     ProxyConfig proxy;
+    std::string proxyError;
 
     int displayOrder = 0;
     bool autoConnect = false;

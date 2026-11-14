@@ -24,7 +24,7 @@ public:
     void connectAccount(Snowflake accountId);
     void disconnectAccount(Snowflake accountId);
     void autoConnectAccounts();
-    void setAccountProxy(Snowflake accountId, const ProxyConfig &proxy);
+    Result<void> setAccountProxy(Snowflake accountId, const ProxyConfig &proxy);
     [[nodiscard]] std::vector<ClientInstance *> getClients() const;
     [[nodiscard]] ClientInstance *client(Snowflake accountId) const;
     [[nodiscard]] AccountInfo getAccountInfo(Snowflake accountId);

@@ -548,6 +548,9 @@ if(BUILD_TESTS)
     styx_test(TestEphemeralMessages EphemeralMessageTests tests/tst_EphemeralMessages.cpp
         src/Core/EphemeralMessages.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageSearch MessageSearchTests tests/tst_MessageSearch.cpp src/Discord/MessageSearch.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
+    styx_test(TestAccountRepository AccountRepositoryTests tests/tst_AccountRepository.cpp
+        src/Storage/AccountRepository.cpp src/Storage/DatabaseManager.cpp src/Storage/Transaction.cpp
+        src/Core/TokenStore.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp)
     add_executable(TestGatewayLogging tests/tst_GatewayLogging.cpp
         src/Discord/Gateway.cpp src/Discord/Voice/VoiceGateway.cpp src/Discord/IngestThread.cpp
         src/Discord/CurlUtils.cpp src/Discord/ClientIdentity.cpp src/Discord/CdnUrls.cpp
@@ -567,7 +570,8 @@ if(BUILD_TESTS)
         src/Storage/DatabaseManager.cpp src/Storage/BaseRepository.cpp
         src/Storage/Transaction.cpp src/Storage/UserRepository.cpp
         src/Storage/ChannelRepository.cpp
-        src/Storage/MessageRepository.cpp src/Core/PollVotes.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp)
+        src/Storage/MessageRepository.cpp src/Core/PollVotes.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp
+        src/Storage/AccountRepository.cpp src/Core/TokenStore.cpp src/Core/ProxyConfig.cpp)
     styx_test(TestFavoriteGifs FavoriteGifTests tests/tst_FavoriteGifs.cpp
         src/Core/Gifs/FavoriteGifRules.cpp src/UI/Gifs/GifMasonryLayout.cpp
         src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)

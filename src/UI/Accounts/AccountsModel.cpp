@@ -61,7 +61,11 @@ Result<void> AccountsModel::addAccount(const AccountInfo &account)
     newAccount.displayOrder = maxOrder + 1;
 
     AccountRepository repo;
-    repo.saveAccount(newAccount);
+    saved = repo.saveAccount(newAccount);
+    if (!saved.success()) {
+        TokenStore::deleteToken(account.id);
+        return saved;
+    }
     repo.clearHeartbeatSession(newAccount.id);
     session->getImageManager()->setAccountProxy(newAccount.id, newAccount.proxy);
     newAccount.token.clear();
@@ -97,13 +101,17 @@ void AccountsModel::setAutoConnect(int row, bool enabled)
     changed.publish(row);
 }
 
-void AccountsModel::setProxy(int row, const ProxyConfig &proxy)
+Result<void> AccountsModel::setProxy(int row, const ProxyConfig &proxy)
 {
-    if (!accountAt(row) || accounts[row].proxy == proxy ||
-        accounts[row].state != ConnectionState::Disconnected) return;
+    if (!accountAt(row) || accounts[row].state != ConnectionState::Disconnected)
+        return Result<void>::makeError("Disconnect this account before changing its proxy.");
+    if (accounts[row].proxy == proxy && accounts[row].proxyError.empty()) return Result<void>::makeOk();
+    auto result = session->setAccountProxy(accounts[row].id, proxy);
+    if (!result.success()) return result;
     accounts[row].proxy = proxy;
-    session->setAccountProxy(accounts[row].id, proxy);
+    accounts[row].proxyError.clear();
     changed.publish(row);
+    return result;
 }
 
 bool AccountsModel::moveAccount(int sourceRow, int targetRow)

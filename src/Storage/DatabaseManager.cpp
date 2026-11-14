@@ -6,6 +6,7 @@
 #include "Core/Logging.hpp"
 #include "Platform/Paths.hpp"
 #include "Transaction.hpp"
+#include "AccountRepository.hpp"
 
 namespace Styx {
 namespace Storage {
@@ -49,11 +50,30 @@ bool DatabaseManager::init()
 
         m_persistentDb.execute("PRAGMA journal_mode = WAL");
         m_persistentDb.execute("PRAGMA synchronous = NORMAL");
+        m_persistentDb.execute("PRAGMA secure_delete = ON");
 
         setupPersistentTables();
+        {
+            auto version = m_persistentDb.prepare("PRAGMA user_version");
+            if (!version.step()) throw std::runtime_error("Unable to read database version");
+            if (version.getInt(0) == 0) {
+                version = {};
+                if (!AccountRepository::migrateLegacyProxies(m_persistentDb)) {
+                    m_persistentDb.close();
+                    return false;
+                }
+                m_persistentDb.execute("VACUUM");
+                auto checkpoint = m_persistentDb.prepare("PRAGMA wal_checkpoint(TRUNCATE)");
+                if (!checkpoint.step() || checkpoint.getInt(0) != 0)
+                    throw std::runtime_error("Unable to truncate database WAL after proxy migration");
+                checkpoint = {};
+                m_persistentDb.execute("PRAGMA user_version = 1");
+            }
+        }
         return true;
-    } catch (const Platform::SqliteError &e) {
+    } catch (const std::exception &e) {
         Core::log(Core::LogLevel::Error, LogDB) << "Persistent DB init exception:" << e.what();
+        m_persistentDb.close();
         return false;
     }
 }
@@ -169,6 +189,9 @@ void DatabaseManager::setupPersistentTables()
 
     if (!columnExists(m_persistentDb, "accounts", "proxy_url"))
         m_persistentDb.execute("ALTER TABLE accounts ADD COLUMN proxy_url TEXT");
+    if (!columnExists(m_persistentDb, "accounts", "proxy_credential_key"))
+        m_persistentDb.execute("ALTER TABLE accounts ADD COLUMN proxy_credential_key TEXT");
+
 
     if (!columnExists(m_persistentDb, "accounts", "heartbeat_session_id")) {
         m_persistentDb.execute("ALTER TABLE accounts ADD COLUMN heartbeat_session_id TEXT");
