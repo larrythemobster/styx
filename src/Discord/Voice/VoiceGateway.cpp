@@ -157,7 +157,7 @@ void VoiceGateway::sendPayload(VoiceOpCode op, const Core::OrderedJson &d)
     obj.insert("d", d);
 
     std::string json = obj.toBytes();
-    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice >>>" << json;
+    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice >>> opcode" << op << "bytes" << json.size();
     sendPayload(json);
 }
 
@@ -168,12 +168,11 @@ void VoiceGateway::sendPayload(const std::string &data)
 
 void VoiceGateway::onPayloadReceived(const nlohmann::json &root)
 {
-    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice <<<" << root.dump();
-
     if (root.contains("seq") && root["seq"].is_number_integer())
         lastReceivedSeq = root["seq"].get<int>();
 
     int op = root.value("op", -1);
+    Core::log(Core::LogLevel::Debug, LogVoice) << "Voice <<< opcode" << op;
     const auto d = root.value("d", nlohmann::json{});
 
     switch (static_cast<VoiceOpCode>(op)) {

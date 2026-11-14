@@ -148,9 +148,8 @@ void Gateway::sendPayload(const std::string &data)
 
 void Gateway::onPayloadReceived(const nlohmann::json &root)
 {
-    Core::log(Core::LogLevel::Debug, LogDiscord) << "Received payload" << root.dump();
-
     Inbound msg = Inbound::fromJson(root);
+    Core::log(Core::LogLevel::Debug, LogDiscord) << "Received gateway opcode" << msg.opcode;
 
     if (msg.s.has_value())
         lastReceivedSequence = msg.s.value();

@@ -548,6 +548,21 @@ if(BUILD_TESTS)
     styx_test(TestEphemeralMessages EphemeralMessageTests tests/tst_EphemeralMessages.cpp
         src/Core/EphemeralMessages.cpp src/Core/Snowflake.cpp)
     styx_test(TestMessageSearch MessageSearchTests tests/tst_MessageSearch.cpp src/Discord/MessageSearch.cpp src/Discord/CdnUrls.cpp src/Core/Snowflake.cpp)
+    add_executable(TestGatewayLogging tests/tst_GatewayLogging.cpp
+        src/Discord/Gateway.cpp src/Discord/Voice/VoiceGateway.cpp src/Discord/IngestThread.cpp
+        src/Discord/CurlUtils.cpp src/Discord/ClientIdentity.cpp src/Discord/CdnUrls.cpp
+        src/Discord/ApplicationCommands.cpp src/Discord/ComponentInteraction.cpp src/Discord/PollProtocol.cpp
+        src/Discord/GroupDm.cpp src/Discord/ApiError.cpp
+        src/Core/OrderedJson.cpp src/Core/ProxyConfig.cpp src/Core/Snowflake.cpp src/Core/Logging.cpp
+        src/Proto/ProtoReader.cpp src/Proto/ProtoWriter.cpp src/Proto/PreloadedSettings.cpp
+        src/Proto/UserSettings.cpp src/Proto/FrecencySettings.cpp)
+    target_include_directories(TestGatewayLogging PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(TestGatewayLogging PRIVATE styx_platform Catch2::Catch2WithMain ZLIB::ZLIB)
+    if(MSVC)
+        target_compile_options(TestGatewayLogging PRIVATE /utf-8 /bigobj)
+    endif()
+    styx_deploy_curl(TestGatewayLogging)
+    add_test(NAME GatewayLoggingTests COMMAND TestGatewayLogging)
     styx_test(TestMessageCache MessageCacheTests tests/tst_MessageCache.cpp
         src/Storage/DatabaseManager.cpp src/Storage/BaseRepository.cpp
         src/Storage/Transaction.cpp src/Storage/UserRepository.cpp
