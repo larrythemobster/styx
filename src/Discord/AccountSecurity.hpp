@@ -3,6 +3,7 @@
 #include "Core/Result.hpp"
 #include "Core/Snowflake.hpp"
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -17,6 +18,8 @@ struct HttpResponse;
 inline constexpr int MfaRequiredCode = 60003;
 // Discord's answer to a password-only TOTP enable request when the password is right.
 inline constexpr int TotpPasswordAcceptedCode = 60005;
+// Private user flag: text message codes are enabled as a second factor.
+inline constexpr std::int64_t MfaSmsFlag = std::int64_t(1) << 4;
 
 // What is wrong with a password change before it is sent, if anything. New passwords
 // are 8 to 72 characters and must be typed the same way twice.
@@ -98,5 +101,9 @@ struct BackupCodeNonces
 // POST /users/@me/mfa/codes-verification with the emailed key and the nonce for the action.
 [[nodiscard]] nlohmann::json backupCodesBody(const std::string &key, const std::string &nonce, bool regenerate);
 [[nodiscard]] Core::Result<std::vector<BackupCode>> backupCodesResult(const HttpResponse &response);
+
+// POST /users/@me/mfa/sms/enable or /disable answer 204; text message codes need the
+// authenticator app and a verified phone number first.
+[[nodiscard]] Core::Result<void> smsMfaResult(const HttpResponse &response);
 
 } // namespace Styx::Discord

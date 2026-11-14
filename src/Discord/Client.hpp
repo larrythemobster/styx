@@ -269,6 +269,8 @@ public:
     void requestBackupCodes(const std::string &password, ResultCallback<BackupCodeNonces> callback);
     void fetchBackupCodes(const std::string &key, const std::string &nonce, bool regenerate,
                           ResultCallback<std::vector<BackupCode>> callback);
+    // Text message codes as a second factor, confirmed with the password (and Discord's challenge).
+    void setSmsMfa(bool enable, const std::string &password, const std::string &mfaAuthorization, GuardedCallback<void> callback);
     void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
     void modifyUserGuildSettings(Snowflake guildId, const UserGuildSettingsEdit &edit, ActionCallback callback = {});
     void modifyCurrentMember(Snowflake guildId, const CurrentMemberEdit &edit,

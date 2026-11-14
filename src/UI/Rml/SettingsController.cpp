@@ -39,6 +39,7 @@
 #include "Platform/Dispatcher.hpp"
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <cmath>
 #include <random>
 #include <sstream>
@@ -491,6 +492,33 @@ void SettingsController::renderMyAccount(std::string &rml)
         } else {
             row("Multi-Factor Authentication", muted("Unknown"));
         }
+        // Text message codes (reference 012) need the authenticator and a verified phone number.
+        if (mfaOn && mfaStep != MfaStep::BackupCodes) {
+            const bool smsOn = (self.flags.valueOr(0) & Discord::MfaSmsFlag) != 0;
+            const bool hasPhone = self.phone.hasValue() && !self.phone->empty();
+            if (mfaStep == MfaStep::SmsEnable || mfaStep == MfaStep::SmsRemove) {
+                row("SMS Authentication", smsOn ? Rml::escape(std::string("Enabled")) : muted("Not enabled"));
+                mfaForm(std::string("<div class=\"settings-description\">") +
+                    (mfaStep == MfaStep::SmsEnable
+                        ? "Discord will also accept a code sent by text message to " + Rml::escape(Core::maskPhone(self.phone.valueOr(""))) +
+                          " when you sign in. Confirm with your password."
+                        : std::string("Discord will stop sending sign-in codes by text message. Confirm with your password.")) +
+                    "</div>" + input("account-mfa-password", "Password", "password") +
+                    formatRml("<div class=\"account-password-mfa%1\"><label class=\"settings-label\" for=\"account-mfa-code\">"
+                        "Authentication or backup code</label><input id=\"account-mfa-code\" class=\"account-password-input\" "
+                        "type=\"text\" maxlength=\"16\"/></div>", std::string(mfaNeedsCode ? " open" : "")));
+            } else if (!self.flags.hasValue()) {
+                row("SMS Authentication", muted("Unknown"));
+            } else if (smsOn) {
+                row("SMS Authentication", Rml::escape(std::string("Enabled")), "<button class=\"settings-btn settings-btn-secondary\" "
+                    "data-action=\"sms-remove\" aria-label=\"Remove text message codes\"><span class=\"settings-btn-label\">Remove</span></button>");
+            } else if (hasPhone) {
+                row("SMS Authentication", muted("Not enabled"), "<button class=\"settings-btn settings-btn-secondary\" "
+                    "data-action=\"sms-enable\" aria-label=\"Enable text message codes\"><span class=\"settings-btn-label\">Enable</span></button>");
+            } else {
+                row("SMS Authentication", muted("Add a verified phone number in the official Discord app first"));
+            }
+        }
         // Backup codes (reference 012): Discord emails a key before showing them again.
         if (mfaOn && mfaStep != MfaStep::BackupCodes) {
             if (mfaStep == MfaStep::BackupPassword || mfaStep == MfaStep::BackupKey || mfaStep == MfaStep::BackupList)
@@ -511,8 +539,13 @@ void SettingsController::renderMyAccount(std::string &rml)
                              : "<button class=\"settings-btn settings-btn-secondary\" data-action=\"backup-regenerate\">"
                                "<span class=\"settings-btn-label\">Generate New Codes</span></button>");
         }
-        rml += "<div class=\"settings-description\">Changing your username, email or phone number, SMS and security-key sign-in "
-               "and logged-in devices aren't available in Styx yet. Use the official Discord app for them.</div>";
+        if (ready) {
+            row("Security Keys", muted("Not available in Styx"));
+            rml += "<div class=\"settings-description\">Discord signs in with security keys and passkeys through WebAuthn, "
+                   "which Styx can't use. Add or remove them in the official Discord app.</div>";
+        }
+        rml += "<div class=\"settings-description\">Changing your username, email or phone number and logged-in devices "
+               "aren't available in Styx yet. Use the official Discord app for them.</div>";
     }
 
     rml += "<div class=\"account-info-divider\"></div>";
@@ -1736,6 +1769,58 @@ void setFormBusy(::Rml::Element *root, const char *form, const char *submitLabel
     }
     if (auto *label = root->QuerySelector(std::string(form) + " .settings-btn-primary .settings-btn-label")) label->SetInnerRML(submitLabel);
 }
+
+// An account change Discord may guard with a confirmation. A typed code answers an authenticator
+// challenge; accounts without a second factor confirm with their password. The change is sent
+// again with the confirmation, once.
+template <typename T>
+struct GuardedChange
+{
+    std::function<void(Discord::Client &, const std::string &authorization, Discord::Client::GuardedCallback<T>)> send;
+    std::function<Discord::Client *()> client;
+    std::function<bool()> current;
+    std::string password;
+    // Empty until the form has asked for one.
+    std::string code;
+    // The outcome. Also runs once the request is no longer current, so replacement tokens are kept.
+    std::function<void(const Core::Result<T> &)> finish;
+    std::function<void()> askForCode;
+};
+
+template <typename T>
+void failGuardedChange(const GuardedChange<T> &change, const char *error)
+{
+    change.finish(Core::Result<T>::makeError(error));
+}
+
+template <typename T>
+void runGuardedChange(std::shared_ptr<const GuardedChange<T>> change, const std::string &authorization = {})
+{
+    auto *client = change->client();
+    if (!client) { failGuardedChange(*change, "The account disconnected. Try again."); return; }
+    const bool confirmed = !authorization.empty();
+    change->send(*client, authorization, [change, confirmed](const Core::Result<T> &result,
+                                                            const std::optional<Discord::MfaRequirement> &challenge) {
+        if (!challenge) { change->finish(result); return; }
+        if (!change->current()) return;
+        if (confirmed) { failGuardedChange(*change, "Discord didn't accept the confirmation. Try again."); return; }
+        const bool usesCode = challenge->totp || challenge->backup;
+        if (!usesCode && !challenge->password) {
+            failGuardedChange(*change, "Discord asked for a security key or a text message code, which Styx can't provide. "
+                                       "Use the official Discord app for this change.");
+            return;
+        }
+        if (usesCode && change->code.empty()) { change->askForCode(); return; }
+        auto *client = change->client();
+        if (!client) { failGuardedChange(*change, "The account disconnected. Try again."); return; }
+        client->verifyMfa(challenge->ticket, usesCode ? Discord::mfaCodeProof(change->code) : Discord::mfaPasswordProof(change->password),
+            [change](const Core::Result<std::string> &verified) {
+                if (!change->current()) return;
+                if (!verified.success()) { change->finish(Core::Result<T>::makeError(verified.error, verified.code)); return; }
+                runGuardedChange(change, *verified.value);
+            });
+    });
+}
 }
 
 void SettingsController::showPasswordError(const std::string &message)
@@ -1781,64 +1866,47 @@ void SettingsController::submitPasswordChange()
     passwordSaving = true;
     setFormBusy(regionRoot, "#account-password-form", "Updating...", true);
     showPasswordError("");
-    sendPasswordChange(++passwordRequest, instance->accountId(), current->GetValue(), next->GetValue(),
-                       passwordNeedsCode ? code->GetValue() : std::string(), {});
-}
 
-void SettingsController::sendPasswordChange(std::uint64_t request, Core::Snowflake account, std::string current, std::string next,
-                                            std::string code, std::string authorization)
-{
-    auto *client = readyClient(shell);
-    if (!client) { finishPasswordRequest("The account disconnected. Try again."); return; }
+    const auto account = instance->accountId();
+    const auto request = ++passwordRequest;
     Platform::Guard<SettingsController> self(this);
     Platform::Guard<Core::Session> session(shell.session());
-    const bool confirmed = !authorization.empty();
-    client->changePassword(current, next, authorization, [self, session, account, request, current, next, code = std::move(code), confirmed](
-                               const Core::Result<std::string> &result, const std::optional<Discord::MfaRequirement> &challenge) {
-        if (!challenge) {
-            const std::string error = result.success() ? adoptReplacementToken(session, account, *result.value) : result.error;
-            if (!self || self->passwordRequest != request) return;
-            if (!result.success()) { self->finishPasswordRequest(error); return; }
-            self->passwordSaving = false;
-            self->passwordFormOpen = false;
-            self->securityNotice = error.empty()
-                ? "Password changed. Discord signed out your other devices; Styx is reconnecting with the new sign-in."
-                : error;
-            self->securityNoticeAccount = account;
-            if (self->shell.isSettingsOpen() && self->currentSection == Section::MyAccount) self->render();
-            self->requestRender();
-            return;
-        }
-        if (!self || self->passwordRequest != request) return;
-        if (confirmed) { self->finishPasswordRequest("Discord didn't accept the confirmation. Try again."); return; }
-        const bool usesCode = challenge->totp || challenge->backup;
-        if (!usesCode && !challenge->password) {
-            self->finishPasswordRequest("Discord asked for a security key or a text message code, which Styx can't provide. "
-                                        "Change the password in the official Discord app.");
-            return;
-        }
-        if (usesCode && code.empty()) {
-            self->passwordNeedsCode = true;
-            if (auto *field = self->regionRoot->GetElementById("account-password-mfa")) field->SetClass("open", true);
-            self->finishPasswordRequest("");
-            return;
-        }
-        auto *client = readyClient(self->shell);
-        if (!client) { self->finishPasswordRequest("The account disconnected. Try again."); return; }
-        // Accounts without a second factor confirm with the password they just typed.
-        client->verifyMfa(challenge->ticket, usesCode ? Discord::mfaCodeProof(code) : Discord::mfaPasswordProof(current),
-            [self, account, request, current, next](const Core::Result<std::string> &verified) {
-                if (!self || self->passwordRequest != request) return;
-                if (!verified.success()) { self->finishPasswordRequest(verified.error); return; }
-                self->sendPasswordChange(request, account, current, next, {}, *verified.value);
-            });
-    });
+    auto isCurrent = [self, request] { return self && self->passwordRequest == request; };
+    auto change = std::make_shared<GuardedChange<std::string>>();
+    change->send = [current = current->GetValue(), next = next->GetValue()](Discord::Client &client, const std::string &authorization,
+                                                                          Discord::Client::GuardedCallback<std::string> callback) {
+        client.changePassword(current, next, authorization, std::move(callback));
+    };
+    change->client = [self] { return self ? readyClient(self->shell) : nullptr; };
+    change->current = isCurrent;
+    change->password = current->GetValue();
+    if (passwordNeedsCode) change->code = code->GetValue();
+    change->finish = [self, session, account, isCurrent](const Core::Result<std::string> &result) {
+        const std::string error = result.success() ? adoptReplacementToken(session, account, *result.value) : result.error;
+        if (!isCurrent()) return;
+        if (!result.success()) { self->finishPasswordRequest(error); return; }
+        self->passwordSaving = false;
+        self->passwordFormOpen = false;
+        self->securityNotice = error.empty()
+            ? "Password changed. Discord signed out your other devices; Styx is reconnecting with the new sign-in."
+            : error;
+        self->securityNoticeAccount = account;
+        if (self->shell.isSettingsOpen() && self->currentSection == Section::MyAccount) self->render();
+        self->requestRender();
+    };
+    change->askForCode = [self] {
+        self->passwordNeedsCode = true;
+        if (auto *field = self->regionRoot->GetElementById("account-password-mfa")) field->SetClass("open", true);
+        self->finishPasswordRequest("");
+    };
+    runGuardedChange<std::string>(std::move(change));
 }
 
 void SettingsController::clearMfaFlow()
 {
     mfaStep = MfaStep::None;
     mfaBusy = false;
+    mfaNeedsCode = false;
     ++mfaRequest;
     // Overwrite before releasing: a password, a second-factor secret, the emailed key and recovery codes.
     for (auto *secret : {&mfaPassword, &mfaSecret, &mfaAuthorization, &backupKey, &backupNonce, &backupRegenerateNonce}) {
@@ -1857,6 +1925,7 @@ const char *SettingsController::mfaSubmitLabel() const
     case MfaStep::Setup: return "Activate";
     case MfaStep::BackupPassword: return "Send Key";
     case MfaStep::BackupKey: return "Show Codes";
+    case MfaStep::SmsEnable: return "Enable";
     default: return "Remove";
     }
 }
@@ -1870,7 +1939,7 @@ void SettingsController::finishMfaRequest(const std::string &error)
     setFormBusy(regionRoot, ".account-mfa-form", mfaSubmitLabel(), false);
     // Re-enabled inputs only accept focus once their styles have been updated.
     if (auto *context = regionRoot->GetContext()) context->Update();
-    for (const char *id : {"account-mfa-password", "account-mfa-code", "account-mfa-key"})
+    for (const char *id : {mfaNeedsCode ? "account-mfa-code" : "account-mfa-password", "account-mfa-code", "account-mfa-key"})
         if (auto *input = regionRoot->GetElementById(id)) { input->Focus(); break; }
 }
 
@@ -1996,6 +2065,37 @@ void SettingsController::submitMfaStep()
                 });
             });
         });
+    } else if (mfaStep == MfaStep::SmsEnable || mfaStep == MfaStep::SmsRemove) {
+        const bool enable = mfaStep == MfaStep::SmsEnable;
+        auto password = value("account-mfa-password");
+        auto code = value("account-mfa-code");
+        if (password.empty()) { finishMfaRequest("Enter your password."); return; }
+        if (mfaNeedsCode && code.empty()) { finishMfaRequest("Enter a code from your authenticator app or a backup code."); return; }
+        mfaBusy = true;
+        setFormBusy(regionRoot, ".account-mfa-form", enable ? "Enabling..." : "Removing...", true);
+        auto change = std::make_shared<GuardedChange<void>>();
+        change->send = [enable, password](Discord::Client &client, const std::string &authorization, Discord::Client::GuardedCallback<void> callback) {
+            client.setSmsMfa(enable, password, authorization, std::move(callback));
+        };
+        change->client = [self] { return self ? readyClient(self->shell) : nullptr; };
+        change->current = current;
+        change->password = password;
+        if (mfaNeedsCode) change->code = std::move(code);
+        change->finish = [self, current, account, enable](const Core::Result<void> &result) {
+            if (!current()) return;
+            if (!result.success()) { self->finishMfaRequest(result.error); return; }
+            self->clearMfaFlow();
+            self->securityNotice = enable ? "Text message codes enabled. Discord can now send sign-in codes to your phone."
+                                          : "Text message codes removed.";
+            self->securityNoticeAccount = account;
+            if (self->shell.isSettingsOpen() && self->currentSection == Section::MyAccount) self->render();
+        };
+        change->askForCode = [self] {
+            self->mfaNeedsCode = true;
+            if (auto *field = self->regionRoot->QuerySelector(".account-mfa-form .account-password-mfa")) field->SetClass("open", true);
+            self->finishMfaRequest("");
+        };
+        runGuardedChange<void>(std::move(change));
     } else if (mfaStep == MfaStep::BackupPassword) {
         auto password = value("account-mfa-password");
         if (password.empty()) { finishMfaRequest("Enter your password."); return; }
@@ -2131,10 +2231,10 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         if (auto *edit = regionRoot->QuerySelector("button[data-action=\"open-password-form\"]")) edit->Focus();
     } else if (action == std::string("submit-password")) {
         submitPasswordChange();
-    } else if (action == std::string("mfa-enable") || action == std::string("mfa-remove") || action == std::string("backup-show")) {
+    } else if (action == "mfa-enable" || action == "mfa-remove" || action == "backup-show" || action == "sms-enable" || action == "sms-remove") {
         clearMfaFlow();
-        mfaStep = action == std::string("mfa-enable") ? MfaStep::Password
-                : action == std::string("mfa-remove") ? MfaStep::Remove : MfaStep::BackupPassword;
+        mfaStep = action == "mfa-enable" ? MfaStep::Password : action == "mfa-remove" ? MfaStep::Remove
+                : action == "sms-enable" ? MfaStep::SmsEnable : action == "sms-remove" ? MfaStep::SmsRemove : MfaStep::BackupPassword;
         securityNotice.clear();
         render();
         if (auto *input = regionRoot->QuerySelector(".account-mfa-form input")) input->Focus();
@@ -2149,12 +2249,19 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
             [self, request] { if (self && self->mfaRequest == request) self->regenerateBackupCodes(); }, nullptr, true);
     } else if (action == std::string("mfa-cancel") || action == std::string("mfa-done")) {
         if (mfaBusy) return;
-        const char *focus = mfaStep == MfaStep::BackupCodes || mfaStep == MfaStep::Remove ? "button[data-action=\"mfa-remove\"]"
-                          : mfaStep == MfaStep::Password || mfaStep == MfaStep::Setup ? "button[data-action=\"mfa-enable\"]"
-                          : "button[data-action=\"backup-show\"]";
+        // Focus returns to the button that opened the flow.
+        const char *opener = [this] {
+            switch (mfaStep) {
+            case MfaStep::BackupCodes: case MfaStep::Remove: return "mfa-remove";
+            case MfaStep::Password: case MfaStep::Setup: return "mfa-enable";
+            case MfaStep::SmsEnable: return "sms-enable";
+            case MfaStep::SmsRemove: return "sms-remove";
+            default: return "backup-show";
+            }
+        }();
         clearMfaFlow();
         render();
-        if (auto *button = regionRoot->QuerySelector(focus)) button->Focus();
+        if (auto *button = regionRoot->QuerySelector(std::string("button[data-action=\"") + opener + "\"]")) button->Focus();
     } else if (action == std::string("mfa-copy-key")) {
         Platform::Desktop::setClipboardText(mfaSecret);
     } else if (action == std::string("mfa-copy-codes")) {

@@ -1052,6 +1052,29 @@ void Client::fetchBackupCodes(const std::string &key, const std::string &nonce, 
         });
 }
 
+void Client::setSmsMfa(bool enable, const std::string &password, const std::string &mfaAuthorization, GuardedCallback<void> callback)
+{
+    RequestOptions options;
+    options.mfaAuthorization = mfaAuthorization;
+    Platform::Guard<Client> self(this);
+    httpClient->send(HttpClient::Method::POST, enable ? "/users/@me/mfa/sms/enable" : "/users/@me/mfa/sms/disable",
+        nlohmann::json{{"password", password}}.dump(), options,
+        [self, enable, callback = std::move(callback)](const HttpResponse &response) {
+            if (auto challenge = mfaChallenge(response)) {
+                if (callback) callback(Core::Result<void>::makeError("Discord asked to confirm this change.", MfaRequiredCode), challenge);
+                return;
+            }
+            auto result = smsMfaResult(response);
+            // Discord announces the change with USER_UPDATE, which isn't followed yet, so apply it here.
+            if (result.success() && self) {
+                const std::int64_t flags = self->me.flags.valueOr(0);
+                self->me.flags = enable ? flags | MfaSmsFlag : flags & ~MfaSmsFlag;
+                self->currentUserUpdated.publish(self->me);
+            }
+            if (callback) callback(result, std::nullopt);
+        });
+}
+
 void Client::modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback)
 {
     RequestOptions options;

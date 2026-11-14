@@ -266,4 +266,9 @@ Core::Result<std::vector<BackupCode>> backupCodesResult(const HttpResponse &resp
     return Core::Result<std::vector<BackupCode>>::makeOk(backupCodesFrom(*codes));
 }
 
+Core::Result<void> smsMfaResult(const HttpResponse &response)
+{
+    return response.success ? Core::Result<void>::makeOk() : apiFailure<void>(response);
+}
+
 } // namespace Styx::Discord

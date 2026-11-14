@@ -117,14 +117,12 @@ private:
     void clearSliderHint();
     void handleSelectChange(::Rml::Element *selectEl);
     void handleAction(const std::string &action, ::Rml::Element *target);
-    void submitPasswordChange();
     // Sends the change, confirming Discord's challenge with the typed code (or the password on
     // accounts without a second factor) and retrying with the confirmation.
-    void sendPasswordChange(std::uint64_t request, Core::Snowflake account, std::string current, std::string next,
-                            std::string code, std::string authorization);
+    void submitPasswordChange();
     void finishPasswordRequest(const std::string &error);
     void showPasswordError(const std::string &message);
-    // Authenticator app setup/removal and backup codes: runs the step that's on screen.
+    // Authenticator app, text message codes and backup codes: runs the step that's on screen.
     void submitMfaStep();
     void finishMfaRequest(const std::string &error);
     [[nodiscard]] const char *mfaSubmitLabel() const;
@@ -164,11 +162,13 @@ private:
     // Outcome of the last password or authenticator change, shown for that account only.
     std::string securityNotice;
     Core::Snowflake securityNoticeAccount;
-    // Authenticator app and backup code flows. The password, secret, emailed key, nonces and Discord's
-    // confirmation are held only between their steps and the backup codes only until the user leaves
-    // them; clearMfaFlow wipes them all. BackupCodes follows setup; BackupPassword, BackupKey and
-    // BackupList show the codes again later.
-    enum class MfaStep { None, Password, Setup, BackupCodes, Remove, BackupPassword, BackupKey, BackupList };
+    // Authenticator app, text message and backup code flows. The password, secret, emailed key, nonces
+    // and Discord's confirmation are held only between their steps and the backup codes only until the
+    // user leaves them; clearMfaFlow wipes them all. BackupCodes follows setup; BackupPassword,
+    // BackupKey and BackupList show the codes again later.
+    enum class MfaStep { None, Password, Setup, BackupCodes, Remove, BackupPassword, BackupKey, BackupList, SmsEnable, SmsRemove };
+    // Discord asked the text message step for an authenticator or backup code.
+    bool mfaNeedsCode = false;
     MfaStep mfaStep = MfaStep::None;
     bool mfaBusy = false;
     std::uint64_t mfaRequest = 0;

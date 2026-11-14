@@ -41,6 +41,8 @@ struct User : Core::JsonUtils::JsonObject
     Field<std::string, true, true> email;
     Field<std::string, true, true> phone;
     Field<bool, true> verified;
+    // Private account flags, also only on the current user's object.
+    Field<std::int64_t, true> flags;
 
     // Required identity fields may be omitted in private-channel user updates.
     unsigned char identityFieldsPresent = 7;
@@ -66,6 +68,7 @@ struct User : Core::JsonUtils::JsonObject
         get(obj, "email", user.email);
         get(obj, "phone", user.phone);
         get(obj, "verified", user.verified);
+        get(obj, "flags", user.flags);
         return user;
     }
 
