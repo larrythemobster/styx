@@ -266,9 +266,41 @@ Core::Result<std::vector<BackupCode>> backupCodesResult(const HttpResponse &resp
     return Core::Result<std::vector<BackupCode>>::makeOk(backupCodesFrom(*codes));
 }
 
-Core::Result<void> smsMfaResult(const HttpResponse &response)
+Core::Result<void> emptyResult(const HttpResponse &response)
 {
     return response.success ? Core::Result<void>::makeOk() : apiFailure<void>(response);
+}
+
+Core::Result<std::vector<AuthSession>> authSessionsResult(const HttpResponse &response)
+{
+    if (!response.success) return apiFailure<std::vector<AuthSession>>(response);
+    const auto body = nlohmann::json::parse(response.body, nullptr, false);
+    const auto list = body.is_object() ? body.find("user_sessions") : body.end();
+    if (list == body.end() || !list->is_array())
+        return Core::Result<std::vector<AuthSession>>::makeError("Discord didn't return the device list. Try again.");
+    auto text = [](const nlohmann::json &object, const char *key) {
+        const auto it = object.find(key);
+        return it != object.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    std::vector<AuthSession> sessions;
+    sessions.reserve(list->size());
+    for (const auto &entry : *list) {
+        if (!entry.is_object()) continue;
+        AuthSession session{text(entry, "id_hash"), text(entry, "approx_last_used_time"), {}, {}, {}};
+        if (session.idHash.empty()) continue;
+        if (const auto info = entry.find("client_info"); info != entry.end() && info->is_object()) {
+            session.os = text(*info, "os");
+            session.platform = text(*info, "platform");
+            session.location = text(*info, "location");
+        }
+        sessions.push_back(std::move(session));
+    }
+    return Core::Result<std::vector<AuthSession>>::makeOk(std::move(sessions));
+}
+
+nlohmann::json authSessionsLogoutBody(const std::vector<std::string> &idHashes)
+{
+    return {{"session_id_hashes", idHashes}};
 }
 
 } // namespace Styx::Discord

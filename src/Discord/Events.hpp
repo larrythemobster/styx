@@ -45,6 +45,8 @@ struct Ready : Core::JsonUtils::JsonObject
     Field<std::vector<Relationship>> relationships;
     Field<std::string> sessionId;
     Field<std::string> resumeGatewayUrl;
+    // Identifies this login among the account's sessions (GET /auth/sessions).
+    Field<std::string, true> authSessionIdHash;
     Field<std::unordered_map<Core::Snowflake, std::string>> notes;
 
     static Ready fromJson(const nlohmann::json &obj)
@@ -62,6 +64,7 @@ struct Ready : Core::JsonUtils::JsonObject
         get(obj, "relationships", ready.relationships);
         get(obj, "session_id", ready.sessionId);
         get(obj, "resume_gateway_url", ready.resumeGatewayUrl);
+        get(obj, "auth_session_id_hash", ready.authSessionIdHash);
         get(obj, "notes", ready.notes);
 
         if (obj.contains("read_state")) {

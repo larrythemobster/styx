@@ -219,6 +219,8 @@ public:
 
     [[nodiscard]] const Proto::PreloadedUserSettings &getSettings() const;
     [[nodiscard]] const User &getMe() const;
+    // This login's id hash from READY, to tell it apart in the device list; empty when unknown.
+    [[nodiscard]] const std::string &authSessionIdHash() const { return currentAuthSession; }
     [[nodiscard]] bool isPremium() const;
 
     template <typename T>
@@ -271,6 +273,9 @@ public:
                           ResultCallback<std::vector<BackupCode>> callback);
     // Text message codes as a second factor, confirmed with the password (and Discord's challenge).
     void setSmsMfa(bool enable, const std::string &password, const std::string &mfaAuthorization, GuardedCallback<void> callback);
+    // Logged-in devices, and logging some of them out (at most MaxSessionsPerLogout at a time).
+    void fetchAuthSessions(ResultCallback<std::vector<AuthSession>> callback);
+    void logoutAuthSessions(const std::vector<std::string> &idHashes, ActionCallback callback);
     void modifyCurrentUserProfile(const UserProfileEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<UserProfileData> callback = {});
     void modifyUserGuildSettings(Snowflake guildId, const UserGuildSettingsEdit &edit, ActionCallback callback = {});
     void modifyCurrentMember(Snowflake guildId, const CurrentMemberEdit &edit,
@@ -538,6 +543,7 @@ private:
 
     Proto::PreloadedUserSettings settings;
     User me;
+    std::string currentAuthSession;
 
     bool appFocused = true;
     bool voiceConnected = false;

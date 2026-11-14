@@ -129,6 +129,10 @@ private:
     // Replaces the backup codes on screen with new ones, after confirmation.
     void regenerateBackupCodes();
     void clearMfaFlow();
+    // Logged-in devices: (re)loads the list, and logs the given sessions out after confirmation.
+    void loadDevices();
+    void logoutDevices(std::vector<std::string> idHashes);
+    void hideDevices();
     void renderKeybindRow(std::string &rml, KeybindAction action);
     void refreshKeybinds();
     void stopRecordingKeybind();
@@ -179,6 +183,13 @@ private:
     std::string backupNonce;
     std::string backupRegenerateNonce;
     std::vector<Discord::BackupCode> mfaBackupCodes;
+    // Account page device list, fetched each time it is opened; hidden again on leaving the page.
+    enum class DevicesState { Hidden, Loading, Loaded, Failed };
+    DevicesState devicesState = DevicesState::Hidden;
+    std::vector<Discord::AuthSession> devices;
+    std::string devicesError;
+    std::uint64_t devicesRequest = 0;
+    bool devicesBusy = false;
     bool colorDragging = false;
     double pickerHue = 0;
     double pickerSaturation = 0;

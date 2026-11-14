@@ -176,3 +176,20 @@ TEST_CASE("Viewing backup codes needs both of Discord's nonces and returns the c
     CHECK_FALSE(backupCodesResult(response(200, R"({"backup_codes":[]})")).success());
     CHECK(backupCodesResult(response(400, R"({"code":50035,"message":"Invalid verification key"})")).code == 50035);
 }
+
+TEST_CASE("Logged-in devices keep what Discord knows and skip sessions that can't be logged out", "[account]")
+{
+    const auto sessions = authSessionsResult(response(200, R"({"user_sessions":[
+        {"id_hash":"h1","approx_last_used_time":"2024-03-30T21:30:58.100231+00:00","client_info":{"os":"Windows","platform":"Discord Client","location":"Winnipeg, Manitoba, Canada"}},
+        {"id_hash":"h2","approx_last_used_time":"2024-03-01T00:00:00+00:00","client_info":{"os":null,"platform":"Firefox","location":null}},
+        {"approx_last_used_time":"2024-03-01T00:00:00+00:00"}]})"));
+    REQUIRE(sessions.success());
+    REQUIRE(sessions.value->size() == 2);
+    CHECK(sessions.value->at(0).idHash == "h1");
+    CHECK(sessions.value->at(0).location == "Winnipeg, Manitoba, Canada");
+    CHECK(sessions.value->at(1).os.empty());
+    CHECK(sessions.value->at(1).platform == "Firefox");
+    CHECK_FALSE(authSessionsResult(response(200, R"({"sessions":[]})")).success());
+    CHECK(authSessionsResult(response(401, R"({"code":0,"message":"401: Unauthorized"})")).error == "401: Unauthorized");
+    CHECK(authSessionsLogoutBody({"h1", "h2"}) == nlohmann::json::parse(R"({"session_id_hashes":["h1","h2"]})"));
+}

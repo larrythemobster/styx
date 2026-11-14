@@ -3,6 +3,7 @@
 #include "Core/Result.hpp"
 #include "Core/Snowflake.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -102,8 +103,23 @@ struct BackupCodeNonces
 [[nodiscard]] nlohmann::json backupCodesBody(const std::string &key, const std::string &nonce, bool regenerate);
 [[nodiscard]] Core::Result<std::vector<BackupCode>> backupCodesResult(const HttpResponse &response);
 
-// POST /users/@me/mfa/sms/enable or /disable answer 204; text message codes need the
-// authenticator app and a verified phone number first.
-[[nodiscard]] Core::Result<void> smsMfaResult(const HttpResponse &response);
+// Requests Discord answers with 204, such as enabling text message codes (which needs the
+// authenticator app and a verified phone number) or logging devices out.
+[[nodiscard]] Core::Result<void> emptyResult(const HttpResponse &response);
+
+// A logged-in device (GET /auth/sessions). Client fields are null when Discord doesn't know them.
+struct AuthSession
+{
+    std::string idHash;
+    std::string lastUsed; // ISO 8601
+    std::string os;
+    std::string platform;
+    std::string location;
+};
+// Sessions without an id hash can't be logged out and are skipped.
+[[nodiscard]] Core::Result<std::vector<AuthSession>> authSessionsResult(const HttpResponse &response);
+// POST /auth/sessions/logout takes 1 to 64 hashes.
+[[nodiscard]] nlohmann::json authSessionsLogoutBody(const std::vector<std::string> &idHashes);
+inline constexpr std::size_t MaxSessionsPerLogout = 64;
 
 } // namespace Styx::Discord

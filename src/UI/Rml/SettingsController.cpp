@@ -27,6 +27,7 @@
 #include "Core/Theme/Scale.hpp"
 #include "Core/Theme/Tokens.hpp"
 #include "Core/UserManager.hpp"
+#include "Core/TimeUtils.hpp"
 #include "Core/TokenStore.hpp"
 #include "Discord/CdnUrls.hpp"
 #include "Discord/Entities.hpp"
@@ -142,6 +143,7 @@ SettingsController::SettingsController(Shell &shell, ::Rml::Element *root)
         if (!passwordSaving) passwordFormOpen = false;
         // Backup codes stay up across the reconnect that follows enabling the authenticator.
         if (!mfaBusy && mfaStep != MfaStep::BackupCodes) clearMfaFlow();
+        hideDevices();
         remoteSettingsSaving = false;
         remoteSettingsError.clear();
         bindAccountSettings();
@@ -197,6 +199,7 @@ void SettingsController::onSettingsOpenChanged(bool open)
         colorPickerOpen = false;
         stopRecordingKeybind();
         if (!mfaBusy) clearMfaFlow();
+        hideDevices();
         regionRoot->SetClass("open", false);
         regionRoot->SetProperty("display", "none");
         if (previousFocus) previousFocus->Focus();
@@ -219,6 +222,7 @@ void SettingsController::setSection(Section section)
     emailRevealed = phoneRevealed = false;
     if (!passwordSaving) passwordFormOpen = false;
     if (!mfaBusy) clearMfaFlow();
+    hideDevices();
     securityNotice.clear();
     currentSubsection.clear();
     render();
@@ -544,8 +548,65 @@ void SettingsController::renderMyAccount(std::string &rml)
             rml += "<div class=\"settings-description\">Discord signs in with security keys and passkeys through WebAuthn, "
                    "which Styx can't use. Add or remove them in the official Discord app.</div>";
         }
-        rml += "<div class=\"settings-description\">Changing your username, email or phone number and logged-in devices "
-               "aren't available in Styx yet. Use the official Discord app for them.</div>";
+        // Logged-in devices (reference 011), loaded when opened.
+        if (ready && devicesState == DevicesState::Hidden) {
+            row("Logged-in Devices", std::string(), "<button class=\"settings-btn settings-btn-secondary\" data-action=\"devices-show\">"
+                "<span class=\"settings-btn-label\">Show Devices</span></button>");
+        } else if (ready) {
+            row("Logged-in Devices", std::string(), "<button class=\"settings-btn settings-btn-secondary\" data-action=\"devices-hide\">"
+                "<span class=\"settings-btn-label\">Hide</span></button>");
+            rml += "<div class=\"account-password-form account-devices\">";
+            if (devicesState == DevicesState::Loading) {
+                rml += "<div class=\"settings-description\">Loading devices...</div>";
+            } else if (devicesState == DevicesState::Failed) {
+                rml += "<div class=\"settings-keybind-error\" role=\"alert\">" + Rml::escape(devicesError) + "</div>"
+                       "<div class=\"settings-button-group\"><button class=\"settings-btn settings-btn-secondary\" data-action=\"devices-show\">"
+                       "<span class=\"settings-btn-label\">Try Again</span></button></div>";
+            } else {
+                const std::string &currentHash = inst->discord()->authSessionIdHash();
+                auto device = [&rml](const Discord::AuthSession &session, bool removable) {
+                    const bool mobile = session.os == "iOS" || session.os == "Android";
+                    std::string title = Rml::escape(session.os.empty() ? std::string("Unknown device") : session.os);
+                    if (!session.platform.empty())
+                        title += " <span class=\"account-device-platform\">\xE2\x80\xA2 " + Rml::escape(session.platform) + "</span>";
+                    std::string detail = Rml::escape(session.location.empty() ? std::string("Unknown location") : session.location);
+                    if (removable)
+                        if (const auto used = Core::TimeUtils::relativeTime(Platform::DateTime::parse(session.lastUsed)); !used.empty())
+                            detail += " \xE2\x80\xA2 " + Rml::escape(used);
+                    rml += formatRml("<div class=\"account-device\"><div class=\"account-device-icon\"><img src=\"icon:%1\"/></div>"
+                        "<div class=\"account-device-text\"><div class=\"account-device-title\">%2</div><div class=\"account-device-detail\">%3</div></div>",
+                        std::string(mobile ? "phone" : "monitor"), title, detail);
+                    if (removable)
+                        rml += formatRml("<button class=\"account-device-logout\" data-action=\"device-logout\" "
+                            "data-session=\"%1\" title=\"Log out this device\" aria-label=\"Log out this device\"><img src=\"icon:x\"/></button>",
+                            Rml::escape(session.idHash));
+                    rml += "</div>";
+                };
+                rml += "<div class=\"settings-description\">These are all the devices that are currently logged in with your Discord account. "
+                       "Log out of devices you don't recognize.</div><div class=\"account-devices-heading\">Current Device</div>";
+                const auto current = std::ranges::find(devices, currentHash, &Discord::AuthSession::idHash);
+                if (!currentHash.empty() && current != devices.end())
+                    device(*current, false);
+                else
+                    rml += "<div class=\"settings-description\">Styx couldn't find this login in Discord's list.</div>";
+                rml += "<div class=\"account-devices-heading\">Other Devices</div>";
+                const bool others = std::ranges::any_of(devices, [&](const auto &session) { return session.idHash != currentHash; });
+                for (const auto &session : devices)
+                    if (session.idHash != currentHash) device(session, true);
+                if (!others) {
+                    rml += "<div class=\"settings-description\">No other devices are logged in.</div>";
+                } else {
+                    rml += "<div class=\"account-devices-heading\">Log out of all known devices</div>"
+                           "<div class=\"settings-description\">You'll have to log back in on all logged out devices.</div>"
+                           "<div class=\"settings-button-group\"><button class=\"settings-btn settings-btn-danger\" data-action=\"devices-logout-all\">"
+                           "<span class=\"settings-btn-label\">Log Out All Known Devices</span></button></div>";
+                }
+                rml += "<div id=\"account-devices-error\" class=\"settings-keybind-error\" role=\"alert\"></div>";
+            }
+            rml += "</div>";
+        }
+        rml += "<div class=\"settings-description\">Changing your username, email or phone number isn't available in Styx yet. "
+               "Use the official Discord app for it.</div>";
     }
 
     rml += "<div class=\"account-info-divider\"></div>";
@@ -2133,6 +2194,67 @@ void SettingsController::submitMfaStep()
     }
 }
 
+void SettingsController::hideDevices()
+{
+    devicesState = DevicesState::Hidden;
+    devices.clear();
+    devicesError.clear();
+    devicesBusy = false;
+    ++devicesRequest;
+}
+
+void SettingsController::loadDevices()
+{
+    auto *client = readyClient(shell);
+    if (!client) return;
+    devicesState = DevicesState::Loading;
+    devicesBusy = false;
+    const auto request = ++devicesRequest;
+    Platform::Guard<SettingsController> self(this);
+    client->fetchAuthSessions([self, request](const Core::Result<std::vector<Discord::AuthSession>> &result) {
+        if (!self || self->devicesRequest != request) return;
+        if (result.success()) {
+            self->devices = *result.value;
+            self->devicesState = DevicesState::Loaded;
+        } else {
+            self->devicesError = result.error;
+            self->devicesState = DevicesState::Failed;
+        }
+        if (!self->shell.isSettingsOpen() || self->currentSection != Section::MyAccount) return;
+        self->render();
+        if (auto *hide = self->regionRoot->QuerySelector("button[data-action=\"devices-hide\"]")) hide->Focus();
+    });
+    render();
+    if (auto *hide = regionRoot->QuerySelector("button[data-action=\"devices-hide\"]")) hide->Focus();
+}
+
+void SettingsController::logoutDevices(std::vector<std::string> idHashes)
+{
+    auto *client = readyClient(shell);
+    if (!client || devicesBusy || idHashes.empty()) return;
+    // Discord takes at most 64 per request; the refreshed list shows any that remain.
+    if (idHashes.size() > Discord::MaxSessionsPerLogout) idHashes.resize(Discord::MaxSessionsPerLogout);
+    devicesBusy = true;
+    ::Rml::ElementList buttons;
+    regionRoot->QuerySelectorAll(buttons, ".account-devices button");
+    for (auto *button : buttons) button->SetAttribute("disabled", "disabled");
+    const auto request = devicesRequest;
+    Platform::Guard<SettingsController> self(this);
+    client->logoutAuthSessions(idHashes, [self, request](const Core::Result<void> &result) {
+        if (!self || self->devicesRequest != request) return;
+        self->devicesBusy = false;
+        if (result.success()) {
+            self->loadDevices();
+            return;
+        }
+        ::Rml::ElementList buttons;
+        self->regionRoot->QuerySelectorAll(buttons, ".account-devices button");
+        for (auto *button : buttons) button->RemoveAttribute("disabled");
+        if (auto *error = self->regionRoot->GetElementById("account-devices-error")) error->SetInnerRML(Rml::escape(result.error));
+        self->requestRender();
+    });
+}
+
 void SettingsController::regenerateBackupCodes()
 {
     auto *client = readyClient(shell);
@@ -2262,6 +2384,36 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         clearMfaFlow();
         render();
         if (auto *button = regionRoot->QuerySelector(std::string("button[data-action=\"") + opener + "\"]")) button->Focus();
+    } else if (action == std::string("devices-show")) {
+        loadDevices();
+    } else if (action == std::string("devices-hide")) {
+        hideDevices();
+        render();
+        if (auto *show = regionRoot->QuerySelector("button[data-action=\"devices-show\"]")) show->Focus();
+    } else if (action == std::string("device-logout") || action == std::string("devices-logout-all")) {
+        auto *client = readyClient(shell);
+        if (!client || devicesBusy || devicesState != DevicesState::Loaded) return;
+        const bool all = action == std::string("devices-logout-all");
+        const std::string &currentHash = client->authSessionIdHash();
+        std::vector<std::string> hashes;
+        std::string body = "Every device except this one will have to log in again.";
+        if (all) {
+            for (const auto &session : devices)
+                if (session.idHash != currentHash) hashes.push_back(session.idHash);
+        } else {
+            const auto hash = target ? target->GetAttribute<std::string>("data-session", "") : std::string();
+            const auto session = std::ranges::find(devices, hash, &Discord::AuthSession::idHash);
+            if (session == devices.end() || hash == currentHash) return;
+            hashes.push_back(hash);
+            body = (session->os.empty() ? std::string("This device") : session->os) +
+                   (session->platform.empty() ? std::string() : " (" + session->platform + ")") + " will have to log in again.";
+        }
+        Platform::Guard<SettingsController> self(this);
+        const auto request = devicesRequest;
+        showConfirmModal(shell, all ? "Log out all known devices?" : "Log out this device?", body, "Log Out",
+            [self, request, hashes = std::move(hashes)] {
+                if (self && self->devicesRequest == request) self->logoutDevices(hashes);
+            }, nullptr, true);
     } else if (action == std::string("mfa-copy-key")) {
         Platform::Desktop::setClipboardText(mfaSecret);
     } else if (action == std::string("mfa-copy-codes")) {

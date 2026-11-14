@@ -990,6 +990,102 @@ input.account-password-input:disabled
 	text-decoration: line-through;
 }
 
+.account-devices-heading
+{
+	display: block;
+	margin: 20dp 0 8dp 0;
+	font-size: 14dp;
+	font-weight: bold;
+	color: #dbdee1;
+}
+
+.account-device
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding: 8dp 0;
+}
+
+.account-device-icon
+{
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 40dp;
+	height: 40dp;
+	margin-right: 12dp;
+	border-radius: 8dp;
+	background-color: #242428;
+}
+
+.account-device-icon img
+{
+	width: 22dp;
+	height: 22dp;
+	image-color: #dbdee1;
+}
+
+.account-device-text
+{
+	display: block;
+	flex: 1 1 0;
+}
+
+.account-device-title
+{
+	display: block;
+	font-size: 14dp;
+	font-weight: bold;
+	color: #f2f3f5;
+}
+
+.account-device-platform
+{
+	color: #dbdee1;
+	font-weight: normal;
+}
+
+.account-device-detail
+{
+	display: block;
+	margin-top: 2dp;
+	font-size: 12dp;
+	color: #b5bac1;
+}
+
+.account-device-logout
+{
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 32dp;
+	height: 32dp;
+	border: 1dp #000000;
+	border-radius: 4dp;
+	box-sizing: border-box;
+	background-color: #111214;
+	cursor: pointer;
+	tab-index: auto;
+}
+
+.account-device-logout:hover, .account-device-logout:focus
+{
+	background-color: #303035;
+}
+
+.account-device-logout[disabled]
+{
+	opacity: 0.5;
+}
+
+.account-device-logout img
+{
+	width: 18dp;
+	height: 18dp;
+	image-color: #dbdee1;
+}
+
 .settings-btn.account-info-reveal
 {
 	height: auto;

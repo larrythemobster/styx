@@ -313,6 +313,7 @@ void Client::onGatewayReady(const Ready &data)
     applyDiscordLocale();
 
     me = data.user;
+    currentAuthSession = data.authSessionIdHash.valueOr(std::string());
 
     ready.publish(data);
 }
@@ -1064,7 +1065,7 @@ void Client::setSmsMfa(bool enable, const std::string &password, const std::stri
                 if (callback) callback(Core::Result<void>::makeError("Discord asked to confirm this change.", MfaRequiredCode), challenge);
                 return;
             }
-            auto result = smsMfaResult(response);
+            auto result = emptyResult(response);
             // Discord announces the change with USER_UPDATE, which isn't followed yet, so apply it here.
             if (result.success() && self) {
                 const std::int64_t flags = self->me.flags.valueOr(0);
@@ -1072,6 +1073,21 @@ void Client::setSmsMfa(bool enable, const std::string &password, const std::stri
                 self->currentUserUpdated.publish(self->me);
             }
             if (callback) callback(result, std::nullopt);
+        });
+}
+
+void Client::fetchAuthSessions(ResultCallback<std::vector<AuthSession>> callback)
+{
+    httpClient->get("/auth/sessions", {}, [callback = std::move(callback)](const HttpResponse &response) {
+        if (callback) callback(authSessionsResult(response));
+    });
+}
+
+void Client::logoutAuthSessions(const std::vector<std::string> &idHashes, ActionCallback callback)
+{
+    httpClient->send(HttpClient::Method::POST, "/auth/sessions/logout", authSessionsLogoutBody(idHashes).dump(), {},
+        [callback = std::move(callback)](const HttpResponse &response) {
+            if (callback) callback(emptyResult(response));
         });
 }
 
