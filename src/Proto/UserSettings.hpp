@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -88,6 +89,14 @@ struct TextAndImagesSettings
     // DmSpamFilterV2: 0 unset (acts as NonFriends), 1 off, 2 non-friends, 3 everyone.
     enum DmSpamFilter : uint32_t { SpamFilterUnset = 0, SpamFilterOff = 1, SpamFilterNonFriends = 2, SpamFilterEveryone = 3 };
     uint32_t dmSpamFilter = SpamFilterUnset;
+    // Sensitive media filters: explicit_content_settings (29) and gore_content_settings (32), each
+    // holding an ExplicitContentRedaction for server channels, friend DMs and other DMs (fields 1-3).
+    enum Redaction : uint32_t { RedactionUnset = 0, RedactionShow = 1, RedactionBlur = 2, RedactionBlock = 3 };
+    enum ContentContext : uint32_t { ContextGuilds = 1, ContextFriendDms = 2, ContextOtherDms = 3 };
+    static constexpr uint32_t ExplicitContentField = 29;
+    static constexpr uint32_t GoreContentField = 32;
+    std::array<uint32_t, 3> explicitContent{}; // indexed by ContentContext - 1
+    std::array<uint32_t, 3> goreContent{};
     static TextAndImagesSettings fromProto(ProtoReader &reader);
 };
 

@@ -28,6 +28,15 @@ struct GuildFolderMove
     Kind kind = Kind::Folder;
 };
 
+// Edit one explicit-content or gore filter context. RedactionUnset restores Discord's default.
+// Unsupported filter fields, contexts and redactions are rejected by preloadedSettingsPatch.
+struct ContentFilterEdit
+{
+    uint32_t filterField = 0;
+    uint32_t context = 0;
+    uint32_t redaction = 0;
+};
+
 struct PreloadedSettingsEdit
 {
     std::optional<std::string> presenceStatus;
@@ -43,6 +52,7 @@ struct PreloadedSettingsEdit
     std::optional<uint32_t> friendDiscoveryFlags;
     std::optional<bool> defaultMessageRequestRestricted;
     std::optional<uint32_t> dmSpamFilter; // TextAndImagesSettings::DmSpamFilter
+    std::optional<ContentFilterEdit> contentFilter;
     std::optional<std::vector<GuildFolder>> guildFolders;
     std::optional<std::string> locale;
     std::optional<std::vector<Core::Snowflake>> guildPositions;

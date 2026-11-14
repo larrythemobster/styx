@@ -103,6 +103,35 @@ std::string encodeWrappedString(uint32_t fieldNumber, std::string_view value)
     return out.takeBytes();
 }
 
+// The text_and_images filter message (explicit or gore content) with one context's redaction
+// replaced, keeping the other contexts and unknown fields of every copy present in the group.
+Core::Result<std::string> editContentFilter(std::span<const uint8_t> groupPayload, const ContentFilterEdit &edit)
+{
+    using Filter = TextAndImagesSettings;
+    if ((edit.filterField != Filter::ExplicitContentField && edit.filterField != Filter::GoreContentField)
+        || edit.context < Filter::ContextGuilds || edit.context > Filter::ContextOtherDms
+        || edit.redaction > Filter::RedactionBlock)
+        return Core::Result<std::string>::makeError("Invalid sensitive media filter choice");
+
+    std::vector<WireField> groupFields;
+    if (!scanWireFields(groupPayload, groupFields))
+        return Core::Result<std::string>::makeError("Malformed text and image settings");
+    std::string nested;
+    for (const auto &field : groupFields) {
+        if (field.fieldNumber != edit.filterField || field.wireType != WireType::LENGTH_DELIMITED) continue;
+        std::vector<WireField> inner;
+        if (!scanWireFields(field.payloadSpan, inner))
+            return Core::Result<std::string>::makeError("Malformed content filter settings");
+        for (const auto &value : inner)
+            if (value.fieldNumber != edit.context)
+                nested.append(reinterpret_cast<const char *>(value.rawSpan.data()), value.rawSpan.size());
+    }
+    nested += encodeRawVarint(edit.context, edit.redaction);
+    ProtoWriter out;
+    out.writeBytes(edit.filterField, nested);
+    return Core::Result<std::string>::makeOk(out.takeBytes());
+}
+
 Core::Result<std::string> moveGuildFolder(std::span<const uint8_t> payload, const GuildFolderMove &move)
 {
     std::vector<WireField> groupFields;
@@ -197,6 +226,7 @@ bool PreloadedSettingsEdit::empty() const
         && !friendDiscoveryFlags.has_value()
         && !defaultMessageRequestRestricted.has_value()
         && !dmSpamFilter.has_value()
+        && !contentFilter.has_value()
         && !guildFolders.has_value()
         && !guildPrivacy.has_value()
         && !guildFolderMove.has_value()
@@ -335,7 +365,7 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
         || edit.friendSourceFlags.has_value()
         || edit.friendDiscoveryFlags.has_value()
         || edit.defaultMessageRequestRestricted.has_value();
-    const bool touchTextAndImages = edit.dmSpamFilter.has_value();
+    const bool touchTextAndImages = edit.dmSpamFilter.has_value() || edit.contentFilter.has_value();
 
     const bool touchStatus = edit.presenceStatus.has_value()
         || edit.customStatus.has_value()
@@ -372,7 +402,14 @@ Core::Result<std::string> preloadedSettingsPatch(const PreloadedSettingsSnapshot
         std::map<uint32_t, std::string> replacements;
 
         if (groupNumber == 6) {
-            replacements[27] = encodeRawVarint(27, *edit.dmSpamFilter);
+            if (edit.dmSpamFilter.has_value())
+                replacements[27] = encodeRawVarint(27, *edit.dmSpamFilter);
+            if (edit.contentFilter.has_value()) {
+                auto filter = editContentFilter(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(currentPayload.data()),
+                                                                         currentPayload.size()), *edit.contentFilter);
+                if (!filter.success()) return filter;
+                replacements[edit.contentFilter->filterField] = std::move(*filter.value);
+            }
         } else if (groupNumber == 8) {
             if (edit.restrictedGuildIds.has_value())
                 replacements[3] = encodePackedSnowflakes(3, *edit.restrictedGuildIds);

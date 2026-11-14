@@ -348,8 +348,22 @@ TextAndImagesSettings TextAndImagesSettings::fromProto(ProtoReader &reader)
     Tag tag;
     while (reader.readTag(tag)) {
         uint64_t value = 0;
+        std::span<const uint8_t> nested;
         if (tag.fieldNumber == 27 && tag.wireType == WireType::VARINT) {
             if (reader.readVarint(value)) settings.dmSpamFilter = static_cast<uint32_t>(value);
+        } else if ((tag.fieldNumber == ExplicitContentField || tag.fieldNumber == GoreContentField) &&
+                   tag.wireType == WireType::LENGTH_DELIMITED) {
+            if (!reader.readLengthDelimited(nested)) continue;
+            auto &target = tag.fieldNumber == ExplicitContentField ? settings.explicitContent : settings.goreContent;
+            ProtoReader inner(nested);
+            Tag innerTag;
+            while (inner.readTag(innerTag)) {
+                if (innerTag.fieldNumber >= ContextGuilds && innerTag.fieldNumber <= ContextOtherDms && innerTag.wireType == WireType::VARINT) {
+                    if (inner.readVarint(value)) target[innerTag.fieldNumber - 1] = static_cast<uint32_t>(value);
+                } else {
+                    inner.skipField(innerTag.wireType);
+                }
+            }
         } else {
             reader.skipField(tag.wireType);
         }

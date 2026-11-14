@@ -101,6 +101,13 @@ cmake --build build --target TestAccountRepository TestGatewayLogging TestProxy
 ctest --test-dir build -R "^(AccountRepositoryTests|GatewayLoggingTests|ProxyTests)$" --output-on-failure
 ```
 
+To check protobuf decoding and patches, including sensitive-media preferences:
+
+```bat
+cmake --build build --target TestProto TestPreloadedSettings
+ctest --test-dir build -R "^(ProtoTests|PreloadedSettingsTests)$" --output-on-failure
+```
+
 To run the renderer and animation tests from an MSVC prompt:
 
 ```bat

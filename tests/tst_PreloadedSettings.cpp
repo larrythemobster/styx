@@ -654,3 +654,89 @@ TEST_CASE("Moving servers preserves fresh folder metadata, order and unknown fie
         REQUIRE_FALSE(preloadedSettingsPatch(*snapshot.value, edit).success());
     }
 }
+
+TEST_CASE("Sensitive media choices preserve other filters, contexts and unknown settings", "[proto]")
+{
+    using Filter = TextAndImagesSettings;
+    const auto current = snapshotFromHex("3218ea0106080110021803820206080310021801d8010298062a");
+    for (uint32_t field : {Filter::ExplicitContentField, Filter::GoreContentField}) {
+        for (uint32_t context = Filter::ContextGuilds; context <= Filter::ContextOtherDms; ++context) {
+            for (uint32_t redaction = Filter::RedactionUnset; redaction <= Filter::RedactionBlock; ++redaction) {
+                CAPTURE(field, context, redaction);
+                PreloadedSettingsEdit edit;
+                edit.contentFilter = ContentFilterEdit{field, context, redaction};
+                const auto patch = preloadedSettingsPatch(current, edit);
+                REQUIRE(patch.success());
+                ProtoReader reader(*patch.value);
+                const auto parsed = PreloadedUserSettings::fromProto(reader);
+                REQUIRE(parsed.textAndImages.has_value());
+                std::array<uint32_t, 3> explicitContent{1, 2, 3};
+                std::array<uint32_t, 3> goreContent{3, 2, 1};
+                (field == Filter::ExplicitContentField ? explicitContent : goreContent)[context - 1] = redaction;
+                CHECK(parsed.textAndImages->explicitContent == explicitContent);
+                CHECK(parsed.textAndImages->goreContent == goreContent);
+                CHECK(parsed.textAndImages->dmSpamFilter == Filter::SpamFilterNonFriends);
+                CHECK(toHex(*patch.value).find("98062a") != std::string::npos);
+            }
+        }
+    }
+}
+
+TEST_CASE("Sensitive media edits merge repeated filter fragments and retain unknown nested fields", "[proto]")
+{
+    using Filter = TextAndImagesSettings;
+    // Explicit-content fragments contain guilds=show, friends=blur, others=block,
+    // an obsolete guilds=block and unknown field 99. Gore and spam are separate.
+    const auto current = snapshotFromHex("321dea010408011002ea01071803080398062a820206080310021801d80102");
+    PreloadedSettingsEdit edit;
+    edit.contentFilter = ContentFilterEdit{Filter::ExplicitContentField, Filter::ContextGuilds, Filter::RedactionUnset};
+    edit.dmSpamFilter = Filter::SpamFilterEveryone;
+    const auto patch = preloadedSettingsPatch(current, edit);
+    REQUIRE(patch.success());
+    ProtoReader reader(*patch.value);
+    const auto parsed = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(parsed.textAndImages.has_value());
+    CHECK(parsed.textAndImages->explicitContent == std::array<uint32_t, 3>{0, 2, 3});
+    CHECK(parsed.textAndImages->goreContent == std::array<uint32_t, 3>{3, 2, 1});
+    CHECK(parsed.textAndImages->dmSpamFilter == Filter::SpamFilterEveryone);
+    // One merged explicit-content message retains the unknown field and writes zero explicitly.
+    CHECK(toHex(*patch.value).find("ea01091002180398062a0800") != std::string::npos);
+}
+
+TEST_CASE("Sensitive media edits can create absent settings without replacing other groups", "[proto]")
+{
+    using Filter = TextAndImagesSettings;
+    auto current = snapshotFromHex("6a020801");
+    PreloadedSettingsEdit edit;
+    edit.contentFilter = ContentFilterEdit{Filter::GoreContentField, Filter::ContextOtherDms, Filter::RedactionBlur};
+    const auto patch = preloadedSettingsPatch(current, edit);
+    REQUIRE(patch.success());
+    CHECK(toHex(*patch.value) == "32058202021802");
+    const auto partial = PreloadedSettingsSnapshot::fromProto(*patch.value);
+    REQUIRE(partial.success());
+    current.mergeFrom(*partial.value);
+    ProtoReader reader(current.bytes());
+    const auto parsed = PreloadedUserSettings::fromProto(reader);
+    REQUIRE(parsed.appearance.has_value());
+    CHECK(parsed.appearance->theme == 1);
+    REQUIRE(parsed.textAndImages.has_value());
+    CHECK(parsed.textAndImages->goreContent == std::array<uint32_t, 3>{0, 0, 2});
+}
+
+TEST_CASE("Sensitive media edits reject invalid choices and malformed nested settings", "[proto]")
+{
+    using Filter = TextAndImagesSettings;
+    for (const auto invalid : {
+             ContentFilterEdit{},
+             ContentFilterEdit{27, Filter::ContextGuilds, Filter::RedactionBlur},
+             ContentFilterEdit{Filter::ExplicitContentField, 0, Filter::RedactionBlur},
+             ContentFilterEdit{Filter::ExplicitContentField, 4, Filter::RedactionBlur},
+             ContentFilterEdit{Filter::ExplicitContentField, Filter::ContextGuilds, 4}}) {
+        PreloadedSettingsEdit edit;
+        edit.contentFilter = invalid;
+        CHECK_FALSE(preloadedSettingsPatch(PreloadedSettingsSnapshot{}, edit).success());
+    }
+    PreloadedSettingsEdit edit;
+    edit.contentFilter = ContentFilterEdit{Filter::ExplicitContentField, Filter::ContextGuilds, Filter::RedactionBlur};
+    CHECK_FALSE(preloadedSettingsPatch(snapshotFromHex("3204ea010108"), edit).success());
+}
