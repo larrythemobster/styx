@@ -918,6 +918,17 @@ input.account-password-input:disabled
 	color: #72767d;
 }
 
+.account-password-mfa
+{
+	display: none;
+	margin: 16dp 0 0 0;
+}
+
+.account-password-mfa.open
+{
+	display: block;
+}
+
 .account-password-notice
 {
 	margin: 0 0 12dp 0;

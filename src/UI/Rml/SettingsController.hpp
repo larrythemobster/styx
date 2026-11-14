@@ -117,6 +117,11 @@ private:
     void handleSelectChange(::Rml::Element *selectEl);
     void handleAction(const std::string &action, ::Rml::Element *target);
     void submitPasswordChange();
+    // Sends the change, confirming Discord's challenge with the typed code (or the password on
+    // accounts without a second factor) and retrying with the confirmation.
+    void sendPasswordChange(std::uint64_t request, Core::Snowflake account, std::string current, std::string next,
+                            std::string code, std::string authorization);
+    void finishPasswordRequest(const std::string &error);
     void showPasswordError(const std::string &message);
     // Authenticator app setup/removal: runs the step that's on screen.
     void submitMfaStep();
@@ -146,9 +151,11 @@ private:
     // Account page: whether the full email/phone are shown. Cleared when leaving the page or account.
     bool emailRevealed = false;
     bool phoneRevealed = false;
-    // Account page password change. Passwords live only in the form's inputs.
+    // Account page password change. Passwords live only in the form's inputs and the request in flight.
     bool passwordFormOpen = false;
     bool passwordSaving = false;
+    // Discord asked this account for an authenticator or backup code; the form shows a field for it.
+    bool passwordNeedsCode = false;
     std::uint64_t passwordRequest = 0;
     // Outcome of the last password or authenticator change, shown for that account only.
     std::string securityNotice;

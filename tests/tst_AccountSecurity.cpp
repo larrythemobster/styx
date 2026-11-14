@@ -64,12 +64,11 @@ TEST_CASE("Discord's password errors are shown as sent", "[account]")
     CHECK(wrong.error == "Password does not match.");
 }
 
-TEST_CASE("Accounts that need multi-factor verification are told to use the official app", "[account]")
+TEST_CASE("A multi-factor requirement without a usable challenge keeps Discord's code", "[account]")
 {
     const auto mfa = passwordChangeResult(response(401, R"({"code":60003,"message":"Two factor is required for this operation"})"), self);
     REQUIRE_FALSE(mfa.success());
     CHECK(mfa.code == MfaRequiredCode);
-    CHECK(mfa.error.find("multi-factor") != std::string::npos);
 }
 
 TEST_CASE("Authenticator secrets are unpadded base32", "[account]")

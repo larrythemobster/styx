@@ -422,11 +422,17 @@ void SettingsController::renderMyAccount(std::string &rml)
                 rml += formatRml("<label class=\"settings-label\" for=\"%1\">%2</label>"
                     "<input id=\"%1\" class=\"account-password-input\" type=\"password\" maxlength=\"128\"/>",
                     std::string(id), std::string(label));
+            // Shown once Discord asks this account to confirm the change with its second factor.
+            rml += formatRml("<div id=\"account-password-mfa\" class=\"account-password-mfa%1\">"
+                "<div class=\"settings-description\">Discord needs a code from your authenticator app, or a backup code, "
+                "to change this account's password.</div><label class=\"settings-label\" for=\"account-password-code\">"
+                "Authentication or backup code</label><input id=\"account-password-code\" class=\"account-password-input\" "
+                "type=\"text\" maxlength=\"16\"/></div>", std::string(passwordNeedsCode ? " open" : ""));
             rml += "<div id=\"account-password-error\" class=\"settings-keybind-error\" role=\"alert\"></div>"
                    "<div class=\"settings-button-group\">"
                    "<button class=\"settings-btn settings-btn-secondary\" data-action=\"cancel-password\"><span class=\"settings-btn-label\">Cancel</span></button>"
                    "<button id=\"account-password-submit\" class=\"settings-btn settings-btn-primary\" data-action=\"submit-password\">"
-                   "<span class=\"settings-btn-label\">Done</span></button></div>";
+                   "<span class=\"settings-btn-label\">" + std::string(passwordNeedsCode ? "Confirm" : "Done") + "</span></button></div>";
             rml += "</div>";
         }
         // Authenticator app: setup in three steps (password, key and code, backup codes) or removal with a code.
@@ -1713,20 +1719,35 @@ void SettingsController::showPasswordError(const std::string &message)
     requestRender();
 }
 
+void SettingsController::finishPasswordRequest(const std::string &error)
+{
+    passwordSaving = false;
+    if (!regionRoot->GetElementById("account-password-form")) return;
+    setFormBusy(regionRoot, "#account-password-form", passwordNeedsCode ? "Confirm" : "Done", false);
+    showPasswordError(error);
+    // Re-enabled inputs only accept focus once their styles have been updated.
+    if (auto *context = regionRoot->GetContext()) context->Update();
+    if (auto *input = regionRoot->GetElementById(passwordNeedsCode ? "account-password-code" : "account-current-password")) input->Focus();
+}
+
 void SettingsController::submitPasswordChange()
 {
     auto *instance = shell.currentInstance();
-    auto *client = readyClient(shell);
-    if (!instance || !client || passwordSaving) return;
+    if (!instance || !readyClient(shell) || passwordSaving) return;
     auto field = [this](const char *id) {
         return rmlui_dynamic_cast<::Rml::ElementFormControlInput *>(regionRoot->GetElementById(id));
     };
     auto *current = field("account-current-password");
     auto *next = field("account-new-password");
     auto *confirm = field("account-confirm-password");
-    if (!current || !next || !confirm) return;
+    auto *code = field("account-password-code");
+    if (!current || !next || !confirm || !code) return;
     if (auto problem = Discord::passwordChangeProblem(current->GetValue(), next->GetValue(), confirm->GetValue())) {
         showPasswordError(*problem);
+        return;
+    }
+    if (passwordNeedsCode && code->GetValue().empty()) {
+        showPasswordError("Enter a code from your authenticator app or a backup code.");
         return;
     }
 
@@ -1734,28 +1755,57 @@ void SettingsController::submitPasswordChange()
     passwordSaving = true;
     setFormBusy(regionRoot, "#account-password-form", "Updating...", true);
     showPasswordError("");
+    sendPasswordChange(++passwordRequest, instance->accountId(), current->GetValue(), next->GetValue(),
+                       passwordNeedsCode ? code->GetValue() : std::string(), {});
+}
 
-    const auto account = instance->accountId();
-    const auto request = ++passwordRequest;
+void SettingsController::sendPasswordChange(std::uint64_t request, Core::Snowflake account, std::string current, std::string next,
+                                            std::string code, std::string authorization)
+{
+    auto *client = readyClient(shell);
+    if (!client) { finishPasswordRequest("The account disconnected. Try again."); return; }
     Platform::Guard<SettingsController> self(this);
     Platform::Guard<Core::Session> session(shell.session());
-    client->changePassword(current->GetValue(), next->GetValue(), [self, session, account, request](const Core::Result<std::string> &result) {
-        const std::string error = result.success() ? adoptReplacementToken(session, account, *result.value) : result.error;
-        if (!self || self->passwordRequest != request) return;
-        self->passwordSaving = false;
-        if (result.success()) {
+    const bool confirmed = !authorization.empty();
+    client->changePassword(current, next, authorization, [self, session, account, request, current, next, code = std::move(code), confirmed](
+                               const Core::Result<std::string> &result, const std::optional<Discord::MfaRequirement> &challenge) {
+        if (!challenge) {
+            const std::string error = result.success() ? adoptReplacementToken(session, account, *result.value) : result.error;
+            if (!self || self->passwordRequest != request) return;
+            if (!result.success()) { self->finishPasswordRequest(error); return; }
+            self->passwordSaving = false;
             self->passwordFormOpen = false;
             self->securityNotice = error.empty()
                 ? "Password changed. Discord signed out your other devices; Styx is reconnecting with the new sign-in."
                 : error;
             self->securityNoticeAccount = account;
             if (self->shell.isSettingsOpen() && self->currentSection == Section::MyAccount) self->render();
-        } else if (self->regionRoot->GetElementById("account-password-form")) {
-            setFormBusy(self->regionRoot, "#account-password-form", "Done", false);
-            self->showPasswordError(error);
-            if (auto *input = self->regionRoot->GetElementById("account-current-password")) input->Focus();
+            self->requestRender();
+            return;
         }
-        self->requestRender();
+        if (!self || self->passwordRequest != request) return;
+        if (confirmed) { self->finishPasswordRequest("Discord didn't accept the confirmation. Try again."); return; }
+        const bool usesCode = challenge->totp || challenge->backup;
+        if (!usesCode && !challenge->password) {
+            self->finishPasswordRequest("Discord asked for a security key or a text message code, which Styx can't provide. "
+                                        "Change the password in the official Discord app.");
+            return;
+        }
+        if (usesCode && code.empty()) {
+            self->passwordNeedsCode = true;
+            if (auto *field = self->regionRoot->GetElementById("account-password-mfa")) field->SetClass("open", true);
+            self->finishPasswordRequest("");
+            return;
+        }
+        auto *client = readyClient(self->shell);
+        if (!client) { self->finishPasswordRequest("The account disconnected. Try again."); return; }
+        // Accounts without a second factor confirm with the password they just typed.
+        client->verifyMfa(challenge->ticket, usesCode ? Discord::mfaCodeProof(code) : Discord::mfaPasswordProof(current),
+            [self, account, request, current, next](const Core::Result<std::string> &verified) {
+                if (!self || self->passwordRequest != request) return;
+                if (!verified.success()) { self->finishPasswordRequest(verified.error); return; }
+                self->sendPasswordChange(request, account, current, next, {}, *verified.value);
+            });
     });
 }
 
@@ -1970,6 +2020,7 @@ void SettingsController::handleAction(const std::string &action, ::Rml::Element 
         refreshKeybinds();
     } else if (action == std::string("open-password-form")) {
         passwordFormOpen = true;
+        passwordNeedsCode = false;
         securityNotice.clear();
         render();
         if (auto *input = regionRoot->GetElementById("account-current-password")) input->Focus();

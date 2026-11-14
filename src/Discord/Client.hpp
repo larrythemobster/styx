@@ -250,12 +250,13 @@ public:
     void fetchChannelCommandIndex(Snowflake channelId, ResultCallback<ApplicationCommandIndex> callback);
     void fetchUserCommandIndex(ResultCallback<ApplicationCommandIndex> callback);
     void modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::string, std::string> &originalMd5s, ResultCallback<User> callback = {});
-    // Changes the account password. Discord revokes every token; the callback gets the replacement.
-    void changePassword(const std::string &currentPassword, const std::string &newPassword, ResultCallback<std::string> callback);
     // Actions Discord guards with a confirmation pass its challenge to the callback instead of a result;
     // confirm it with verifyMfa and call again with the returned authorization.
     template <typename T>
     using GuardedCallback = std::function<void(const Core::Result<T> &, const std::optional<MfaRequirement> &)>;
+    // Changes the account password. Discord revokes every token; the callback gets the replacement.
+    void changePassword(const std::string &currentPassword, const std::string &newPassword, const std::string &mfaAuthorization,
+                        GuardedCallback<std::string> callback);
     // Authenticator app (TOTP) setup: check the password first, then enable with the secret and a code.
     void checkTotpPassword(const std::string &password, const std::string &mfaAuthorization, GuardedCallback<void> callback);
     void enableTotp(const std::string &password, const std::string &secret, const std::string &code,

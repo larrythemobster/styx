@@ -38,7 +38,7 @@ Core::Result<std::string> passwordChangeResult(const HttpResponse &response, Cor
     if (!response.success) {
         auto error = ApiError::fromResponse(response);
         if (error.code == MfaRequiredCode)
-            error.message = "This account uses multi-factor authentication, which Styx can't confirm yet. "
+            error.message = "Discord asked for a second factor Styx can't provide. "
                             "Change the password in the official Discord app.";
         return Core::Result<std::string>::makeError(std::move(error.message), error.code);
     }

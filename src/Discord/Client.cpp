@@ -970,13 +970,19 @@ void Client::modifyCurrentUser(const CurrentUserEdit &edit, const std::map<std::
         });
 }
 
-void Client::changePassword(const std::string &currentPassword, const std::string &newPassword, ResultCallback<std::string> callback)
+void Client::changePassword(const std::string &currentPassword, const std::string &newPassword, const std::string &mfaAuthorization,
+                            GuardedCallback<std::string> callback)
 {
     const Snowflake userId = me.id.get();
-    httpClient->send(HttpClient::Method::PATCH, "/users/@me", passwordChangeBody(currentPassword, newPassword).dump(), {},
+    RequestOptions options;
+    options.mfaAuthorization = mfaAuthorization;
+    httpClient->send(HttpClient::Method::PATCH, "/users/@me", passwordChangeBody(currentPassword, newPassword).dump(), options,
         [userId, callback = std::move(callback)](const HttpResponse &response) {
-            if (callback)
-                callback(passwordChangeResult(response, userId));
+            if (!callback) return;
+            if (auto challenge = mfaChallenge(response))
+                callback(Core::Result<std::string>::makeError("Discord asked to confirm this change.", MfaRequiredCode), challenge);
+            else
+                callback(passwordChangeResult(response, userId), std::nullopt);
         });
 }
 
