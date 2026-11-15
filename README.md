@@ -24,6 +24,19 @@ support is incomplete. Calls and streaming still need more live testing.
 > Third-party clients violate Discord's Terms of Service and may put your account
 > at risk. Styx is not affiliated with Discord.
 
+## Download
+
+The first pre-release is [v0.1.0-alpha.1](https://github.com/larrythemobster/styx/releases/tag/v0.1.0-alpha.1).
+It is an alpha build, not a stable release.
+
+On Windows x64, download `styx-v0.1.0-alpha.1-windows-x64.zip` from the release,
+extract the entire archive, and run `bin/styx.exe`. Keep the DLLs, resources and
+licenses beside the executable. The [Microsoft Visual C++ x64 runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+is required.
+
+Linux and macOS users need to build from source; this release has no binaries for
+those platforms.
+
 ## Local credentials and logs
 
 Discord tokens and proxy usernames and passwords are stored in the operating

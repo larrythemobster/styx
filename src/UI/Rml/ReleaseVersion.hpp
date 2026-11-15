@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace Styx::UI::Rml {
-inline constexpr std::string_view currentVersion = "0.1.0";
+inline constexpr std::string_view currentVersion = "0.1.0-alpha.1";
 
 struct ReleaseVersion {
     std::array<std::string, 3> core;
